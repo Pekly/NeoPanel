@@ -242,6 +242,14 @@ set -e
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- --update
 EOF
   chmod +x "$INSTALL_DIR/neopanel-update"
+
+  # Install global neopanel-installer command shortcut
+  cat > "$INSTALL_DIR/neopanel-installer" <<'EOF'
+#!/usr/bin/env bash
+set -e
+curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- "$@"
+EOF
+  chmod +x "$INSTALL_DIR/neopanel-installer"
 }
 
 step_config_service() {
@@ -476,6 +484,21 @@ step_update_swap() {
   mv "$BUILD_DIR/neopanel_new" "$INSTALL_DIR/$BINARY_NAME"
   chmod +x "$INSTALL_DIR/$BINARY_NAME"
   rm -rf "$BUILD_DIR"
+
+  # Ensure shortcuts are installed
+  cat > "$INSTALL_DIR/neopanel-update" <<'EOF'
+#!/usr/bin/env bash
+set -e
+curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- --update
+EOF
+  chmod +x "$INSTALL_DIR/neopanel-update"
+
+  cat > "$INSTALL_DIR/neopanel-installer" <<'EOF'
+#!/usr/bin/env bash
+set -e
+curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- "$@"
+EOF
+  chmod +x "$INSTALL_DIR/neopanel-installer"
 
   systemctl restart neopanel
   sleep 1
