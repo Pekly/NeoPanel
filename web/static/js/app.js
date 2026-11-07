@@ -147,14 +147,19 @@ function logout() {
 
 // --- View Router ---
 function showView(viewId) {
-  ['setup-view', 'login-view', 'dashboard-view', 'server-detail-view'].forEach((id) => {
+  ['setup-view', 'login-view', 'dashboard-view', 'server-detail-view', 'account-view'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.display = id === viewId ? 'block' : 'none';
   });
 
+  const isAuthenticated = (viewId === 'dashboard-view' || viewId === 'server-detail-view' || viewId === 'account-view');
   const navAuth = document.getElementById('nav-auth');
   if (navAuth) {
-    navAuth.style.display = (viewId === 'dashboard-view' || viewId === 'server-detail-view') ? 'flex' : 'none';
+    navAuth.style.display = isAuthenticated ? 'flex' : 'none';
+  }
+  const headerSearch = document.getElementById('header-search');
+  if (headerSearch) {
+    headerSearch.style.display = isAuthenticated ? 'flex' : 'none';
   }
 }
 
@@ -839,8 +844,398 @@ async function handleCreateServer(e) {
   } catch (e) {}
 }
 
+function openModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = 'flex';
+}
+
 function closeModal(id) {
-  document.getElementById(id).style.display = 'none';
+  const el = document.getElementById(id);
+  if (el) el.style.display = 'none';
+}
+
+// --- Global Command Palette (Ctrl + K) ---
+let paletteItems = [];
+let paletteSelectedIndex = 0;
+
+function openCommandPalette() {
+  const modal = document.getElementById('command-palette-modal');
+  const input = document.getElementById('palette-search-input');
+  if (!modal || !input) return;
+
+  modal.style.display = 'flex';
+  input.value = '';
+  input.focus();
+  handlePaletteSearch('');
+}
+
+function closeCommandPalette() {
+  const modal = document.getElementById('command-palette-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function handlePaletteSearch(q) {
+  q = q.toLowerCase().trim();
+  paletteItems = [];
+
+  // 1. Minecraft Servers
+  if (state.servers && state.servers.length > 0) {
+    const matchingServers = state.servers.filter(s =>
+      !q || s.name.toLowerCase().includes(q) || s.type.toLowerCase().includes(q) || s.port.toString().includes(q)
+    );
+    matchingServers.forEach(s => {
+      paletteItems.push({
+        type: 'server',
+        id: s.id,
+        title: s.name,
+        desc: `${s.type.toUpperCase()} • Port ${s.port} • ${s.memory_max} MB`,
+        status: s.stats?.status || 'offline',
+        action: () => {
+          closeCommandPalette();
+          openServer(s.id);
+        }
+      });
+    });
+  }
+
+  // 2. Navigation Actions
+  const actions = [
+    { title: 'Deploy New Minecraft Server', desc: 'Create a new Paper, Purpur, or Fabric server', icon: 'server', action: () => { closeCommandPalette(); openCreateServerModal(); } },
+    { title: 'Account Settings', desc: 'View profile, update password, and manage SSH keys', icon: 'user', action: () => { closeCommandPalette(); openAccountSettings(); } },
+    { title: 'SSH Keys (SFTP Access)', desc: 'Manage public SSH keys for passwordless SFTP', icon: 'key', action: () => { closeCommandPalette(); openAccountSettings(); switchAccountTab('ssh'); } },
+    { title: 'API Tokens', desc: 'Generate or revoke programmatic REST API keys', icon: 'code', action: () => { closeCommandPalette(); openAccountSettings(); switchAccountTab('api'); } },
+    { title: 'Account Activity Log', desc: 'Audit recent operations and authentication history', icon: 'activity', action: () => { closeCommandPalette(); openAccountSettings(); switchAccountTab('activity'); } },
+    { title: 'SFTP Remote Access Guide', desc: 'View connection host, port 2022, and user credentials', icon: 'zap', action: () => { closeCommandPalette(); openSFTPModal(); } },
+    { title: 'View All Servers (Dashboard)', desc: 'Return to dashboard grid overview', icon: 'home', action: () => { closeCommandPalette(); showView('dashboard-view'); loadDashboard(); } },
+    { title: 'Sign Out / Logout', desc: 'End session and return to login', icon: 'logout', action: () => { closeCommandPalette(); logout(); } },
+  ];
+
+  const matchingActions = actions.filter(a =>
+    !q || a.title.toLowerCase().includes(q) || a.desc.toLowerCase().includes(q)
+  );
+  matchingActions.forEach(a => {
+    paletteItems.push({
+      type: 'action',
+      title: a.title,
+      desc: a.desc,
+      icon: a.icon,
+      action: a.action
+    });
+  });
+
+  paletteSelectedIndex = 0;
+  renderPaletteResults();
+}
+
+function renderPaletteResults() {
+  const container = document.getElementById('palette-results-list');
+  if (!container) return;
+  container.innerHTML = '';
+
+  if (paletteItems.length === 0) {
+    container.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-dim); font-size: 0.85rem;">No servers or commands matching your search.</div>`;
+    return;
+  }
+
+  let lastType = '';
+  paletteItems.forEach((item, idx) => {
+    if (item.type !== lastType) {
+      const header = document.createElement('div');
+      header.className = 'palette-group-title';
+      header.textContent = item.type === 'server' ? 'Minecraft Servers' : 'Quick Actions & Pages';
+      container.appendChild(header);
+      lastType = item.type;
+    }
+
+    const el = document.createElement('div');
+    el.className = `palette-item ${idx === paletteSelectedIndex ? 'active' : ''}`;
+    el.onclick = () => item.action();
+
+    if (item.type === 'server') {
+      el.innerHTML = `
+        <div class="palette-item-left">
+          <div class="palette-item-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          </div>
+          <div>
+            <div class="palette-item-title">${escapeHtml(item.title)}</div>
+            <div class="palette-item-desc">${escapeHtml(item.desc)}</div>
+          </div>
+        </div>
+        <span class="badge badge-${item.status}" style="font-size: 0.675rem; padding: 0.15rem 0.5rem;">
+          <span class="status-dot"></span>${item.status}
+        </span>
+      `;
+    } else {
+      el.innerHTML = `
+        <div class="palette-item-left">
+          <div class="palette-item-icon" style="color: var(--accent); background: rgba(6, 182, 212, 0.1);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+          </div>
+          <div>
+            <div class="palette-item-title">${escapeHtml(item.title)}</div>
+            <div class="palette-item-desc">${escapeHtml(item.desc)}</div>
+          </div>
+        </div>
+        <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-dim);">Jump ↵</span>
+      `;
+    }
+
+    container.appendChild(el);
+  });
+}
+
+function handlePaletteKeydown(e) {
+  if (paletteItems.length === 0) return;
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    paletteSelectedIndex = (paletteSelectedIndex + 1) % paletteItems.length;
+    renderPaletteResults();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    paletteSelectedIndex = (paletteSelectedIndex - 1 + paletteItems.length) % paletteItems.length;
+    renderPaletteResults();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (paletteItems[paletteSelectedIndex]) {
+      paletteItems[paletteSelectedIndex].action();
+    }
+  } else if (e.key === 'Escape') {
+    closeCommandPalette();
+  }
+}
+
+// Global shortcut listener for Ctrl + K / Cmd + K
+window.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    openCommandPalette();
+  } else if (e.key === 'Escape') {
+    closeCommandPalette();
+  }
+});
+
+// --- Account Settings Flow (Matching Image 1) ---
+function openAccountSettings() {
+  showView('account-view');
+  loadAccountProfile();
+  switchAccountTab('ssh'); // Default to SSH Keys as shown in user's screenshot
+}
+
+function switchAccountTab(tab) {
+  ['general', 'security', 'ssh', 'api', 'activity'].forEach(t => {
+    const btn = document.getElementById(`account-tab-btn-${t}`);
+    const subtab = document.getElementById(`account-subtab-${t}`);
+    if (btn) btn.className = t === tab ? 'account-tab-btn active' : 'account-tab-btn';
+    if (subtab) subtab.style.display = t === tab ? 'block' : 'none';
+  });
+
+  if (tab === 'general') loadAccountProfile();
+  if (tab === 'ssh') loadSSHKeys();
+  if (tab === 'api') loadAPIKeys();
+  if (tab === 'activity') loadActivity();
+}
+
+async function loadAccountProfile() {
+  try {
+    const prof = await api('/api/account/profile');
+    const uEl = document.getElementById('profile-username');
+    const cEl = document.getElementById('profile-created');
+    if (uEl) uEl.textContent = prof.username;
+    if (cEl) cEl.textContent = new Date(prof.created_at).toLocaleDateString();
+  } catch (e) {}
+}
+
+async function handleUpdatePassword(e) {
+  e.preventDefault();
+  const current = document.getElementById('pwd-current').value;
+  const newP = document.getElementById('pwd-new').value;
+  const confirmP = document.getElementById('pwd-confirm').value;
+
+  if (newP !== confirmP) {
+    showToast('New passwords do not match', 'error');
+    return;
+  }
+
+  try {
+    await api('/api/account/password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password: current, new_password: newP }),
+    });
+    showToast('Password updated successfully!');
+    document.getElementById('pwd-current').value = '';
+    document.getElementById('pwd-new').value = '';
+    document.getElementById('pwd-confirm').value = '';
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// --- SSH Keys ---
+async function loadSSHKeys() {
+  const container = document.getElementById('ssh-keys-list');
+  if (!container) return;
+  container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading registered SSH keys...</div>`;
+
+  try {
+    const keys = await api('/api/account/ssh-keys');
+    container.innerHTML = '';
+    if (!keys || keys.length === 0) {
+      container.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-dim); font-size:0.875rem;">No SSH public keys registered. Add your OpenSSH public key for passwordless SFTP file editing!</div>`;
+      return;
+    }
+
+    keys.forEach(k => {
+      const card = document.createElement('div');
+      card.className = 'key-item-card';
+      card.innerHTML = `
+        <div style="flex: 1; overflow: hidden;">
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2.5"><path d="M21 2l-2 2m-1.5 1.5L12 11"></path><circle cx="7.5" cy="16.5" r="4.5"></circle><line x1="16.5" y1="7.5" x2="19.5" y2="10.5"></line></svg>
+            <span style="font-weight:700; font-size:0.95rem; color:#fff;">${escapeHtml(k.name)}</span>
+            <span style="font-size:0.75rem; color:var(--text-dim);">• Added ${new Date(k.created_at).toLocaleDateString()}</span>
+          </div>
+          <div class="key-fingerprint">${escapeHtml(k.fingerprint)}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="deleteSSHKey(${k.id})">Delete</button>
+      `;
+      container.appendChild(card);
+    });
+  } catch (err) {
+    container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function handleAddSSHKey(e) {
+  e.preventDefault();
+  const name = document.getElementById('ssh-key-name').value.trim();
+  const pub = document.getElementById('ssh-key-pub').value.trim();
+
+  try {
+    await api('/api/account/ssh-keys', {
+      method: 'POST',
+      body: JSON.stringify({ name, public_key: pub }),
+    });
+    showToast('SSH Key registered successfully!');
+    closeModal('add-ssh-modal');
+    document.getElementById('ssh-key-name').value = '';
+    document.getElementById('ssh-key-pub').value = '';
+    loadSSHKeys();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteSSHKey(id) {
+  if (!confirm('Are you sure you want to remove this SSH key?')) return;
+  try {
+    await api(`/api/account/ssh-keys/${id}`, { method: 'DELETE' });
+    showToast('SSH key deleted');
+    loadSSHKeys();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// --- API Keys ---
+async function loadAPIKeys() {
+  const container = document.getElementById('api-keys-list');
+  if (!container) return;
+  container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading API tokens...</div>`;
+
+  try {
+    const keys = await api('/api/account/api-keys');
+    container.innerHTML = '';
+    if (!keys || keys.length === 0) {
+      container.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-dim); font-size:0.875rem;">No active API keys generated yet.</div>`;
+      return;
+    }
+
+    keys.forEach(k => {
+      const card = document.createElement('div');
+      card.className = 'key-item-card';
+      card.innerHTML = `
+        <div style="flex: 1;">
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+            <span style="font-weight:700; font-size:0.95rem; color:#fff;">${escapeHtml(k.name)}</span>
+            <span style="font-size:0.75rem; color:var(--text-dim);">• Created ${new Date(k.created_at).toLocaleDateString()}</span>
+          </div>
+          <div class="key-fingerprint" style="color: #67e8f9;">${escapeHtml(k.key_prefix)}</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="deleteAPIKey(${k.id})">Revoke</button>
+      `;
+      container.appendChild(card);
+    });
+  } catch (err) {
+    container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function handleCreateAPIKey(e) {
+  e.preventDefault();
+  const name = document.getElementById('api-key-name').value.trim();
+
+  try {
+    const res = await api('/api/account/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    closeModal('add-api-key-modal');
+    document.getElementById('api-key-name').value = '';
+    document.getElementById('new-token-value').textContent = res.token;
+    openModal('new-api-key-modal');
+    loadAPIKeys();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteAPIKey(id) {
+  if (!confirm('Are you sure you want to revoke this API token? Any application using it will lose access.')) return;
+  try {
+    await api(`/api/account/api-keys/${id}`, { method: 'DELETE' });
+    showToast('API token revoked');
+    loadAPIKeys();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// --- Activity Logs ---
+async function loadActivity() {
+  const container = document.getElementById('activity-logs-list');
+  if (!container) return;
+  container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading activity log...</div>`;
+
+  try {
+    const logs = await api('/api/account/activity');
+    container.innerHTML = '';
+    if (!logs || logs.length === 0) {
+      container.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-dim); font-size:0.875rem;">No recorded activity yet.</div>`;
+      return;
+    }
+
+    logs.forEach(l => {
+      const item = document.createElement('div');
+      item.className = 'activity-item';
+      item.innerHTML = `
+        <div class="activity-icon">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
+        <div style="flex:1;">
+          <div style="font-weight:600; font-size:0.875rem; color:#fff;">${escapeHtml(l.details)}</div>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.2rem;">
+            ${new Date(l.created_at).toLocaleString()} • ${escapeHtml(l.ip_address || 'local')}
+          </div>
+        </div>
+      `;
+      container.appendChild(item);
+    });
+  } catch (err) {
+    container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</div>`;
+  }
 }
 
 // --- Utilities ---
