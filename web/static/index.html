@@ -259,11 +259,13 @@
           <div class="form-group">
             <label>Port</label>
             <input id="new-server-port" type="number" class="form-input" required value="25565">
+            <small style="color: var(--text-muted); font-size: 0.725rem; display: block; margin-top: 0.25rem;">Default: 25565. Use 25566, 25567 for other servers.</small>
           </div>
           <div class="form-group">
             <label>RAM Max (MB)</label>
             <input id="new-server-mem-max" type="number" class="form-input" required value="2048" step="512">
             <input id="new-server-mem-min" type="hidden" value="1024">
+            <small style="color: var(--text-muted); font-size: 0.725rem; display: block; margin-top: 0.25rem;">Tip: Leave at least 512MB free for Ubuntu.</small>
           </div>
         </div>
         <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">

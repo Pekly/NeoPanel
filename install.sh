@@ -61,7 +61,9 @@ log_error() {
 
 check_root() {
   if [ "$EUID" -ne 0 ]; then
-    log_error "This script must be run as root! Run with: sudo bash $0"
+    log_error "Root privileges are required to install packages, configure UFW, and setup systemd."
+    echo -e "\n${YELLOW}[REMINDER] Please re-run the installer using sudo:${NC}"
+    echo -e "  ${CYAN}sudo bash <(curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh)${NC}\n"
     exit 1
   fi
 }
@@ -317,10 +319,25 @@ run_full_installation() {
   local bind_host="0.0.0.0"
 
   if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
+    echo -e "${CYAN}[REMINDER] Before proceeding, ensure your domain's DNS 'A' record points to this server's IP (${pub_ip}).${NC}"
+    echo -e "${YELLOW}           If DNS has not propagated yet, Let's Encrypt certificate issuance may fail.${NC}\n"
+
     read -p "Enter your Domain name (e.g. panel.example.com): " domain
     while [ -z "$domain" ]; do
       read -p "Domain cannot be empty. Enter Domain: " domain
     done
+
+    # Quick DNS propagation check
+    local resolved_ip
+    resolved_ip=$(getent ahostsv4 "$domain" 2>/dev/null | head -n 1 | awk '{print $1}')
+    if [ -n "$resolved_ip" ] && [ "$resolved_ip" != "$pub_ip" ]; then
+      log_warn "DNS check: '$domain' resolves to $resolved_ip, but this server's public IP is $pub_ip."
+      echo -e "${YELLOW}[REMINDER] If you just updated your DNS record, it can take a few minutes to propagate.${NC}"
+      read -p "Do you want to continue anyway? (y/N): " override_dns
+      if [[ ! "$override_dns" =~ ^[Yy]$ ]]; then
+        exit 1
+      fi
+    fi
 
     read -p "Enter Email for Let's Encrypt certificates: " email
     while [ -z "$email" ]; do
@@ -363,11 +380,27 @@ run_full_installation() {
     echo -e "  ${BOLD}Web Dashboard:${NC}   ${CYAN}http://${pub_ip}:${PANEL_PORT}${NC}"
   fi
 
-  echo -e "  ${BOLD}Initial Setup:${NC}   Open the URL in your browser to create the Admin user."
+  echo -e "  ${BOLD}Initial Setup:${NC}   Open the URL above in your browser to create the Admin account."
   echo -e "  ${BOLD}Config Path:${NC}     ${CONFIG_DIR}/config.yaml"
   echo -e "  ${BOLD}Data Path:${NC}       ${DATA_DIR}"
+
+  echo -e "\n  ${YELLOW}${BOLD}[REMINDER] Cloud Firewalls & Security Groups:${NC}"
+  echo -e "    If your VPS is hosted on AWS, Oracle Cloud, Google Cloud, Azure, or OVH,"
+  echo -e "    remember to also allow incoming ports in your cloud provider's web console:"
+  echo -e "      - ${CYAN}Port 80 / 443 (TCP)${NC}       -> Web Dashboard"
+  echo -e "      - ${CYAN}Port 25565-25600 (TCP/UDP)${NC} -> Minecraft Player Connections"
+
+  echo -e "\n  ${CYAN}${BOLD}[REMINDER] Minecraft Server Ports:${NC}"
+  echo -e "    Your first server can use default port 25565."
+  echo -e "    Each subsequent server requires its own unique port (e.g. 25566, 25567)."
+
+  if [ -f /var/run/reboot-required ]; then
+    echo -e "\n  ${YELLOW}${BOLD}[NOTE] Pending Kernel Updates:${NC}"
+    echo -e "    Your system has pending updates. Consider running 'sudo reboot' when convenient."
+  fi
+
   echo -e "\n  ${BOLD}Useful Commands:${NC}"
-  echo -e "    ${YELLOW}neopanel-update${NC}            # Instant one-command update from GitHub"
+  echo -e "    ${YELLOW}sudo neopanel-update${NC}       # Instant one-command update from GitHub"
   echo -e "    ${YELLOW}systemctl status neopanel${NC}    # View status"
   echo -e "    ${YELLOW}journalctl -u neopanel -f${NC}    # View live logs"
   echo -e "    ${YELLOW}systemctl restart neopanel${NC}   # Restart panel"
