@@ -31,11 +31,13 @@ BINARY_NAME="neopanel"
 print_banner() {
   clear
   echo -e "${CYAN}${BOLD}"
-  echo '  _   _             ____                  _ '
-  echo ' | \ | | ___  ___  |  _ \ __ _ _ __   ___| |'
-  echo ' |  \| |/ _ \/ _ \ | |_) / _` | '_ \ / _ \ |'
-  echo ' | |\  |  __/ (_) ||  __/ (_| | | | |  __/ |'
-  echo ' |_| \_|\___|\___/ |_|   \__,_|_| |_|\___|_|'
+  cat << 'EOF'
+  _   _             ____                  _ 
+ | \ | | ___  ___  |  _ \ __ _ _ __   ___| |
+ |  \| |/ _ \/ _ \ | |_) / _` | '_ \ / _ \ |
+ | |\  |  __/ (_) ||  __/ (_| | | | |  __/ |
+ |_| \_|\___|\___/ |_|   \__,_|_| |_|\___|_|
+EOF
   echo -e "${NC}"
   echo -e "${GREEN}${BOLD}>> Ultra-Lightweight Minecraft Server Manager Installer <<${NC}"
   echo -e "${YELLOW}Target: Ubuntu 24.04 LTS (Noble Numbat)${NC}\n"
