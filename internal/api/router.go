@@ -22,6 +22,7 @@ type Router struct {
 	mux            *http.ServeMux
 	cfg            *config.Config
 	auth           *AuthHandler
+	account        *AccountHandler
 	servers        *ServerHandler
 	console        *ConsoleHandler
 	files          *FileHandler
@@ -31,6 +32,7 @@ type Router struct {
 
 func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManager, embeddedStatic fs.FS) *Router {
 	authHandler := NewAuthHandler(db, cfg.Security.JWTSecret, cfg.Security.TokenExpiration)
+	accountHandler := NewAccountHandler(db, authHandler)
 	serverHandler := NewServerHandler(db, manager)
 	consoleHandler := NewConsoleHandler(authHandler, manager)
 	fileHandler := NewFileHandler(manager)
@@ -40,6 +42,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		mux:            http.NewServeMux(),
 		cfg:            cfg,
 		auth:           authHandler,
+		account:        accountHandler,
 		servers:        serverHandler,
 		console:        consoleHandler,
 		files:          fileHandler,
@@ -103,7 +106,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
 			return
 		}
-		userClaims, _ := req.Context().Value(contextUserKey).(*Claims)
+		userClaims, _ := req.Context().Value(contextUserKey).(*JWTClaims)
 		username := "admin"
 		if userClaims != nil && userClaims.Username != "" {
 			username = userClaims.Username
@@ -121,6 +124,17 @@ func (r *Router) registerRoutes(db *database.DB) {
 			"server_name": srv.Name,
 		})
 	}))
+
+	// Account Settings routes
+	r.mux.HandleFunc("GET /api/account/profile", r.requireAuth(r.account.GetProfile))
+	r.mux.HandleFunc("POST /api/account/password", r.requireAuth(r.account.UpdatePassword))
+	r.mux.HandleFunc("GET /api/account/ssh-keys", r.requireAuth(r.account.ListSSHKeys))
+	r.mux.HandleFunc("POST /api/account/ssh-keys", r.requireAuth(r.account.AddSSHKey))
+	r.mux.HandleFunc("DELETE /api/account/ssh-keys/{id}", r.requireAuth(r.account.DeleteSSHKey))
+	r.mux.HandleFunc("GET /api/account/api-keys", r.requireAuth(r.account.ListAPIKeys))
+	r.mux.HandleFunc("POST /api/account/api-keys", r.requireAuth(r.account.CreateAPIKey))
+	r.mux.HandleFunc("DELETE /api/account/api-keys/{id}", r.requireAuth(r.account.DeleteAPIKey))
+	r.mux.HandleFunc("GET /api/account/activity", r.requireAuth(r.account.ListActivity))
 
 	// System info
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))

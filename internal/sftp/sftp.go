@@ -47,7 +47,8 @@ func NewSFTPServer(cfg *config.Config, db *database.DB) (*SFTPServer, error) {
 	}
 
 	sshConf := &ssh.ServerConfig{
-		PasswordCallback: s.authenticate,
+		PasswordCallback:  s.authenticate,
+		PublicKeyCallback: s.authenticatePublicKey,
 	}
 	sshConf.AddHostKey(signer)
 	s.sshConf = sshConf
@@ -94,8 +95,65 @@ func (s *SFTPServer) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permiss
 		return nil, fmt.Errorf("authentication failed for user %q", rawUser)
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), pass); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), pass); err != nil {
 		return nil, fmt.Errorf("invalid password for user %q", rawUser)
+	}
+
+	jailPath := s.cfg.Paths.ServersDir
+	if targetServer != "" {
+		srv, err := s.db.GetServer(targetServer)
+		if err != nil {
+			servers, _ := s.db.ListServers()
+			for _, sv := range servers {
+				if strings.EqualFold(sv.Name, targetServer) || strings.EqualFold(sv.ID, targetServer) {
+					srv = sv
+					break
+				}
+			}
+		}
+		if srv == nil {
+			return nil, fmt.Errorf("server %q not found", targetServer)
+		}
+		jailPath = filepath.Join(s.cfg.Paths.ServersDir, srv.ID)
+	}
+
+	_ = os.MkdirAll(jailPath, 0755)
+
+	return &ssh.Permissions{
+		Extensions: map[string]string{
+			"jail_path": jailPath,
+			"username":  username,
+		},
+	}, nil
+}
+
+func (s *SFTPServer) authenticatePublicKey(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
+	rawUser := c.User()
+	username := rawUser
+	var targetServer string
+
+	if idx := strings.Index(rawUser, "."); idx != -1 {
+		username = rawUser[:idx]
+		targetServer = rawUser[idx+1:]
+	}
+
+	keys, err := s.db.GetAllSSHKeysForUser(username)
+	if err != nil || len(keys) == 0 {
+		return nil, fmt.Errorf("no authorized ssh keys registered for user %q", username)
+	}
+
+	clientKeyBytes := pubKey.Marshal()
+	matched := false
+	for _, k := range keys {
+		parsedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(k.PublicKey))
+		if err == nil && string(parsedKey.Marshal()) == string(clientKeyBytes) {
+			matched = true
+			break
+		}
+	}
+
+	if !matched {
+		return nil, fmt.Errorf("public key rejected for user %q", username)
 	}
 
 	jailPath := s.cfg.Paths.ServersDir

@@ -36,3 +36,29 @@ type ServerStats struct {
 	UptimeSec int64   `json:"uptime_sec"`
 }
 
+type SSHKey struct {
+	ID          int       `json:"id"`
+	UserID      int       `json:"user_id"`
+	Name        string    `json:"name"`
+	Fingerprint string    `json:"fingerprint"`
+	PublicKey   string    `json:"public_key"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type APIKey struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	Name      string    `json:"name"`
+	KeyPrefix string    `json:"key_prefix"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ActivityLog struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	Action    string    `json:"action"`
+	Details   string    `json:"details"`
+	IPAddress string    `json:"ip_address"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
