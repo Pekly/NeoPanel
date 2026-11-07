@@ -199,3 +199,4 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/gzip")
 	http.ServeFile(w, r, filePath)
 }
+

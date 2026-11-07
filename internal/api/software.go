@@ -122,3 +122,4 @@ func (h *SoftwareHandler) SaveProperties(w http.ResponseWriter, r *http.Request)
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "server.properties saved successfully"})
 }
+

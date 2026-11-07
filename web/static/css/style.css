@@ -189,8 +189,10 @@ nav {
   color: var(--mu);
 }
 
-nav button.nav-item {
+nav button, nav button.nav-item {
   all: unset;
+  box-sizing: border-box;
+  width: 100%;
   cursor: pointer;
   padding: 8px 10px;
   border-radius: 6px;
@@ -203,12 +205,12 @@ nav button.nav-item {
   transition: all 0.15s ease;
 }
 
-nav button.nav-item:hover {
+nav button:hover, nav button.nav-item:hover {
   background: var(--pn2);
   color: var(--tx);
 }
 
-nav button.nav-item.on {
+nav button.on, nav button.nav-item.on {
   background: var(--pn2);
   color: var(--tx);
   font-weight: 600;
@@ -1197,7 +1199,7 @@ textarea {
   .avbtn {
     display: block;
   }
-  nav button.nav-item {
+  nav button, nav button.nav-item {
     white-space: nowrap;
   }
   main {
@@ -1207,3 +1209,43 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+/* Server Creator & Custom Pills */
+.engine-card {
+  transition: all 0.18s ease;
+  cursor: pointer;
+  border: 1px solid var(--ln);
+}
+.engine-card:hover {
+  border-color: var(--ac);
+  transform: translateY(-1px);
+}
+.engine-card.on {
+  border-color: var(--ac);
+  background: var(--acs);
+}
+.engine-card.on b {
+  color: var(--ac);
+}
+.ram-pill, .ver-pill {
+  transition: all 0.15s ease;
+}
+.ram-pill.pr, .ver-pill.pr {
+  background: var(--ac) !important;
+  color: #fff !important;
+  border-color: var(--ac) !important;
+}
+
+/* Background Image Overlay Engine */
+:root {
+  --bg-mc-img: none;
+}
+main.has-bg {
+  background-image: 
+    linear-gradient(rgba(14, 17, 24, 0.88), rgba(14, 17, 24, 0.94)),
+    var(--bg-mc-img);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
