@@ -85,6 +85,16 @@ func (m *ServerManager) Stop(serverID string, graceful bool) error {
 	return inst.Stop(graceful)
 }
 
+func (m *ServerManager) RemoveInstance(serverID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if inst, ok := m.instances[serverID]; ok {
+		_ = inst.Stop(false)
+		delete(m.instances, serverID)
+	}
+}
+
 func (m *ServerManager) Restart(srv *database.Server) error {
 	_ = m.Stop(srv.ID, true)
 	time.Sleep(1 * time.Second)

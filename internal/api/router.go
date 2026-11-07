@@ -90,6 +90,12 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/power", r.requireAuth(r.servers.PowerAction))
 	r.mux.HandleFunc("POST /api/servers/{id}/command", r.requireAuth(r.servers.SendCommand))
 
+	// Port allocations routes
+	r.mux.HandleFunc("GET /api/servers/{id}/ports", r.requireAuth(r.servers.ListServerPorts))
+	r.mux.HandleFunc("POST /api/servers/{id}/ports", r.requireAuth(r.servers.AddServerPort))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/ports/{portId}", r.requireAuth(r.servers.DeleteServerPort))
+	r.mux.HandleFunc("POST /api/servers/{id}/ports/{portId}/primary", r.requireAuth(r.servers.SetPrimaryPort))
+
 	// WebSocket console route (handles token auth inside)
 	r.mux.HandleFunc("GET /api/servers/{id}/ws", r.console.HandleWebSocket)
 

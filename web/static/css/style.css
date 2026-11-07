@@ -506,13 +506,42 @@ h2 {
   color: #fff;
 }
 
-.srv-card-refresh {
+.srv-card-actions {
   position: absolute;
   top: 10px;
   right: 12px;
   z-index: 2;
-  color: rgba(255, 255, 255, 0.7);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.srv-card-action-btn {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 13px;
+}
+
+.srv-card-action-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.srv-card-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.25);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
 }
 
 .srv-card-body {

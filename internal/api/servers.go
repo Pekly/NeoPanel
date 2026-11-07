@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -154,6 +155,9 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record default primary port allocation in database
+	_ = h.db.AddServerPort(server.ID, server.Port, "tcp/udp", "Primary Game Port", true)
+
 	writeJSON(w, http.StatusCreated, ServerWithStats{
 		Server: server,
 		Stats:  h.manager.GetStats(server),
@@ -201,12 +205,15 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop running instance
-	_ = h.manager.Stop(server.ID, false)
+	// Remove runtime instance and stop process immediately
+	h.manager.RemoveInstance(server.ID)
 
-	// Remove files
+	// Remove server working directory files
 	workingDir := h.manager.GetWorkingDir(serverID)
 	_ = os.RemoveAll(workingDir)
+
+	// Remove all port allocations associated with this server
+	_ = h.db.DeleteAllServerPorts(serverID)
 
 	if err := h.db.DeleteServer(serverID); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete from database"})
@@ -275,5 +282,122 @@ func (h *ServerHandler) SendCommand(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "command sent"})
+}
+
+// --- Port Allocation Endpoints ---
+
+func (h *ServerHandler) ListServerPorts(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	ports, err := h.db.ListServerPorts(serverID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, ports)
+}
+
+type AddPortRequest struct {
+	Port      int    `json:"port"`
+	Protocol  string `json:"protocol"`
+	Notes     string `json:"notes"`
+	IsPrimary bool   `json:"is_primary"`
+}
+
+func (h *ServerHandler) AddServerPort(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	var req AddPortRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	if req.Port < 1024 || req.Port > 65535 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Port number must be between 1024 and 65535"})
+		return
+	}
+
+	port, err := h.db.AddServerPort(serverID, req.Port, req.Protocol, req.Notes, req.IsPrimary)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// If set as primary, also update server.properties
+	if req.IsPrimary {
+		h.updateServerPropertiesPort(serverID, req.Port)
+	}
+
+	writeJSON(w, http.StatusCreated, port)
+}
+
+func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	portIDStr := getURLParam(r, "portId")
+	portID, err := strconv.Atoi(portIDStr)
+	if err != nil || portID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid port ID"})
+		return
+	}
+
+	if err := h.db.DeleteServerPort(serverID, portID); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Port allocation deleted successfully"})
+}
+
+func (h *ServerHandler) SetPrimaryPort(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	portIDStr := getURLParam(r, "portId")
+	portID, err := strconv.Atoi(portIDStr)
+	if err != nil || portID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid port ID"})
+		return
+	}
+
+	newPort, err := h.db.SetPrimaryServerPort(serverID, portID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Update server.properties with the new primary port
+	h.updateServerPropertiesPort(serverID, newPort)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Primary port updated",
+		"port":    newPort,
+	})
+}
+
+func (h *ServerHandler) updateServerPropertiesPort(serverID string, port int) {
+	workingDir := h.manager.GetWorkingDir(serverID)
+	propsPath := filepath.Join(workingDir, "server.properties")
+	content, err := os.ReadFile(propsPath)
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(content), "\n")
+	hasPort := false
+	hasQuery := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "server-port=") {
+			lines[i] = fmt.Sprintf("server-port=%d", port)
+			hasPort = true
+		} else if strings.HasPrefix(trimmed, "query.port=") {
+			lines[i] = fmt.Sprintf("query.port=%d", port)
+			hasQuery = true
+		}
+	}
+	if !hasPort {
+		lines = append(lines, fmt.Sprintf("server-port=%d", port))
+	}
+	if !hasQuery {
+		lines = append(lines, fmt.Sprintf("query.port=%d", port))
+	}
+	_ = os.WriteFile(propsPath, []byte(strings.Join(lines, "\n")), 0644)
 }
 

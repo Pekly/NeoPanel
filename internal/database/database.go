@@ -100,6 +100,20 @@ func (db *DB) migrate() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at DESC);
+
+	CREATE TABLE IF NOT EXISTS server_ports (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		server_id TEXT NOT NULL,
+		port INTEGER NOT NULL,
+		protocol TEXT NOT NULL DEFAULT 'tcp/udp',
+		notes TEXT NOT NULL DEFAULT '',
+		is_primary BOOLEAN NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		UNIQUE(server_id, port)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_server_ports_srv ON server_ports(server_id);
+	CREATE INDEX IF NOT EXISTS idx_server_ports_port ON server_ports(port);
 	`
 	_, err := db.conn.Exec(schema)
 	return err
@@ -346,5 +360,148 @@ func (db *DB) ListActivity(userID int, limit int) ([]*ActivityLog, error) {
 		logs = append(logs, l)
 	}
 	return logs, nil
+}
+
+// --- Server Port Allocations ---
+
+func (db *DB) ListServerPorts(serverID string) ([]*ServerPort, error) {
+	rows, err := db.conn.Query("SELECT id, server_id, port, protocol, notes, is_primary, created_at FROM server_ports WHERE server_id = ? ORDER BY is_primary DESC, port ASC", serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ports []*ServerPort
+	for rows.Next() {
+		p := &ServerPort{}
+		var isPrimary int
+		if err := rows.Scan(&p.ID, &p.ServerID, &p.Port, &p.Protocol, &p.Notes, &isPrimary, &p.CreatedAt); err != nil {
+			return nil, err
+		}
+		p.IsPrimary = isPrimary == 1
+		ports = append(ports, p)
+	}
+
+	// Backwards compatibility: if no ports in server_ports, populate from servers table
+	if len(ports) == 0 {
+		srv, err := db.GetServer(serverID)
+		if err == nil && srv.Port > 0 {
+			now := time.Now().UTC()
+			res, err := db.conn.Exec("INSERT OR IGNORE INTO server_ports (server_id, port, protocol, notes, is_primary, created_at) VALUES (?, ?, 'tcp/udp', 'Primary Game Port', 1, ?)",
+				serverID, srv.Port, now)
+			if err == nil {
+				id, _ := res.LastInsertId()
+				ports = append(ports, &ServerPort{
+					ID:        int(id),
+					ServerID:  serverID,
+					Port:      srv.Port,
+					Protocol:  "tcp/udp",
+					Notes:     "Primary Game Port",
+					IsPrimary: true,
+					CreatedAt: now,
+				})
+			}
+		}
+	}
+
+	if ports == nil {
+		ports = []*ServerPort{}
+	}
+	return ports, nil
+}
+
+func (db *DB) AddServerPort(serverID string, port int, protocol, notes string, isPrimary bool) (*ServerPort, error) {
+	if port < 1024 || port > 65535 {
+		return nil, fmt.Errorf("port must be between 1024 and 65535")
+	}
+	if protocol == "" {
+		protocol = "tcp/udp"
+	}
+	if notes == "" {
+		if isPrimary {
+			notes = "Primary Game Port"
+		} else {
+			notes = "Additional Allocation"
+		}
+	}
+
+	// Check if port is already allocated on another server
+	var otherServerID string
+	err := db.conn.QueryRow("SELECT server_id FROM server_ports WHERE port = ? AND server_id != ?", port, serverID).Scan(&otherServerID)
+	if err == nil && otherServerID != "" {
+		return nil, fmt.Errorf("port %d is already allocated to another server (%s)", port, otherServerID)
+	}
+
+	// Also check servers table for legacy entries
+	var srvID string
+	err = db.conn.QueryRow("SELECT id FROM servers WHERE port = ? AND id != ?", port, serverID).Scan(&srvID)
+	if err == nil && srvID != "" {
+		return nil, fmt.Errorf("port %d is already used as the primary port of server %s", port, srvID)
+	}
+
+	if isPrimary {
+		// Set all other ports for this server as non-primary
+		_, _ = db.conn.Exec("UPDATE server_ports SET is_primary = 0 WHERE server_id = ?", serverID)
+		// Update servers table
+		_, _ = db.conn.Exec("UPDATE servers SET port = ? WHERE id = ?", port, serverID)
+	}
+
+	now := time.Now().UTC()
+	primaryInt := 0
+	if isPrimary {
+		primaryInt = 1
+	}
+
+	res, err := db.conn.Exec("INSERT INTO server_ports (server_id, port, protocol, notes, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+		serverID, port, protocol, notes, primaryInt, now)
+	if err != nil {
+		return nil, fmt.Errorf("port %d is already assigned to this server", port)
+	}
+
+	id, _ := res.LastInsertId()
+	return &ServerPort{
+		ID:        int(id),
+		ServerID:  serverID,
+		Port:      port,
+		Protocol:  protocol,
+		Notes:     notes,
+		IsPrimary: isPrimary,
+		CreatedAt: now,
+	}, nil
+}
+
+func (db *DB) DeleteServerPort(serverID string, portID int) error {
+	var isPrimary int
+	err := db.conn.QueryRow("SELECT is_primary FROM server_ports WHERE id = ? AND server_id = ?", portID, serverID).Scan(&isPrimary)
+	if err != nil {
+		return fmt.Errorf("port allocation not found")
+	}
+	if isPrimary == 1 {
+		return fmt.Errorf("cannot delete the primary game port. Assign another port as primary first.")
+	}
+
+	_, err = db.conn.Exec("DELETE FROM server_ports WHERE id = ? AND server_id = ?", portID, serverID)
+	return err
+}
+
+func (db *DB) SetPrimaryServerPort(serverID string, portID int) (int, error) {
+	var port int
+	err := db.conn.QueryRow("SELECT port FROM server_ports WHERE id = ? AND server_id = ?", portID, serverID).Scan(&port)
+	if err != nil {
+		return 0, fmt.Errorf("port allocation not found")
+	}
+
+	_, _ = db.conn.Exec("UPDATE server_ports SET is_primary = 0 WHERE server_id = ?", serverID)
+	_, err = db.conn.Exec("UPDATE server_ports SET is_primary = 1 WHERE id = ? AND server_id = ?", portID, serverID)
+	if err != nil {
+		return 0, err
+	}
+	_, _ = db.conn.Exec("UPDATE servers SET port = ? WHERE id = ?", port, serverID)
+	return port, nil
+}
+
+func (db *DB) DeleteAllServerPorts(serverID string) error {
+	_, err := db.conn.Exec("DELETE FROM server_ports WHERE server_id = ?", serverID)
+	return err
 }
 

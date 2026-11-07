@@ -73,6 +73,7 @@ window.S = {
   wl: [],
   ops: [],
   plugins: [],
+  ports: [],
   bk: [],
   sc: [
     ['Restart server', '0 4 * * *', true],
@@ -632,6 +633,8 @@ function srvh() {
       <button class="btn" onclick="toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
       ${S.cmenu ? `<div class="cmenu" role="menu">
         ${CMDS.map(([label, cmd]) => `<button role="menuitem" onclick="execQuickCmd('${cmd}')">${label}</button>`).join('')}
+        <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
+        <button role="menuitem" style="color: #ef4444;" onclick="S.cmenu=false; openDeleteServerModal('${srv?.id}', '${esc(srv?.name || '')}');">${ic('trash', 13)} Delete Server</button>
       </div>` : ''}
       <button class="btn pr" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
@@ -759,7 +762,10 @@ const V = {
           <div class="sift-server-card" onclick="switchServer(${i}); go('con');" data-name="${esc(s.name)}" data-addr="${host}">
             <div class="srv-card-banner" style="background-image: url('/img/banner.jpg');">
               <span class="srv-card-badge">Minecraft - ${esc(coreLabel)}</span>
-              <span class="srv-card-refresh" onclick="event.stopPropagation(); refreshServerStatus();" title="Refresh">↻</span>
+              <div class="srv-card-actions">
+                <span class="srv-card-action-btn" onclick="event.stopPropagation(); refreshServerStatus();" title="Refresh status">↻</span>
+                <span class="srv-card-action-btn danger" onclick="event.stopPropagation(); openDeleteServerModal('${s.id}', '${esc(s.name)}');" title="Delete Server">${ic('trash', 13)}</span>
+              </div>
             </div>
             <div class="srv-card-body">
               <div class="srv-card-title-row">
@@ -1290,30 +1296,110 @@ const V = {
     const host = window.location.hostname;
     const sftpUser = S.sftp ? S.sftp.username : `admin.${srv?.id || 'server'}`;
     const sftpPort = S.sftp ? S.sftp.port : 2022;
+    const ports = (S.ports && S.ports.length > 0) ? S.ports : [
+      { id: 0, port: srv?.port || 25565, protocol: 'tcp/udp', notes: 'Primary Game Port', is_primary: true }
+    ];
 
     return `${srvh()}
-    <div class="grid g2" style="margin-top:14px">
-      <div class="card tw">
-        <h2>Server Port Allocations</h2>
+    <div style="display: flex; flex-direction: column; gap: 20px; margin-top: 14px;">
+      <!-- Port Allocations Card -->
+      <div class="card tw" style="padding: 22px;">
+        <div class="row sb" style="margin-bottom: 16px; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <h2 style="margin: 0; font-size: 18px; color: #fff;">Network Allocations</h2>
+            <p class="mu" style="font-size: 13px; margin: 4px 0 0;">Manage inbound port bindings for game traffic, voice chat, web maps, crossplay, and queries.</p>
+          </div>
+          <button class="btn pr sm" onclick="openAddPortModal()" style="height: 36px; padding: 0 16px;">
+            ${ic('plus', 14)} Assign Port
+          </button>
+        </div>
+
         <table>
-          <thead><tr><th>Service</th><th>Port</th><th>Primary</th></tr></thead>
+          <thead>
+            <tr>
+              <th>IP / Host</th>
+              <th>Port</th>
+              <th>Protocol</th>
+              <th>Service / Notes</th>
+              <th>Status</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
           <tbody>
-            <tr><td>Minecraft Game</td><td class="mono">${srv?.port || 25565}</td><td><span class="badge online"><i class="dot"></i>Yes</span></td></tr>
-            <tr><td>Pure-Go SFTP (Built-in)</td><td class="mono">${sftpPort}</td><td>No</td></tr>
-            <tr><td>RCON Remote Console</td><td class="mono">25575</td><td>No</td></tr>
+            ${ports.map(p => `
+              <tr>
+                <td class="mono" style="color: var(--tx-muted);">${host}</td>
+                <td>
+                  <span class="mono" style="font-weight: 700; color: #fff; cursor: pointer;" onclick="navigator.clipboard.writeText('${p.port}'); toast('Port ${p.port} copied!');" title="Click to copy">
+                    ${p.port}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge" style="background: rgba(255,255,255,0.06); color: var(--tx-muted); font-size: 11px; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;">
+                    ${esc(p.protocol || 'tcp/udp')}
+                  </span>
+                </td>
+                <td style="color: #fff; font-weight: 500;">
+                  ${esc(p.notes || (p.is_primary ? 'Primary Game Port' : 'Additional Allocation'))}
+                </td>
+                <td>
+                  ${p.is_primary ? 
+                    `<span class="badge online"><i class="dot"></i>Primary</span>` : 
+                    `<span class="badge" style="background: rgba(255,255,255,0.05); color: var(--tx-muted);">Secondary</span>`}
+                </td>
+                <td style="text-align: right;">
+                  ${p.is_primary ? `
+                    <span class="mu" style="font-size: 12px;">Default Game Port</span>
+                  ` : `
+                    <div class="row" style="justify-content: flex-end; gap: 8px;">
+                      <button class="btn sm" onclick="setPrimaryPort(${p.id})" title="Set as primary game port">Make Primary</button>
+                      <button class="btn dg sm" onclick="deletePort(${p.id}, ${p.port})" title="Delete allocation">${ic('trash', 14)}</button>
+                    </div>
+                  `}
+                </td>
+              </tr>
+            `).join('')}
           </tbody>
         </table>
       </div>
 
-      <div class="card">
-        <h2>SFTP File Access</h2>
-        <p class="mu" style="font-size:13px; margin-bottom:12px;">Connect with FileZilla, WinSCP, or Cyberduck using pure-Go jailed SFTP.</p>
-        <div class="mono" style="background:var(--con); color:var(--cont); padding:10px 12px; border-radius:6px; font-size:12px; margin-bottom:12px;">
-          <div><b>Host:</b> ${host}</div>
-          <div><b>Port:</b> ${sftpPort}</div>
-          <div><b>Username:</b> ${sftpUser}</div>
+      <!-- Secondary Row: SFTP Access & Common Ports -->
+      <div class="grid g2" style="gap: 20px;">
+        <div class="card" style="padding: 22px;">
+          <h2 style="font-size: 16px; margin-bottom: 8px; color: #fff;">SFTP Management Endpoint</h2>
+          <p class="mu" style="font-size: 13px; margin-bottom: 14px;">Pure-Go jailed SFTP daemon running natively in NeoPanel for secure file management.</p>
+          <div class="mono" style="background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border); padding: 12px 14px; border-radius: 8px; font-size: 12.5px; line-height: 1.8; margin-bottom: 14px;">
+            <div><span class="mu">Host:</span> <b style="color: #fff;">${host}</b></div>
+            <div><span class="mu">Port:</span> <b style="color: #fff;">${sftpPort}</b></div>
+            <div><span class="mu">Username:</span> <b style="color: #fff;">${sftpUser}</b></div>
+          </div>
+          <button class="btn sm" onclick="navigator.clipboard.writeText('sftp://${sftpUser}@${host}:${sftpPort}'); toast('SFTP URI copied!');">
+            Copy SFTP URI
+          </button>
         </div>
-        <button class="btn pr sm" onclick="navigator.clipboard.writeText('sftp://${sftpUser}@${host}:${sftpPort}'); toast('SFTP URI copied!');">Copy Connection URL</button>
+
+        <div class="card" style="padding: 22px;">
+          <h2 style="font-size: 16px; margin-bottom: 8px; color: #fff;">Common Plugin Ports</h2>
+          <p class="mu" style="font-size: 13px; margin-bottom: 12px;">Default ports frequently needed by popular Minecraft server plugins:</p>
+          <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+            <div class="row sb" style="padding: 6px 0; border-bottom: 1px solid var(--border);">
+              <span>Simple Voice Chat (UDP)</span>
+              <span class="mono" style="color: var(--ac); font-weight: 700;">24454</span>
+            </div>
+            <div class="row sb" style="padding: 6px 0; border-bottom: 1px solid var(--border);">
+              <span>Dynmap Web Interface</span>
+              <span class="mono" style="color: var(--ac); font-weight: 700;">8123</span>
+            </div>
+            <div class="row sb" style="padding: 6px 0; border-bottom: 1px solid var(--border);">
+              <span>Geyser / Floodgate (Bedrock)</span>
+              <span class="mono" style="color: var(--ac); font-weight: 700;">19132</span>
+            </div>
+            <div class="row sb" style="padding: 6px 0;">
+              <span>NuVotifier / Voting Port</span>
+              <span class="mono" style="color: var(--ac); font-weight: 700;">8192</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>`;
   },
@@ -1496,6 +1582,23 @@ const V = {
           <button class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save Properties</button>
           <button class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Danger Zone: Delete Server -->
+    <div class="card" style="margin-top: 20px; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.05); padding: 22px;">
+      <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <h2 style="color: #ef4444; font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px;">
+            ${ic('trash', 16)} Danger Zone: Delete Server Instance
+          </h2>
+          <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
+            Permanently destroy this Minecraft server instance (<b>${esc(srv?.name || '')}</b>). All files, worlds, player data, plugins, configs, and allocated ports will be erased. This action cannot be reversed.
+          </p>
+        </div>
+        <button class="btn dg" onclick="openDeleteServerModal('${srv?.id}', '${esc(srv?.name || '')}')" style="height: 38px; padding: 0 18px; font-weight: 600;">
+          ${ic('trash', 14)} Delete Server
+        </button>
       </div>
     </div>`;
   },
@@ -1956,7 +2059,7 @@ window.onEnterView = function(view) {
   else if (view === 'store') searchModrinth();
   else if (view === 'bk') loadBackupsList();
   else if (view === 'set') loadProperties();
-  else if (view === 'net') loadSFTPDetails();
+  else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
   else if (view === 'admin') loadAdminData();
   else if (view === 'acc') loadAccountData();
   else if (view === 'dash') loadDashboard();
@@ -2627,7 +2730,9 @@ function switchServer(index) {
   S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
   if (S.activeServerId !== srv.id) {
     S.log = [];
+    S.ports = [];
     connectWs(srv.id);
+    loadServerPorts();
   }
   R();
   toast(`Switched to ${srv.name}`);
@@ -2773,9 +2878,15 @@ window.setCreateVersion = function(ver) {
 };
 
 function getNextSuggestedPort() {
-  const usedPorts = S.servers.map(s => s.port || 25565);
+  const usedPorts = new Set();
+  (S.servers || []).forEach(s => {
+    if (s.port) usedPorts.add(s.port);
+  });
+  (S.ports || []).forEach(p => {
+    if (p.port) usedPorts.add(p.port);
+  });
   let candidate = 25565;
-  while (usedPorts.includes(candidate)) {
+  while (usedPorts.has(candidate)) {
     candidate++;
   }
   return candidate;
@@ -2968,6 +3079,245 @@ async function handleCreateServer(e) {
     if (btn) {
       btn.disabled = false;
       btn.textContent = '🚀 Create & Launch Server';
+    }
+  }
+}
+
+// --- Port Allocation Management ---
+async function loadServerPorts() {
+  const srv = curServer();
+  if (!srv) return;
+  try {
+    const list = await api(`/api/servers/${srv.id}/ports`);
+    if (Array.isArray(list)) {
+      S.ports = list;
+      if (S.view === 'net') R();
+    }
+  } catch (err) {
+    console.error('Failed to load server ports:', err);
+  }
+}
+
+function openAddPortModal() {
+  const container = $('#modal-container');
+  if (!container) return;
+
+  const srv = curServer();
+  const nextPort = getNextSuggestedPort();
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:520px;">
+      <div class="row sb" style="margin-bottom:16px;">
+        <h2 style="font-size:20px; margin:0; color:#fff;">Assign Port Allocation</h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p class="mu" style="font-size:13px; margin-bottom:16px;">
+        Assign an additional incoming network port to <b>${esc(srv?.name || 'this server')}</b>.
+      </p>
+
+      <form id="add-port-form" onsubmit="submitAddPort(event)">
+        <label class="f" style="margin-bottom:14px;">
+          <span>Port Number (1024 - 65535)</span>
+          <input type="number" id="ap-port" min="1024" max="65535" required value="${nextPort}">
+        </label>
+
+        <!-- Quick Preset Chips -->
+        <div style="margin-bottom:14px;">
+          <span class="mu" style="display:block; margin-bottom:6px; font-size:12px;">Quick Presets:</span>
+          <div class="row" style="flex-wrap:wrap; gap:6px;">
+            <button type="button" class="btn sm" style="font-size:11.5px; padding:4px 8px;" onclick="setPortPreset(24454, 'Simple Voice Chat')">Voice Chat (24454)</button>
+            <button type="button" class="btn sm" style="font-size:11.5px; padding:4px 8px;" onclick="setPortPreset(8123, 'Dynmap Web Map')">Dynmap (8123)</button>
+            <button type="button" class="btn sm" style="font-size:11.5px; padding:4px 8px;" onclick="setPortPreset(19132, 'Geyser Bedrock')">Bedrock (19132)</button>
+            <button type="button" class="btn sm" style="font-size:11.5px; padding:4px 8px;" onclick="setPortPreset(8192, 'NuVotifier')">Votifier (8192)</button>
+            <button type="button" class="btn sm" style="font-size:11.5px; padding:4px 8px;" onclick="setPortPreset(8100, 'BlueMap')">BlueMap (8100)</button>
+          </div>
+        </div>
+
+        <label class="f" style="margin-bottom:14px;">
+          <span>Protocol</span>
+          <select id="ap-proto">
+            <option value="tcp/udp">TCP / UDP (Recommended)</option>
+            <option value="tcp">TCP only</option>
+            <option value="udp">UDP only (e.g. Voice Chat)</option>
+          </select>
+        </label>
+
+        <label class="f" style="margin-bottom:14px;">
+          <span>Service / Notes</span>
+          <input type="text" id="ap-notes" placeholder="e.g. Simple Voice Chat, Dynmap, Geyser" value="Additional Allocation">
+        </label>
+
+        <label class="row" style="gap:8px; margin-bottom:20px; cursor:pointer;">
+          <input type="checkbox" id="ap-primary">
+          <span style="font-size:13px; color:#fff;">Set as primary game port (updates server.properties)</span>
+        </label>
+
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="ap-submit-btn" class="btn pr">${ic('plus', 14)} Assign Port</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+  setTimeout(() => $('#ap-port')?.focus(), 50);
+}
+
+function setPortPreset(port, notes) {
+  const pInp = $('#ap-port');
+  const nInp = $('#ap-notes');
+  if (pInp) pInp.value = port;
+  if (nInp) nInp.value = notes;
+}
+
+async function submitAddPort(e) {
+  e.preventDefault();
+  const srv = curServer();
+  if (!srv) return;
+
+  const btn = $('#ap-submit-btn');
+  if (btn) btn.disabled = true;
+
+  const port = parseInt($('#ap-port')?.value, 10);
+  const protocol = $('#ap-proto')?.value || 'tcp/udp';
+  const notes = $('#ap-notes')?.value.trim() || 'Additional Allocation';
+  const isPrimary = $('#ap-primary')?.checked || false;
+
+  if (isNaN(port) || port < 1024 || port > 65535) {
+    toast('Invalid port: must be between 1024 and 65535', 'bad');
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  try {
+    await api(`/api/servers/${srv.id}/ports`, {
+      method: 'POST',
+      body: JSON.stringify({ port, protocol, notes, is_primary: isPrimary })
+    });
+    toast(`Port ${port} successfully assigned!`, 'ok');
+    closeModal();
+    if (isPrimary) {
+      srv.port = port;
+    }
+    await loadServerPorts();
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to assign port', 'bad');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function deletePort(portId, portNum) {
+  const srv = curServer();
+  if (!srv) return;
+
+  if (!confirm(`Are you sure you want to delete port allocation ${portNum}?`)) {
+    return;
+  }
+
+  try {
+    await api(`/api/servers/${srv.id}/ports/${portId}`, { method: 'DELETE' });
+    toast(`Port ${portNum} deleted`, 'ok');
+    await loadServerPorts();
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to delete port', 'bad');
+  }
+}
+
+async function setPrimaryPort(portId) {
+  const srv = curServer();
+  if (!srv) return;
+
+  try {
+    const res = await api(`/api/servers/${srv.id}/ports/${portId}/primary`, { method: 'POST' });
+    if (res && res.port) {
+      srv.port = res.port;
+    }
+    toast(`Primary game port updated to ${res.port}`, 'ok');
+    await loadServerPorts();
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to update primary port', 'bad');
+  }
+}
+
+// --- Server Deletion Management ---
+function openDeleteServerModal(srvId, srvName) {
+  const container = $('#modal-container');
+  if (!container) return;
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:520px; border:1px solid rgba(239, 68, 68, 0.4);">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:20px; margin:0; color:#ef4444; display:flex; align-items:center; gap:8px;">
+          ${ic('trash', 18)} Delete Server Instance
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p style="font-size:13.5px; color:#e2e8f0; line-height:1.6; margin-bottom:14px;">
+        You are about to permanently delete <b style="color:#fff;">${esc(srvName)}</b> (<code>${esc(srvId)}</code>).
+      </p>
+
+      <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:13px; color:#fca5a5; line-height:1.5;">
+        <b>Warning:</b> This process is completely irreversible. All world data, player inventories, plugin configs, and assigned port allocations will be wiped immediately.
+      </div>
+
+      <label class="f" style="margin-bottom:20px;">
+        <span style="font-size:13px; color:#cbd5e1;">To confirm, type <b style="color:#fff;">${esc(srvName)}</b> below:</span>
+        <input type="text" id="del-srv-confirm" placeholder="Type server name to confirm" autocomplete="off" oninput="checkDeleteServerConfirm('${esc(srvName).replace(/'/g, "\\'")}')">
+      </label>
+
+      <div class="row" style="justify-content:flex-end; gap:10px;">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="button" id="del-srv-btn" class="btn dg" disabled onclick="executeDeleteServer('${srvId}')">
+          ${ic('trash', 14)} Delete Server Permanently
+        </button>
+      </div>
+    </div>
+  </div>`;
+
+  setTimeout(() => $('#del-srv-confirm')?.focus(), 50);
+}
+
+function checkDeleteServerConfirm(expectedName) {
+  const inp = $('#del-srv-confirm');
+  const btn = $('#del-srv-btn');
+  if (!inp || !btn) return;
+  const match = inp.value.trim().toLowerCase() === expectedName.trim().toLowerCase();
+  btn.disabled = !match;
+}
+
+async function executeDeleteServer(srvId) {
+  const btn = $('#del-srv-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Deleting server...';
+  }
+
+  try {
+    if (S.ws) {
+      try {
+        S.ws.onclose = null;
+        S.ws.close();
+      } catch (e) {}
+      S.ws = null;
+    }
+
+    await api(`/api/servers/${srvId}`, { method: 'DELETE' });
+    toast('Server deleted successfully', 'ok');
+    closeModal();
+
+    await loadDashboard();
+    S.cs = 0;
+    go('dash');
+  } catch (err) {
+    toast(err.message || 'Failed to delete server', 'bad');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Delete Server Permanently';
     }
   }
 }
@@ -3194,6 +3544,15 @@ window.saveStartupSettings = saveStartupSettings;
 window.formatFileDate = formatFileDate;
 window.formatFileSize = formatFileSize;
 window.formatNum = formatNum;
+window.openAddPortModal = openAddPortModal;
+window.submitAddPort = submitAddPort;
+window.deletePort = deletePort;
+window.setPrimaryPort = setPrimaryPort;
+window.setPortPreset = setPortPreset;
+window.loadServerPorts = loadServerPorts;
+window.openDeleteServerModal = openDeleteServerModal;
+window.checkDeleteServerConfirm = checkDeleteServerConfirm;
+window.executeDeleteServer = executeDeleteServer;
 
 // --- Initialize Application ---
 document.addEventListener('DOMContentLoaded', () => {

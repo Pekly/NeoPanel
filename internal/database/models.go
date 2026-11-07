@@ -62,3 +62,13 @@ type ActivityLog struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type ServerPort struct {
+	ID        int       `json:"id"`
+	ServerID  string    `json:"server_id"`
+	Port      int       `json:"port"`
+	Protocol  string    `json:"protocol"` // "tcp/udp", "tcp", "udp"
+	Notes     string    `json:"notes"`    // "Primary Game Port", "Voice Chat", "Dynmap", "Geyser"
+	IsPrimary bool      `json:"is_primary"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
