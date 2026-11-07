@@ -25,6 +25,7 @@ SERVICE_FILE="/etc/systemd/system/neopanel.service"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="neopanel"
 LOG_FILE="/tmp/neopanel-install.log"
+BUILD_DIR="/tmp/neopanel-build"
 
 # Prevent apt interactive prompts from hanging in background
 export DEBIAN_FRONTEND=noninteractive
@@ -110,10 +111,8 @@ run_step() {
     sleep 0.12
   done
 
-  wait "$pid"
-  local exit_code=$?
-
-  if [ "$exit_code" -eq 0 ]; then
+  # Use if wait "$pid" so set -e does not prematurely abort the script
+  if wait "$pid"; then
     draw_progress "$end_pct" "✔ ${label}"
     echo ""
   else
@@ -195,11 +194,11 @@ step_build_neopanel() {
     go mod tidy
     go build -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
   else
-    TMP_DIR=$(mktemp -d)
-    git clone https://github.com/Pekly/NeoPanel.git "$TMP_DIR"
-    if [ -f "$TMP_DIR/cmd/neopanel/main.go" ]; then
-      (cd "$TMP_DIR" && go mod tidy && go build -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
-      rm -rf "$TMP_DIR"
+    rm -rf "$BUILD_DIR"
+    git clone https://github.com/Pekly/NeoPanel.git "$BUILD_DIR"
+    if [ -f "$BUILD_DIR/cmd/neopanel/main.go" ]; then
+      (cd "$BUILD_DIR" && go mod tidy && go build -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
+      rm -rf "$BUILD_DIR"
     else
       echo "Failed to clone repository or main.go missing." >&2
       exit 1
@@ -431,12 +430,12 @@ step_update_fetch() {
     apt-get update -y -q && apt-get install -y -q golang-go
   fi
 
-  UPDATE_TMP=$(mktemp -d)
-  git clone --depth 1 https://github.com/Pekly/NeoPanel.git "$UPDATE_TMP"
+  rm -rf "$BUILD_DIR"
+  git clone --depth 1 https://github.com/Pekly/NeoPanel.git "$BUILD_DIR"
 }
 
 step_update_compile() {
-  (cd "$UPDATE_TMP" && go mod tidy && go build -ldflags="-s -w" -o "$UPDATE_TMP/neopanel_new" ./cmd/neopanel)
+  (cd "$BUILD_DIR" && go mod tidy && go build -ldflags="-s -w" -o "$BUILD_DIR/neopanel_new" ./cmd/neopanel)
 }
 
 step_update_swap() {
@@ -444,9 +443,9 @@ step_update_swap() {
     cp "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/${BINARY_NAME}.bak"
   fi
 
-  mv "$UPDATE_TMP/neopanel_new" "$INSTALL_DIR/$BINARY_NAME"
+  mv "$BUILD_DIR/neopanel_new" "$INSTALL_DIR/$BINARY_NAME"
   chmod +x "$INSTALL_DIR/$BINARY_NAME"
-  rm -rf "$UPDATE_TMP"
+  rm -rf "$BUILD_DIR"
 
   systemctl restart neopanel
   sleep 1
