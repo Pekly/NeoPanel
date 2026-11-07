@@ -201,3 +201,4 @@ func DetectInstalledJavas() []JavaRuntimeInfo {
 
 	return results
 }
+

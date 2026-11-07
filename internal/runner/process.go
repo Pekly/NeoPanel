@@ -87,7 +87,7 @@ func (p *ProcessInstance) Start() error {
 
 	// Build Java command
 	javaBinary, javaLabel := ResolveJavaBinary(p.server.JavaPath)
-	p.broadcastLog(fmt.Sprintf("[NeoPanel]: Starting instance using %s (%s)", javaLabel, javaBinary))
+	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Starting instance using %s (%s)...\x1b[0m", javaLabel, javaBinary))
 
 	jarPath := filepath.Join(p.workingDir, p.server.JarFile)
 	if _, err := os.Stat(jarPath); os.IsNotExist(err) {
