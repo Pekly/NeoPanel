@@ -271,6 +271,11 @@ func (p *ProcessInstance) broadcast(msg string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	// Prevent consecutive duplicate lines (e.g. concurrent stdout & stderr duplication)
+	if len(p.logBuffer) > 0 && p.logBuffer[len(p.logBuffer)-1] == msg {
+		return
+	}
+
 	// Append to buffer
 	if len(p.logBuffer) >= maxLogBuffer {
 		p.logBuffer = p.logBuffer[1:]

@@ -60,13 +60,11 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 	}
 	defer conn.Close()
 
-	// Send recent logs first
+	// Send recent logs first in a structured history batch
 	history := h.manager.GetLogs(serverID)
-	for _, line := range history {
-		msg, _ := json.Marshal(WSMessage{Event: "log", Data: line})
-		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-			return
-		}
+	if historyData, err := json.Marshal(history); err == nil {
+		msg, _ := json.Marshal(WSMessage{Event: "history", Data: string(historyData)})
+		_ = conn.WriteMessage(websocket.TextMessage, msg)
 	}
 
 	// Subscribe to live log stream

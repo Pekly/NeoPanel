@@ -121,6 +121,7 @@ window.S = {
     act: []
   },
   activeWs: null,
+  activeServerId: null,
   pollTimer: null
 };
 
@@ -373,7 +374,15 @@ function updateHeaderBadge() {
 }
 
 function addLog(line) {
+  if (!line) return;
   const html = formatLogLine(line);
+  if (!html) return;
+
+  // Prevent consecutive duplicate lines (e.g. concurrent streams or duplicate frames)
+  if (S.log.length > 0 && S.log[S.log.length - 1] === html) {
+    return;
+  }
+
   S.log.push(html);
   if (S.log.length > 800) S.log.shift();
   if (S.view === 'con') paintLog();
@@ -388,11 +397,23 @@ function paintLog() {
 
 // --- WebSocket Connection ---
 function connectWs(serverId) {
+  if (!serverId) return;
+
+  // If already connected or connecting to this server, do not recreate WebSocket
+  if (S.activeWs && S.activeServerId === serverId && (S.activeWs.readyState === WebSocket.OPEN || S.activeWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
   if (S.activeWs) {
+    S.activeWs.onopen = null;
+    S.activeWs.onmessage = null;
+    S.activeWs.onerror = null;
+    S.activeWs.onclose = null;
     try { S.activeWs.close(); } catch (e) {}
     S.activeWs = null;
   }
-  if (!serverId) return;
+
+  S.activeServerId = serverId;
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${encodeURIComponent(S.token)}`;
@@ -402,10 +423,22 @@ function connectWs(serverId) {
     S.activeWs = ws;
 
     ws.onmessage = e => {
+      if (!e.data) return;
       try {
-        if (e.data.startsWith('{')) {
-          const msg = JSON.parse(e.data);
-          if (msg.event === 'log') {
+        const text = e.data.trim();
+        if (text.startsWith('{')) {
+          const msg = JSON.parse(text);
+          if (msg.event === 'history') {
+            try {
+              const list = JSON.parse(msg.data);
+              if (Array.isArray(list)) {
+                S.log = list.map(formatLogLine).filter(Boolean);
+                if (S.log.length > 800) S.log = S.log.slice(-800);
+                if (S.view === 'con') paintLog();
+                return;
+              }
+            } catch (histErr) {}
+          } else if (msg.event === 'log') {
             addLog(msg.data);
             return;
           } else if (msg.event === 'stats' || msg.type === 'stats') {
@@ -440,7 +473,9 @@ function connectWs(serverId) {
     };
 
     ws.onclose = () => {
-      S.activeWs = null;
+      if (S.activeWs === ws) {
+        S.activeWs = null;
+      }
     };
   } catch (e) {}
 }
@@ -2590,7 +2625,10 @@ function switchServer(index) {
   S.status = (st === 'running' || st === 'online') ? 'online' : 'offline';
   S.ver = srv.version || S.ver;
   S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
-  connectWs(srv.id);
+  if (S.activeServerId !== srv.id) {
+    S.log = [];
+    connectWs(srv.id);
+  }
   R();
   toast(`Switched to ${srv.name}`);
 }
