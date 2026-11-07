@@ -1,0 +1,29 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+neopanel
+
+# NeoPanel runtime data
+data/
+neopanel.db*
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local developer automation tools (hidden from public repository)
+push.ps1
+push.bat
+*.bat
+

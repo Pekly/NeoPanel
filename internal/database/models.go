@@ -1,0 +1,38 @@
+package database
+
+import "time"
+
+type User struct {
+	ID           int       `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"` // "admin" or "user"
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type Server struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Type        string    `json:"type"`       // "paper", "purpur", "vanilla", "fabric", "spigot", "custom"
+	Version     string    `json:"version"`    // e.g. "1.20.4", "1.21.1"
+	JarFile     string    `json:"jar_file"`   // e.g. "server.jar"
+	Port        int       `json:"port"`       // e.g. 25565
+	MemoryMinMB int       `json:"memory_min"` // e.g. 1024
+	MemoryMaxMB int       `json:"memory_max"` // e.g. 2048
+	JavaArgs    string    `json:"java_args"`  // custom JVM flags
+	JavaPath    string    `json:"java_path"`  // custom Java binary path (optional)
+	AutoRestart bool      `json:"auto_restart"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ServerStats struct {
+	ServerID  string  `json:"server_id"`
+	Status    string  `json:"status"` // "offline", "starting", "online", "stopping"
+	CPUUsage  float64 `json:"cpu_usage"`
+	MemoryMB  int64   `json:"memory_mb"`
+	DiskMB    int64   `json:"disk_mb"`
+	UptimeSec int64   `json:"uptime_sec"`
+}
+
