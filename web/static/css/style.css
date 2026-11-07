@@ -1422,6 +1422,142 @@ input:focus, select:focus, textarea:focus {
   background: rgba(248, 81, 73, 0.15);
 }
 
+/* Floating Right-Click Context Menu */
+.floating-ctx-menu {
+  position: fixed;
+  min-width: 175px;
+  background: var(--card-bg-solid);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  padding: 6px;
+  z-index: 100;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: fadeIn 0.1s ease-out;
+}
+
+.floating-ctx-menu button {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--tx);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.floating-ctx-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.floating-ctx-menu button.dg {
+  color: #ef4444;
+}
+
+.floating-ctx-menu button.dg:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fca5a5;
+}
+
+.floating-ctx-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+/* Drag and Drop Dropzone Overlay */
+.dropzone-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 13, 20, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  border: 3px dashed var(--ac);
+  border-radius: 16px;
+  margin: 20px;
+  pointer-events: none;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.dropzone-overlay h2 {
+  font-size: 22px;
+  color: #fff;
+  margin: 0;
+}
+
+.dropzone-overlay p {
+  font-size: 14px;
+  color: var(--tx-muted);
+  margin: 0;
+}
+
+/* Floating Bulk Actions Bar */
+.bulk-action-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 20, 32, 0.95);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  z-index: 80;
+  animation: slideUp 0.18s ease-out;
+}
+
+/* Upload Progress Floating Widget */
+.upload-progress-widget {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 330px;
+  background: var(--card-bg-solid);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  padding: 14px 18px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
+  z-index: 90;
+  animation: slideUp 0.18s ease-out;
+}
+
+.upload-prog-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.upload-prog-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--ac);
+  box-shadow: 0 0 10px var(--ac-glow);
+  border-radius: 3px;
+  transition: width 0.15s ease;
+}
+
 /* Toast */
 .toast {
   position: fixed;

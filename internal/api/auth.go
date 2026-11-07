@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -163,6 +164,73 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		"token": token,
 		"user":  user,
 	})
+}
+
+// --- Admin User Management Endpoints ---
+
+func (h *AuthHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.db.ListUsers()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
+}
+
+func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Role     string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" || req.Password == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username and password are required"})
+		return
+	}
+	if req.Role != "admin" {
+		req.Role = "user"
+	}
+
+	hash, err := h.HashPassword(req.Password)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to hash password"})
+		return
+	}
+
+	user, err := h.db.CreateUser(req.Username, hash, req.Role)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username already taken or invalid"})
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, user)
+}
+
+func (h *AuthHandler) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	idStr := getURLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid user ID"})
+		return
+	}
+
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	if claims != nil && claims.UserID == id {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot delete your own account"})
+		return
+	}
+
+	if err := h.db.DeleteUser(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete user"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "User deleted successfully"})
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {

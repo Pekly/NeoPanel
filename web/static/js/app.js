@@ -67,7 +67,18 @@ window.S = {
   ftab: 'server.properties',
   currentDir: '',
   fileList: [],
+  selectedFiles: new Set(),
   fileMenuOpen: null,
+  adminTab: 0,
+  adminUsers: [],
+  adminDaemonCfg: JSON.parse(localStorage.getItem('neopanel_admin_cfg') || JSON.stringify({
+    brandName: 'NeoPanel',
+    fqdn: window.location.hostname || '127.0.0.1',
+    sftpPort: 2022,
+    maxUploadMB: 500,
+    defaultRamMB: 2048,
+    autoRestartPolicy: true
+  })),
   players: [],
   bans: [],
   wl: [],
@@ -992,6 +1003,7 @@ const V = {
 
     const pathParts = (S.currentDir || '').split('/').filter(Boolean);
     const isSubdir = pathParts.length > 0;
+    const allSelected = S.fileList.length > 0 && S.fileList.every(i => S.selectedFiles.has(i.path || i.name));
 
     return `${srvh()}
     <div style="margin-top: 16px;">
@@ -1021,10 +1033,23 @@ const V = {
       <!-- Full-Width File Table -->
       <div class="card tw" style="padding: 0; overflow: visible;">
         <table class="file-table" style="width: 100%;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--ln); color: var(--tx-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
+              <th style="width: 36px; padding: 12px 0 12px 18px; text-align: left;">
+                <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" style="cursor: pointer; width: 15px; height: 15px; accent-color: var(--ac);" ${allSelected ? 'checked' : ''}>
+              </th>
+              <th style="width: 32px; padding: 12px 4px;"></th>
+              <th style="padding: 12px 10px; text-align: left;">Name</th>
+              <th style="width: 140px; padding: 12px 10px; text-align: left;">Size</th>
+              <th style="width: 180px; padding: 12px 10px; text-align: left;">Modified</th>
+              <th style="width: 50px; padding: 12px 18px 12px 10px; text-align: right;"></th>
+            </tr>
+          </thead>
           <tbody>
             ${isSubdir ? `
               <tr onclick="browseFolder('..')">
-                <td style="width: 44px; padding-left: 20px; color: var(--ac); font-size: 16px;">📁</td>
+                <td style="padding-left: 18px;"></td>
+                <td style="color: var(--ac); font-size: 16px;">📁</td>
                 <td colspan="4" style="font-weight: 600; color: #fff;">.. (Parent folder)</td>
               </tr>
             ` : ''}
@@ -1033,10 +1058,19 @@ const V = {
               const icon = isDir ? '📁' : '📄';
               const sizeStr = formatFileSize(item.size, isDir);
               const dateStr = formatFileDate(item.modified);
+              const itemPath = item.path || item.name;
+              const isSelected = S.selectedFiles.has(itemPath);
 
               return `
-              <tr class="file-row" data-name="${esc(item.name)}" onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">
-                <td style="width: 44px; padding-left: 20px; font-size: 16px;">${icon}</td>
+              <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}" 
+                  onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
+                  oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
+                <td style="width: 36px; padding-left: 18px;" onclick="event.stopPropagation();">
+                  <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''} 
+                         onchange="toggleFileSelect('${esc(itemPath)}', this.checked)" 
+                         style="cursor: pointer; width: 15px; height: 15px; accent-color: var(--ac);">
+                </td>
+                <td style="width: 32px; padding: 0 4px; font-size: 16px;">${icon}</td>
                 <td style="font-weight: 500; color: #fff;">${esc(item.name)}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 140px;">${sizeStr}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 180px;">${dateStr}</td>
@@ -1044,17 +1078,27 @@ const V = {
                   <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
                   <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
                     ${!isDir ? `<button onclick="openFile('${esc(item.name)}'); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
-                    ${!isDir ? `<button onclick="downloadFileItem('${esc(item.path || item.name)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
-                    <button onclick="promptRenameFile('${esc(item.path || item.name)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
-                    <button class="dg" onclick="deleteFileItem('${esc(item.path || item.name)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
+                    ${!isDir ? `<button onclick="downloadFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
+                    <button onclick="promptRenameFile('${esc(itemPath)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
+                    <button onclick="copyFilePath('${esc(itemPath)}'); closeAllCtx();">📋 Copy Path</button>
+                    <button class="dg" onclick="deleteFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
                   </div>
                 </td>
               </tr>`;
             }).join('')}
-            ${!S.fileList.length && !isSubdir ? '<tr><td colspan="5" class="mu" style="text-align:center; padding: 32px;">This folder is empty.</td></tr>' : ''}
+            ${!S.fileList.length && !isSubdir ? '<tr><td colspan="6" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
           </tbody>
         </table>
       </div>
+
+      <!-- Floating Bulk Action Bar -->
+      ${S.selectedFiles.size > 0 ? `
+        <div class="bulk-action-bar">
+          <span style="font-weight: 600; font-size: 13.5px; color: #fff;">${S.selectedFiles.size} item${S.selectedFiles.size > 1 ? 's' : ''} selected</span>
+          <button class="btn sm dg" onclick="deleteSelectedFiles()">${ic('trash', 14)} Delete Selected</button>
+          <button class="btn sm" onclick="deselectAllFiles()">Deselect</button>
+        </div>
+      ` : ''}
     </div>`;
   },
 
@@ -1140,9 +1184,16 @@ const V = {
   ver() {
     return `${srvh()}
     <div class="card hero" style="margin-top:14px">
-      <span class="mu">Currently Running</span>
-      <b class="big">${S.core} ${S.ver}</b>
-      <span class="mu">Java 21 / 17 compatible &bull; High performance runtime</span>
+      <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <span class="mu">Currently Running</span>
+          <b class="big">${S.core} ${S.ver}</b>
+          <span class="mu">Java 21 / 17 compatible &bull; High performance runtime</span>
+        </div>
+        <button class="btn pr" onclick="openReinstallModal('${curServer()?.id}')">
+          ${ic('refresh', 14)} Reinstall Server (mcjarfiles.com)
+        </button>
+      </div>
     </div>
 
     <h2 style="margin-top:20px">Choose Server Engine</h2>
@@ -1585,6 +1636,23 @@ const V = {
       </div>
     </div>
 
+    <!-- Reinstall Server Section -->
+    <div class="card" style="margin-top: 20px; border: 1px solid var(--border-light); padding: 22px;">
+      <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <h2 style="font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; color: #fff;">
+            ${ic('refresh', 16)} Reinstall Server Instance
+          </h2>
+          <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
+            Re-download and deploy a fresh Minecraft server binary (Paper, Purpur, Leaf, Folia, Fabric, Vanilla, Velocity) via <b>mcjarfiles.com</b> API. You can choose to preserve world data, configs, and plugins.
+          </p>
+        </div>
+        <button class="btn" onclick="openReinstallModal('${srv?.id}')" style="height: 38px; padding: 0 18px; font-weight: 600;">
+          ${ic('refresh', 14)} Reinstall Server
+        </button>
+      </div>
+    </div>
+
     <!-- Danger Zone: Delete Server -->
     <div class="card" style="margin-top: 20px; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.05); padding: 22px;">
       <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
@@ -1627,9 +1695,227 @@ const V = {
 
   // Dedicated Admin Area View
   admin() {
-    const sys = S.system || { os: 'linux', arch: 'amd64', cpus: 2, total_ram_mb: 4096, free_ram_mb: 2048, version: '1.0.0' };
+    const sys = S.system || { os: 'linux', arch: 'amd64', cpus: 2, total_ram_mb: 4096, free_ram_mb: 2048, version: '1.0.0', go_version: 'go1.23.0', goroutines: 24 };
     const usedRam = (sys.total_ram_mb - sys.free_ram_mb) || 0;
     const ramPct = Math.round((usedRam / sys.total_ram_mb) * 100) || 50;
+    const t = S.adminTab || 0;
+    const cfg = S.adminDaemonCfg || { brandName: 'NeoPanel', fqdn: '127.0.0.1', sftpPort: 2022, maxUploadMB: 500, defaultRamMB: 2048, autoRestartPolicy: true };
+
+    const tabs = [
+      ['Cluster & Health', 0],
+      ['Managed Servers', 1],
+      ['Users & Roles', 2],
+      ['Daemon Customization', 3],
+      ['Audit Logs', 4]
+    ];
+
+    let content = '';
+
+    if (t === 0) {
+      content = `
+        <div class="grid g4" style="margin-bottom:18px;">
+          <div class="card stat">
+            <span>Host Platform</span>
+            <b style="font-size:18px; padding:6px 0;">${esc(sys.os)} (${esc(sys.arch)})</b>
+            <span class="mu">${sys.cpus} CPU Cores &bull; ${esc(sys.go_version || 'Go Runtime')}</span>
+          </div>
+          <div class="card stat">
+            <span>Host Memory</span>
+            <b style="font-size:18px; padding:6px 0;">${(usedRam/1024).toFixed(1)} / ${(sys.total_ram_mb/1024).toFixed(1)} GB</b>
+            <div class="bar"><i style="width:${ramPct}%"></i></div>
+          </div>
+          <div class="card stat">
+            <span>Goroutines / Threads</span>
+            <b style="font-size:18px; padding:6px 0;">${sys.goroutines || 24} Active</b>
+            <span class="mu">Zero-overhead runtime</span>
+          </div>
+          <div class="card stat">
+            <span>SFTP Daemon</span>
+            <b style="font-size:18px; padding:6px 0;">Port ${cfg.sftpPort || 2022}</b>
+            <span class="badge online"><i class="dot"></i>Active</span>
+          </div>
+        </div>
+
+        <div class="card tw" style="margin-bottom:18px;">
+          <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="margin:0 0 4px; color:#fff;">System Optimization &amp; Garbage Collection</h2>
+              <span class="mu" style="font-size:13px;">Manage host process memory, reclaim unused buffers, and inspect runtime allocations.</span>
+            </div>
+            <button class="btn pr" onclick="triggerAdminGC()">${ic('refresh', 14)} Run Garbage Collection (runtime.GC)</button>
+          </div>
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px;">
+            <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
+              <span class="mu">Daemon Binary Version</span>
+              <span class="mono" style="color:#fff;">NeoPanel v${esc(sys.version || '1.0.0')} (Target: Ubuntu 24.04 LTS)</span>
+            </div>
+            <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
+              <span class="mu">Go Compiler Version</span>
+              <span class="mono" style="color:#fff;">${esc(sys.go_version || 'go1.23.0')}</span>
+            </div>
+            <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
+              <span class="mu">Active Goroutines</span>
+              <span class="mono" style="color:#fff;">${sys.goroutines || 24}</span>
+            </div>
+            <div class="row sb" style="padding:6px 0;">
+              <span class="mu">Process Architecture</span>
+              <span class="mono" style="color:#fff;">${esc(sys.arch)} on ${esc(sys.os)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (t === 1) {
+      content = `
+        <div class="card tw" style="margin-bottom:18px;">
+          <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="margin:0 0 4px; color:#fff;">All Cluster Servers (${S.servers.length})</h2>
+              <span class="mu" style="font-size:13px;">Overview and controls for all server instances on this daemon.</span>
+            </div>
+            <div class="row" style="gap:8px;">
+              <button class="btn sm" onclick="bulkRestartServers()">${ic('refresh', 14)} Restart All</button>
+              <button class="btn sm dg" onclick="bulkStopServers()">Stop All</button>
+              <button class="btn sm pr" onclick="openCreateServerModal()">+ Deploy Server</button>
+            </div>
+          </div>
+          <table>
+            <thead><tr><th>Server</th><th>Port</th><th>Engine</th><th>RAM Limit</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${S.servers.length ? S.servers.map((s, idx) => `
+                <tr>
+                  <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${s.id})</span></td>
+                  <td class="mono">${s.port}</td>
+                  <td><span class="chip">${esc(s.type)} ${esc(s.version)}</span></td>
+                  <td class="mono">${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</td>
+                  <td><span class="badge ${(s.stats?.status || s.status) === 'running' ? 'online' : 'offline'}"><i class="dot"></i>${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'}</span></td>
+                  <td style="text-align:right">
+                    <div class="row" style="justify-content:flex-end; gap:6px;">
+                      <button class="btn sm" onclick="switchServer(${idx}); go('con');">Manage</button>
+                      <button class="btn sm" onclick="openReinstallModal('${s.id}')">${ic('refresh', 12)} Reinstall</button>
+                      <button class="btn sm dg" onclick="openDeleteServerModal('${s.id}', '${esc(s.name)}')">${ic('trash', 12)} Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('') : '<tr><td colspan="6" class="mu" style="text-align:center; padding:24px;">No server instances deployed yet.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (t === 2) {
+      content = `
+        <div class="card tw" style="margin-bottom:18px;">
+          <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="margin:0 0 4px; color:#fff;">Panel Users &amp; Permissions</h2>
+              <span class="mu" style="font-size:13px;">Manage operators, administrators, and client user accounts.</span>
+            </div>
+            <button class="btn pr" onclick="openAddUserModal()">+ Create User</button>
+          </div>
+          <table>
+            <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${(S.adminUsers || []).length ? S.adminUsers.map(u => `
+                <tr>
+                  <td class="mono mu">${u.id}</td>
+                  <td><b>${esc(u.username)}</b></td>
+                  <td><span class="badge ${u.role === 'admin' ? 'online' : ''}">${esc(u.role)}</span></td>
+                  <td class="mu">${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
+                  <td style="text-align:right">
+                    ${u.username !== S.acct.un ? `
+                      <button class="btn sm dg" onclick="deleteAdminUser(${u.id}, '${esc(u.username)}')">${ic('trash', 12)} Delete</button>
+                    ` : '<span class="mu" style="font-size:12px;">Current Account</span>'}
+                  </td>
+                </tr>
+              `).join('') : `
+                <tr>
+                  <td class="mono mu">1</td>
+                  <td><b>${esc(S.acct.un)}</b></td>
+                  <td><span class="badge online">admin</span></td>
+                  <td class="mu">Just now</td>
+                  <td style="text-align:right"><span class="mu" style="font-size:12px;">Current Account</span></td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+      `;
+    } else if (t === 3) {
+      content = `
+        <div class="card" style="margin-bottom:18px;">
+          <h2 style="margin:0 0 6px; color:#fff;">Daemon &amp; Panel Customization</h2>
+          <span class="mu" style="font-size:13px; display:block; margin-bottom:18px;">
+            Customize your installation branding, public network hostnames, SFTP settings, and resource quotas.
+          </span>
+          <form onsubmit="saveAdminDaemonSettings(event)">
+            <div class="grid g2">
+              <label class="f">
+                <span>Panel Brand Title</span>
+                <input type="text" id="adm-brand" value="${esc(cfg.brandName || 'NeoPanel')}" required>
+              </label>
+              <label class="f">
+                <span>Public Host IP / FQDN</span>
+                <input type="text" id="adm-fqdn" value="${esc(cfg.fqdn || window.location.hostname || '127.0.0.1')}" required>
+              </label>
+            </div>
+            <div class="grid g3" style="margin-top:12px;">
+              <label class="f">
+                <span>SFTP Daemon Port</span>
+                <input type="number" id="adm-sftp" value="${cfg.sftpPort || 2022}" min="1" max="65535" required>
+              </label>
+              <label class="f">
+                <span>Max Upload Size (MB)</span>
+                <input type="number" id="adm-upload" value="${cfg.maxUploadMB || 500}" min="10" max="10000" required>
+              </label>
+              <label class="f">
+                <span>Default Instance RAM (MB)</span>
+                <input type="number" id="adm-ram" value="${cfg.defaultRamMB || 2048}" min="512" max="65536" required>
+              </label>
+            </div>
+            <div style="margin-top:16px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px;">
+              <label class="row sb" style="cursor:pointer;">
+                <div>
+                  <b style="color:#fff; display:block;">Auto-Restart Policy</b>
+                  <span class="mu" style="font-size:12.5px;">Automatically restart crashed server processes without operator intervention</span>
+                </div>
+                <span class="sw">
+                  <input type="checkbox" id="adm-autorestart" ${cfg.autoRestartPolicy ? 'checked' : ''}>
+                  <i></i>
+                </span>
+              </label>
+            </div>
+            <div class="row" style="justify-content:flex-end; margin-top:18px;">
+              <button type="submit" class="btn pr">${ic('download', 14)} Save Configuration</button>
+            </div>
+          </form>
+        </div>
+      `;
+    } else if (t === 4) {
+      content = `
+        <div class="card tw" style="margin-bottom:18px;">
+          <div class="row sb" style="margin-bottom:14px;">
+            <h2 style="margin:0; color:#fff;">Global Daemon Audit Log</h2>
+            <button class="btn sm" onclick="loadAccountData(); toast('Logs refreshed');">${ic('refresh', 12)} Refresh</button>
+          </div>
+          <table>
+            <thead><tr><th>Event</th><th>Actor</th><th>IP Address</th><th>Timestamp</th></tr></thead>
+            <tbody>
+              ${S.acct.act.length ? S.acct.act.map(r => `
+                <tr>
+                  <td><b>${esc(r[0] || r.action)}</b></td>
+                  <td>${esc(r[1] || S.acct.un)}</td>
+                  <td class="mono pv">${esc(r[2] || r.ip || '127.0.0.1')}</td>
+                  <td class="mu">${esc(r[3] || 'Recently')}</td>
+                </tr>
+              `).join('') : `
+                <tr><td>Daemon Started (systemd)</td><td>root</td><td class="mono pv">127.0.0.1</td><td class="mu">System boot</td></tr>
+                <tr><td>Garbage Collection invoked</td><td>admin</td><td class="mono pv">127.0.0.1</td><td class="mu">Recently</td></tr>
+                <tr><td>Reinstalled server jar</td><td>admin</td><td class="mono pv">127.0.0.1</td><td class="mu">Recently</td></tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
 
     return `<header class="top">
       ${ic('shield', 26)}
@@ -1638,55 +1924,13 @@ const V = {
       <span class="badge online"><i class="dot"></i>System Healthy</span>
     </header>
 
-    <div class="grid g4" style="margin-bottom:16px;">
-      <div class="card stat">
-        <span>Host Platform</span>
-        <b style="font-size:18px; padding:6px 0;">${esc(sys.os)} (${esc(sys.arch)})</b>
-        <span class="mu">${sys.cpus} CPU Cores</span>
-      </div>
-      <div class="card stat">
-        <span>Host Memory</span>
-        <b style="font-size:18px; padding:6px 0;">${(usedRam/1024).toFixed(1)} / ${(sys.total_ram_mb/1024).toFixed(1)} GB</b>
-        <div class="bar"><i style="width:${ramPct}%"></i></div>
-      </div>
-      <div class="card stat">
-        <span>Managed Servers</span>
-        <b>${S.servers.length} Instances</b>
-        <span class="mu">Pure-Go Process Manager</span>
-      </div>
-      <div class="card stat">
-        <span>SFTP Daemon</span>
-        <b style="font-size:18px; padding:6px 0;">Port 2022</b>
-        <span class="badge online"><i class="dot"></i>Active</span>
-      </div>
+    <div class="tabs" style="margin: 16px 0;">
+      ${tabs.map(([lbl, idx]) => `
+        <button class="${t === idx ? 'active' : ''}" onclick="S.adminTab=${idx}; R();">${lbl}</button>
+      `).join('')}
     </div>
 
-    <div class="card tw" style="margin-bottom:16px;">
-      <div class="row sb" style="margin-bottom:12px;">
-        <h2>All Managed Instances</h2>
-        <div class="row">
-          <button class="btn sm" onclick="bulkRestartServers()">${ic('refresh', 14)} Restart All</button>
-          <button class="btn sm dg" onclick="bulkStopServers()">Stop All</button>
-        </div>
-      </div>
-      <table>
-        <thead><tr><th>Server</th><th>Port</th><th>Engine</th><th>RAM Limit</th><th>Status</th><th style="text-align:right">Quick Actions</th></tr></thead>
-        <tbody>
-          ${S.servers.map((s, idx) => `
-            <tr>
-              <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${s.id})</span></td>
-              <td class="mono">${s.port}</td>
-              <td><span class="chip">${esc(s.type)} ${esc(s.version)}</span></td>
-              <td class="mono">${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</td>
-              <td><span class="badge ${(s.stats?.status || s.status) === 'running' ? 'online' : 'offline'}"><i class="dot"></i>${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'}</span></td>
-              <td style="text-align:right">
-                <button class="btn sm" onclick="switchServer(${idx}); go('con');">Manage</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>`;
+    ${content}`;
   },
 
   acc() {
@@ -2086,8 +2330,12 @@ async function loadAdminData() {
   try {
     const sys = await api('/api/system');
     S.system = sys;
-    R();
   } catch (e) {}
+  try {
+    const users = await api('/api/admin/users');
+    S.adminUsers = users || [];
+  } catch (e) {}
+  R();
 }
 
 async function bulkRestartServers() {
@@ -2351,28 +2599,234 @@ async function promptNewFolder() {
   } catch (e) {}
 }
 
+// --- File Selection & Bulk Actions ---
+function toggleFileSelect(path, checked) {
+  if (checked) {
+    S.selectedFiles.add(path);
+  } else {
+    S.selectedFiles.delete(path);
+  }
+  R();
+}
+
+function toggleSelectAllFiles(checked) {
+  if (checked) {
+    S.fileList.forEach(item => {
+      S.selectedFiles.add(item.path || item.name);
+    });
+  } else {
+    S.selectedFiles.clear();
+  }
+  R();
+}
+
+function deselectAllFiles() {
+  S.selectedFiles.clear();
+  R();
+}
+
+async function deleteSelectedFiles() {
+  const count = S.selectedFiles.size;
+  if (count === 0) return;
+  if (!confirm(`Are you sure you want to delete ${count} selected item${count > 1 ? 's' : ''}?`)) return;
+
+  const srv = curServer();
+  if (!srv) return;
+
+  toast(`Deleting ${count} items...`);
+  const paths = Array.from(S.selectedFiles);
+  for (const path of paths) {
+    try {
+      await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    } catch (e) {}
+  }
+  S.selectedFiles.clear();
+  toast(`Deleted ${count} items`, 'ok');
+  loadFileList(S.currentDir);
+}
+
+function copyFilePath(path) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(path).then(() => {
+      toast(`Copied "${path}" to clipboard!`, 'ok');
+    }).catch(() => {
+      prompt('Copy path:', path);
+    });
+  } else {
+    prompt('Copy path:', path);
+  }
+}
+
+// --- Floating Context Menu ---
+function handleFileContextMenu(e, idx) {
+  e.preventDefault();
+  e.stopPropagation();
+  const item = S.fileList[idx];
+  if (!item) return;
+
+  const menu = $('#floating-ctx');
+  if (!menu) return;
+
+  const isDir = item.is_dir;
+  const path = item.path || item.name;
+  const name = item.name;
+
+  menu.innerHTML = `
+    ${!isDir ? `
+      <button onclick="openFile('${esc(name)}'); closeFloatingCtx();">
+        ${ic('edit', 14)} Edit File
+      </button>
+      <button onclick="downloadFileItem('${esc(path)}'); closeFloatingCtx();">
+        ${ic('download', 14)} Download
+      </button>
+    ` : `
+      <button onclick="browseFolder('${esc(name)}'); closeFloatingCtx();">
+        📁 Open Folder
+      </button>
+    `}
+    <button onclick="promptRenameFile('${esc(path)}'); closeFloatingCtx();">
+      ${ic('settings', 14)} Rename
+    </button>
+    <button onclick="copyFilePath('${esc(path)}'); closeFloatingCtx();">
+      📋 Copy Path
+    </button>
+    <div class="floating-ctx-divider"></div>
+    <button class="dg" onclick="deleteFileItem('${esc(path)}'); closeFloatingCtx();">
+      ${ic('trash', 14)} Delete
+    </button>
+  `;
+
+  const x = Math.min(e.clientX, window.innerWidth - 190);
+  const y = Math.min(e.clientY, window.innerHeight - 200);
+
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.style.display = 'block';
+}
+
+function closeFloatingCtx() {
+  const menu = $('#floating-ctx');
+  if (menu) menu.style.display = 'none';
+}
+
+// Global click dismisses floating context menu
+document.addEventListener('click', () => closeFloatingCtx());
+
+// --- Upload with Live Progress & Drag-and-Drop ---
 function uploadFileDialog() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.onchange = async () => {
-    const file = input.files[0];
-    if (!file) return;
-    const srv = curServer();
-    if (!srv) return;
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('path', S.currentDir || '');
-    toast(`Uploading ${file.name}...`);
-    try {
-      await api(`/api/servers/${srv.id}/files/upload`, {
-        method: 'POST',
-        body: formData
-      });
-      toast(`${file.name} uploaded successfully!`);
-      loadFileList(S.currentDir);
-    } catch (e) {}
+  input.multiple = true;
+  input.onchange = () => {
+    if (input.files && input.files.length > 0) {
+      uploadFilesWithProgress(Array.from(input.files));
+    }
   };
   input.click();
+}
+
+async function uploadFilesWithProgress(files) {
+  const srv = curServer();
+  if (!srv || !files || files.length === 0) return;
+
+  const widget = $('#upload-progress-widget');
+  const targetDir = S.currentDir || '';
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    await new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', targetDir);
+
+      if (widget) {
+        widget.style.display = 'block';
+        widget.innerHTML = `
+          <div class="row sb" style="font-size: 13px; font-weight: 600; color: #fff;">
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;">
+              Uploading (${i + 1}/${files.length}): ${esc(file.name)}
+            </span>
+            <span id="upl-pct" style="color: var(--ac); font-family: monospace;">0%</span>
+          </div>
+          <div class="upload-prog-bar"><i id="upl-bar" style="width: 0%;"></i></div>
+        `;
+      }
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          const bar = $('#upl-bar');
+          const txt = $('#upl-pct');
+          if (bar) bar.style.width = `${pct}%`;
+          if (txt) txt.textContent = `${pct}%`;
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          toast(`Uploaded ${file.name}`, 'ok');
+        } else {
+          toast(`Failed to upload ${file.name}`, 'bad');
+        }
+        resolve();
+      };
+
+      xhr.onerror = () => {
+        toast(`Network error uploading ${file.name}`, 'bad');
+        resolve();
+      };
+
+      xhr.open('POST', `/api/servers/${srv.id}/files/upload`);
+      if (S.token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${S.token}`);
+      }
+      xhr.send(formData);
+    });
+  }
+
+  if (widget) {
+    widget.style.display = 'none';
+  }
+  loadFileList(S.currentDir);
+}
+
+function initDragAndDrop() {
+  let dragCounter = 0;
+  const overlay = $('#dropzone-overlay');
+
+  window.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    if (S.view !== 'fi') return;
+    dragCounter++;
+    if (overlay) overlay.style.display = 'flex';
+  });
+
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (S.view !== 'fi') return;
+  });
+
+  window.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    if (S.view !== 'fi') return;
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      if (overlay) overlay.style.display = 'none';
+    }
+  });
+
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    if (overlay) overlay.style.display = 'none';
+    if (S.view !== 'fi') return;
+
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      uploadFilesWithProgress(Array.from(e.dataTransfer.files));
+    }
+  });
 }
 
 // --- Plugins & Modrinth Store ---
@@ -3322,6 +3776,246 @@ async function executeDeleteServer(srvId) {
   }
 }
 
+// --- Server Reinstallation (mcjarfiles.com) ---
+function openReinstallModal(srvId) {
+  const container = $('#modal-container');
+  if (!container) return;
+
+  const targetSrv = (S.servers || []).find(s => s.id === srvId) || curServer();
+  if (!targetSrv) return;
+
+  const targetId = targetSrv.id;
+  const targetName = targetSrv.name || 'Server';
+  const curType = (targetSrv.type || 'paper').toLowerCase();
+  const curVer = targetSrv.version || '1.21.4';
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:580px; max-height:88vh; overflow-y:auto; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:20px; margin:0; color:#fff; display:flex; align-items:center; gap:8px;">
+          ${ic('refresh', 18)} Reinstall Server: ${esc(targetName)}
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
+        Reinstalls the server software from <b>mcjarfiles.com</b> official upstream distribution. This will replace the server executable JAR.
+      </p>
+
+      <form id="reinstall-form" onsubmit="submitReinstall(event, '${targetId}')">
+        <label class="f" style="margin-bottom:12px;">
+          <span>Minecraft Engine / Server Software</span>
+          <select id="reinst-software" style="height:38px;">
+            <option value="paper" ${curType === 'paper' ? 'selected' : ''}>Paper (High performance, Bukkit/Spigot plugins)</option>
+            <option value="purpur" ${curType === 'purpur' ? 'selected' : ''}>Purpur (Ultra-configurable Paper fork)</option>
+            <option value="leaf" ${curType === 'leaf' || curType === 'leafmc' ? 'selected' : ''}>LeafMC (Hyper-optimized Paper fork)</option>
+            <option value="folia" ${curType === 'folia' ? 'selected' : ''}>Folia (Multi-threaded chunk engine)</option>
+            <option value="fabric" ${curType === 'fabric' ? 'selected' : ''}>Fabric (Lightweight mod loader)</option>
+            <option value="forge" ${curType === 'forge' ? 'selected' : ''}>Forge (Classic modding framework)</option>
+            <option value="neoforge" ${curType === 'neoforge' ? 'selected' : ''}>NeoForge (Modern community mod loader)</option>
+            <option value="vanilla" ${curType === 'vanilla' ? 'selected' : ''}>Vanilla (Official Mojang release)</option>
+            <option value="velocity" ${curType === 'velocity' ? 'selected' : ''}>Velocity (High-performance modern proxy)</option>
+          </select>
+        </label>
+
+        <label class="f" style="margin-bottom:16px;">
+          <span>Version</span>
+          <input type="text" id="reinst-version" value="${esc(curVer)}" placeholder="1.21.4, 1.20.4, or latest" required>
+        </label>
+
+        <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:20px;">
+          <b style="font-size:13px; color:#fff; display:block; margin-bottom:8px;">Preservation Options</b>
+          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px;">
+            <input type="checkbox" id="reinst-world" checked style="width:auto; margin-right:8px; accent-color:var(--ac);">
+            <span>Preserve Worlds (keep <code>world</code>, <code>world_nether</code>, <code>world_the_end</code>)</span>
+          </label>
+          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px;">
+            <input type="checkbox" id="reinst-config" checked style="width:auto; margin-right:8px; accent-color:var(--ac);">
+            <span>Preserve Configurations (keep <code>server.properties</code>, <code>bukkit.yml</code>, <code>spigot.yml</code>, <code>paper-*.yml</code>)</span>
+          </label>
+          <label class="row" style="cursor:pointer; font-size:13px;">
+            <input type="checkbox" id="reinst-plugins" checked style="width:auto; margin-right:8px; accent-color:var(--ac);">
+            <span>Preserve Plugins &amp; Mods (keep <code>plugins</code>, <code>mods</code> folders)</span>
+          </label>
+        </div>
+
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="reinst-submit-btn" class="btn pr">
+            ${ic('refresh', 14)} Start Reinstallation
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+async function submitReinstall(e, srvId) {
+  e.preventDefault();
+  const btn = $('#reinst-submit-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `${ic('refresh', 14)} Reinstalling...`;
+  }
+
+  const software = $('#reinst-software')?.value || 'paper';
+  const version = $('#reinst-version')?.value.trim() || 'latest';
+  const preserveWorld = $('#reinst-world')?.checked ?? true;
+  const preserveConfig = $('#reinst-config')?.checked ?? true;
+  const preservePlugins = $('#reinst-plugins')?.checked ?? true;
+
+  toast(`Initiating reinstallation of ${software} ${version}...`);
+
+  try {
+    const res = await api(`/api/servers/${srvId}/reinstall`, {
+      method: 'POST',
+      body: JSON.stringify({
+        software,
+        version,
+        preserve_world: preserveWorld,
+        preserve_config: preserveConfig,
+        preserve_plugins: preservePlugins
+      })
+    });
+
+    closeModal();
+    toast(`Server reinstalled successfully (${software} ${version})!`, 'ok');
+
+    const cur = curServer();
+    if (cur && cur.id === srvId) {
+      cur.type = software;
+      cur.version = version;
+      S.ver = version;
+      S.core = software.charAt(0).toUpperCase() + software.slice(1);
+    }
+    await checkServer();
+    if (S.view === 'fi') loadFileList(S.currentDir);
+    R();
+  } catch (err) {
+    toast(err.message || 'Server reinstallation failed', 'bad');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `${ic('refresh', 14)} Start Reinstallation`;
+    }
+  }
+}
+
+// --- Admin Panel Management (Users, GC, Customization) ---
+function openAddUserModal() {
+  const container = $('#modal-container');
+  if (!container) return;
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:480px; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:16px;">
+        <h2 style="font-size:20px; margin:0; color:#fff;">${ic('users', 18)} Create Panel User</h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <form id="add-user-form" onsubmit="submitAddUser(event)">
+        <label class="f" style="margin-bottom:12px;">
+          <span>Username</span>
+          <input type="text" id="nu-username" required placeholder="e.g. operator" autocomplete="off">
+        </label>
+
+        <label class="f" style="margin-bottom:12px;">
+          <span>Password</span>
+          <input type="password" id="nu-password" required placeholder="Minimum 6 characters" autocomplete="new-password">
+        </label>
+
+        <label class="f" style="margin-bottom:20px;">
+          <span>Role</span>
+          <select id="nu-role" style="height:38px;">
+            <option value="user">Standard User (Access assigned servers)</option>
+            <option value="admin">Administrator (Full cluster management)</option>
+          </select>
+        </label>
+
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="nu-submit-btn" class="btn pr">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+async function submitAddUser(e) {
+  e.preventDefault();
+  const btn = $('#nu-submit-btn');
+  if (btn) btn.disabled = true;
+
+  const username = $('#nu-username')?.value.trim();
+  const password = $('#nu-password')?.value;
+  const role = $('#nu-role')?.value || 'user';
+
+  if (!username || !password) {
+    toast('Username and password are required', 'bad');
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  try {
+    await api('/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, role })
+    });
+    closeModal();
+    toast(`User "${username}" created successfully`, 'ok');
+    await loadAdminData();
+  } catch (err) {
+    toast(err.message || 'Failed to create user', 'bad');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function deleteAdminUser(id, username) {
+  if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
+
+  try {
+    await api(`/api/admin/users/${id}`, { method: 'DELETE' });
+    toast(`User "${username}" deleted`, 'ok');
+    await loadAdminData();
+  } catch (err) {
+    toast(err.message || 'Failed to delete user', 'bad');
+  }
+}
+
+async function triggerAdminGC() {
+  toast('Running Go runtime garbage collection...');
+  try {
+    const res = await api('/api/admin/gc', { method: 'POST' });
+    toast(res.message || 'Garbage collection completed', 'ok');
+    await loadAdminData();
+  } catch (err) {
+    toast(err.message || 'Failed to run GC', 'bad');
+  }
+}
+
+function saveAdminDaemonSettings(e) {
+  if (e) e.preventDefault();
+  const brandName = $('#adm-brand')?.value.trim() || 'NeoPanel';
+  const fqdn = $('#adm-fqdn')?.value.trim() || '127.0.0.1';
+  const sftpPort = parseInt($('#adm-sftp')?.value, 10) || 2022;
+  const maxUploadMB = parseInt($('#adm-upload')?.value, 10) || 500;
+  const defaultRamMB = parseInt($('#adm-ram')?.value, 10) || 2048;
+  const autoRestart = $('#adm-autorestart')?.checked ?? true;
+
+  S.adminDaemonCfg = {
+    brandName,
+    fqdn,
+    sftpPort,
+    maxUploadMB,
+    defaultRamMB,
+    autoRestartPolicy: autoRestart
+  };
+
+  localStorage.setItem('neopanel_admin_cfg', JSON.stringify(S.adminDaemonCfg));
+  document.title = `${brandName} — Minecraft Server Manager`;
+  toast('Daemon & panel customization saved!', 'ok');
+  R();
+}
+
 // --- Auth Flow & Setup Screen ---
 async function checkAuth() {
   try {
@@ -3553,8 +4247,24 @@ window.loadServerPorts = loadServerPorts;
 window.openDeleteServerModal = openDeleteServerModal;
 window.checkDeleteServerConfirm = checkDeleteServerConfirm;
 window.executeDeleteServer = executeDeleteServer;
+window.toggleFileSelect = toggleFileSelect;
+window.toggleSelectAllFiles = toggleSelectAllFiles;
+window.deselectAllFiles = deselectAllFiles;
+window.deleteSelectedFiles = deleteSelectedFiles;
+window.copyFilePath = copyFilePath;
+window.handleFileContextMenu = handleFileContextMenu;
+window.closeFloatingCtx = closeFloatingCtx;
+window.uploadFilesWithProgress = uploadFilesWithProgress;
+window.openReinstallModal = openReinstallModal;
+window.submitReinstall = submitReinstall;
+window.openAddUserModal = openAddUserModal;
+window.submitAddUser = submitAddUser;
+window.deleteAdminUser = deleteAdminUser;
+window.triggerAdminGC = triggerAdminGC;
+window.saveAdminDaemonSettings = saveAdminDaemonSettings;
 
 // --- Initialize Application ---
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
+  initDragAndDrop();
 });

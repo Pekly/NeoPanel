@@ -20,6 +20,8 @@ type SystemInfo struct {
 	FreeRAMMB   int64  `json:"free_ram_mb"`
 	UptimeHours int64  `json:"uptime_hours"`
 	Version     string `json:"version"`
+	GoVersion   string `json:"go_version"`
+	Goroutines  int    `json:"goroutines"`
 }
 
 func HandleSystemInfo(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +33,8 @@ func HandleSystemInfo(w http.ResponseWriter, r *http.Request) {
 		FreeRAMMB:   2048,
 		UptimeHours: int64(time.Since(startTime).Hours()),
 		Version:     "1.0.0",
+		GoVersion:   runtime.Version(),
+		Goroutines:  runtime.NumGoroutine(),
 	}
 
 	if runtime.GOOS == "linux" {
@@ -38,6 +42,11 @@ func HandleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, info)
+}
+
+func HandleRunGC(w http.ResponseWriter, r *http.Request) {
+	runtime.GC()
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Garbage collection executed successfully"})
 }
 
 func readLinuxMemInfo(info *SystemInfo) {

@@ -33,6 +33,11 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// Try fast, reliable mcjarfiles.com API first for supported engines
+	if err := DownloadWithMCJarFiles(flavor, version, destDir, jarFileName); err == nil {
+		return nil
+	}
+
 	destPath := filepath.Join(destDir, jarFileName)
 
 	var downloadURL string
@@ -66,6 +71,102 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 	}
 
 	// Automatically agree to Minecraft EULA
+	eulaPath := filepath.Join(destDir, "eula.txt")
+	_ = os.WriteFile(eulaPath, []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
+
+	return nil
+}
+
+// DownloadWithMCJarFiles downloads a Minecraft server JAR from mcjarfiles.com REST API.
+// Automatically follows 302 redirects to the official upstream builds.
+func DownloadWithMCJarFiles(flavor, version, destDir, jarFileName string) error {
+	fl := strings.ToLower(strings.TrimSpace(flavor))
+	ver := strings.TrimSpace(version)
+
+	var endpoint string
+	switch fl {
+	case "paper":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/paper"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/paper/%s", ver)
+		}
+	case "purpur":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/purpur"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/purpur/%s", ver)
+		}
+	case "leaf", "leafmc":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/leafmc"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/leafmc/%s", ver)
+		}
+	case "folia":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/folia"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/folia/%s", ver)
+		}
+	case "fabric":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/modded/fabric"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/modded/fabric/%s", ver)
+		}
+	case "forge":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/modded/forge"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/modded/forge/%s", ver)
+		}
+	case "neoforge":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/modded/neoforge"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/modded/neoforge/%s", ver)
+		}
+	case "vanilla":
+		if ver == "" || strings.EqualFold(ver, "latest") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/vanilla/release"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/vanilla/release/%s", ver)
+		}
+	case "velocity":
+		if ver == "" || strings.EqualFold(ver, "latest") || strings.HasPrefix(ver, "1.") {
+			endpoint = "https://mcjarfiles.com/api/get-latest-jar/proxies/velocity"
+		} else {
+			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/proxies/velocity/%s", ver)
+		}
+	default:
+		return fmt.Errorf("flavor %s is not supported on mcjarfiles", fl)
+	}
+
+	_ = os.MkdirAll(destDir, 0755)
+	destPath := filepath.Join(destDir, jarFileName)
+
+	resp, err := httpGet(endpoint)
+	if err != nil {
+		return fmt.Errorf("mcjarfiles download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("mcjarfiles returned non-200 status: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return fmt.Errorf("failed to write server jar: %w", err)
+	}
+
+	// Auto-accept EULA
 	eulaPath := filepath.Join(destDir, "eula.txt")
 	_ = os.WriteFile(eulaPath, []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
 

@@ -25,6 +25,19 @@
   <!-- Modal Container for Dialogs (Create Server, Uploads, Prompts) -->
   <div id="modal-container"></div>
 
+  <!-- Floating Right-Click Context Menu -->
+  <div id="floating-ctx" class="floating-ctx-menu" style="display:none;"></div>
+
+  <!-- Drag and Drop Overlay -->
+  <div id="dropzone-overlay" class="dropzone-overlay" style="display:none;">
+    <div style="font-size: 48px;">📂</div>
+    <h2>Drop files here to upload</h2>
+    <p>Files will be uploaded directly to the current directory</p>
+  </div>
+
+  <!-- Upload Progress Widget -->
+  <div id="upload-progress-widget" class="upload-progress-widget" style="display:none;"></div>
+
   <!-- App Core Script -->
   <script src="/js/app.js"></script>
 </body>

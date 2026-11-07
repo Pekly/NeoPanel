@@ -127,6 +127,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// Software and Properties routes
 	r.mux.HandleFunc("POST /api/servers/{id}/software", r.requireAuth(r.software.ChangeSoftware))
+	r.mux.HandleFunc("POST /api/servers/{id}/reinstall", r.requireAuth(r.software.ReinstallServer))
 	r.mux.HandleFunc("GET /api/servers/{id}/properties", r.requireAuth(r.software.GetProperties))
 	r.mux.HandleFunc("POST /api/servers/{id}/properties", r.requireAuth(r.software.SaveProperties))
 
@@ -168,8 +169,12 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("DELETE /api/account/api-keys/{id}", r.requireAuth(r.account.DeleteAPIKey))
 	r.mux.HandleFunc("GET /api/account/activity", r.requireAuth(r.account.ListActivity))
 
-	// System info
+	// System info & Admin tools
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))
+	r.mux.HandleFunc("POST /api/admin/gc", r.requireAuth(HandleRunGC))
+	r.mux.HandleFunc("GET /api/admin/users", r.requireAuth(r.auth.ListUsers))
+	r.mux.HandleFunc("POST /api/admin/users", r.requireAuth(r.auth.AdminCreateUser))
+	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAuth(r.auth.AdminDeleteUser))
 
 	// Embedded Static & SPA routes
 	if r.embeddedStatic != nil {

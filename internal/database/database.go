@@ -155,6 +155,32 @@ func (db *DB) CreateUser(username, passwordHash, role string) (*User, error) {
 	}, nil
 }
 
+func (db *DB) ListUsers() ([]*User, error) {
+	rows, err := db.conn.Query("SELECT id, username, role, created_at FROM users ORDER BY created_at ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []*User
+	for rows.Next() {
+		u := &User{}
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	if users == nil {
+		users = []*User{}
+	}
+	return users, nil
+}
+
+func (db *DB) DeleteUser(id int) error {
+	_, err := db.conn.Exec("DELETE FROM users WHERE id = ?", id)
+	return err
+}
+
 func (db *DB) ListServers() ([]*Server, error) {
 	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, created_at, updated_at FROM servers ORDER BY created_at DESC`)
 	if err != nil {
