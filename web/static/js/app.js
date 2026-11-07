@@ -9,6 +9,9 @@ const state = {
   consoleMgr: null,
   currentFilePath: '',
   systemInfo: null,
+  reconnectAttempts: 0,
+  reconnectTimeout: null,
+  activeCategory: '',
 };
 
 // --- Toast Notifications ---
@@ -281,24 +284,51 @@ function updateServerPowerBadges(status) {
 }
 
 // --- Console & WebSocket ---
+function updateConsoleConn(status, label) {
+  const el = document.getElementById('console-conn-status');
+  if (el) {
+    el.className = `conn-status conn-${status}`;
+    const txt = el.querySelector('.conn-text');
+    if (txt) txt.textContent = label;
+  }
+}
+
 function initConsoleWebSocket(serverId) {
+  if (state.reconnectTimeout) {
+    clearTimeout(state.reconnectTimeout);
+    state.reconnectTimeout = null;
+  }
+
   if (state.activeWs) {
-    state.activeWs.close();
+    try { state.activeWs.close(); } catch (e) {}
     state.activeWs = null;
   }
 
   const logBox = document.getElementById('terminal-logs');
   const inputEl = document.getElementById('terminal-input');
-  state.consoleMgr = new ConsoleManager(logBox, inputEl, (cmd) => {
-    sendConsoleCommand(cmd);
-  });
+  if (!state.consoleMgr) {
+    state.consoleMgr = new ConsoleManager(logBox, inputEl, (cmd) => {
+      sendConsoleCommand(cmd);
+    });
+  } else {
+    state.consoleMgr.container = logBox;
+    state.consoleMgr.input = inputEl;
+  }
   state.consoleMgr.clear();
+
+  updateConsoleConn('reconnecting', state.reconnectAttempts > 0 ? 'Reconnecting...' : 'Connecting...');
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${state.token}`;
 
   const ws = new WebSocket(wsUrl);
   state.activeWs = ws;
+
+  ws.onopen = () => {
+    state.reconnectAttempts = 0;
+    updateConsoleConn('connected', 'Connected');
+    state.consoleMgr.appendLine('\x1b[32m[NeoPanel] Console connected to server instance.\x1b[0m');
+  };
 
   ws.onmessage = (event) => {
     try {
@@ -310,10 +340,39 @@ function initConsoleWebSocket(serverId) {
   };
 
   ws.onclose = () => {
-    if (state.selectedServer && state.selectedServer.id === serverId) {
-      state.consoleMgr.appendLine('\x1b[33m[NeoPanel] Console disconnected. Reconnecting...\x1b[0m');
+    if (state.selectedServer && state.selectedServer.id === serverId && state.currentTab === 'console') {
+      updateConsoleConn('reconnecting', 'Disconnected');
+      scheduleConsoleReconnect(serverId);
+    } else {
+      updateConsoleConn('offline', 'Offline');
     }
   };
+
+  ws.onerror = () => {
+    updateConsoleConn('offline', 'Error');
+  };
+}
+
+function scheduleConsoleReconnect(serverId) {
+  if (state.reconnectTimeout) clearTimeout(state.reconnectTimeout);
+  const delay = Math.min(1000 * Math.pow(1.5, state.reconnectAttempts), 8000);
+  state.reconnectAttempts++;
+  updateConsoleConn('reconnecting', `Retry in ${(delay / 1000).toFixed(0)}s`);
+  state.reconnectTimeout = setTimeout(() => {
+    if (state.selectedServer && state.selectedServer.id === serverId && state.currentTab === 'console') {
+      initConsoleWebSocket(serverId);
+    }
+  }, delay);
+}
+
+function openPopoutConsole() {
+  if (!state.selectedServer) return;
+  const url = `/console.html?id=${state.selectedServer.id}`;
+  const width = Math.min(1050, window.screen.width - 80);
+  const height = Math.min(720, window.screen.height - 100);
+  const left = (window.screen.width - width) / 2;
+  const top = (window.screen.height - height) / 2;
+  window.open(url, `neopanel_console_${state.selectedServer.id}`, `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`);
 }
 
 function sendConsoleCommand(cmd) {
@@ -346,18 +405,214 @@ async function serverPower(action) {
 // --- Tab Switching ---
 function switchTab(tab) {
   state.currentTab = tab;
-  ['console', 'files', 'settings'].forEach((t) => {
+  ['console', 'files', 'plugins', 'settings'].forEach((t) => {
     const el = document.getElementById(`tab-content-${t}`);
     const btn = document.getElementById(`tab-btn-${t}`);
     if (el) el.style.display = t === tab ? 'block' : 'none';
     if (btn) btn.className = t === tab ? 'tab-btn active' : 'tab-btn';
   });
 
-  if (tab === 'files') {
+  if (tab === 'console' && state.selectedServer) {
+    if (!state.activeWs || state.activeWs.readyState !== WebSocket.OPEN) {
+      initConsoleWebSocket(state.selectedServer.id);
+    }
+  } else if (tab === 'files') {
     loadFiles('');
+  } else if (tab === 'plugins') {
+    loadPluginsTab();
   } else if (tab === 'settings') {
     populateSettingsForm();
   }
+}
+
+// --- Plugins & Addons Flow ---
+async function loadPluginsTab() {
+  loadInstalledPlugins();
+  const resultsGrid = document.getElementById('plugin-search-results');
+  if (resultsGrid && !resultsGrid.children.length) {
+    searchPlugins('');
+  }
+}
+
+async function searchPlugins(query) {
+  const inputEl = document.getElementById('plugin-search-input');
+  const q = query !== undefined ? query : (inputEl ? inputEl.value.trim() : '');
+  const resultsGrid = document.getElementById('plugin-search-results');
+  if (!resultsGrid) return;
+
+  resultsGrid.innerHTML = `
+    <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; color: var(--text-dim);">
+      <p style="font-size: 0.95rem;">Searching Modrinth API...</p>
+    </div>
+  `;
+
+  try {
+    const searchTarget = q || (state.activeCategory || 'paper');
+    const data = await api(`/api/plugins/search?query=${encodeURIComponent(searchTarget)}&limit=24`);
+    renderPluginResults(data.hits || []);
+  } catch (err) {
+    resultsGrid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:2rem; color:var(--danger);">Failed to search plugins: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function renderPluginResults(hits) {
+  const grid = document.getElementById('plugin-search-results');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  if (!hits || hits.length === 0) {
+    grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:2.5rem; color:var(--text-dim);">No plugins found on Modrinth matching this query.</div>`;
+    return;
+  }
+
+  hits.forEach(plugin => {
+    const card = document.createElement('div');
+    card.className = 'plugin-card';
+    const icon = plugin.icon_url || '/favicon.svg';
+    const downloads = formatNumber(plugin.downloads);
+
+    card.innerHTML = `
+      <div>
+        <div class="plugin-header">
+          <img src="${escapeHtml(icon)}" class="plugin-icon" onerror="this.src='/favicon.svg'" alt="">
+          <div class="plugin-info">
+            <h4>${escapeHtml(plugin.title)}</h4>
+            <div class="plugin-author">by ${escapeHtml(plugin.author)}</div>
+          </div>
+        </div>
+        <p class="plugin-desc">${escapeHtml(plugin.description || 'No description provided.')}</p>
+      </div>
+      <div class="plugin-footer">
+        <span class="plugin-downloads">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          ${downloads}
+        </span>
+        <button class="btn btn-primary btn-sm" onclick="installPlugin('${escapeHtml(plugin.slug || plugin.project_id)}', this)">
+          Install
+        </button>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+function filterPluginsCategory(chip, category) {
+  document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  state.activeCategory = category;
+  searchPlugins(category);
+}
+
+async function installPlugin(slug, btn) {
+  if (!state.selectedServer) return;
+  const originalText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `Installing...`;
+
+  try {
+    const res = await api(`/api/servers/${state.selectedServer.id}/plugins/install`, {
+      method: 'POST',
+      body: JSON.stringify({ slug }),
+    });
+    btn.innerHTML = `✔ Installed`;
+    btn.className = 'btn btn-secondary btn-sm';
+    showToast(`Installed '${res.filename}'!`);
+    loadInstalledPlugins();
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = originalText;
+    showToast(`Install failed: ${err.message}`, 'error');
+  }
+}
+
+async function loadInstalledPlugins() {
+  if (!state.selectedServer) return;
+  const tbody = document.getElementById('installed-plugins-tbody');
+  const label = document.getElementById('installed-folder-label');
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading installed plugins...</td></tr>`;
+
+  try {
+    const data = await api(`/api/servers/${state.selectedServer.id}/plugins`);
+    if (label) label.textContent = data.folder === 'mods' ? 'Mods' : 'Plugins';
+    renderInstalledPlugins(data.plugins || []);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderInstalledPlugins(plugins) {
+  const tbody = document.getElementById('installed-plugins-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+
+  if (!plugins || plugins.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:1.5rem; color:var(--text-dim);">No plugins currently installed. Search above to install 1-click plugins from Modrinth!</td></tr>`;
+    return;
+  }
+
+  plugins.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>
+        <div style="display:flex; align-items:center; gap:0.65rem; font-weight:600; font-family:var(--font-mono); font-size:0.85rem;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+          ${escapeHtml(p.filename)}
+        </div>
+      </td>
+      <td style="color:var(--text-dim); font-size:0.8rem;">${formatBytes(p.size)}</td>
+      <td style="color:var(--text-dim); font-size:0.8rem;">${new Date(p.modified).toLocaleString()}</td>
+      <td style="text-align:right;">
+        <button class="btn btn-danger btn-sm" onclick="deletePlugin('${escapeHtml(p.filename)}')">
+          Uninstall
+        </button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+async function deletePlugin(filename) {
+  if (!confirm(`Are you sure you want to uninstall and remove '${filename}'?`)) return;
+  try {
+    await api(`/api/servers/${state.selectedServer.id}/plugins?filename=${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+    });
+    showToast(`Removed '${filename}'`);
+    loadInstalledPlugins();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// --- SFTP Modal ---
+async function openSFTPModal() {
+  if (!state.selectedServer) return;
+  try {
+    const sftp = await api(`/api/servers/${state.selectedServer.id}/sftp`);
+    document.getElementById('sftp-host').textContent = sftp.host;
+    document.getElementById('sftp-port').textContent = sftp.port;
+    document.getElementById('sftp-username').textContent = sftp.username;
+    document.getElementById('sftp-modal').style.display = 'flex';
+  } catch (err) {
+    showToast('Failed to load SFTP details', 'error');
+  }
+}
+
+function copyText(text) {
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('Copied to clipboard!');
+  }).catch(() => {
+    showToast('Failed to copy', 'error');
+  });
+}
+
+function formatNumber(num) {
+  if (!num) return '0';
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+  return num.toString();
 }
 
 // --- File Manager Icons & Utilities ---

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path/filepath"
@@ -24,6 +25,7 @@ type Router struct {
 	servers        *ServerHandler
 	console        *ConsoleHandler
 	files          *FileHandler
+	plugins        *PluginHandler
 	embeddedStatic fs.FS
 }
 
@@ -32,6 +34,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	serverHandler := NewServerHandler(db, manager)
 	consoleHandler := NewConsoleHandler(authHandler, manager)
 	fileHandler := NewFileHandler(manager)
+	pluginHandler := NewPluginHandler(db, manager)
 
 	r := &Router{
 		mux:            http.NewServeMux(),
@@ -40,10 +43,11 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		servers:        serverHandler,
 		console:        consoleHandler,
 		files:          fileHandler,
+		plugins:        pluginHandler,
 		embeddedStatic: embeddedStatic,
 	}
 
-	r.registerRoutes()
+	r.registerRoutes(db)
 	return r
 }
 
@@ -56,7 +60,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	r.mux.ServeHTTP(w, req)
 }
 
-func (r *Router) registerRoutes() {
+func (r *Router) registerRoutes(db *database.DB) {
 	// Public auth routes
 	r.mux.HandleFunc("GET /api/auth/status", r.auth.Status)
 	r.mux.HandleFunc("POST /api/auth/setup", r.auth.Setup)
@@ -84,6 +88,39 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/create", r.requireAuth(r.files.Create))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files", r.requireAuth(r.files.Delete))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload", r.requireAuth(r.files.Upload))
+
+	// Modrinth Plugins & Addons routes
+	r.mux.HandleFunc("GET /api/plugins/search", r.requireAuth(r.plugins.Search))
+	r.mux.HandleFunc("GET /api/servers/{id}/plugins", r.requireAuth(r.plugins.ListInstalled))
+	r.mux.HandleFunc("POST /api/servers/{id}/plugins/install", r.requireAuth(r.plugins.Install))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/plugins", r.requireAuth(r.plugins.Delete))
+
+	// SFTP details endpoint
+	r.mux.HandleFunc("GET /api/servers/{id}/sftp", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+		serverID := getURLParam(req, "id")
+		srv, err := db.GetServer(serverID)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
+			return
+		}
+		userClaims, _ := req.Context().Value(contextUserKey).(*Claims)
+		username := "admin"
+		if userClaims != nil && userClaims.Username != "" {
+			username = userClaims.Username
+		}
+		host := req.Host
+		if strings.Contains(host, ":") {
+			host = strings.Split(host, ":")[0]
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled":     r.cfg.SFTP.Enabled,
+			"port":        r.cfg.SFTP.Port,
+			"host":        host,
+			"username":    fmt.Sprintf("%s.%s", username, srv.ID),
+			"server_id":   srv.ID,
+			"server_name": srv.Name,
+		})
+	}))
 
 	// System info
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))

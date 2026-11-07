@@ -15,12 +15,19 @@ type Config struct {
 	Paths    PathsConfig    `yaml:"paths"`
 	Security SecurityConfig `yaml:"security"`
 	Java     JavaConfig     `yaml:"java"`
+	SFTP     SFTPConfig     `yaml:"sftp"`
 }
 
 type ServerConfig struct {
 	Host string `yaml:"host"`
 	Port int    `yaml:"port"`
 	Mode string `yaml:"mode"` // "standalone" or "behind_proxy"
+}
+
+type SFTPConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Port    int    `yaml:"port"`
+	KeyPath string `yaml:"key_path"`
 }
 
 type PathsConfig struct {
@@ -63,6 +70,11 @@ func DefaultConfig() *Config {
 		},
 		Java: JavaConfig{
 			DefaultPath: "java",
+		},
+		SFTP: SFTPConfig{
+			Enabled: true,
+			Port:    2022,
+			KeyPath: filepath.Join(dataDir, "sftp_host_key"),
 		},
 	}
 }

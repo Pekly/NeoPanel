@@ -29,7 +29,7 @@ Traditional Minecraft panels (like Pterodactyl) require **PHP-FPM, Nginx, Redis,
 Run the all-in-one interactive installer script with a single command (similar to the unofficial Pterodactyl installer):
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh)
+curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash
 ```
 
 *(Or clone the repository and run `sudo bash install.sh`)*
@@ -55,16 +55,26 @@ bash <(curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.s
 
 ## 🎮 Key Features
 
-- **Real-Time Interactive Console**:
+- **Real-Time Interactive Console & Popout View**:
   - Live WebSocket stream with ANSI and Minecraft (`§`) color code rendering.
   - Interactive command input with command history (`↑` and `↓` arrow keys).
+  - Live connection health indicator dot (🟢 Connected, 🟡 Auto-Reconnecting, 🔴 Offline).
+  - **Standalone Popout Console**: Pop out the terminal into a focused, distraction-free window or dedicated screen.
   - Power controls: Start, Stop, Restart, and Force Kill.
+- **Modrinth Plugin Downloader**:
+  - Search and install from 10,000+ plugins directly using the official Modrinth v2 API.
+  - Category filters (Optimization, Administration, Chat, World Management, Economy, Security).
+  - 1-click install and uninstall management.
+- **Built-in Pure-Go SFTP Server (Port 2022)**:
+  - Connect with FileZilla, Cyberduck, WinSCP or any standard SFTP client.
+  - Chroot directory jailing isolates sessions directly into the Minecraft server directory.
 - **One-Click Server Jar Downloader**:
   - Direct downloads for **PaperMC**, **Purpur**, **Vanilla (Mojang)**, and **Fabric**.
   - Automatically writes `eula.txt` (`eula=true`).
 - **Web File Manager**:
   - In-browser code editor for `server.properties`, plugins configs, and YAML files.
   - File upload, creation, and deletion with breadcrumb navigation.
+  - Quick-copy SFTP credentials modal.
 - **Crash Detection & Auto-Restart**:
   - Automatically restarts Minecraft instances if they crash unexpectedly.
 - **Host & Process Metrics**:
@@ -122,6 +132,11 @@ security:
 
 java:
   default_path: "java"
+
+sftp:
+  enabled: true
+  port: 2022
+  key_path: "/var/lib/neopanel/sftp_host_key"
 ```
 
 ---

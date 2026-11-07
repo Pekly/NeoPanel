@@ -69,6 +69,18 @@ log_error() {
   echo -e "${RED}[ERROR]${NC} $1"
 }
 
+prompt_user() {
+  local prompt_text="$1"
+  local var_name="$2"
+  if [ -t 0 ]; then
+    read -r -p "$prompt_text" "$var_name"
+  elif [ -e /dev/tty ]; then
+    read -r -p "$prompt_text" "$var_name" </dev/tty
+  else
+    read -r -p "$prompt_text" "$var_name"
+  fi
+}
+
 # Renders a sleek progress bar with live percentage and label
 draw_progress() {
   local pct="$1"
@@ -147,7 +159,7 @@ check_os() {
 
   if [ "$OS" != "ubuntu" ]; then
     log_warn "This script is tailored for Ubuntu 24.04 LTS, but detected: $OS $VERSION_ID"
-    read -p "Do you want to continue anyway? (y/N): " choice
+    prompt_user "Do you want to continue anyway? (y/N): " choice
     if [[ ! "$choice" =~ ^[Yy]$ ]]; then
       exit 1
     fi
@@ -211,7 +223,7 @@ step_build_neopanel() {
   cat > "$INSTALL_DIR/neopanel-update" <<'EOF'
 #!/usr/bin/env bash
 set -e
-bash <(curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh) --update
+curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- --update
 EOF
   chmod +x "$INSTALL_DIR/neopanel-update"
 }
@@ -296,6 +308,7 @@ step_firewall() {
   ufw allow 22/tcp >/dev/null 2>&1 || true
   ufw allow 80/tcp >/dev/null 2>&1
   ufw allow 443/tcp >/dev/null 2>&1
+  ufw allow 2022/tcp >/dev/null 2>&1
   ufw allow "${PANEL_PORT}/tcp" >/dev/null 2>&1
   ufw allow 25565:25600/tcp >/dev/null 2>&1
   ufw allow 25565:25600/udp >/dev/null 2>&1
@@ -317,7 +330,7 @@ run_full_installation() {
   echo -e "${BOLD}Server Public IP detected:${NC} ${CYAN}${pub_ip}${NC}\n"
 
   echo -e "${YELLOW}Would you like to configure a custom domain with automated Let's Encrypt SSL?${NC}"
-  read -p "Use Domain & SSL? (y/n) [default: y]: " use_ssl
+  prompt_user "Use Domain & SSL? (y/n) [default: y]: " use_ssl
   use_ssl=${use_ssl:-y}
 
   local domain=""
@@ -328,9 +341,9 @@ run_full_installation() {
     echo -e "\n${CYAN}[REMINDER] Ensure your domain's DNS 'A' record points to this server's IP (${pub_ip}).${NC}"
     echo -e "${YELLOW}           If DNS has not propagated yet, Let's Encrypt certificate issuance will fail.${NC}\n"
 
-    read -p "Enter your Domain name (e.g. panel.example.com): " domain
+    prompt_user "Enter your Domain name (e.g. panel.example.com): " domain
     while [ -z "$domain" ]; do
-      read -p "Domain cannot be empty. Enter Domain: " domain
+      prompt_user "Domain cannot be empty. Enter Domain: " domain
     done
 
     # Quick DNS check
@@ -339,21 +352,21 @@ run_full_installation() {
     if [ -n "$resolved_ip" ] && [ "$resolved_ip" != "$pub_ip" ]; then
       log_warn "DNS check: '$domain' resolves to $resolved_ip, but server IP is $pub_ip."
       echo -e "${YELLOW}[REMINDER] If you just updated your DNS record, please wait a minute for propagation.${NC}"
-      read -p "Do you want to continue anyway? (y/N): " override_dns
+      prompt_user "Do you want to continue anyway? (y/N): " override_dns
       if [[ ! "$override_dns" =~ ^[Yy]$ ]]; then
         exit 1
       fi
     fi
 
-    read -p "Enter Email for Let's Encrypt certificate notices: " email
+    prompt_user "Enter Email for Let's Encrypt certificate notices: " email
     while [ -z "$email" ]; do
-      read -p "Email cannot be empty. Enter Email: " email
+      prompt_user "Email cannot be empty. Enter Email: " email
     done
 
     bind_host="127.0.0.1"
   fi
 
-  read -p "Would you like to configure UFW firewall rules automatically? (y/n) [default: y]: " conf_ufw
+  prompt_user "Would you like to configure UFW firewall rules automatically? (y/n) [default: y]: " conf_ufw
   conf_ufw=${conf_ufw:-y}
 
   # Clear terminal for clean, premium progress view
@@ -399,6 +412,7 @@ run_full_installation() {
   echo -e "    If your VPS is hosted on AWS, Oracle Cloud, Google Cloud, Azure, or OVH,"
   echo -e "    remember to also allow incoming ports in your cloud provider's web console:"
   echo -e "      - ${CYAN}Port 80 / 443 (TCP)${NC}       -> Web Dashboard"
+  echo -e "      - ${CYAN}Port 2022 (TCP)${NC}           -> Pure-Go Built-in SFTP Server"
   echo -e "      - ${CYAN}Port 25565-25600 (TCP/UDP)${NC} -> Minecraft Player Connections"
 
   echo -e "\n  ${CYAN}${BOLD}[REMINDER] Minecraft Server Ports:${NC}"
@@ -485,7 +499,7 @@ interactive_menu() {
   echo -e "  ${GREEN}[7]${NC} Uninstall NeoPanel"
   echo -e "  ${RED}[0]${NC} Exit"
   echo ""
-  read -p "Enter selection [1]: " choice
+  prompt_user "Enter selection [1]: " choice
   choice=${choice:-1}
 
   case "$choice" in
@@ -503,8 +517,8 @@ interactive_menu() {
       ;;
     4)
       check_root
-      read -p "Enter Domain: " dom
-      read -p "Enter Email: " em
+      prompt_user "Enter Domain: " dom
+      prompt_user "Enter Email: " em
       print_banner
       run_step 0 100 "Configuring Let's Encrypt SSL & Caddy" "step_ssl_caddy '$dom' '$em'"
       log_success "SSL configured."
@@ -521,7 +535,7 @@ interactive_menu() {
       ;;
     7)
       check_root
-      read -p "Are you sure you want to completely uninstall NeoPanel? (y/N): " uninst
+      prompt_user "Are you sure you want to completely uninstall NeoPanel? (y/N): " uninst
       if [[ "$uninst" =~ ^[Yy]$ ]]; then
         systemctl stop neopanel || true
         systemctl disable neopanel || true

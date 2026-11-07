@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NeoPanel — Popout Console</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-deep);
+    }
+    .popout-header {
+      background: rgba(12, 16, 23, 0.9);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 0.65rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .popout-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 0.75rem 1rem 1rem;
+      overflow: hidden;
+    }
+    .popout-terminal {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--terminal-bg);
+      border: 1px solid var(--border-card);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+    }
+    .popout-terminal .terminal-logs {
+      flex: 1;
+      height: 100%;
+      min-height: 200px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Popout Top Bar -->
+  <div class="popout-header">
+    <div style="display: flex; align-items: center; gap: 0.85rem;">
+      <div class="logo-icon-wrapper" style="width: 28px; height: 28px; border-radius: 6px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+      </div>
+      <div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <h2 id="server-title" style="font-size: 1.05rem; font-weight: 800; letter-spacing: -0.01em;">Loading Server...</h2>
+          <span id="server-badge" class="badge badge-offline" style="font-size: 0.675rem; padding: 0.15rem 0.5rem;">
+            <span class="status-dot"></span>offline
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Power Actions & Status -->
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      <div id="popout-conn-status" class="conn-status conn-reconnecting">
+        <span class="conn-dot"></span>
+        <span class="conn-text">Connecting...</span>
+      </div>
+
+      <div style="display: flex; gap: 0.35rem;">
+        <button class="btn btn-primary btn-sm" onclick="sendPower('start')" title="Start Server">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Start
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="sendPower('restart')" title="Restart Server">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          Restart
+        </button>
+        <button class="btn btn-warning btn-sm" onclick="sendPower('stop')" title="Stop Server">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>
+          Stop
+        </button>
+        <button class="btn btn-danger btn-sm" onclick="sendPower('kill')" title="Force Kill">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Terminal Main Area -->
+  <div class="popout-main">
+    <div class="popout-terminal">
+      <div class="terminal-header">
+        <div class="mac-dots">
+          <span class="mac-dot red"></span>
+          <span class="mac-dot yellow"></span>
+          <span class="mac-dot green"></span>
+        </div>
+        <span style="font-family: var(--font-mono); font-size: 0.775rem; letter-spacing: 0.04em;">neo-console://stream</span>
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+          <button class="btn btn-secondary btn-sm" onclick="consoleMgr.clear()" style="padding: 0.2rem 0.55rem; font-size: 0.725rem;">Clear</button>
+          <span style="font-size: 0.75rem; color: var(--text-dim);">&uarr; &darr; History</span>
+        </div>
+      </div>
+      <div id="terminal-logs" class="terminal-logs"></div>
+      <div class="terminal-input-bar">
+        <span class="terminal-prompt-sym">&gt;</span>
+        <input id="terminal-input" type="text" placeholder="Type server command (e.g. 'say Hello', 'whitelist on', 'tps')...">
+        <button onclick="document.getElementById('terminal-input').dispatchEvent(new KeyboardEvent('keydown', {'key': 'Enter'}))">
+          Send &crarr;
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast-container"></div>
+
+  <script src="/js/terminal.js"></script>
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const serverId = urlParams.get('id');
+    const token = localStorage.getItem('neopanel_token') || '';
+
+    let consoleMgr = null;
+    let ws = null;
+    let reconnectAttempts = 0;
+    let reconnectTimeout = null;
+
+    function showToast(msg, type = 'success') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type === 'error' ? 'error' : ''}`;
+      toast.innerHTML = `<span>${msg}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => toast.remove(), 250);
+      }, 3500);
+    }
+
+    async function api(path, options = {}) {
+      options.headers = options.headers || {};
+      if (token) options.headers['Authorization'] = `Bearer ${token}`;
+      if (!options.headers['Content-Type']) options.headers['Content-Type'] = 'application/json';
+      const res = await fetch(path, options);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      return res.json();
+    }
+
+    function updateConnStatus(status, label) {
+      const el = document.getElementById('popout-conn-status');
+      el.className = `conn-status conn-${status}`;
+      el.querySelector('.conn-text').textContent = label;
+    }
+
+    async function init() {
+      if (!serverId) {
+        alert('Missing server ID in URL');
+        return;
+      }
+      if (!token) {
+        window.location.href = '/';
+        return;
+      }
+
+      const logBox = document.getElementById('terminal-logs');
+      const inputEl = document.getElementById('terminal-input');
+      consoleMgr = new ConsoleManager(logBox, inputEl, sendCommand);
+
+      try {
+        const srv = await api(`/api/servers/${serverId}`);
+        document.title = `${srv.name} — NeoPanel Console`;
+        document.getElementById('server-title').textContent = srv.name;
+        updateServerBadge(srv.stats?.status || 'offline');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+
+      connectWS();
+    }
+
+    function updateServerBadge(status) {
+      const b = document.getElementById('server-badge');
+      b.className = `badge badge-${status}`;
+      b.innerHTML = `<span class="status-dot"></span>${status}`;
+    }
+
+    function connectWS() {
+      if (ws) {
+        try { ws.close(); } catch (e) {}
+        ws = null;
+      }
+
+      updateConnStatus('reconnecting', reconnectAttempts > 0 ? `Reconnecting...` : 'Connecting...');
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${token}`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        reconnectAttempts = 0;
+        updateConnStatus('connected', 'Connected');
+        consoleMgr.appendLine('\x1b[32m[NeoPanel] Connected to server stream.\x1b[0m');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.event === 'log') {
+            consoleMgr.appendLine(msg.data);
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+        updateConnStatus('reconnecting', 'Disconnected');
+        scheduleReconnect();
+      };
+
+      ws.onerror = () => {
+        updateConnStatus('offline', 'Error');
+      };
+    }
+
+    function scheduleReconnect() {
+      clearTimeout(reconnectTimeout);
+      const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), 8000);
+      reconnectAttempts++;
+      updateConnStatus('reconnecting', `Retry in ${(delay/1000).toFixed(0)}s`);
+      reconnectTimeout = setTimeout(connectWS, delay);
+    }
+
+    function sendCommand(cmd) {
+      if (!cmd) return;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ event: 'command', data: cmd }));
+      } else {
+        api(`/api/servers/${serverId}/command`, {
+          method: 'POST',
+          body: JSON.stringify({ command: cmd })
+        }).catch(e => showToast(e.message, 'error'));
+      }
+    }
+
+    async function sendPower(action) {
+      try {
+        const res = await api(`/api/servers/${serverId}/power`, {
+          method: 'POST',
+          body: JSON.stringify({ action })
+        });
+        showToast(`Sent ${action.toUpperCase()}`);
+        if (res.current) {
+          updateServerBadge(res.current.status);
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
