@@ -106,6 +106,22 @@ func getLinuxJavaCandidates(tag string) []string {
 		return candidates
 	}
 
+	if tag == "25" {
+		candidates = append(candidates,
+			"/usr/lib/jvm/java-25-temurin/bin/java",
+			"/usr/lib/jvm/java-25/bin/java",
+			"/usr/lib/jvm/jdk-25/bin/java",
+		)
+		for _, arch := range archs {
+			candidates = append(candidates,
+				"/usr/lib/jvm/java-25-temurin-"+arch+"/bin/java",
+				"/usr/lib/jvm/java-25-openjdk-"+arch+"/bin/java",
+				"/usr/lib/jvm/jdk-25-openjdk-"+arch+"/bin/java",
+			)
+		}
+		return candidates
+	}
+
 	for _, arch := range archs {
 		candidates = append(candidates,
 			"/usr/lib/jvm/java-"+tag+"-openjdk-"+arch+"/bin/java",

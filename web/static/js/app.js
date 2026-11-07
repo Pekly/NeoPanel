@@ -1486,7 +1486,7 @@ const V = {
   stp() {
     const srv = curServer();
     const curJava = srv?.java_path || '21';
-    const isCustom = !['21', '17', '8', 'java', ''].includes(curJava);
+    const isCustom = !['21', '17', '8', '25', 'java', ''].includes(curJava);
     const memMin = srv?.memory_min || Math.min(1024, srv?.memory_max || 2048);
     const memMax = srv?.memory_max || 2048;
     const jvmFlags = srv?.java_args || '-XX:+UseG1GC';
@@ -1511,6 +1511,7 @@ const V = {
             <option value="21" ${curJava === '21' || curJava === 'java' || !curJava ? 'selected' : ''}>Java 21 (Modern 1.20.5+ / Recommended)</option>
             <option value="17" ${curJava === '17' ? 'selected' : ''}>Java 17 (Legacy 1.18 - 1.20.4)</option>
             <option value="8" ${curJava === '8' ? 'selected' : ''}>Java 8 (Legacy 1.8 - 1.12.2)</option>
+            <option value="25" ${curJava === '25' ? 'selected' : ''}>Java 25 (Cutting edge / Experimental)</option>
             <option value="custom" ${isCustom ? 'selected' : ''}>Custom Binary Path...</option>
           </select>
           <div id="stp-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
@@ -1660,11 +1661,12 @@ const V = {
             <option value="21" ${srv?.java_path === '21' || srv?.java_path === 'java' || !srv?.java_path ? 'selected' : ''}>Java 21 (Modern 1.20.5+ / Recommended)</option>
             <option value="17" ${srv?.java_path === '17' ? 'selected' : ''}>Java 17 (Legacy 1.18 - 1.20.4)</option>
             <option value="8" ${srv?.java_path === '8' ? 'selected' : ''}>Java 8 (Legacy 1.8 - 1.12.2)</option>
-            <option value="custom" ${!['21', '17', '8', 'java', ''].includes(srv?.java_path) ? 'selected' : ''}>Custom Binary Path...</option>
+            <option value="25" ${srv?.java_path === '25' ? 'selected' : ''}>Java 25 (Cutting edge / Experimental)</option>
+            <option value="custom" ${!['21', '17', '8', '25', 'java', ''].includes(srv?.java_path) ? 'selected' : ''}>Custom Binary Path...</option>
           </select>
         </label>
-        <div id="prop-custom-wrap" style="${!['21', '17', '8', 'java', ''].includes(srv?.java_path) ? '' : 'display: none;'} margin-top: 6px;">
-          <input type="text" id="prop-java-custom" value="${esc(!['21', '17', '8', 'java', ''].includes(srv?.java_path) ? srv?.java_path : '')}" placeholder="/usr/lib/jvm/java-XX/bin/java" style="font-size: 13px;">
+        <div id="prop-custom-wrap" style="${!['21', '17', '8', '25', 'java', ''].includes(srv?.java_path) ? '' : 'display: none;'} margin-top: 6px;">
+          <input type="text" id="prop-java-custom" value="${esc(!['21', '17', '8', '25', 'java', ''].includes(srv?.java_path) ? srv?.java_path : '')}" placeholder="/usr/lib/jvm/java-XX/bin/java" style="font-size: 13px;">
         </div>
         <div class="row" style="margin-top:14px;">
           <button class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save Properties</button>
@@ -3550,6 +3552,7 @@ function openCreateServerModal() {
               <option value="21" selected>OpenJDK 21 (1.20.5+ / Modern)</option>
               <option value="17">OpenJDK 17 (1.18 - 1.20.4)</option>
               <option value="8">OpenJDK 8 (1.8 - 1.12.2 Legacy)</option>
+              <option value="25">Java 25 (Cutting edge / Experimental)</option>
             </select>
           </label>
         </div>

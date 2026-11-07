@@ -190,6 +190,20 @@ step_java() {
     openjdk-21-jre-headless openjdk-17-jre-headless || true
   apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
     openjdk-8-jre-headless || true
+
+  # Install Java 25 (Cutting edge / Experimental) via Adoptium if not already present
+  if [ ! -x "/usr/lib/jvm/java-25-temurin/bin/java" ] && [ ! -x "/usr/lib/jvm/java-25-openjdk-amd64/bin/java" ]; then
+    local arch="x64"
+    if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+      arch="aarch64"
+    fi
+    mkdir -p /usr/lib/jvm/java-25-temurin
+    local j25_url="https://api.adoptium.net/v3/binary/latest/25/ga/linux/${arch}/jdk/hotspot/normal/eclipse"
+    if ! curl -sIL "$j25_url" | grep -qi "HTTP.*[23]0[0-9]"; then
+      j25_url="https://api.adoptium.net/v3/binary/latest/25/ea/linux/${arch}/jdk/hotspot/normal/eclipse"
+    fi
+    curl -sL "$j25_url" | tar -xz -C /usr/lib/jvm/java-25-temurin --strip-components=1 2>/dev/null || true
+  fi
 }
 
 step_go_compiler() {
@@ -377,7 +391,7 @@ run_full_installation() {
 
   # Run steps with smooth percentage progress
   run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
-  run_step 15 35 "Installing Minecraft Java 21 & 17 runtimes" "step_java"
+  run_step 15 35 "Installing Minecraft Java runtimes (8, 17, 21 & 25)" "step_java"
   run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
   run_step 55 75 "Compiling NeoPanel core binary from source" "step_build_neopanel"
   run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT'"
@@ -494,7 +508,7 @@ interactive_menu() {
   echo "Please select an option:"
   echo -e "  ${GREEN}[1]${NC} Full Installation (Panel + Java + SSL + Firewall)"
   echo -e "  ${GREEN}[2]${NC} Update NeoPanel to Latest Version (From GitHub)"
-  echo -e "  ${GREEN}[3]${NC} Install Java Runtimes (OpenJDK 17 & 21)"
+  echo -e "  ${GREEN}[3]${NC} Install Java Runtimes (OpenJDK 8, 17, 21 & Java 25)"
   echo -e "  ${GREEN}[4]${NC} Configure / Reconfigure Let's Encrypt SSL (Caddy)"
   echo -e "  ${GREEN}[5]${NC} Configure UFW Firewall"
   echo -e "  ${GREEN}[6]${NC} Restart NeoPanel Service"
@@ -514,7 +528,7 @@ interactive_menu() {
     3)
       check_root
       print_banner
-      run_step 0 100 "Installing Java 21 & 17 runtimes" "step_java"
+      run_step 0 100 "Installing Java 8, 17, 21 & Java 25 runtimes" "step_java"
       log_success "Java installed successfully."
       ;;
     4)
@@ -571,7 +585,7 @@ else
       ;;
     --java)
       check_root
-      run_step 0 100 "Installing Java 21 & 17 runtimes" "step_java"
+      run_step 0 100 "Installing Java 8, 17, 21 & Java 25 runtimes" "step_java"
       ;;
     --firewall)
       check_root
