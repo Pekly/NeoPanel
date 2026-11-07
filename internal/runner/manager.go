@@ -39,6 +39,14 @@ func (m *ServerManager) GetInstance(serverID string) (*ProcessInstance, bool) {
 	return inst, ok
 }
 
+func (m *ServerManager) UpdateInstanceServer(srv *database.Server) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if inst, ok := m.instances[srv.ID]; ok {
+		inst.server = srv
+	}
+}
+
 func (m *ServerManager) getOrCreateInstance(srv *database.Server) *ProcessInstance {
 	m.mu.Lock()
 	defer m.mu.Unlock()

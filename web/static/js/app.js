@@ -1485,53 +1485,78 @@ const V = {
 
   stp() {
     const srv = curServer();
+    const curJava = srv?.java_path || '21';
+    const isCustom = !['21', '17', '8', 'java', ''].includes(curJava);
+    const memMin = srv?.memory_min || Math.min(1024, srv?.memory_max || 2048);
+    const memMax = srv?.memory_max || 2048;
+    const jvmFlags = srv?.java_args || '-XX:+UseG1GC';
+    const jarName = srv?.jar_file || 'server.jar';
+    const javaCmd = (curJava === 'custom' || isCustom) ? (srv?.java_path || 'java') : `java (OpenJDK ${curJava})`;
+
     return `${srvh()}
     <div style="margin-top: 18px;">
       <!-- Top Grid: Startup Command & Docker Image / Java -->
       <div style="display: grid; grid-template-columns: 1fr 340px; gap: 16px; margin-bottom: 24px;">
         <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Startup Command</h2>
+          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Active Startup Command</h2>
           <div class="mono" style="background: var(--con-bg); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); color: #fff; font-size: 12.5px; line-height: 1.6; word-break: break-all;">
-            java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar ${esc(srv?.jar_file || 'server.jar')}
+            ${esc(javaCmd)} -Xms${memMin}M -Xmx${memMax}M ${esc(jvmFlags)} -jar ${esc(jarName)} nogui
           </div>
+          <span class="mu" style="font-size: 12px; margin-top: 8px; display: block;">This command is dynamically constructed from your selected Java binary, memory allocation, and JVM arguments.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Docker Image / Java Runtime</h2>
-          <select id="stp-java" style="margin-bottom: 8px;">
-            <option selected>Java 21 (Recommended)</option>
-            <option>Java 17 (Legacy 1.18 - 1.20.4)</option>
-            <option>Java 8 (Legacy 1.12.2)</option>
-            <option>Java 25 (Cutting edge)</option>
+          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Java Runtime Environment</h2>
+          <select id="stp-java" onchange="toggleCustomJavaInput(this.value)" style="margin-bottom: 8px;">
+            <option value="21" ${curJava === '21' || curJava === 'java' || !curJava ? 'selected' : ''}>Java 21 (Modern 1.20.5+ / Recommended)</option>
+            <option value="17" ${curJava === '17' ? 'selected' : ''}>Java 17 (Legacy 1.18 - 1.20.4)</option>
+            <option value="8" ${curJava === '8' ? 'selected' : ''}>Java 8 (Legacy 1.8 - 1.12.2)</option>
+            <option value="custom" ${isCustom ? 'selected' : ''}>Custom Binary Path...</option>
           </select>
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">This is an advanced feature allowing you to select a Docker image or Java runtime to use when running this server instance.</span>
+          <div id="stp-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
+            <input type="text" id="stp-java-custom" value="${esc(isCustom ? curJava : '')}" placeholder="/usr/lib/jvm/java-XX/bin/java" style="font-size: 13px;">
+          </div>
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Select which OpenJDK runtime binary executes your server JAR. NeoPanel automatically dispatches to the correct binary on your system.</span>
         </div>
       </div>
 
       <!-- Variables Section -->
-      <h2 style="font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 16px;">Variables</h2>
+      <h2 style="font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 16px;">Runtime Variables &amp; Parameters</h2>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-bottom: 20px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px;">
         <div class="card" style="padding: 20px;">
           <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MINECRAFT VERSION</div>
           <input type="text" id="stp-ver" value="${esc(srv?.version || 'latest')}" style="margin-bottom: 8px; font-weight: 600;">
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The version of minecraft to download. Leave at latest to always get the latest version. Invalid versions will default to latest.</span>
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The release or snapshot version of Minecraft running in this container.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
           <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">SERVER JAR FILE</div>
           <input type="text" id="stp-jar" value="${esc(srv?.jar_file || 'server.jar')}" style="margin-bottom: 8px; font-weight: 600;">
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The name of the server jarfile to run the server with.</span>
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The name of the server executable JAR inside the container directory.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">BUILD NUMBER</div>
-          <input type="text" id="stp-build" value="latest" style="margin-bottom: 8px; font-weight: 600;">
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The build number for the paper release. Leave at latest to always get the latest version. Invalid versions will default to latest.</span>
+          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MAX RAM ALLOCATION</div>
+          <select id="stp-ram" style="margin-bottom: 8px; font-weight: 600;">
+            <option value="1024" ${memMax === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
+            <option value="2048" ${memMax === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
+            <option value="4096" ${memMax === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
+            <option value="6144" ${memMax === 6144 ? 'selected' : ''}>6 GB (6144 MB)</option>
+            <option value="8192" ${memMax === 8192 ? 'selected' : ''}>8 GB (8192 MB)</option>
+            <option value="16384" ${memMax === 16384 ? 'selected' : ''}>16 GB (16384 MB)</option>
+          </select>
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Adjust the maximum heap memory (-Xmx) given to this Minecraft server.</span>
+        </div>
+
+        <div class="card" style="padding: 20px;">
+          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">CUSTOM JVM FLAGS (JAVA_ARGS)</div>
+          <input type="text" id="stp-args" value="${esc(srv?.java_args || '-XX:+UseG1GC')}" style="margin-bottom: 8px; font-weight: 500;">
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Additional JVM options passed directly to the Java process on start.</span>
         </div>
       </div>
 
-      <button class="btn pr" onclick="saveStartupSettings()" style="padding: 10px 24px;">Save Startup Variables</button>
+      <button class="btn pr" onclick="saveStartupSettings()" style="padding: 10px 24px;">${ic('download', 14)} Save &amp; Apply Startup Variables</button>
     </div>`;
   },
 
@@ -1629,6 +1654,18 @@ const V = {
             <option value="16384" ${curMem === 16384 ? 'selected' : ''}>16 GB (16384 MB)</option>
           </select>
         </label>
+        <label class="f" style="margin-top: 10px;">
+          <span>Java Runtime Version</span>
+          <select id="prop-java" onchange="toggleCustomPropJava(this.value)">
+            <option value="21" ${srv?.java_path === '21' || srv?.java_path === 'java' || !srv?.java_path ? 'selected' : ''}>Java 21 (Modern 1.20.5+ / Recommended)</option>
+            <option value="17" ${srv?.java_path === '17' ? 'selected' : ''}>Java 17 (Legacy 1.18 - 1.20.4)</option>
+            <option value="8" ${srv?.java_path === '8' ? 'selected' : ''}>Java 8 (Legacy 1.8 - 1.12.2)</option>
+            <option value="custom" ${!['21', '17', '8', 'java', ''].includes(srv?.java_path) ? 'selected' : ''}>Custom Binary Path...</option>
+          </select>
+        </label>
+        <div id="prop-custom-wrap" style="${!['21', '17', '8', 'java', ''].includes(srv?.java_path) ? '' : 'display: none;'} margin-top: 6px;">
+          <input type="text" id="prop-java-custom" value="${esc(!['21', '17', '8', 'java', ''].includes(srv?.java_path) ? srv?.java_path : '')}" placeholder="/usr/lib/jvm/java-XX/bin/java" style="font-size: 13px;">
+        </div>
         <div class="row" style="margin-top:14px;">
           <button class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save Properties</button>
           <button class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
@@ -2489,14 +2526,60 @@ function setPlugTab(tab) {
   else loadPluginsList();
 }
 
+function toggleCustomJavaInput(val) {
+  const wrap = $('#stp-custom-wrap');
+  if (wrap) wrap.style.display = (val === 'custom') ? 'block' : 'none';
+}
+
+function toggleCustomPropJava(val) {
+  const wrap = $('#prop-custom-wrap');
+  if (wrap) wrap.style.display = (val === 'custom') ? 'block' : 'none';
+}
+
 async function saveStartupSettings() {
   const srv = curServer();
   if (!srv) return;
-  const ver = $('#stp-ver')?.value?.trim();
-  const jar = $('#stp-jar')?.value?.trim();
-  toast('Startup variables updated successfully');
-  if (ver) srv.version = ver;
-  if (jar) srv.jar_file = jar;
+
+  let javaChoice = $('#stp-java')?.value;
+  if (javaChoice === 'custom') {
+    javaChoice = $('#stp-java-custom')?.value.trim();
+  }
+  const ver = $('#stp-ver')?.value?.trim() || srv.version || '1.21.4';
+  const jar = $('#stp-jar')?.value?.trim() || srv.jar_file || 'server.jar';
+  const args = $('#stp-args')?.value?.trim() || srv.java_args || '-XX:+UseG1GC';
+  const newRam = parseInt($('#stp-ram')?.value, 10) || srv.memory_max || 2048;
+
+  try {
+    await api(`/api/servers/${srv.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: srv.name,
+        description: srv.description,
+        type: srv.type,
+        version: ver,
+        jar_file: jar,
+        port: srv.port,
+        memory_min: Math.min(1024, newRam),
+        memory_max: newRam,
+        java_path: javaChoice,
+        java_args: args,
+        auto_restart: srv.auto_restart
+      })
+    });
+
+    srv.version = ver;
+    srv.jar_file = jar;
+    srv.java_path = javaChoice;
+    srv.java_args = args;
+    srv.memory_max = newRam;
+    srv.memory_min = Math.min(1024, newRam);
+    S.ver = ver;
+
+    toast('Startup variables & Java runtime saved to database! Restart server to apply.', 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to save startup configuration', 'bad');
+  }
 }
 
 async function openFile(name) {
@@ -3004,6 +3087,12 @@ async function saveProperties() {
   const srv = curServer();
   if (!srv) return;
   const newPort = parseInt($('#prop-port')?.value) || srv.port || 25565;
+  const newRam = parseInt($('#prop-ram')?.value) || getServerMaxRamMB(srv);
+  let newJava = $('#prop-java')?.value;
+  if (newJava === 'custom') {
+    newJava = $('#prop-java-custom')?.value.trim();
+  }
+
   const payload = {
     'motd': S.props.motd,
     'server-port': String(newPort),
@@ -3014,14 +3103,42 @@ async function saveProperties() {
     'white-list': String(S.props.wl),
     'enable-command-block': String(S.props.cmd)
   };
+
   try {
+    // 1. Write server.properties file
     await api(`/api/servers/${srv.id}/properties`, {
       method: 'POST',
       body: JSON.stringify(payload)
     });
+
+    // 2. Persist port, memory, and java runtime to SQLite DB and process runner
+    await api(`/api/servers/${srv.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: srv.name,
+        description: srv.description,
+        type: srv.type,
+        version: srv.version,
+        jar_file: srv.jar_file,
+        port: newPort,
+        memory_min: Math.min(1024, newRam),
+        memory_max: newRam,
+        java_path: newJava || srv.java_path,
+        java_args: srv.java_args,
+        auto_restart: srv.auto_restart
+      })
+    });
+
     srv.port = newPort;
-    toast('Server properties saved! Restart server to apply.');
-  } catch (e) {}
+    srv.memory_max = newRam;
+    srv.memory_min = Math.min(1024, newRam);
+    if (newJava) srv.java_path = newJava;
+
+    toast('Server properties, RAM allocation & Java runtime saved! Restart server to apply.', 'ok');
+    R();
+  } catch (e) {
+    toast(e.message || 'Failed to save server settings', 'bad');
+  }
 }
 
 async function loadSFTPDetails() {
@@ -3432,6 +3549,7 @@ function openCreateServerModal() {
             <select id="cs-java">
               <option value="21" selected>OpenJDK 21 (1.20.5+ / Modern)</option>
               <option value="17">OpenJDK 17 (1.18 - 1.20.4)</option>
+              <option value="8">OpenJDK 8 (1.8 - 1.12.2 Legacy)</option>
             </select>
           </label>
         </div>
@@ -3494,6 +3612,7 @@ async function handleCreateServer(e) {
   const memoryMax = parseInt($('#cs-mem')?.value) || 2048;
   const memoryMin = Math.min(1024, memoryMax);
   const port = parseInt($('#cs-port')?.value) || 25565;
+  const javaPath = $('#cs-java')?.value || '21';
   const useAikar = $('#cs-aikar')?.checked;
 
   let javaArgs = '-XX:+UseG1GC';
@@ -3513,6 +3632,7 @@ async function handleCreateServer(e) {
         memory_min: memoryMin,
         memory_max: memoryMax,
         port,
+        java_path: javaPath,
         java_args: javaArgs,
         auto_download: true,
         auto_restart: true
@@ -4262,6 +4382,8 @@ window.submitAddUser = submitAddUser;
 window.deleteAdminUser = deleteAdminUser;
 window.triggerAdminGC = triggerAdminGC;
 window.saveAdminDaemonSettings = saveAdminDaemonSettings;
+window.toggleCustomJavaInput = toggleCustomJavaInput;
+window.toggleCustomPropJava = toggleCustomPropJava;
 
 // --- Initialize Application ---
 document.addEventListener('DOMContentLoaded', () => {

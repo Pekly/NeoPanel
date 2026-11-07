@@ -86,10 +86,8 @@ func (p *ProcessInstance) Start() error {
 	p.mu.Unlock()
 
 	// Build Java command
-	javaPath := p.server.JavaPath
-	if javaPath == "" {
-		javaPath = "java"
-	}
+	javaBinary, javaLabel := ResolveJavaBinary(p.server.JavaPath)
+	p.broadcastLog(fmt.Sprintf("[NeoPanel]: Starting instance using %s (%s)", javaLabel, javaBinary))
 
 	jarPath := filepath.Join(p.workingDir, p.server.JarFile)
 	if _, err := os.Stat(jarPath); os.IsNotExist(err) {
@@ -115,7 +113,7 @@ func (p *ProcessInstance) Start() error {
 
 	args = append(args, "-jar", p.server.JarFile, "nogui")
 
-	cmd := exec.Command(javaPath, args...)
+	cmd := exec.Command(javaBinary, args...)
 	cmd.Dir = p.workingDir
 
 	stdin, err := cmd.StdinPipe()

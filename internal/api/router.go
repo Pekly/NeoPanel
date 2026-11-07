@@ -171,6 +171,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// System info & Admin tools
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))
+	r.mux.HandleFunc("GET /api/system/java", r.requireAuth(HandleGetJavaRuntimes))
 	r.mux.HandleFunc("POST /api/admin/gc", r.requireAuth(HandleRunGC))
 	r.mux.HandleFunc("GET /api/admin/users", r.requireAuth(r.auth.ListUsers))
 	r.mux.HandleFunc("POST /api/admin/users", r.requireAuth(r.auth.AdminCreateUser))

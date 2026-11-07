@@ -178,10 +178,25 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	server.Name = req.Name
+	if strings.TrimSpace(req.Name) != "" {
+		server.Name = strings.TrimSpace(req.Name)
+	}
 	server.Description = req.Description
-	server.MemoryMinMB = req.MemoryMinMB
-	server.MemoryMaxMB = req.MemoryMaxMB
+	if req.Port > 0 {
+		server.Port = req.Port
+	}
+	if req.Type != "" {
+		server.Type = req.Type
+	}
+	if req.Version != "" {
+		server.Version = req.Version
+	}
+	if req.MemoryMinMB > 0 {
+		server.MemoryMinMB = req.MemoryMinMB
+	}
+	if req.MemoryMaxMB > 0 {
+		server.MemoryMaxMB = req.MemoryMaxMB
+	}
 	server.JavaArgs = req.JavaArgs
 	server.JavaPath = req.JavaPath
 	server.AutoRestart = req.AutoRestart
@@ -190,9 +205,11 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.UpdateServer(server); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server: " + err.Error()})
 		return
 	}
+
+	h.manager.UpdateInstanceServer(server)
 
 	writeJSON(w, http.StatusOK, server)
 }

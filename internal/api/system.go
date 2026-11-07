@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Pekly/NeoPanel/internal/runner"
 )
 
 var startTime = time.Now()
@@ -47,6 +49,11 @@ func HandleSystemInfo(w http.ResponseWriter, r *http.Request) {
 func HandleRunGC(w http.ResponseWriter, r *http.Request) {
 	runtime.GC()
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Garbage collection executed successfully"})
+}
+
+func HandleGetJavaRuntimes(w http.ResponseWriter, r *http.Request) {
+	javas := runner.DetectInstalledJavas()
+	writeJSON(w, http.StatusOK, javas)
 }
 
 func readLinuxMemInfo(info *SystemInfo) {

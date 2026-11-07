@@ -187,7 +187,9 @@ step_prerequisites() {
 step_java() {
   apt-get update -y -q
   apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-    openjdk-21-jre-headless openjdk-17-jre-headless
+    openjdk-21-jre-headless openjdk-17-jre-headless || true
+  apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+    openjdk-8-jre-headless || true
 }
 
 step_go_compiler() {
