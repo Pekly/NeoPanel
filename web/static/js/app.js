@@ -16,10 +16,18 @@ function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
   toast.className = `toast ${type === 'error' ? 'error' : ''}`;
-  toast.textContent = message;
+  
+  const iconSvg = type === 'error' 
+    ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--danger); flex-shrink:0;"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`
+    : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--primary); flex-shrink:0;"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+
+  toast.innerHTML = `${iconSvg}<span>${escapeHtml(message)}</span>`;
   container.appendChild(toast);
   setTimeout(() => {
-    toast.remove();
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(100%)';
+    toast.style.transition = 'all 0.25s ease';
+    setTimeout(() => toast.remove(), 250);
   }, 4000);
 }
 
@@ -67,11 +75,19 @@ async function checkAuth() {
     // Verify current user
     const user = await api('/api/auth/me');
     state.user = user;
-    document.getElementById('nav-user').textContent = user.username;
+    updateUserNav(user.username);
     showView('dashboard-view');
     loadDashboard();
   } catch (e) {
     showView('login-view');
+  }
+}
+
+function updateUserNav(username) {
+  document.getElementById('nav-user').textContent = username;
+  const avatar = document.getElementById('nav-user-avatar');
+  if (avatar) {
+    avatar.textContent = username.charAt(0).toUpperCase();
   }
 }
 
@@ -89,7 +105,7 @@ async function handleSetup(e) {
     state.user = res.user;
     localStorage.setItem('neopanel_token', res.token);
     showToast('Admin setup completed!');
-    document.getElementById('nav-user').textContent = res.user.username;
+    updateUserNav(res.user.username);
     showView('dashboard-view');
     loadDashboard();
   } catch (e) {}
@@ -109,7 +125,7 @@ async function handleLogin(e) {
     state.user = res.user;
     localStorage.setItem('neopanel_token', res.token);
     showToast(`Welcome back, ${res.user.username}!`);
-    document.getElementById('nav-user').textContent = res.user.username;
+    updateUserNav(res.user.username);
     showView('dashboard-view');
     loadDashboard();
   } catch (e) {}
@@ -164,9 +180,21 @@ async function loadDashboard() {
 
     if (servers.length === 0) {
       grid.innerHTML = `
-        <div style="grid-column: 1/-1; text-align: center; padding: 3rem; background: var(--bg-card); border-radius: 8px; border: 1px dashed var(--border);">
-          <h3>No Minecraft servers yet</h3>
-          <p style="color: var(--text-muted); margin-top: 0.5rem;">Click "Create Server" to deploy your first Paper, Purpur, or Vanilla server.</p>
+        <div style="grid-column: 1/-1; text-align: center; padding: 4rem 2rem; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed rgba(255,255,255,0.12); box-shadow: var(--shadow-card);">
+          <div style="width: 56px; height: 56px; border-radius: 14px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); display: flex; align-items: center; justify-content: center; margin: 0 auto 1.25rem; color: var(--primary);">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+          </div>
+          <h3 style="font-size: 1.35rem; font-weight: 800; color: #fff;">No Minecraft servers deployed yet</h3>
+          <p style="color: var(--text-dim); margin-top: 0.5rem; max-width: 440px; margin-left: auto; margin-right: auto; font-size: 0.9rem;">
+            Click the button below to deploy your first high-performance PaperMC, Purpur, or Vanilla Minecraft server.
+          </p>
+          <button class="btn btn-primary" onclick="openCreateServerModal()" style="margin-top: 1.5rem;">
+            + Deploy Server
+          </button>
         </div>
       `;
       return;
@@ -176,6 +204,9 @@ async function loadDashboard() {
       const card = document.createElement('div');
       card.className = 'server-card';
       const statusClass = `badge-${s.stats?.status || 'offline'}`;
+      const memUsed = s.stats?.memory_mb || 0;
+      const memMax = s.memory_max || 1024;
+      const memPct = Math.min(100, Math.round((memUsed / memMax) * 100));
 
       card.innerHTML = `
         <div>
@@ -184,20 +215,42 @@ async function loadDashboard() {
               <h3 class="server-name">${escapeHtml(s.name)}</h3>
               <p class="server-sub">Port: ${s.port} &bull; ${s.jar_file}</p>
             </div>
-            <div style="display: flex; gap: 0.5rem;">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
               <span class="badge badge-flavor">${escapeHtml(s.type)} ${escapeHtml(s.version)}</span>
-              <span class="badge ${statusClass}">${s.stats?.status || 'offline'}</span>
+              <span class="badge ${statusClass}">
+                <span class="status-dot"></span>
+                ${s.stats?.status || 'offline'}
+              </span>
             </div>
           </div>
+
+          <!-- Mini RAM Meter -->
+          <div style="margin: 0.75rem 0 0.25rem;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.725rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem;">
+              <span>MEMORY ALLOCATION</span>
+              <span>${memUsed} / ${memMax} MB (${memPct}%)</span>
+            </div>
+            <div style="background: rgba(255, 255, 255, 0.06); height: 5px; border-radius: 3px; overflow: hidden;">
+              <div style="background: linear-gradient(90deg, var(--primary), var(--accent)); width: ${memPct}%; height: 100%; transition: width 0.3s ease;"></div>
+            </div>
+          </div>
+
           <div class="server-stats-grid">
             <div class="stat-item"><span class="label">CPU Usage</span><span class="val">${(s.stats?.cpu_usage || 0).toFixed(1)}%</span></div>
-            <div class="stat-item"><span class="label">Memory</span><span class="val">${s.stats?.memory_mb || 0} MB / ${s.memory_max} MB</span></div>
+            <div class="stat-item"><span class="label">Memory</span><span class="val">${memUsed} MB</span></div>
             <div class="stat-item"><span class="label">Disk Usage</span><span class="val">${s.stats?.disk_mb || 0} MB</span></div>
             <div class="stat-item"><span class="label">Uptime</span><span class="val">${formatUptime(s.stats?.uptime_sec || 0)}</span></div>
           </div>
         </div>
-        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem;">
-          <button class="btn btn-secondary btn-sm" onclick="openServer('${s.id}')">Manage &rarr;</button>
+
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; border-top: 1px solid var(--border-subtle); padding-top: 0.85rem;">
+          <button class="btn btn-secondary btn-sm" onclick="openServer('${s.id}')">
+            Manage
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
         </div>
       `;
       grid.appendChild(card);
@@ -213,7 +266,7 @@ async function openServer(serverId) {
     showView('server-detail-view');
 
     document.getElementById('detail-server-name').textContent = srv.name;
-    document.getElementById('detail-server-meta').textContent = `${srv.type.toUpperCase()} ${srv.version} &bull; Port ${srv.port}`;
+    document.getElementById('detail-server-meta').textContent = `${srv.type.toUpperCase()} ${srv.version} • Port ${srv.port} • Max RAM ${srv.memory_max} MB`;
 
     switchTab('console');
     updateServerPowerBadges(srv.stats?.status || 'offline');
@@ -224,7 +277,7 @@ async function openServer(serverId) {
 function updateServerPowerBadges(status) {
   const badge = document.getElementById('detail-server-status');
   badge.className = `badge badge-${status}`;
-  badge.textContent = status;
+  badge.innerHTML = `<span class="status-dot"></span>${status}`;
 }
 
 // --- Console & WebSocket ---
@@ -283,7 +336,7 @@ async function serverPower(action) {
       method: 'POST',
       body: JSON.stringify({ action }),
     });
-    showToast(`Sent ${action.toUpperCase()} signal`);
+    showToast(`Sent ${action.toUpperCase()} command`);
     if (res.current) {
       updateServerPowerBadges(res.current.status);
     }
@@ -307,7 +360,24 @@ function switchTab(tab) {
   }
 }
 
-// --- File Manager ---
+// --- File Manager Icons & Utilities ---
+function getFileIcon(name, isDir) {
+  if (isDir) {
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" style="flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+  }
+
+  const ext = name.split('.').pop().toLowerCase();
+  if (ext === 'jar') {
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" style="flex-shrink:0;"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>`;
+  } else if (ext === 'properties' || ext === 'yml' || ext === 'yaml' || ext === 'json') {
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`;
+  } else if (ext === 'log' || ext === 'txt') {
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`;
+  }
+
+  return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" style="flex-shrink:0;"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+}
+
 async function loadFiles(path = '') {
   state.currentFilePath = path;
   try {
@@ -323,11 +393,11 @@ function renderFileList(files, currentPath) {
   // Breadcrumbs
   const breadcrumbEl = document.getElementById('file-breadcrumbs');
   const parts = currentPath.split('/').filter(Boolean);
-  let breadcrumbHtml = `<a href="javascript:void(0)" onclick="loadFiles('')" style="color:var(--primary);">root</a>`;
+  let breadcrumbHtml = `<a href="javascript:void(0)" onclick="loadFiles('')" style="color:var(--primary); font-weight:700;">root</a>`;
   let accum = '';
-  parts.forEach((p, idx) => {
+  parts.forEach((p) => {
     accum += (accum ? '/' : '') + p;
-    breadcrumbHtml += ` / <a href="javascript:void(0)" onclick="loadFiles('${accum}')" style="color:var(--primary);">${escapeHtml(p)}</a>`;
+    breadcrumbHtml += ` <span style="color:var(--text-dim);">&sol;</span> <a href="javascript:void(0)" onclick="loadFiles('${accum}')" style="color:#fff; font-weight:600;">${escapeHtml(p)}</a>`;
   });
   breadcrumbEl.innerHTML = breadcrumbHtml;
 
@@ -337,7 +407,12 @@ function renderFileList(files, currentPath) {
     const tr = document.createElement('tr');
     tr.className = 'file-row';
     tr.innerHTML = `
-      <td colspan="4"><span class="file-name" onclick="loadFiles('${parent}')">&#128193; .. (parent directory)</span></td>
+      <td colspan="4">
+        <span class="file-name" onclick="loadFiles('${parent}')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
+          .. (parent folder)
+        </span>
+      </td>
     `;
     tbody.appendChild(tr);
   }
@@ -351,17 +426,22 @@ function renderFileList(files, currentPath) {
   files.forEach((f) => {
     const tr = document.createElement('tr');
     tr.className = 'file-row';
-    const icon = f.is_dir ? '&#128193;' : '&#128196;';
+    const iconSvg = getFileIcon(f.name, f.is_dir);
     const clickAction = f.is_dir
       ? `loadFiles('${f.path}')`
       : `openFileEditor('${f.path}')`;
 
     tr.innerHTML = `
-      <td><span class="file-name" onclick="${clickAction}">${icon} ${escapeHtml(f.name)}</span></td>
-      <td>${f.is_dir ? '-' : formatBytes(f.size)}</td>
-      <td>${new Date(f.modified).toLocaleString()}</td>
+      <td><span class="file-name" onclick="${clickAction}">${iconSvg} ${escapeHtml(f.name)}</span></td>
+      <td style="color: var(--text-dim); font-family: var(--font-mono); font-size: 0.8rem;">${f.is_dir ? '-' : formatBytes(f.size)}</td>
+      <td style="color: var(--text-dim); font-size: 0.8rem;">${new Date(f.modified).toLocaleString()}</td>
       <td style="text-align: right;">
-        <button class="btn btn-secondary btn-sm" onclick="deleteFile('${f.path}')">&#128465;</button>
+        <button class="btn btn-secondary btn-sm" onclick="deleteFile('${f.path}')" style="color: var(--danger); padding: 0.25rem 0.55rem;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -532,4 +612,3 @@ function formatUptime(seconds) {
 
 // Boot application
 window.addEventListener('DOMContentLoaded', checkAuth);
-

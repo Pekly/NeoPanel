@@ -3,36 +3,60 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NeoPanel - Lightweight Minecraft Server Manager</title>
+  <title>NeoPanel — Ultra-Light Minecraft Server Manager</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <!-- Header -->
   <header>
     <div class="logo-area" onclick="showView('dashboard-view'); loadDashboard();" style="cursor: pointer;">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-        <polyline points="2 17 12 22 22 17"></polyline>
-        <polyline points="2 12 12 17 22 12"></polyline>
-      </svg>
+      <div class="logo-icon-wrapper">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+      </div>
       <span>NeoPanel</span>
       <span class="logo-badge">Ultra-Light</span>
     </div>
     <div id="nav-auth" class="nav-links" style="display: none;">
-      <span id="nav-user" style="font-size: 0.875rem; color: var(--text-muted); font-weight: 600;"></span>
-      <button class="btn btn-secondary btn-sm" onclick="logout()">Logout</button>
+      <div class="user-pill">
+        <span class="user-avatar" id="nav-user-avatar">A</span>
+        <span id="nav-user">admin</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="logout()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+          <polyline points="16 17 21 12 16 7"></polyline>
+          <line x1="21" y1="12" x2="9" y2="12"></line>
+        </svg>
+        Logout
+      </button>
     </div>
   </header>
 
   <main>
     <!-- View 1: First-time Admin Setup -->
-    <div id="setup-view" style="display: none; max-width: 440px; margin: 4rem auto;">
-      <div class="card">
-        <h2 style="margin-bottom: 0.5rem;">Initialize NeoPanel</h2>
-        <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">
-          Welcome! Create your primary administrator account to get started.
-        </p>
+    <div id="setup-view" style="display: none; max-width: 460px; margin: 4rem auto;">
+      <div class="card" style="box-shadow: 0 12px 40px -8px rgba(0,0,0,0.8);">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+          <div class="logo-icon-wrapper" style="width: 48px; height: 48px; margin: 0 auto 1rem; border-radius: 12px;">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+          </div>
+          <h2 style="font-size: 1.6rem; font-weight: 800; letter-spacing: -0.02em;">Initialize NeoPanel</h2>
+          <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.35rem;">
+            Create your primary administrator credentials to launch your dashboard.
+          </p>
+        </div>
         <form onsubmit="handleSetup(event)">
           <div class="form-group">
             <label>Admin Username</label>
@@ -40,10 +64,10 @@
           </div>
           <div class="form-group">
             <label>Master Password</label>
-            <input id="setup-password" type="password" class="form-input" required minlength="6" placeholder="Choose a strong password" autocomplete="new-password">
+            <input id="setup-password" type="password" class="form-input" required minlength="6" placeholder="Choose a strong master password" autocomplete="new-password">
           </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
-            Create Admin &amp; Launch
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1.25rem;">
+            Complete Setup &amp; Launch
           </button>
         </form>
       </div>
@@ -51,11 +75,20 @@
 
     <!-- View 2: Login -->
     <div id="login-view" style="display: none; max-width: 420px; margin: 5rem auto;">
-      <div class="card">
-        <h2 style="margin-bottom: 0.5rem;">Sign In</h2>
-        <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.5rem;">
-          Manage your high-performance Minecraft instances.
-        </p>
+      <div class="card" style="box-shadow: 0 12px 40px -8px rgba(0,0,0,0.8);">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+          <div class="logo-icon-wrapper" style="width: 44px; height: 44px; margin: 0 auto 0.85rem; border-radius: 12px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+          </div>
+          <h2 style="font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em;">Sign In</h2>
+          <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem;">
+            Access high-performance Minecraft instances.
+          </p>
+        </div>
         <form onsubmit="handleLogin(event)">
           <div class="form-group">
             <label>Username</label>
@@ -65,7 +98,7 @@
             <label>Password</label>
             <input id="login-password" type="password" class="form-input" required autocomplete="current-password">
           </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1.25rem;">
             Authenticate
           </button>
         </form>
@@ -76,33 +109,62 @@
     <div id="dashboard-view" style="display: none;">
       <!-- Stats Metrics Bar -->
       <div class="grid-cols-3" style="margin-bottom: 2rem;">
-        <div class="metric-card">
-          <div class="metric-icon">&#9881;</div>
+        <div class="metric-card" style="--card-accent: var(--primary);">
+          <div class="metric-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+              <line x1="6" y1="6" x2="6.01" y2="6"></line>
+              <line x1="6" y1="18" x2="6.01" y2="18"></line>
+            </svg>
+          </div>
           <div class="metric-info">
             <h4>Total Servers</h4>
             <p id="total-servers-count">0</p>
           </div>
         </div>
-        <div class="metric-card">
-          <div class="metric-icon" style="color: var(--accent); background: rgba(6, 182, 212, 0.1);">&#9654;</div>
+        <div class="metric-card" style="--card-accent: var(--accent);">
+          <div class="metric-icon" style="color: var(--accent); background: rgba(6, 182, 212, 0.1); border-color: rgba(6, 182, 212, 0.2);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+          </div>
           <div class="metric-info">
             <h4>Active Instances</h4>
             <p id="active-servers-count">0</p>
           </div>
         </div>
-        <div class="metric-card">
-          <div class="metric-icon" style="color: #a855f7; background: rgba(168, 85, 247, 0.1);">&#128421;</div>
+        <div class="metric-card" style="--card-accent: var(--purple);">
+          <div class="metric-icon" style="color: var(--purple); background: rgba(139, 92, 246, 0.1); border-color: rgba(139, 92, 246, 0.2);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect>
+              <rect x="9" y="9" width="6" height="6"></rect>
+              <line x1="9" y1="1" x2="9" y2="4"></line>
+              <line x1="15" y1="1" x2="15" y2="4"></line>
+              <line x1="9" y1="20" x2="9" y2="23"></line>
+              <line x1="15" y1="20" x2="15" y2="23"></line>
+            </svg>
+          </div>
           <div class="metric-info">
-            <h4>Host Memory</h4>
+            <h4>Host Available Memory</h4>
             <p id="system-ram-metric">0 / 0 MB</p>
           </div>
         </div>
       </div>
 
       <!-- Action Bar -->
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
-        <h2 style="font-size: 1.5rem; font-weight: 700;">Minecraft Servers</h2>
-        <button class="btn btn-primary" onclick="openCreateServerModal()">+ Create Server</button>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+        <div>
+          <h2 style="font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em;">Minecraft Servers</h2>
+          <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 0.15rem;">Manage your active instances and allocations</p>
+        </div>
+        <button class="btn btn-primary" onclick="openCreateServerModal()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          Create Server
+        </button>
       </div>
 
       <!-- Server Cards Grid -->
@@ -112,42 +174,104 @@
     <!-- View 4: Server Detail -->
     <div id="server-detail-view" style="display: none;">
       <!-- Server Header -->
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
         <div>
-          <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <button class="btn btn-secondary btn-sm" onclick="showView('dashboard-view'); loadDashboard();">&larr; Back</button>
-            <h1 id="detail-server-name" style="font-size: 1.75rem; font-weight: 700;">Server</h1>
-            <span id="detail-server-status" class="badge badge-offline">offline</span>
+          <div style="display: flex; align-items: center; gap: 0.85rem;">
+            <button class="btn btn-secondary btn-sm" onclick="showView('dashboard-view'); loadDashboard();">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="19" y1="12" x2="5" y2="12"></line>
+                <polyline points="12 19 5 12 12 5"></polyline>
+              </svg>
+              Servers
+            </button>
+            <h1 id="detail-server-name" style="font-size: 1.75rem; font-weight: 800; letter-spacing: -0.02em;">Server</h1>
+            <span id="detail-server-status" class="badge badge-offline">
+              <span class="status-dot"></span>
+              offline
+            </span>
           </div>
-          <p id="detail-server-meta" style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem; margin-left: 5rem;"></p>
+          <p id="detail-server-meta" style="color: var(--text-dim); font-size: 0.85rem; margin-top: 0.35rem; margin-left: 5.5rem;"></p>
         </div>
+
         <!-- Power Controls -->
-        <div style="display: flex; gap: 0.5rem;">
-          <button class="btn btn-primary btn-sm" onclick="serverPower('start')">&#9658; Start</button>
-          <button class="btn btn-secondary btn-sm" onclick="serverPower('restart')">&#8635; Restart</button>
-          <button class="btn btn-warning btn-sm" onclick="serverPower('stop')">&#9632; Stop</button>
-          <button class="btn btn-danger btn-sm" onclick="serverPower('kill')">&#9760; Force Kill</button>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-sm" onclick="serverPower('start')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            Start
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="serverPower('restart')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            Restart
+          </button>
+          <button class="btn btn-warning btn-sm" onclick="serverPower('stop')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="1"></rect>
+            </svg>
+            Stop
+          </button>
+          <button class="btn btn-danger btn-sm" onclick="serverPower('kill')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="15" y1="9" x2="9" y2="15"></line>
+              <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+            Force Kill
+          </button>
         </div>
       </div>
 
       <!-- Tabs Navigation -->
       <div class="tabs">
-        <button id="tab-btn-console" class="tab-btn active" onclick="switchTab('console')">Console &amp; Terminal</button>
-        <button id="tab-btn-files" class="tab-btn" onclick="switchTab('files')">File Manager</button>
-        <button id="tab-btn-settings" class="tab-btn" onclick="switchTab('settings')">Configuration</button>
+        <button id="tab-btn-console" class="tab-btn active" onclick="switchTab('console')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          Terminal Console
+        </button>
+        <button id="tab-btn-files" class="tab-btn" onclick="switchTab('files')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+            <polyline points="13 2 13 9 20 9"></polyline>
+          </svg>
+          File Manager
+        </button>
+        <button id="tab-btn-settings" class="tab-btn" onclick="switchTab('settings')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          Configuration
+        </button>
       </div>
 
       <!-- Tab 1: Console -->
       <div id="tab-content-console">
         <div class="terminal-container">
           <div class="terminal-header">
-            <span>Interactive Minecraft Terminal</span>
-            <span style="font-size: 0.75rem;">Use &uarr; &darr; arrows for command history</span>
+            <div class="mac-dots">
+              <span class="mac-dot red"></span>
+              <span class="mac-dot yellow"></span>
+              <span class="mac-dot green"></span>
+            </div>
+            <span style="font-family: var(--font-mono); font-size: 0.775rem; letter-spacing: 0.04em;">neo-console://stream</span>
+            <div style="display: flex; gap: 0.75rem; align-items: center;">
+              <button class="btn btn-secondary btn-sm" onclick="state.consoleMgr?.clear()" style="padding: 0.2rem 0.55rem; font-size: 0.725rem;">Clear</button>
+              <span style="font-size: 0.75rem; color: var(--text-dim);">&uarr; &darr; History</span>
+            </div>
           </div>
           <div id="terminal-logs" class="terminal-logs"></div>
           <div class="terminal-input-bar">
-            <input id="terminal-input" type="text" placeholder="Type a command (e.g. 'say Hello', 'op Username', 'whitelist on')...">
-            <button onclick="document.getElementById('terminal-input').dispatchEvent(new KeyboardEvent('keydown', {'key': 'Enter'}))">Send</button>
+            <span class="terminal-prompt-sym">&gt;</span>
+            <input id="terminal-input" type="text" placeholder="Type a command (e.g. 'say Welcome to NeoPanel!', 'op Steve', 'whitelist on')...">
+            <button onclick="document.getElementById('terminal-input').dispatchEvent(new KeyboardEvent('keydown', {'key': 'Enter'}))">
+              Send &crarr;
+            </button>
           </div>
         </div>
       </div>
@@ -155,12 +279,25 @@
       <!-- Tab 2: File Manager -->
       <div id="tab-content-files" style="display: none;">
         <div class="card">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-            <div id="file-breadcrumbs" style="font-family: var(--font-mono); font-size: 0.875rem;"></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+            <div id="file-breadcrumbs" style="font-family: var(--font-mono); font-size: 0.85rem; display: flex; align-items: center; gap: 0.35rem;"></div>
             <div style="display: flex; gap: 0.5rem;">
               <input type="file" id="file-upload-input" style="display: none;" onchange="uploadFile()">
-              <button class="btn btn-secondary btn-sm" onclick="document.getElementById('file-upload-input').click()">Upload File</button>
-              <button class="btn btn-secondary btn-sm" onclick="loadFiles(state.currentFilePath)">Refresh</button>
+              <button class="btn btn-secondary btn-sm" onclick="document.getElementById('file-upload-input').click()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Upload File
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="loadFiles(state.currentFilePath)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="23 4 23 10 17 10"></polyline>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                </svg>
+                Refresh
+              </button>
             </div>
           </div>
           <table class="file-table">
@@ -180,7 +317,7 @@
       <!-- Tab 3: Server Settings -->
       <div id="tab-content-settings" style="display: none; max-width: 680px;">
         <div class="card">
-          <h3 style="margin-bottom: 1.25rem;">Server JVM &amp; Parameters</h3>
+          <h3 style="margin-bottom: 1.25rem; font-weight: 800;">Server JVM &amp; Parameters</h3>
           <form onsubmit="saveServerSettings(event)">
             <div class="form-group">
               <label>Server Display Name</label>
@@ -204,20 +341,22 @@
               <label>Custom Java JVM Flags (Aikar flags, garbage collection)</label>
               <input id="setting-java-args" type="text" class="form-input" placeholder="-XX:+UseG1GC -XX:+ParallelRefProcEnabled">
             </div>
-            <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
-              <input id="setting-auto-restart" type="checkbox">
-              <label for="setting-auto-restart" style="margin: 0; cursor: pointer;">Auto-restart server automatically on crash</label>
+            <div class="form-group" style="display: flex; align-items: center; gap: 0.65rem; margin-top: 1rem;">
+              <input id="setting-auto-restart" type="checkbox" style="width: 16px; height: 16px; accent-color: var(--primary);">
+              <label for="setting-auto-restart" style="margin: 0; cursor: pointer; text-transform: none; font-size: 0.875rem; color: #fff;">
+                Auto-restart server automatically on crash
+              </label>
             </div>
             <div style="display: flex; justify-content: flex-end; margin-top: 1.5rem;">
               <button type="submit" class="btn btn-primary">Save Changes</button>
             </div>
           </form>
 
-          <hr style="border: 0; border-top: 1px solid var(--border); margin: 2rem 0;">
+          <hr style="border: 0; border-top: 1px solid var(--border-subtle); margin: 2rem 0;">
 
           <div>
-            <h4 style="color: var(--danger); margin-bottom: 0.5rem;">Danger Zone</h4>
-            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+            <h4 style="color: var(--danger); margin-bottom: 0.5rem; font-weight: 800;">Danger Zone</h4>
+            <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1rem;">
               Permanently delete this server instance, its configuration, and world data.
             </p>
             <button class="btn btn-danger btn-sm" onclick="deleteCurrentServer()">Delete Server</button>
@@ -231,7 +370,7 @@
   <div id="create-server-modal" class="modal-overlay" style="display: none;">
     <div class="modal-content">
       <div class="modal-header">
-        <h3>Create Minecraft Server</h3>
+        <h3>Deploy Minecraft Server</h3>
         <button class="close-btn" onclick="closeModal('create-server-modal')">&times;</button>
       </div>
       <form onsubmit="handleCreateServer(event)">
@@ -259,22 +398,24 @@
           <div class="form-group">
             <label>Port</label>
             <input id="new-server-port" type="number" class="form-input" required value="25565">
-            <small style="color: var(--text-muted); font-size: 0.725rem; display: block; margin-top: 0.25rem;">Default: 25565. Use 25566, 25567 for other servers.</small>
+            <small style="color: var(--text-dim); font-size: 0.725rem; display: block; margin-top: 0.25rem;">Default: 25565. Use 25566, 25567 for others.</small>
           </div>
           <div class="form-group">
             <label>RAM Max (MB)</label>
             <input id="new-server-mem-max" type="number" class="form-input" required value="2048" step="512">
             <input id="new-server-mem-min" type="hidden" value="1024">
-            <small style="color: var(--text-muted); font-size: 0.725rem; display: block; margin-top: 0.25rem;">Tip: Leave at least 512MB free for Ubuntu.</small>
+            <small style="color: var(--text-dim); font-size: 0.725rem; display: block; margin-top: 0.25rem;">Tip: Leave at least 512MB for Ubuntu.</small>
           </div>
         </div>
-        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
-          <input id="new-server-autodl" type="checkbox" checked>
-          <label for="new-server-autodl" style="margin: 0; cursor: pointer;">Auto-download server JAR and accept EULA</label>
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.65rem; margin-top: 1rem;">
+          <input id="new-server-autodl" type="checkbox" checked style="width: 16px; height: 16px; accent-color: var(--primary);">
+          <label for="new-server-autodl" style="margin: 0; cursor: pointer; text-transform: none; font-size: 0.85rem; color: #fff;">
+            Auto-download server JAR and accept EULA
+          </label>
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem;">
           <button type="button" class="btn btn-secondary" onclick="closeModal('create-server-modal')">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Server</button>
+          <button type="submit" class="btn btn-primary">Deploy Server</button>
         </div>
       </form>
     </div>
@@ -282,13 +423,13 @@
 
   <!-- Modal: File Text Editor -->
   <div id="editor-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-content" style="max-width: 800px; height: 80vh; display: flex; flex-direction: column;">
+    <div class="modal-content" style="max-width: 860px; height: 85vh; display: flex; flex-direction: column;">
       <div class="modal-header">
-        <h3 id="editor-modal-title" style="font-family: var(--font-mono); font-size: 1rem;">File Editor</h3>
+        <h3 id="editor-modal-title" style="font-family: var(--font-mono); font-size: 0.95rem;">File Editor</h3>
         <button class="close-btn" onclick="closeModal('editor-modal')">&times;</button>
       </div>
       <input type="hidden" id="editor-file-path">
-      <textarea id="editor-content" class="form-textarea" style="flex: 1; font-family: var(--font-mono); font-size: 0.85rem; resize: none; margin-bottom: 1rem;"></textarea>
+      <textarea id="editor-content" class="form-textarea" style="flex: 1; font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.5; resize: none; margin-bottom: 1rem; background: #06090f; border-color: rgba(255,255,255,0.08);"></textarea>
       <div style="display: flex; justify-content: flex-end; gap: 0.5rem;">
         <button class="btn btn-secondary" onclick="closeModal('editor-modal')">Cancel</button>
         <button class="btn btn-primary" onclick="saveFileContent()">Save Changes</button>
@@ -304,4 +445,3 @@
   <script src="/js/app.js"></script>
 </body>
 </html>
-

@@ -13,6 +13,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
@@ -23,9 +24,17 @@ DATA_DIR="/var/lib/neopanel"
 SERVICE_FILE="/etc/systemd/system/neopanel.service"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="neopanel"
+LOG_FILE="/tmp/neopanel-install.log"
+
+# Prevent apt interactive prompts from hanging in background
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
+# Initialize log file
+: > "$LOG_FILE"
 
 # -----------------------------------------------------------------------------
-# Helper Functions
+# Premium UI & Animated Progress System
 # -----------------------------------------------------------------------------
 
 print_banner() {
@@ -57,6 +66,65 @@ log_warn() {
 
 log_error() {
   echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Renders a sleek progress bar with live percentage and label
+draw_progress() {
+  local pct="$1"
+  local text="$2"
+  local bar_width=28
+  local filled=$(( pct * bar_width / 100 ))
+  local empty=$(( bar_width - filled ))
+
+  local bar=""
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do bar+="░"; done
+
+  # Carriage return with padding to cleanly overwrite line
+  printf "\r  ${CYAN}[${GREEN}%s${CYAN}] ${BOLD}%3d%%${NC}  %-48s" "$bar" "$pct" "$text"
+}
+
+# Executes a background task silently while rendering an animated spinner & smooth percentage progress
+run_step() {
+  local start_pct="$1"
+  local end_pct="$2"
+  local label="$3"
+  local cmd="$4"
+
+  # Execute command in background, routing all output to log file
+  eval "$cmd" >> "$LOG_FILE" 2>&1 &
+  local pid=$!
+
+  local cur=$start_pct
+  local spin_idx=0
+  local spinners=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+
+  while kill -0 "$pid" 2>/dev/null; do
+    local char="${spinners[$spin_idx]}"
+    spin_idx=$(( (spin_idx + 1) % 10 ))
+
+    draw_progress "$cur" "${char} ${label}..."
+    if [ "$cur" -lt $((end_pct - 1)) ]; then
+      cur=$(( cur + 1 ))
+    fi
+    sleep 0.12
+  done
+
+  wait "$pid"
+  local exit_code=$?
+
+  if [ "$exit_code" -eq 0 ]; then
+    draw_progress "$end_pct" "✔ ${label}"
+    echo ""
+  else
+    draw_progress "$cur" "✖ ${label} (FAILED)"
+    echo -e "\n\n${RED}${BOLD}================================================================${NC}"
+    echo -e "${RED}${BOLD}           Installation Error on Step: ${label}                  ${NC}"
+    echo -e "${RED}${BOLD}================================================================${NC}\n"
+    tail -n 35 "$LOG_FILE"
+    echo -e "\n${YELLOW}Full detailed installation log saved to: ${LOG_FILE}${NC}\n"
+    exit 1
+  fi
 }
 
 check_root() {
@@ -96,74 +164,49 @@ generate_secret() {
 }
 
 # -----------------------------------------------------------------------------
-# Dependency Management
+# Background Installation Steps
 # -----------------------------------------------------------------------------
 
-install_prerequisites() {
-  log_info "Updating system packages..."
+step_prerequisites() {
   apt-get update -y -q
-
-  log_info "Installing essential utilities (curl, wget, jq, tar, ufw, ca-certificates)..."
-  apt-get install -y -q curl wget jq tar ufw ca-certificates software-properties-common git
-
-  log_success "Base dependencies installed."
+  apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+    curl wget jq tar ufw ca-certificates software-properties-common git
 }
 
-install_java() {
-  log_info "Installing Java OpenJDK Runtimes for Minecraft (Java 21 & 17)..."
+step_java() {
   apt-get update -y -q
-  apt-get install -y -q openjdk-21-jre-headless openjdk-17-jre-headless
+  apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+    openjdk-21-jre-headless openjdk-17-jre-headless
+}
 
-  if command -v java &>/dev/null; then
-    JAVA_VER=$(java -version 2>&1 | head -n 1)
-    log_success "Java installed successfully: $JAVA_VER"
-  else
-    log_error "Java installation failed."
+step_go_compiler() {
+  if ! command -v go &>/dev/null; then
+    apt-get update -y -q
+    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" golang-go
   fi
 }
 
-# -----------------------------------------------------------------------------
-# Binary & Service Setup
-# -----------------------------------------------------------------------------
-
-install_neopanel_binary() {
-  log_info "Setting up NeoPanel core binary..."
-
-  # Create directories
+step_build_neopanel() {
   mkdir -p "$CONFIG_DIR"
   mkdir -p "$DATA_DIR/servers"
   mkdir -p "$DATA_DIR/backups"
 
-  # If running from local source tree, compile or copy
   if [ -f "./cmd/neopanel/main.go" ]; then
-    log_info "Compiling NeoPanel from local source..."
-    if ! command -v go &>/dev/null; then
-      log_info "Installing Go compiler..."
-      apt-get install -y -q golang-go
-    fi
     go mod tidy
     go build -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
   else
-    log_info "Downloading NeoPanel source and compiling..."
-    if ! command -v go &>/dev/null; then
-      log_info "Installing Go compiler..."
-      apt-get install -y -q golang-go
-    fi
     TMP_DIR=$(mktemp -d)
-    log_info "Cloning repository from https://github.com/Pekly/NeoPanel.git..."
     git clone https://github.com/Pekly/NeoPanel.git "$TMP_DIR"
     if [ -f "$TMP_DIR/cmd/neopanel/main.go" ]; then
-      log_info "Resolving dependencies and compiling binary..."
       (cd "$TMP_DIR" && go mod tidy && go build -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
       rm -rf "$TMP_DIR"
     else
-      log_error "Failed to clone repository or main.go not found."
+      echo "Failed to clone repository or main.go missing." >&2
       exit 1
     fi
   fi
 
   chmod +x "$INSTALL_DIR/$BINARY_NAME"
-  log_success "Binary installed at $INSTALL_DIR/$BINARY_NAME"
 
   # Install global neopanel-update command shortcut
   cat > "$INSTALL_DIR/neopanel-update" <<'EOF'
@@ -172,17 +215,14 @@ set -e
 bash <(curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh) --update
 EOF
   chmod +x "$INSTALL_DIR/neopanel-update"
-  log_success "Global updater command created: 'neopanel-update'"
 }
 
-create_config() {
+step_config_service() {
   local host="$1"
   local port="$2"
 
   local secret
   secret=$(generate_secret)
-
-  log_info "Generating configuration at $CONFIG_DIR/config.yaml..."
 
   cat > "$CONFIG_DIR/config.yaml" <<EOF
 server:
@@ -204,11 +244,6 @@ java:
 EOF
 
   chmod 600 "$CONFIG_DIR/config.yaml"
-  log_success "Configuration generated with secure random JWT secret."
-}
-
-create_systemd_service() {
-  log_info "Creating systemd service at $SERVICE_FILE..."
 
   cat > "$SERVICE_FILE" <<EOF
 [Unit]
@@ -231,33 +266,23 @@ EOF
   systemctl daemon-reload
   systemctl enable neopanel
   systemctl restart neopanel
-  log_success "NeoPanel systemd service created and started."
 }
 
-# -----------------------------------------------------------------------------
-# SSL & Reverse Proxy (Caddy)
-# -----------------------------------------------------------------------------
-
-setup_ssl_caddy() {
+step_ssl_caddy() {
   local domain="$1"
   local email="$2"
-
-  log_info "Installing Caddy web server for automated Let's Encrypt SSL..."
 
   apt-get install -y -q debian-keyring debian-archive-keyring apt-transport-https curl
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg 2>/dev/null
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
   apt-get update -y -q
-  apt-get install -y -q caddy
-
-  log_info "Configuring automated SSL reverse proxy for domain: $domain..."
+  apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" caddy
 
   cat > /etc/caddy/Caddyfile <<EOF
 ${domain} {
     encode gzip zstd
     tls ${email}
 
-    # Proxy WebSocket & API traffic to NeoPanel
     reverse_proxy 127.0.0.1:${PANEL_PORT} {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
@@ -266,34 +291,16 @@ ${domain} {
 EOF
 
   systemctl restart caddy
-  log_success "Caddy configured! Let's Encrypt certificate will be provisioned automatically."
 }
 
-# -----------------------------------------------------------------------------
-# Firewall Configuration
-# -----------------------------------------------------------------------------
-
-configure_firewall() {
-  log_info "Configuring UFW firewall..."
-
-  # Keep SSH open first!
+step_firewall() {
   ufw allow 22/tcp >/dev/null 2>&1 || true
-
-  # Allow Web ports
   ufw allow 80/tcp >/dev/null 2>&1
   ufw allow 443/tcp >/dev/null 2>&1
-
-  # Allow Panel standalone port if no SSL
   ufw allow "${PANEL_PORT}/tcp" >/dev/null 2>&1
-
-  # Allow common Minecraft server port range (25565-25600 TCP/UDP)
   ufw allow 25565:25600/tcp >/dev/null 2>&1
   ufw allow 25565:25600/udp >/dev/null 2>&1
-
-  # Enable UFW non-interactively
   echo "y" | ufw enable >/dev/null 2>&1
-
-  log_success "Firewall rules applied: SSH (22), HTTP (80), HTTPS (443), Minecraft (25565-25600)."
 }
 
 # -----------------------------------------------------------------------------
@@ -319,58 +326,63 @@ run_full_installation() {
   local bind_host="0.0.0.0"
 
   if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
-    echo -e "${CYAN}[REMINDER] Before proceeding, ensure your domain's DNS 'A' record points to this server's IP (${pub_ip}).${NC}"
-    echo -e "${YELLOW}           If DNS has not propagated yet, Let's Encrypt certificate issuance may fail.${NC}\n"
+    echo -e "\n${CYAN}[REMINDER] Ensure your domain's DNS 'A' record points to this server's IP (${pub_ip}).${NC}"
+    echo -e "${YELLOW}           If DNS has not propagated yet, Let's Encrypt certificate issuance will fail.${NC}\n"
 
     read -p "Enter your Domain name (e.g. panel.example.com): " domain
     while [ -z "$domain" ]; do
       read -p "Domain cannot be empty. Enter Domain: " domain
     done
 
-    # Quick DNS propagation check
+    # Quick DNS check
     local resolved_ip
     resolved_ip=$(getent ahostsv4 "$domain" 2>/dev/null | head -n 1 | awk '{print $1}')
     if [ -n "$resolved_ip" ] && [ "$resolved_ip" != "$pub_ip" ]; then
-      log_warn "DNS check: '$domain' resolves to $resolved_ip, but this server's public IP is $pub_ip."
-      echo -e "${YELLOW}[REMINDER] If you just updated your DNS record, it can take a few minutes to propagate.${NC}"
+      log_warn "DNS check: '$domain' resolves to $resolved_ip, but server IP is $pub_ip."
+      echo -e "${YELLOW}[REMINDER] If you just updated your DNS record, please wait a minute for propagation.${NC}"
       read -p "Do you want to continue anyway? (y/N): " override_dns
       if [[ ! "$override_dns" =~ ^[Yy]$ ]]; then
         exit 1
       fi
     fi
 
-    read -p "Enter Email for Let's Encrypt certificates: " email
+    read -p "Enter Email for Let's Encrypt certificate notices: " email
     while [ -z "$email" ]; do
       read -p "Email cannot be empty. Enter Email: " email
     done
 
-    # When behind reverse proxy, bind internally
     bind_host="127.0.0.1"
-  fi
-
-  echo -e "\n${BOLD}Starting installation process...${NC}\n"
-
-  install_prerequisites
-  install_java
-  install_neopanel_binary
-  create_config "$bind_host" "$PANEL_PORT"
-  create_systemd_service
-
-  if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
-    setup_ssl_caddy "$domain" "$email"
   fi
 
   read -p "Would you like to configure UFW firewall rules automatically? (y/n) [default: y]: " conf_ufw
   conf_ufw=${conf_ufw:-y}
+
+  # Clear terminal for clean, premium progress view
+  print_banner
+  echo -e "${BOLD}Installing NeoPanel...${NC} (Silent background execution, logs -> ${CYAN}${LOG_FILE}${NC})\n"
+
+  # Run steps with smooth percentage progress
+  run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
+  run_step 15 35 "Installing Minecraft Java 21 & 17 runtimes" "step_java"
+  run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
+  run_step 55 75 "Compiling NeoPanel core binary from source" "step_build_neopanel"
+  run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT'"
+
+  if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
+    run_step 85 95 "Setting up automated Let's Encrypt SSL & Caddy" "step_ssl_caddy '$domain' '$email'"
+  fi
+
   if [[ "$conf_ufw" =~ ^[Yy]$ ]]; then
-    configure_firewall
+    run_step 95 100 "Applying UFW firewall security rules" "step_firewall"
+  else
+    draw_progress 100 "✔ Installation completed"
+    echo ""
   fi
 
   # -----------------------------------------------------------------------------
   # Completion Banner
   # -----------------------------------------------------------------------------
-  print_banner
-  echo -e "${GREEN}${BOLD}================================================================${NC}"
+  echo -e "\n${GREEN}${BOLD}================================================================${NC}"
   echo -e "${GREEN}${BOLD}           NeoPanel Installation Successfully Completed!         ${NC}"
   echo -e "${GREEN}${BOLD}================================================================${NC}\n"
 
@@ -411,11 +423,7 @@ run_full_installation() {
 # Update Flow
 # -----------------------------------------------------------------------------
 
-update_neopanel() {
-  print_banner
-  check_root
-  log_info "Initiating seamless update from GitHub repository..."
-
+step_update_fetch() {
   if ! command -v git &>/dev/null; then
     apt-get update -y -q && apt-get install -y -q git
   fi
@@ -423,58 +431,43 @@ update_neopanel() {
     apt-get update -y -q && apt-get install -y -q golang-go
   fi
 
-  TMP_DIR=$(mktemp -d)
-  log_info "Cloning latest commits from https://github.com/Pekly/NeoPanel.git..."
-  if ! git clone --depth 1 https://github.com/Pekly/NeoPanel.git "$TMP_DIR"; then
-    log_error "Failed to clone repository from GitHub."
-    rm -rf "$TMP_DIR"
-    exit 1
-  fi
+  UPDATE_TMP=$(mktemp -d)
+  git clone --depth 1 https://github.com/Pekly/NeoPanel.git "$UPDATE_TMP"
+}
 
-  LATEST_COMMIT=$(cd "$TMP_DIR" && git log -1 --format="%h - %s (%cr)")
-  log_info "Target version: ${LATEST_COMMIT}"
+step_update_compile() {
+  (cd "$UPDATE_TMP" && go mod tidy && go build -ldflags="-s -w" -o "$UPDATE_TMP/neopanel_new" ./cmd/neopanel)
+}
 
-  log_info "Tidying module dependencies..."
-  (cd "$TMP_DIR" && go mod tidy)
-
-  log_info "Compiling fresh NeoPanel binary..."
-  if ! (cd "$TMP_DIR" && go build -ldflags="-s -w" -o "$TMP_DIR/neopanel_new" ./cmd/neopanel); then
-    log_error "Build failed! Current running version was not modified."
-    rm -rf "$TMP_DIR"
-    exit 1
-  fi
-
-  # Backup previous binary
+step_update_swap() {
   if [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
     cp "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/${BINARY_NAME}.bak"
   fi
 
-  # Atomically replace binary
-  mv "$TMP_DIR/neopanel_new" "$INSTALL_DIR/$BINARY_NAME"
+  mv "$UPDATE_TMP/neopanel_new" "$INSTALL_DIR/$BINARY_NAME"
   chmod +x "$INSTALL_DIR/$BINARY_NAME"
-  rm -rf "$TMP_DIR"
+  rm -rf "$UPDATE_TMP"
 
-  log_info "Restarting NeoPanel service..."
   systemctl restart neopanel
   sleep 1
+  systemctl is-active --quiet neopanel
+}
 
-  if systemctl is-active --quiet neopanel; then
-    echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-    echo -e "${GREEN}${BOLD}           NeoPanel Successfully Updated to Latest Version!     ${NC}"
-    echo -e "${GREEN}${BOLD}================================================================${NC}\n"
-    echo -e "  ${BOLD}Installed Commit:${NC} ${CYAN}${LATEST_COMMIT}${NC}"
-    echo -e "  ${BOLD}Service Status:${NC}   ${GREEN}Active & Running (systemd)${NC}"
-    echo -e "  ${BOLD}Dashboard:${NC}        All database records, servers & configs preserved.\n"
-    echo -e "${GREEN}================================================================${NC}\n"
-  else
-    log_error "Service failed to restart cleanly! Rolling back binary..."
-    if [ -f "$INSTALL_DIR/${BINARY_NAME}.bak" ]; then
-      mv "$INSTALL_DIR/${BINARY_NAME}.bak" "$INSTALL_DIR/$BINARY_NAME"
-      systemctl restart neopanel
-    fi
-    log_error "Check system logs with: journalctl -u neopanel -n 50"
-    exit 1
-  fi
+update_neopanel() {
+  print_banner
+  check_root
+  echo -e "${BOLD}Updating NeoPanel to Latest Release...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
+
+  run_step 0 35 "Fetching latest updates from GitHub" "step_update_fetch"
+  run_step 35 75 "Compiling fresh NeoPanel binary" "step_update_compile"
+  run_step 75 100 "Restarting service and verifying health" "step_update_swap"
+
+  echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+  echo -e "${GREEN}${BOLD}           NeoPanel Successfully Updated to Latest Version!     ${NC}"
+  echo -e "${GREEN}${BOLD}================================================================${NC}\n"
+  echo -e "  ${BOLD}Service Status:${NC}   ${GREEN}Active & Running (systemd)${NC}"
+  echo -e "  ${BOLD}Dashboard:${NC}        All database records, servers & configs preserved.\n"
+  echo -e "${GREEN}================================================================${NC}\n"
 }
 
 # -----------------------------------------------------------------------------
@@ -505,17 +498,23 @@ interactive_menu() {
       ;;
     3)
       check_root
-      install_java
+      print_banner
+      run_step 0 100 "Installing Java 21 & 17 runtimes" "step_java"
+      log_success "Java installed successfully."
       ;;
     4)
       check_root
       read -p "Enter Domain: " dom
       read -p "Enter Email: " em
-      setup_ssl_caddy "$dom" "$em"
+      print_banner
+      run_step 0 100 "Configuring Let's Encrypt SSL & Caddy" "step_ssl_caddy '$dom' '$em'"
+      log_success "SSL configured."
       ;;
     5)
       check_root
-      configure_firewall
+      print_banner
+      run_step 0 100 "Configuring UFW Firewall" "step_firewall"
+      log_success "Firewall configured."
       ;;
     6)
       systemctl restart neopanel
@@ -557,15 +556,14 @@ else
       ;;
     --java)
       check_root
-      install_java
+      run_step 0 100 "Installing Java 21 & 17 runtimes" "step_java"
       ;;
     --firewall)
       check_root
-      configure_firewall
+      run_step 0 100 "Configuring UFW Firewall" "step_firewall"
       ;;
     *)
       interactive_menu
       ;;
   esac
 fi
-
