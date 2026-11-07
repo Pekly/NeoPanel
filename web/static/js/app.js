@@ -644,89 +644,156 @@ function liveCon() {
 const V = {
   dash() {
     const srv = curServer();
-    const on = S.status === 'online';
-    const c = on ? S.cpu.at(-1) : 0;
-    const maxRamMB = getServerMaxRamMB(srv);
-    const maxRamGB = (maxRamMB / 1024).toFixed(1);
-    const r = on ? ((S.ram.at(-1) / 100) * parseFloat(maxRamGB)).toFixed(1) : '0.0';
-    const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
+    const runningCount = S.servers.filter(s => (s.stats?.status || s.status) === 'running' || (s.stats?.status || s.status) === 'online').length;
+    const totalCount = S.servers.length;
+    const totalRamAllocatedMB = S.servers.reduce((sum, s) => sum + getServerMaxRamMB(s), 0);
+    const totalRamAllocatedGB = (totalRamAllocatedMB / 1024).toFixed(1);
+    const totalRamUsedGB = S.status === 'online' ? ((S.ram.at(-1) / 100) * (totalRamAllocatedMB / 1024)).toFixed(1) : '0.0';
 
-    return `<header class="top">
-      <h1>Dashboard</h1>
-      <span class="sp"></span>
-      <button class="btn pr" onclick="openCreateServerModal()">${ic('plus', 15)} Create Server</button>
-    </header>
-    
-    ${S.servers.length > 1 ? `
-      <div class="row" style="margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
-        ${S.servers.map((s, i) => `
-          <button class="btn ${i === S.cs ? 'pr' : ''}" onclick="switchServer(${i})">
-            <b>${esc(s.name)}</b> <span class="badge ${(s.stats?.status || s.status) === 'running' ? 'online' : 'offline'}" style="margin-left:6px;"><i class="dot"></i>${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'}</span>
-          </button>
-        `).join('')}
+    return `
+    <div class="row sb" style="margin-bottom: 24px; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
+      <div>
+        <h1 style="font-size: 26px; font-weight: 800; color: #fff; margin-bottom: 4px; letter-spacing: -0.02em;">Servers</h1>
+        <span class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} &bull; ${totalCount} running</span>
       </div>
-    ` : ''}
-
-    <div class="grid g4">
-      <div class="card stat">
-        <span>Players online</span>
-        <b>${S.players.length} / ${S.props.max}</b>
-        <div class="bar"><i style="width:${Math.min(100, (S.players.length / S.props.max) * 100)}%"></i></div>
-      </div>
-      <div class="card stat">
-        <span>Ticks per second</span>
-        <b>${on ? S.tps.toFixed(2) : '0.00'}</b>
-        <span class="mu">Target 20.00</span>
-      </div>
-      <div class="card stat">
-        <span>Uptime</span>
-        <b style="font-size:21px;padding:5px 0">${up()}</b>
-        <span class="mu">Since last start</span>
-      </div>
-      <div class="card stat">
-        <span>Game Address</span>
-        <b style="font-size:17px;padding:7px 0" class="mono pv">${hostAddr}</b>
-        <button class="btn sm" onclick="navigator.clipboard.writeText('${hostAddr}'); toast('Address copied!')">Copy</button>
+      <div class="row" style="gap: 10px; flex-wrap: wrap;">
+        <div style="position: relative;">
+          <input type="text" id="srv-filter" placeholder="Filter by name or address" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
+          <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
+        </div>
+        <div class="row" style="gap: 2px; background: rgba(255,255,255,0.04); padding: 3px; border-radius: 8px; border: 1px solid var(--border);">
+          <button class="btn sm pr" style="height: 28px; padding: 0 12px;">Mine</button>
+          <button class="btn sm" style="height: 28px; padding: 0 12px; border: 0; background: transparent;">Others</button>
+        </div>
+        <button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
+          ${ic('plus', 14)} Create server
+        </button>
       </div>
     </div>
 
-    <div class="grid g2" style="margin-top:14px">
-      <div class="card">
-        <div class="row sb"><h2>CPU Load</h2><b>${c.toFixed(0)}%</b></div>
-        ${spark(on ? S.cpu : S.cpu.map(() => 0), 100)}
-      </div>
-      <div class="card">
-        <div class="row sb"><h2>Memory</h2><b>${r} / ${maxRamGB} GB</b></div>
-        ${spark(on ? S.ram : S.ram.map(() => 0), 100)}
-      </div>
-    </div>
+    <div style="display: grid; grid-template-columns: 1fr 310px; gap: 20px; align-items: start;">
+      <!-- Left Column: Server Cards Grid -->
+      <div id="srv-card-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px;">
+        ${S.servers.map((s, i) => {
+          const isRun = (s.stats?.status || s.status) === 'running' || (s.stats?.status || s.status) === 'online' || (i === S.cs && S.status === 'online');
+          const maxRam = getServerMaxRamMB(s);
+          const cVal = isRun ? (i === S.cs ? S.cpu.at(-1) : 2) : 0;
+          const mVal = isRun ? (i === S.cs ? ((S.ram.at(-1) / 100) * maxRam).toFixed(0) : Math.round(maxRam * 0.4)) : 0;
+          const host = `${window.location.hostname}:${s.port || 25565}`;
+          const coreLabel = (s.type || 'paper').charAt(0).toUpperCase() + (s.type || 'paper').slice(1);
 
-    <div class="grid g2" style="margin-top:14px">
-      <div class="card">
-        <h2>Server List Preview</h2>
-        <div class="slist">
-          <i class="cube"></i>
-          <div>
-            <b>${esc(S.props.motd)}</b>
-            <div class="mu">${S.core} ${S.ver}, ${S.players.length}/${S.props.max} players</div>
+          return `
+          <div class="sift-server-card" onclick="switchServer(${i}); go('con');" data-name="${esc(s.name)}" data-addr="${host}">
+            <div class="srv-card-banner" style="background-image: url('/img/banner.jpg');">
+              <span class="srv-card-badge">Minecraft - ${esc(coreLabel)}</span>
+              <span class="srv-card-refresh" onclick="event.stopPropagation(); refreshServerStatus();" title="Refresh">↻</span>
+            </div>
+            <div class="srv-card-body">
+              <div class="srv-card-title-row">
+                <span class="srv-card-title">${esc(s.name || 'Minecraft Server')}</span>
+                <span class="badge ${isRun ? 'online' : 'offline'}">
+                  <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
+                  ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${up()}</span>` : ''}
+                </span>
+              </div>
+              <div class="srv-card-addr">${host}</div>
+              <div class="srv-meters-row">
+                <div class="srv-meter">
+                  <div class="srv-meter-head">
+                    <span>CPU</span>
+                    <span class="srv-meter-val">${cVal.toFixed(0)}%</span>
+                  </div>
+                  <div class="meter-bar"><i style="width:${Math.min(100, cVal)}%"></i></div>
+                </div>
+                <div class="srv-meter">
+                  <div class="srv-meter-head">
+                    <span>Memory</span>
+                    <span class="srv-meter-val">${mVal} MB</span>
+                  </div>
+                  <div class="meter-bar"><i style="width:${Math.min(100, (mVal / (maxRam || 1)) * 100)}%"></i></div>
+                </div>
+                <div class="srv-meter">
+                  <div class="srv-meter-head">
+                    <span>Disk</span>
+                    <span class="srv-meter-val">222 MB</span>
+                  </div>
+                  <div class="meter-bar"><i style="width:14%"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+
+        <!-- Dashed Create Server Card -->
+        <div class="create-server-dashed-card" onclick="openCreateServerModal()">
+          <div class="create-icon-bubble">
+            ${ic('plus', 18)}
           </div>
-          <span class="ping"><i></i><i></i><i></i><i></i></span>
+          <span>Create a server</span>
         </div>
       </div>
-      <div class="card">
-        <h2>Players (Last 24 Hours)</h2>
-        <svg class="spark" viewBox="0 0 240 70" preserveAspectRatio="none" aria-hidden="true">
-          ${[3, 2, 1, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 14, 15, 17, 16, 13, 10, 7, 4].map((v, i) => `
-            <rect x="${i * 10 + 1}" y="${70 - v * 4}" width="8" height="${v * 4}" rx="1" fill="var(--ac)" opacity="${0.35 + v / 25}"/>
-          `).join('')}
-        </svg>
-      </div>
-    </div>
 
-    <div class="card" style="margin-top:14px">
-      <h2>Recent Server Activity</h2>
-      <div class="mono mu" style="font-size:12.5px; line-height: 1.7;">
-        ${S.log.slice(-6).map(l => `<div>${l}</div>`).join('') || '<div>No recent activity recorded.</div>'}
+      <!-- Right Column: Recent Activity & Allocation -->
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Recent Activity Card -->
+        <div class="card" style="padding: 18px;">
+          <div class="row sb" style="margin-bottom: 14px;">
+            <h2 style="font-size: 15px; font-weight: 700; color: #fff;">Recent activity</h2>
+            <a href="#act" onclick="go('act')" class="mu" style="font-size: 12px; text-decoration: none;">View all</a>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; font-size: 13px;">
+              <div style="display: flex; gap: 8px;">
+                <span class="mu" style="color: var(--tx-dim);">&rarr;</span>
+                <div>
+                  <div style="font-weight: 600; color: #fff;">Signed in</div>
+                  <div class="mu mono" style="font-size: 11.5px;">${esc(S.acct.un || 'admin')} &bull; ${window.location.hostname}</div>
+                </div>
+              </div>
+              <span class="mu" style="font-size: 12px;">12m</span>
+            </div>
+            ${S.servers.length ? `
+              <div style="display: flex; align-items: flex-start; justify-content: space-between; font-size: 13px;">
+                <div style="display: flex; gap: 8px;">
+                  <span class="mu" style="color: var(--tx-dim);">&rarr;</span>
+                  <div>
+                    <div style="font-weight: 600; color: #fff;">Server registered</div>
+                    <div class="mu" style="font-size: 11.5px;">${esc(S.servers[0].name)} &bull; ${esc(S.servers[0].type || 'paper')}</div>
+                  </div>
+                </div>
+                <span class="mu" style="font-size: 12px;">2h</span>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Your Allocation Card -->
+        <div class="card" style="padding: 18px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 14px;">Your allocation</h2>
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div>
+              <div class="row sb" style="font-size: 12px; margin-bottom: 5px;">
+                <span class="mu">Memory</span>
+                <span class="mono" style="font-weight: 600; color: #fff;">${totalRamUsedGB} of ${totalRamAllocatedGB} GB</span>
+              </div>
+              <div class="meter-bar"><i style="width: ${Math.min(100, (parseFloat(totalRamUsedGB) / (parseFloat(totalRamAllocatedGB) || 1)) * 100)}%;"></i></div>
+            </div>
+            <div>
+              <div class="row sb" style="font-size: 12px; margin-bottom: 5px;">
+                <span class="mu">Disk</span>
+                <span class="mono" style="font-weight: 600; color: #fff;">0.2 of 10 GB</span>
+              </div>
+              <div class="meter-bar"><i style="width: 12%;"></i></div>
+            </div>
+            <div>
+              <div class="row sb" style="font-size: 12px; margin-bottom: 5px;">
+                <span class="mu">Running</span>
+                <span class="mono" style="font-weight: 600; color: #fff;">${runningCount} of ${totalCount}</span>
+              </div>
+              <div class="meter-bar"><i style="width: ${Math.min(100, (runningCount / (totalCount || 1)) * 100)}%;"></i></div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>`;
   },
@@ -745,7 +812,7 @@ const V = {
         <div class="con" id="log" role="log" aria-live="polite"></div>
         <div class="cin">
           <span>&raquo;</span>
-          <input id="cmd" autocomplete="off" spellcheck="false" placeholder="${S.status === 'online' ? 'Type a command, try help...' : 'Server is offline'}" aria-label="Console command" ${S.status !== 'online' ? 'disabled' : ''}>
+          <input id="cmd" autocomplete="off" spellcheck="false" placeholder="Type a command..." aria-label="Console command">
         </div>
       </div>
       <div class="card stc" id="stc">${statsHtml()}</div>
@@ -826,100 +893,169 @@ const V = {
   },
 
   fi() {
-    const f = S.ftab;
-    return `${srvh()}
-    <div class="grid" style="grid-template-columns: minmax(240px, 320px) 1fr; gap:14px; margin-top:14px;">
-      <!-- Left Column: File Explorer -->
-      <div class="card" style="display:flex; flex-direction:column; gap:10px;">
-        <div class="row sb">
-          <div class="row" style="gap:6px; overflow:hidden;">
-            ${ic('folder', 16)}
-            <b class="mono" style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">/server${S.currentDir ? '/' + S.currentDir : ''}</b>
+    const f = S.editingFile || S.ftab;
+    if (S.editingFile) {
+      return `${srvh()}
+      <div style="margin-top: 16px;">
+        <div class="row sb" style="margin-bottom: 12px; gap: 12px;">
+          <div class="row" style="gap: 8px;">
+            <button class="btn sm" onclick="closeEditor()">&larr; Back to files</button>
+            <span class="mono" style="font-weight: 600; font-size: 14px; color: #fff;">${esc(S.editingFile)}</span>
           </div>
-          <div class="row" style="gap:4px;">
-            <button class="btn sm" onclick="promptNewFile()" title="New File">${ic('file', 14)} New</button>
-            <button class="btn sm" onclick="promptNewFolder()" title="New Folder">${ic('folder', 14)} Dir</button>
-            <button class="btn sm pr" onclick="uploadFileDialog()" title="Upload File">${ic('download', 14)} Up</button>
+          <div class="row" style="gap: 8px;">
+            <button class="btn sm" onclick="downloadFileItem('${esc(S.editingFile)}')">${ic('download', 14)} Download</button>
+            <button class="btn sm pr" onclick="saveActiveFile()">${ic('download', 14)} Save File</button>
           </div>
         </div>
+        <textarea id="ed" spellcheck="false" aria-label="File editor">${esc(S.files[S.editingFile] || '')}</textarea>
+      </div>`;
+    }
 
-        ${S.currentDir ? `<button class="btn sm" onclick="browseFolder('..')" style="text-align:left;">📁 .. (Parent folder)</button>` : ''}
-        
-        <div style="max-height: calc(100vh - 360px); overflow-y:auto; display:flex; flex-direction:column; gap:2px;">
-          ${S.fileList.map((item, idx) => `
-            <div class="fitem ${f === item.name ? 'on' : ''}">
-              <div class="row" style="flex:1; min-width:0;" onclick="${item.is_dir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">
-                ${item.is_dir ? ic('folder', 16) : ic('file', 16)}
-                <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; margin-left:6px;">${esc(item.name)}</span>
-              </div>
-              <div class="factions">
-                ${!item.is_dir ? `<button class="btn sm" onclick="downloadFileItem('${esc(item.path || item.name)}')">${ic('download', 12)}</button>` : ''}
-                <button class="btn sm" onclick="promptRenameFile('${esc(item.path || item.name)}')">${ic('edit', 12)}</button>
-                <button class="btn sm dg" onclick="deleteFileItem('${esc(item.path || item.name)}')">${ic('trash', 12)}</button>
-              </div>
-            </div>
-          `).join('') || '<div class="mu" style="font-size:12px; padding:12px; text-align:center;">Directory is empty</div>'}
+    const pathParts = (S.currentDir || '').split('/').filter(Boolean);
+    const isSubdir = pathParts.length > 0;
+
+    return `${srvh()}
+    <div style="margin-top: 16px;">
+      <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <!-- Breadcrumb Navigation -->
+        <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500;">
+          <span onclick="browseFolder('')" style="color: var(--tx-muted); cursor: pointer;">/ home / container /</span>
+          ${pathParts.map((part, idx) => {
+            const sub = pathParts.slice(0, idx + 1).join('/');
+            const isLast = idx === pathParts.length - 1;
+            return `<span onclick="browseFolder('${sub}')" style="cursor: pointer; color: ${isLast ? '#fff' : 'var(--tx-muted)'}; margin-left: 4px;">${esc(part)} /</span>`;
+          }).join('')}
+        </div>
+
+        <!-- Search & Action Buttons -->
+        <div class="row" style="gap: 10px; flex-wrap: wrap;">
+          <div style="position: relative;">
+            <input type="text" id="fi-filter" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 200px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
+            <kbd style="position: absolute; right: 10px; top: 9px; font-size: 11px; color: var(--tx-muted); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;">/</kbd>
+          </div>
+          <button class="btn" onclick="promptNewFolder()" style="height: 36px;">+ New folder</button>
+          <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('download', 14)} Upload</button>
+          <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">+ New file</button>
         </div>
       </div>
 
-      <!-- Right Column: Full-Height Code & Config Editor -->
-      <div class="card" style="display:flex; flex-direction:column;">
-        <div class="row sb" style="margin-bottom:12px;">
-          <div class="row" style="gap:8px;">
-            ${ic('file', 18)}
-            <h2 style="margin:0; font-size:16px;">${esc(f || 'Select a file to edit')}</h2>
-          </div>
-          ${f ? `<button class="btn pr" onclick="saveActiveFile()">${ic('download', 14)} Save File</button>` : ''}
-        </div>
-        <textarea id="ed" spellcheck="false" aria-label="File editor" placeholder="Select or open a configuration file from the directory browser on the left...">${esc(S.files[f] || '')}</textarea>
+      <!-- Full-Width File Table -->
+      <div class="card tw" style="padding: 0; overflow: visible;">
+        <table class="file-table" style="width: 100%;">
+          <tbody>
+            ${isSubdir ? `
+              <tr onclick="browseFolder('..')">
+                <td style="width: 44px; padding-left: 20px; color: var(--ac); font-size: 16px;">📁</td>
+                <td colspan="4" style="font-weight: 600; color: #fff;">.. (Parent folder)</td>
+              </tr>
+            ` : ''}
+            ${S.fileList.map((item, idx) => {
+              const isDir = item.is_dir;
+              const icon = isDir ? '📁' : '📄';
+              const sizeStr = formatFileSize(item.size, isDir);
+              const dateStr = formatFileDate(item.modified);
+
+              return `
+              <tr class="file-row" data-name="${esc(item.name)}" onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">
+                <td style="width: 44px; padding-left: 20px; font-size: 16px;">${icon}</td>
+                <td style="font-weight: 500; color: #fff;">${esc(item.name)}</td>
+                <td class="mu mono" style="font-size: 12.5px; width: 140px;">${sizeStr}</td>
+                <td class="mu mono" style="font-size: 12.5px; width: 180px;">${dateStr}</td>
+                <td style="width: 50px; text-align: right; padding-right: 18px; position: relative;" onclick="event.stopPropagation();">
+                  <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
+                  <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
+                    ${!isDir ? `<button onclick="openFile('${esc(item.name)}'); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
+                    ${!isDir ? `<button onclick="downloadFileItem('${esc(item.path || item.name)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
+                    <button onclick="promptRenameFile('${esc(item.path || item.name)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
+                    <button class="dg" onclick="deleteFileItem('${esc(item.path || item.name)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+            ${!S.fileList.length && !isSubdir ? '<tr><td colspan="5" class="mu" style="text-align:center; padding: 32px;">This folder is empty.</td></tr>' : ''}
+          </tbody>
+        </table>
       </div>
     </div>`;
   },
 
   plug() {
+    const isBrowse = (S.plugTab || 'browse') === 'browse';
     return `${srvh()}
-    <div class="card tw" style="margin-top:14px">
-      <table>
-        <thead><tr><th>Plugin</th><th>Version</th><th>Enabled</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>
-          ${S.plugins.length ? S.plugins.map((p, i) => `
-            <tr>
-              <td><b>${esc(p[0])}</b></td>
-              <td class="mono">${esc(p[1] || 'installed')}</td>
-              <td>
+    <div style="margin-top: 18px;">
+      <!-- Top Title and Controls Bar -->
+      <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 14px;">
+        <h1 style="font-size: 24px; font-weight: 800; color: #fff;">Plugins</h1>
+        <div class="row" style="gap: 10px; flex-wrap: wrap;">
+          <button class="btn ${isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('browse')">Browse</button>
+          <button class="btn ${!isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('installed')">Installed ${S.plugins.length}</button>
+          
+          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;" disabled>
+            <option>Source: Modrinth</option>
+          </select>
+          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;" onchange="S.core=this.value; searchModrinth();">
+            <option ${S.core === 'Paper' ? 'selected' : ''}>Software: Paper</option>
+            <option ${S.core === 'Purpur' ? 'selected' : ''}>Software: Purpur</option>
+            <option ${S.core === 'Fabric' ? 'selected' : ''}>Software: Fabric</option>
+            <option ${S.core === 'Spigot' ? 'selected' : ''}>Software: Spigot</option>
+            <option ${S.core === 'Velocity' ? 'selected' : ''}>Software: Velocity</option>
+          </select>
+          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;">
+            <option>Version: Any</option>
+            <option>1.21.4</option>
+            <option>1.20.4</option>
+            <option>1.19.4</option>
+          </select>
+          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;">
+            <option>Sort: Relevance</option>
+            <option>Sort: Downloads</option>
+            <option>Sort: Follows</option>
+            <option>Sort: Newest</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Big Search Input -->
+      <div style="position: relative; margin-bottom: 18px;">
+        <input type="text" id="store-search" placeholder="Search 19,447 plugins on Modrinth..." value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 42px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
+        <span style="position: absolute; left: 12px; top: 12px; color: var(--tx-muted);">${ic('search', 16)}</span>
+      </div>
+
+      <!-- Content Grid: Browse Modrinth Hits or Installed Plugins -->
+      ${isBrowse ? `
+        <div style="display: flex; flex-direction: column; gap: 10px;" id="store-grid">
+          <div class="mu" style="padding: 24px; text-align: center;">Loading top plugins from Modrinth...</div>
+        </div>
+      ` : `
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          ${S.plugins.map((p, i) => `
+            <div class="plugin-card">
+              <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
+                <div style="width: 44px; height: 44px; border-radius: 8px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 20px;">
+                  🧩
+                </div>
+                <div>
+                  <b class="plugin-title">${esc(p[0])}</b>
+                  <div class="mu mono" style="font-size: 12px; margin-top: 3px;">${esc(p[1] || 'installed')}</div>
+                </div>
+              </div>
+              <div class="row" style="gap: 12px;">
                 <label class="sw">
                   <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
                   <i></i>
                 </label>
-              </td>
-              <td style="text-align:right">
-                <button class="btn sm dg" onclick="deletePlugin('${esc(p[0])}')">${ic('trash', 14)} Remove</button>
-              </td>
-            </tr>
-          `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No plugins found in the /plugins directory.</td></tr>'}
-        </tbody>
-      </table>
-      <div class="row sb" style="margin-top:16px; border-top:1px solid var(--ln); padding-top:14px;">
-        <span class="mu">Changes apply immediately or after the next server restart.</span>
-        <button class="btn pr" onclick="go('store')">${ic('store', 16)} Browse Modrinth Store</button>
-      </div>
+                <button class="btn sm dg" onclick="deletePlugin('${esc(p[0])}')">Uninstall</button>
+              </div>
+            </div>
+          `).join('') || '<div class="mu" style="padding: 32px; text-align: center;">No plugins installed. Switch to Browse to install plugins with one click.</div>'}
+        </div>
+      `}
     </div>`;
   },
 
   store() {
-    return `${srvh()}
-    <div class="row sb" style="margin:14px 0 12px; gap:12px;">
-      <input type="text" id="store-search" placeholder="Search thousands of plugins on Modrinth..." value="${esc(S.q)}" oninput="S.q=this.value; searchModrinthDebounced();" style="max-width:320px">
-      <div class="row" style="overflow-x:auto;">
-        ${CATS.map(c => `
-          <button class="btn sm ${S.cat === c ? 'pr' : ''}" onclick="S.cat='${c}'; searchModrinth();">${c}</button>
-        `).join('')}
-      </div>
-      <button class="btn" onclick="uploadFileDialog()">${ic('download', 14)} Upload .jar</button>
-    </div>
-    <div class="grid store" id="store-grid">
-      <div class="mu" style="padding:24px;">Loading top plugins from Modrinth...</div>
-    </div>`;
+    S.plugTab = 'browse';
+    return this.plug();
   },
 
   ver() {
@@ -1113,22 +1249,88 @@ const V = {
 
   stp() {
     const srv = curServer();
-    const mem = getServerMaxRamMB(srv);
     return `${srvh()}
-    <div class="card" style="margin-top:14px">
-      <h2>Server Startup Parameters</h2>
-      <label class="f">
-        <span>Startup Command</span>
-        <textarea id="startup-cmd" style="min-height:75px">java -Xms128M -Xmx${mem}M -XX:+UseG1GC -jar ${srv?.jar_file || 'server.jar'} nogui</textarea>
-      </label>
-      <label class="f">
-        <span>Java Runtime Environment</span>
-        <select id="startup-java">
-          <option selected>OpenJDK 21 (Recommended for 1.20.5+)</option>
-          <option>OpenJDK 17 (Legacy 1.18 - 1.20.4)</option>
-        </select>
-      </label>
-      <button class="btn pr" onclick="toast('Startup arguments saved')">Save Startup Parameters</button>
+    <div style="margin-top: 18px;">
+      <!-- Top Grid: Startup Command & Docker Image / Java -->
+      <div style="display: grid; grid-template-columns: 1fr 340px; gap: 16px; margin-bottom: 24px;">
+        <div class="card" style="padding: 20px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Startup Command</h2>
+          <div class="mono" style="background: var(--con-bg); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); color: #fff; font-size: 12.5px; line-height: 1.6; word-break: break-all;">
+            java -Xms128M -XX:MaxRAMPercentage=95.0 -Dterminal.jline=false -Dterminal.ansi=true -jar ${esc(srv?.jar_file || 'server.jar')}
+          </div>
+        </div>
+
+        <div class="card" style="padding: 20px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Docker Image / Java Runtime</h2>
+          <select id="stp-java" style="margin-bottom: 8px;">
+            <option selected>Java 21 (Recommended)</option>
+            <option>Java 17 (Legacy 1.18 - 1.20.4)</option>
+            <option>Java 8 (Legacy 1.12.2)</option>
+            <option>Java 25 (Cutting edge)</option>
+          </select>
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">This is an advanced feature allowing you to select a Docker image or Java runtime to use when running this server instance.</span>
+        </div>
+      </div>
+
+      <!-- Variables Section -->
+      <h2 style="font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 16px;">Variables</h2>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-bottom: 20px;">
+        <div class="card" style="padding: 20px;">
+          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MINECRAFT VERSION</div>
+          <input type="text" id="stp-ver" value="${esc(srv?.version || 'latest')}" style="margin-bottom: 8px; font-weight: 600;">
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The version of minecraft to download. Leave at latest to always get the latest version. Invalid versions will default to latest.</span>
+        </div>
+
+        <div class="card" style="padding: 20px;">
+          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">SERVER JAR FILE</div>
+          <input type="text" id="stp-jar" value="${esc(srv?.jar_file || 'server.jar')}" style="margin-bottom: 8px; font-weight: 600;">
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The name of the server jarfile to run the server with.</span>
+        </div>
+
+        <div class="card" style="padding: 20px;">
+          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">BUILD NUMBER</div>
+          <input type="text" id="stp-build" value="latest" style="margin-bottom: 8px; font-weight: 600;">
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The build number for the paper release. Leave at latest to always get the latest version. Invalid versions will default to latest.</span>
+        </div>
+      </div>
+
+      <button class="btn pr" onclick="saveStartupSettings()" style="padding: 10px 24px;">Save Startup Variables</button>
+    </div>`;
+  },
+
+  bill() {
+    const srv = curServer();
+    return `${srvh()}
+    <div style="margin-top: 18px;">
+      <h1 style="font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 16px;">Billing & Resource Allocation</h1>
+      <div class="grid g2" style="margin-bottom: 16px;">
+        <div class="card" style="padding: 20px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Active Server Tier</h2>
+          <div class="row sb" style="margin-bottom: 8px;">
+            <span class="mu">Plan Name</span>
+            <b style="color: #fff;">NeoPanel Dedicated vCPU Tier 1</b>
+          </div>
+          <div class="row sb" style="margin-bottom: 8px;">
+            <span class="mu">Allocated Memory</span>
+            <b class="mono">${getServerMaxRamMB(srv)} MB Dedicated RAM</b>
+          </div>
+          <div class="row sb" style="margin-bottom: 8px;">
+            <span class="mu">Port Allocation</span>
+            <b class="mono">${srv?.port || 25565} (Primary IPv4)</b>
+          </div>
+          <div class="row sb">
+            <span class="mu">Billing Cycle</span>
+            <span class="badge online"><i class="dot"></i>Active &bull; Renews in 30 days</span>
+          </div>
+        </div>
+
+        <div class="card" style="padding: 20px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Payment Method</h2>
+          <p class="mu" style="font-size: 13px; margin-bottom: 14px;">Direct VPS node deployment. No third-party recurring subscription fee.</p>
+          <button class="btn sm" onclick="toast('Invoice downloaded')">${ic('download', 14)} Download Receipt (.PDF)</button>
+        </div>
+      </div>
     </div>`;
   },
 
@@ -1419,15 +1621,30 @@ const V = {
       </div>`;
     }
 
-    return `<header class="top">
-      ${av(40)}
-      <h1>Account Settings</h1>
-      <span class="sp"></span>
-      <button class="btn dg" onclick="logout()">Log Out</button>
-    </header>
+    const accTabs = [
+      ['⚙', 'General'],
+      ['🔒', 'Security'],
+      ['🔑', 'SSH Keys'],
+      ['&lt;/&gt;', 'API Keys'],
+      ['👁', 'Activity']
+    ];
+
+    return `
+    <div class="row sb" style="margin-bottom: 20px;">
+      <div class="row" style="gap: 12px; align-items: center;">
+        <div style="width: 44px; height: 44px; border-radius: 10px; background: #6366f1; display: grid; place-items: center; color: #fff; font-size: 20px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);">
+          👤
+        </div>
+        <h1 style="font-size: 24px; font-weight: 800; color: #fff;">Account Settings</h1>
+      </div>
+      <button class="btn dg sm" onclick="logout()">Log Out</button>
+    </div>
     <div class="atabs">
-      ${['General', 'Security', 'SSH Keys', 'API Keys', 'Activity'].map((x, i) => `
-        <button class="${t === i ? 'on' : ''}" onclick="S.acct.tab=${i}; R(); loadAccountData();">${x}</button>
+      ${accTabs.map(([icon, label], i) => `
+        <button class="${t === i ? 'on' : ''}" onclick="S.acct.tab=${i}; R(); loadAccountData();">
+          <span style="font-size: 13px;">${icon}</span>
+          <span>${label}</span>
+        </button>
       `).join('')}
     </div>
     ${tabContent}`;
@@ -1468,9 +1685,64 @@ function renderVersionRows() {
 
 // --- Navigation Render ---
 function navHtml() {
-  let group = '';
+  const isDash = S.view === 'dash';
 
-  return `<div class="brand" onclick="go('dash')" style="cursor:pointer;">
+  if (isDash) {
+    return `
+    <div class="brand" onclick="go('dash')" style="cursor:pointer;">
+      <i class="cube"></i>NeoPanel
+    </div>
+    
+    <button class="nsearch" onclick="openPalette(1)">
+      ${ic('search', 16)}
+      <span>Search servers or pages...</span>
+      <kbd>Ctrl K</kbd>
+    </button>
+
+    <button class="nav-item on" onclick="go('dash')">
+      ${ic('server', 16)}
+      <span>Servers</span>
+    </button>
+    <button class="nav-item ${S.view === 'act' ? 'on' : ''}" onclick="go('act')">
+      ${ic('activity', 16)}
+      <span>Activity</span>
+    </button>
+
+    <div class="ng">Billing</div>
+    <button class="nav-item ${S.view === 'store' ? 'on' : ''}" onclick="go('store')">
+      ${ic('store', 16)}
+      <span>Store</span>
+    </button>
+    <button class="nav-item" onclick="go('dash')">
+      ${ic('layers', 16)}
+      <span>Overview</span>
+    </button>
+    <button class="nav-item ${S.view === 'bill' ? 'on' : ''}" onclick="go('bill')">
+      ${ic('file', 16)}
+      <span>Invoices</span>
+    </button>
+
+    <span class="sp"></span>
+
+    <button class="nav-item ${S.view === 'admin' ? 'on' : ''}" onclick="go('admin')" style="margin-bottom:6px;">
+      ${ic('shield', 16)}
+      <span>Open Admin Area</span>
+    </button>
+
+    <button class="chip2 ${S.view === 'acc' ? 'on' : ''}" onclick="go('acc')" aria-label="Account Settings">
+      ${av(34)}
+      <span class="who">
+        <b>${esc(S.acct.fn)} ${esc(S.acct.ln)}</b>
+        <span class="mu pv">${esc(S.acct.em)}</span>
+      </span>
+      ${ic('settings', 16)}
+    </button>`;
+  }
+
+  // Inside a Server Workspace
+  let group = '';
+  return `
+  <div class="brand" onclick="go('dash')" style="cursor:pointer;">
     <i class="cube"></i>NeoPanel
   </div>
   
@@ -1480,9 +1752,8 @@ function navHtml() {
     <kbd>Ctrl K</kbd>
   </button>
 
-  <button class="nb" onclick="go('dash')">
-    ${ic('server', 16)}
-    All Servers (${S.servers.length})
+  <button class="nb" onclick="go('dash')" style="margin-bottom: 6px;">
+    &larr; All servers
   </button>
 
   ${PG.map(([key, label, iconName, grp]) => {
@@ -1500,7 +1771,7 @@ function navHtml() {
 
   <button class="nav-item ${S.view === 'admin' ? 'on' : ''}" onclick="go('admin')" style="margin-bottom:6px;">
     ${ic('shield', 16)}
-    <span>Admin Area</span>
+    <span>Open Admin Area</span>
   </button>
 
   <button class="chip2 ${S.view === 'acc' ? 'on' : ''}" onclick="go('acc')" aria-label="Account Settings">
@@ -1686,32 +1957,125 @@ function browseFolder(dirName) {
   }
 }
 
+function formatFileDate(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    const now = new Date();
+    const diffSec = Math.floor((now - d) / 1000);
+    if (diffSec < 60) return 'Just now';
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)} minutes ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} hours ago`;
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch (e) {
+    return '—';
+  }
+}
+
+function formatFileSize(bytes, isDir) {
+  if (isDir) return '—';
+  if (bytes === 0) return '0 Bytes';
+  if (!bytes) return '—';
+  const units = ['Bytes', 'KiB', 'MiB', 'GiB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 2)} ${units[i] || 'Bytes'}`;
+}
+
+function formatNum(n) {
+  if (!n) return '0';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function filterServerCards(q) {
+  const cards = $$('.sift-server-card');
+  const term = (q || '').toLowerCase();
+  cards.forEach(c => {
+    const name = (c.getAttribute('data-name') || '').toLowerCase();
+    const addr = (c.getAttribute('data-addr') || '').toLowerCase();
+    c.style.display = (name.includes(term) || addr.includes(term)) ? '' : 'none';
+  });
+}
+
+function filterFileList(q) {
+  const rows = $$('.file-row');
+  const term = (q || '').toLowerCase();
+  rows.forEach(r => {
+    const name = (r.getAttribute('data-name') || '').toLowerCase();
+    r.style.display = name.includes(term) ? '' : 'none';
+  });
+}
+
+function toggleFileCtx(e, idx) {
+  if (e) e.stopPropagation();
+  const all = $$('.file-ctx-menu');
+  all.forEach((m, i) => {
+    if (i !== idx) m.style.display = 'none';
+  });
+  const m = $(`#fctx-${idx}`);
+  if (m) {
+    m.style.display = m.style.display === 'block' ? 'none' : 'block';
+  }
+}
+
+function closeAllCtx() {
+  $$('.file-ctx-menu').forEach(m => m.style.display = 'none');
+}
+window.addEventListener('click', closeAllCtx);
+
+function closeEditor() {
+  S.editingFile = null;
+  R();
+}
+
+function setPlugTab(tab) {
+  S.plugTab = tab;
+  R();
+  if (tab === 'browse') searchModrinth();
+  else loadPluginsList();
+}
+
+async function saveStartupSettings() {
+  const srv = curServer();
+  if (!srv) return;
+  const ver = $('#stp-ver')?.value?.trim();
+  const jar = $('#stp-jar')?.value?.trim();
+  toast('Startup variables updated successfully');
+  if (ver) srv.version = ver;
+  if (jar) srv.jar_file = jar;
+}
+
 async function openFile(name) {
   const srv = curServer();
   if (!srv) return;
   const filePath = S.currentDir ? `${S.currentDir}/${name}` : name;
-  S.ftab = name;
+  S.editingFile = filePath;
+  S.ftab = filePath;
   try {
     const data = await api(`/api/servers/${srv.id}/files/content?path=${encodeURIComponent(filePath)}`);
-    S.files[name] = data.content != null ? data.content : data;
+    S.files[filePath] = data.content != null ? data.content : data;
     R();
-  } catch (e) {}
+  } catch (e) {
+    S.editingFile = null;
+  }
 }
 
 async function saveActiveFile() {
   const srv = curServer();
-  if (!srv || !S.ftab) return;
+  const filePath = S.editingFile || S.ftab;
+  if (!srv || !filePath) return;
   const ed = $('#ed');
   if (!ed) return;
   const content = ed.value;
-  const filePath = S.currentDir ? `${S.currentDir}/${S.ftab}` : S.ftab;
   try {
     await api(`/api/servers/${srv.id}/files/content`, {
       method: 'POST',
       body: JSON.stringify({ path: filePath, content })
     });
-    S.files[S.ftab] = content;
-    toast(`Saved ${S.ftab} successfully`);
+    S.files[filePath] = content;
+    toast(`Saved ${filePath.split('/').pop()} successfully`);
   } catch (e) {}
 }
 
@@ -1850,26 +2214,36 @@ async function searchModrinth() {
     grid.innerHTML = hits.map(hit => {
       const isInstalled = S.plugins.some(p => p[0].toLowerCase().includes(hit.title.toLowerCase()));
       const icon = hit.icon_url
-        ? `<img src="${esc(hit.icon_url)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';"><div style="display:none;width:40px;height:40px;border-radius:8px;background:var(--pn2);place-items:center;flex-shrink:0;">${ic('puzzle')}</div>`
-        : `<div style="width:40px;height:40px;border-radius:8px;background:var(--pn2);display:grid;place-items:center;flex-shrink:0;">${ic('puzzle')}</div>`;
+        ? `<img src="${esc(hit.icon_url)}" class="plugin-icon" onerror="this.src='/favicon.svg'">`
+        : `<div class="plugin-icon" style="display:grid; place-items:center; color:var(--ac); font-size:20px;">🧩</div>`;
 
-      return `<div class="card pc">
-        <div class="row sb" style="gap:10px;">
+      return `
+      <div class="plugin-card">
+        <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
           ${icon}
-          <div style="flex:1; min-width:0;">
-            <b style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(hit.title)}</b>
-            <span class="chip" style="font-size:11px;">${hit.categories ? hit.categories[0] : 'plugin'}</span>
+          <div style="min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+              <b class="plugin-title">${esc(hit.title)}</b>
+              <span class="mu" style="font-size: 12.5px;">by ${esc(hit.author || 'Author')}</span>
+            </div>
+            <div class="plugin-desc">${esc(hit.description || '')}</div>
+            <div class="row" style="gap: 12px; font-size: 11.5px; margin-top: 5px;">
+              <span class="mu">&darr; ${formatNum(hit.downloads)}</span>
+              <span class="mu">&hearts; ${formatNum(hit.follows || 0)} follows</span>
+              <span class="chip">Modrinth</span>
+            </div>
           </div>
         </div>
-        <p class="mu" style="font-size:12.5px; margin:8px 0 10px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${esc(hit.description || '')}</p>
-        <div class="row sb">
-          <span class="mu" style="font-size:12px;">↓ ${(hit.downloads / 1000).toFixed(0)}k</span>
-          ${isInstalled ? '<span class="badge online"><i class="dot"></i>Installed</span>' : `<button class="btn pr sm" onclick="installPlugin('${hit.project_id || hit.slug}', '${esc(hit.title)}')">Install</button>`}
+        <div>
+          ${isInstalled
+            ? '<span class="badge online"><i class="dot"></i>Installed</span>'
+            : `<button class="btn pr" onclick="installPlugin('${hit.project_id || hit.slug}', '${esc(hit.title)}')" style="min-width: 95px; justify-content: center;">${ic('download', 14)} Install</button>`
+          }
         </div>
       </div>`;
-    }).join('') || '<div class="mu" style="padding:24px;">No matching plugins found on Modrinth.</div>';
+    }).join('') || '<div class="mu" style="padding:24px; text-align:center;">No matching plugins found on Modrinth.</div>';
   } catch (e) {
-    grid.innerHTML = '<div class="mu" style="padding:24px;">Error reaching Modrinth API.</div>';
+    grid.innerHTML = '<div class="mu" style="padding:24px; text-align:center;">Error reaching Modrinth API.</div>';
   }
 }
 
@@ -2706,6 +3080,16 @@ window.loadAccountData = loadAccountData;
 window.loadPlayersData = loadPlayersData;
 window.bulkRestartServers = bulkRestartServers;
 window.bulkStopServers = bulkStopServers;
+window.filterServerCards = filterServerCards;
+window.filterFileList = filterFileList;
+window.toggleFileCtx = toggleFileCtx;
+window.closeAllCtx = closeAllCtx;
+window.closeEditor = closeEditor;
+window.setPlugTab = setPlugTab;
+window.saveStartupSettings = saveStartupSettings;
+window.formatFileDate = formatFileDate;
+window.formatFileSize = formatFileSize;
+window.formatNum = formatNum;
 
 // --- Initialize Application ---
 document.addEventListener('DOMContentLoaded', () => {
