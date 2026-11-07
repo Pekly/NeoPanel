@@ -232,3 +232,49 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "File uploaded successfully", "name": handler.Filename})
 }
 
+func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	reqPath := r.URL.Query().Get("path")
+	fullPath, err := h.safePath(serverID, reqPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	info, err := os.Stat(fullPath)
+	if err != nil || info.IsDir() {
+		http.Error(w, "File not found or is a directory", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(fullPath)))
+	w.Header().Set("Content-Type", "application/octet-stream")
+	http.ServeFile(w, r, fullPath)
+}
+
+func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	var req struct {
+		OldPath string `json:"old_path"`
+		NewPath string `json:"new_path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return
+	}
+	oldFull, err := h.safePath(serverID, req.OldPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	newFull, err := h.safePath(serverID, req.NewPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := os.Rename(oldFull, newFull); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to rename: " + err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Renamed successfully"})
+}
+
+

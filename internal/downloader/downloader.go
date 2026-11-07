@@ -46,6 +46,12 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 		downloadURL, err = getVanillaURL(version)
 	case "fabric":
 		downloadURL, err = getFabricURL(version)
+	case "velocity":
+		downloadURL, err = getVelocityURL(version)
+	case "waterfall":
+		downloadURL, err = getWaterfallURL(version)
+	case "bungeecord":
+		downloadURL, err = getBungeeCordURL()
 	default:
 		return fmt.Errorf("unsupported server flavor for auto-download: %s", flavor)
 	}
@@ -220,4 +226,60 @@ func getFabricURL(version string) (string, error) {
 	installerVersion := "1.0.1"
 	return fmt.Sprintf("https://meta.fabricmc.net/v2/versions/loader/%s/%s/%s/server/jar",
 		version, loaderVersion, installerVersion), nil
+}
+
+func getVelocityURL(version string) (string, error) {
+	if version == "" {
+		version = "3.3.0-SNAPSHOT"
+	}
+	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/velocity/versions/%s/builds", version)
+	resp, err := httpGet(apiURL)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var builds []struct {
+				Downloads map[string]struct {
+					URL string `json:"url"`
+				} `json:"downloads"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&builds) == nil && len(builds) > 0 {
+				for _, dl := range builds[0].Downloads {
+					if dl.URL != "" {
+						return dl.URL, nil
+					}
+				}
+			}
+		}
+	}
+	return "https://api.papermc.io/v2/projects/velocity/versions/3.3.0-SNAPSHOT/builds/434/downloads/velocity-3.3.0-SNAPSHOT-434.jar", nil
+}
+
+func getWaterfallURL(version string) (string, error) {
+	if version == "" {
+		version = "1.20"
+	}
+	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/waterfall/versions/%s/builds", version)
+	resp, err := httpGet(apiURL)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			var builds []struct {
+				Downloads map[string]struct {
+					URL string `json:"url"`
+				} `json:"downloads"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&builds) == nil && len(builds) > 0 {
+				for _, dl := range builds[0].Downloads {
+					if dl.URL != "" {
+						return dl.URL, nil
+					}
+				}
+			}
+		}
+	}
+	return "https://api.papermc.io/v2/projects/waterfall/versions/1.20/builds/556/downloads/waterfall-1.20-556.jar", nil
+}
+
+func getBungeeCordURL() (string, error) {
+	return "https://ci.md-5.net/job/BungeeCord/lastSuccessfulBuild/artifact/bootstrap/target/BungeeCord.jar", nil
 }

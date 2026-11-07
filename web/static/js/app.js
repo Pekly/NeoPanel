@@ -1,7 +1,41 @@
-// NeoPanel — Ultra-Lightweight Minecraft Server Manager
-// Fully reactive Vanilla JS SPA with real-time WebSocket, SFTP, Modrinth API & Backups.
+// NeoPanel — Ultra-Lightweight Minecraft Server Manager & Daemon SPA
+// Zero external JS dependencies. Pure-Go backend integration.
 
-// --- Selectors & Global Helpers ---
+// --- High-Quality Vector SVG Icon Generator ---
+function ic(name, size = 18) {
+  const p = {
+    terminal: `<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>`,
+    settings: `<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>`,
+    activity: `<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>`,
+    files: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>`,
+    database: `<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>`,
+    backup: `<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>`,
+    clock: `<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`,
+    network: `<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>`,
+    link: `<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>`,
+    play: `<polygon points="5 3 19 12 5 21 5 3"/>`,
+    users: `<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`,
+    puzzle: `<path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v3.8h1.5a2.5 2.5 0 0 1 0 5H2V20a2 2 0 0 0 2 2h3.8v-1.5a2.5 2.5 0 0 1 5 0V22H17a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"/>`,
+    store: `<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>`,
+    cpu: `<rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/>`,
+    layers: `<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>`,
+    shield: `<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>`,
+    user: `<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`,
+    search: `<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>`,
+    server: `<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>`,
+    download: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`,
+    trash: `<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>`,
+    edit: `<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>`,
+    folder: `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>`,
+    file: `<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>`,
+    plus: `<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>`,
+    refresh: `<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>`,
+    more: `<circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>`
+  };
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic" aria-hidden="true">${p[name] || p.terminal}</svg>`;
+}
+
+// --- Selectors & Shortcuts ---
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
@@ -12,9 +46,9 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
 window.S = {
   token: localStorage.getItem('neopanel_token') || '',
   user: null,
-  view: 'dash',              // active view: dash, con, set, act, fi, db, bk, sc, net, sub, stp, pl, plug, store, ver, all, acc
-  status: 'offline',         // current server status: online, offline, starting
-  start: Date.now(),         // server start time for uptime
+  view: 'dash',              // active view: dash, con, set, act, fi, db, bk, sc, net, sub, stp, pl, plug, store, ver, all, admin, acc
+  status: 'offline',         // online, offline, starting, stopping
+  start: Date.now(),
   cpu: Array.from({ length: 40 }, () => 0),
   ram: Array.from({ length: 40 }, () => 0),
   ni: Array.from({ length: 40 }, () => 0),
@@ -22,19 +56,20 @@ window.S = {
   tps: 20.00,
   ver: '1.21.4',
   core: 'Paper',
-  sel: 'Paper',              // selected core in software switcher
-  q: '',                     // plugin search query
-  cat: 'All',                // plugin category filter
-  ptab: 'online',            // player tab: online, wl, ban
-  ftab: 'server.properties', // active open file name
-  currentDir: '',            // file browser current directory path
-  fileList: [],              // list of files in currentDir
-  players: [],               // online players
-  bans: [],                  // banned players
-  wl: [],                    // whitelisted players
-  ops: [],                   // ops
-  plugins: [],               // installed plugins [[name, ver, enabled]]
-  bk: [],                    // backups list
+  sel: 'Paper',
+  q: '',
+  cat: 'All',
+  ptab: 'online',
+  ftab: 'server.properties',
+  currentDir: '',
+  fileList: [],
+  fileMenuOpen: null,
+  players: [],
+  bans: [],
+  wl: [],
+  ops: [],
+  plugins: [],
+  bk: [],
   sc: [
     ['Restart server', '0 4 * * *', true],
     ['Backup world', '0 3 * * *', true],
@@ -51,19 +86,19 @@ window.S = {
     port: 25565,
     cmd: false
   },
-  files: {},                 // cache of open files
-  log: [],                   // console lines
-  hist: [],                  // command input history
-  hi: 0,                     // command history pointer
-  cs: 0,                     // current server index
-  servers: [],               // live servers list from /api/servers
-  sftp: null,                // sftp details
-  system: null,              // system info
-  cmenu: false,              // commands dropdown open
-  pq: '',                    // command palette query
-  pi: 0,                     // command palette selected index
-  vq: '',                    // version search query
-  vf: 'All',                 // version family filter
+  files: {},
+  log: [],
+  hist: [],
+  hi: 0,
+  cs: 0,
+  servers: [],
+  sftp: null,
+  system: null,
+  cmenu: false,
+  pq: '',
+  pi: 0,
+  vq: '',
+  vf: 'All',
   acct: {
     fn: 'Admin',
     ln: 'User',
@@ -85,7 +120,7 @@ window.S = {
   pollTimer: null
 };
 
-// --- Audio Feedback (Web Audio API) ---
+// --- Web Audio Click/Beep ---
 function beep() {
   if (!S.acct.sound) return;
   try {
@@ -103,7 +138,6 @@ function beep() {
   } catch (e) {}
 }
 
-// --- Toast Notification ---
 function toast(msg, type = 'info') {
   beep();
   const t = $('#toast');
@@ -114,7 +148,6 @@ function toast(msg, type = 'info') {
   toast.timer = setTimeout(() => t.classList.remove('s'), 2600);
 }
 
-// --- Clock & Formatters ---
 const clock = () => new Date().toTimeString().slice(0, 8);
 
 function formatBytes(bytes) {
@@ -209,32 +242,102 @@ async function api(endpoint, options = {}) {
   }
 }
 
-// --- Active Server Helper ---
 function curServer() {
   if (!S.servers || S.servers.length === 0) return null;
   return S.servers[S.cs] || S.servers[0];
 }
 
-// --- ANSI to HTML ---
-function ansiToHtml(text) {
-  const escText = esc(text);
-  return escText
+// --- Advanced Minecraft & Terminal Log Parser ---
+function formatLogLine(raw) {
+  if (!raw) return '';
+
+  // 1. Unwrap JSON if raw starts with {"event":"log"
+  if (raw.startsWith('{')) {
+    try {
+      const obj = JSON.parse(raw);
+      if (obj.event === 'log' && obj.data != null) {
+        raw = obj.data;
+      }
+    } catch (e) {}
+  }
+
+  // 2. Automatically detect if server is ready
+  if (raw.includes('Done (') || raw.includes('For help, type "help"') || raw.includes('Server Ping Player Sample Count')) {
+    if (S.status !== 'online') {
+      S.status = 'online';
+      updateInputState();
+      updateHeaderBadge();
+    }
+  } else if (raw.includes('Stopping server') || raw.includes('Closing Server')) {
+    S.status = 'stopping';
+    updateInputState();
+    updateHeaderBadge();
+  }
+
+  // 3. Escape HTML
+  let text = esc(raw);
+
+  // 4. Minecraft Section Color Codes (§0-§f)
+  const mcColors = {
+    '0': '#000000', '1': '#0000aa', '2': '#00aa00', '3': '#00aaaa',
+    '4': '#aa0000', '5': '#aa00aa', '6': '#ffaa00', '7': '#aaaaaa',
+    '8': '#555555', '9': '#5555ff', 'a': '#55ff55', 'b': '#55ffff',
+    'c': '#ff5555', 'd': '#ff55ff', 'e': '#ffff55', 'f': '#ffffff'
+  };
+  text = text.replace(/§([0-9a-f])/gi, (_, c) => `</span><span style="color:${mcColors[c.toLowerCase()] || '#fff'}">`);
+  text = text.replace(/§l/gi, '<b>').replace(/§r/gi, '</b></span>');
+
+  // 5. ANSI Color Escape Sequences
+  text = text
     .replace(/\x1b\[0m/g, '</span>')
+    .replace(/\x1b\[1m/g, '<b>')
+    .replace(/\x1b\[22m/g, '</b>')
     .replace(/\x1b\[31m/g, '<span class="e">')
     .replace(/\x1b\[32m/g, '<span class="c">')
     .replace(/\x1b\[33m/g, '<span class="w">')
-    .replace(/\x1b\[34m/g, '<span class="c">')
+    .replace(/\x1b\[34m/g, '<span class="info">')
     .replace(/\x1b\[35m/g, '<span class="w">')
     .replace(/\x1b\[36m/g, '<span class="c">')
-    .replace(/\x1b\[1m/g, '<b>')
-    .replace(/\x1b\[22m/g, '</b>');
+    .replace(/\x1b\[37m/g, '<span class="cont">');
+
+  // 6. Highlight Log Levels & Timestamps
+  if (text.includes('WARN]:') || text.includes('WARN:')) {
+    text = `<span class="w">${text}</span>`;
+  } else if (text.includes('ERROR]:') || text.includes('ERROR:') || text.includes('Exception:')) {
+    text = `<span class="e">${text}</span>`;
+  } else if (text.includes('INFO]:')) {
+    text = text.replace(/\[([0-9:]+)\s+INFO\]:/g, '<span class="dim">[$1</span> <span class="c">INFO</span><span class="dim">]:</span>');
+  }
+
+  // 7. Highlight advancements & player activity
+  if (text.includes('joined the game') || text.includes('has made the advancement')) {
+    text = `<span class="c">${text}</span>`;
+  } else if (text.includes('left the game')) {
+    text = `<span class="w">${text}</span>`;
+  }
+
+  return text;
 }
 
-function addLog(line, cls) {
-  const time = clock();
-  const formatted = cls ? `<span class="${cls}">${line}</span>` : line;
-  S.log.push(`[${time}] ${formatted}`);
-  if (S.log.length > 500) S.log.shift();
+function updateInputState() {
+  const inp = $('#cmd');
+  if (!inp) return;
+  const isOnline = S.status === 'online';
+  inp.disabled = !isOnline;
+  inp.placeholder = isOnline ? 'Type a command, try help...' : 'Server is offline';
+}
+
+function updateHeaderBadge() {
+  const badge = $('#srv-badge');
+  if (!badge) return;
+  badge.className = `badge ${S.status}`;
+  badge.innerHTML = `<i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[S.status] || 'Offline'}`;
+}
+
+function addLog(line) {
+  const html = formatLogLine(line);
+  S.log.push(html);
+  if (S.log.length > 800) S.log.shift();
   if (S.view === 'con') paintLog();
 }
 
@@ -245,7 +348,7 @@ function paintLog() {
   l.scrollTop = l.scrollHeight;
 }
 
-// --- WebSocket Console Connection ---
+// --- WebSocket Connection ---
 function connectWs(serverId) {
   if (S.activeWs) {
     try { S.activeWs.close(); } catch (e) {}
@@ -264,7 +367,10 @@ function connectWs(serverId) {
       try {
         if (e.data.startsWith('{')) {
           const msg = JSON.parse(e.data);
-          if (msg.type === 'stats') {
+          if (msg.event === 'log') {
+            addLog(msg.data);
+            return;
+          } else if (msg.event === 'stats' || msg.type === 'stats') {
             const c = Math.max(0, Math.min(100, msg.cpu_percent || 0));
             S.cpu.push(c);
             S.cpu.shift();
@@ -283,17 +389,16 @@ function connectWs(serverId) {
 
             liveCon();
             return;
-          } else if (msg.type === 'status') {
+          } else if (msg.event === 'status' || msg.type === 'status') {
             S.status = msg.data || S.status;
-            R();
+            updateInputState();
+            updateHeaderBadge();
             return;
           }
         }
       } catch (err) {}
 
-      // Plain text log line
-      const html = ansiToHtml(e.data);
-      addLog(html);
+      addLog(e.data);
     };
 
     ws.onclose = () => {
@@ -309,18 +414,22 @@ async function power(action) {
 
   if (action === 'start') {
     S.status = 'starting';
-    addLog(`[Server thread/INFO]: Starting Minecraft server instance ${srv.name}...`, 'c');
-    R();
+    addLog(`[NeoPanel]: Starting instance ${srv.name}...`);
+    updateInputState();
+    updateHeaderBadge();
     toast('Starting server...');
   } else if (action === 'stop') {
-    addLog('[Server thread/INFO]: Stopping the server...', 'w');
+    S.status = 'stopping';
+    addLog('[NeoPanel]: Stopping server process...');
+    updateInputState();
+    updateHeaderBadge();
     toast('Stopping server...');
   } else if (action === 'restart') {
     toast('Restarting server...');
-    addLog('[Server thread/INFO]: Restart sequence initiated...', 'w');
+    addLog('[NeoPanel]: Restart sequence initiated...');
   } else if (action === 'kill') {
     toast('Terminating server process...');
-    addLog('[Server thread/ERROR]: Force kill signal delivered', 'e');
+    addLog('[NeoPanel]: Force kill signal delivered');
   }
 
   try {
@@ -330,7 +439,8 @@ async function power(action) {
     });
     S.status = res.status || (action === 'start' ? 'online' : 'offline');
     if (S.status === 'online') S.start = Date.now();
-    R();
+    updateInputState();
+    updateHeaderBadge();
     toast(`Server ${action} command sent`);
   } catch (err) {
     toast(`Action failed: ${err.message}`, 'error');
@@ -346,6 +456,8 @@ async function refreshServerStatus() {
     S.status = data.stats?.status || data.status || 'offline';
     S.ver = data.version || S.ver;
     S.core = (data.type || 'paper').charAt(0).toUpperCase() + (data.type || 'paper').slice(1);
+    updateInputState();
+    updateHeaderBadge();
     R();
   } catch (e) {}
 }
@@ -357,7 +469,7 @@ async function runCmd(cmd) {
   if (!srv) return;
 
   if (S.activeWs && S.activeWs.readyState === WebSocket.OPEN) {
-    S.activeWs.send(JSON.stringify({ action: 'command', data: cmd }));
+    S.activeWs.send(JSON.stringify({ event: 'command', data: cmd }));
   } else {
     try {
       await api(`/api/servers/${srv.id}/command`, {
@@ -368,23 +480,23 @@ async function runCmd(cmd) {
   }
 }
 
-// --- Navigation Categorization (PG) ---
+// --- Categorized Navigation (PG) with Vector SVGs ---
 const PG = [
-  ['con', 'Console', '›_', 'General'],
-  ['set', 'Settings', '⚙', 'General'],
-  ['act', 'Activity', '◷', 'General'],
-  ['fi', 'Files', '▤', 'Management'],
-  ['db', 'Databases', '⛁', 'Management'],
-  ['bk', 'Backups', '▣', 'Management'],
-  ['sc', 'Schedules', '◫', 'Management'],
-  ['net', 'Network', '◍', 'Management'],
-  ['sub', 'Subdomain', '◌', 'Management'],
-  ['stp', 'Startup', '➤', 'Management'],
-  ['pl', 'Players', '☺', 'Management'],
-  ['plug', 'Plugins', '✦', 'Minecraft'],
-  ['store', 'Plugin store', '⊕', 'Minecraft'],
-  ['ver', 'Software', '⇅', 'Minecraft'],
-  ['all', 'All versions', '☰', 'Minecraft']
+  ['con', 'Console', 'terminal', 'General'],
+  ['set', 'Settings', 'settings', 'General'],
+  ['act', 'Activity', 'activity', 'General'],
+  ['fi', 'Files', 'files', 'Management'],
+  ['db', 'Databases', 'database', 'Management'],
+  ['bk', 'Backups', 'backup', 'Management'],
+  ['sc', 'Schedules', 'clock', 'Management'],
+  ['net', 'Network', 'network', 'Management'],
+  ['sub', 'Subdomain', 'link', 'Management'],
+  ['stp', 'Startup', 'play', 'Management'],
+  ['pl', 'Players', 'users', 'Management'],
+  ['plug', 'Plugins', 'puzzle', 'Minecraft'],
+  ['store', 'Plugin store', 'store', 'Minecraft'],
+  ['ver', 'Software', 'cpu', 'Minecraft'],
+  ['all', 'All versions', 'layers', 'Minecraft']
 ];
 
 const CMDS = [
@@ -399,7 +511,10 @@ const CORES = [
   ['Purpur', 'Paper fork with extreme configurability'],
   ['Fabric', 'Lightweight modular mod loader'],
   ['Vanilla', 'Standard Mojang vanilla server'],
-  ['NeoForge', 'Modern forge modding engine']
+  ['NeoForge', 'Modern forge modding engine'],
+  ['Velocity', 'Modern high-throughput proxy'],
+  ['Waterfall', 'PaperMC BungeeCord proxy fork'],
+  ['BungeeCord', 'Classic multi-server proxy']
 ];
 
 const FAM = [
@@ -432,7 +547,7 @@ function srvh() {
     <div>
       <div class="row">
         <h1>${esc(S.props.motd || srv?.name || 'Minecraft Server')}</h1>
-        <span class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting' }[st]}</span>
+        <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st]}</span>
       </div>
       <div id="hst" class="row hst">
         <span class="mono mu pv">${hostAddr}</span>
@@ -445,8 +560,8 @@ function srvh() {
       ${S.cmenu ? `<div class="cmenu" role="menu">
         ${CMDS.map(([label, cmd]) => `<button role="menuitem" onclick="execQuickCmd('${cmd}')">${label}</button>`).join('')}
       </div>` : ''}
-      <button class="btn pr" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>Start</button>
-      <button class="btn" onclick="power('restart')" ${on ? '' : 'disabled'}>Restart</button>
+      <button class="btn pr" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
+      <button class="btn" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
       <button class="btn stop" onclick="power('stop')" ${on ? '' : 'disabled'}>Stop</button>
       <button class="btn dg" onclick="power('kill')">Kill</button>
     </div>
@@ -464,7 +579,6 @@ function execQuickCmd(cmd) {
   R();
 }
 
-// --- Stats & Charts ---
 function statsHtml() {
   const srv = curServer();
   const on = S.status === 'online';
@@ -481,11 +595,11 @@ function statsHtml() {
     </div>
   </div>`;
 
-  return row('◎', 'Address', `<span class="pv">${hostAddr}</span>`) +
-    row('◷', 'Uptime', up()) +
-    row('▣', 'CPU load', `${c.toFixed(1)}%`, '/ 100%') +
-    row('▤', 'Memory', `${m.toFixed(0)} MiB`, `/ ${(maxRamMB / 1024).toFixed(1)} GiB`) +
-    row('▥', 'Disk', '1.82 GiB', '/ 20 GiB') +
+  return row(ic('network', 16), 'Address', `<span class="pv">${hostAddr}</span>`) +
+    row(ic('clock', 16), 'Uptime', up()) +
+    row(ic('cpu', 16), 'CPU load', `${c.toFixed(1)}%`, '/ 100%') +
+    row(ic('layers', 16), 'Memory', `${m.toFixed(0)} MiB`, `/ ${(maxRamMB / 1024).toFixed(1)} GiB`) +
+    row(ic('database', 16), 'Disk', '1.82 GiB', '/ 20 GiB') +
     row('↓', 'Network (inbound)', `${(on ? S.ni.at(-1) : 0).toFixed(1)} KiB`) +
     row('↑', 'Network (outbound)', `${(on ? S.no.at(-1) : 0).toFixed(1)} KiB`);
 }
@@ -540,7 +654,7 @@ const V = {
     return `<header class="top">
       <h1>Dashboard</h1>
       <span class="sp"></span>
-      <button class="btn pr" onclick="openCreateServerModal()">+ Create Server</button>
+      <button class="btn pr" onclick="openCreateServerModal()">${ic('plus', 15)} Create Server</button>
     </header>
     
     ${S.servers.length > 1 ? `
@@ -589,7 +703,7 @@ const V = {
 
     <div class="grid g2" style="margin-top:14px">
       <div class="card">
-        <h2>How it looks in the server list</h2>
+        <h2>Server List Preview</h2>
         <div class="slist">
           <i class="cube"></i>
           <div>
@@ -610,9 +724,9 @@ const V = {
     </div>
 
     <div class="card" style="margin-top:14px">
-      <h2>Recent Activity</h2>
+      <h2>Recent Server Activity</h2>
       <div class="mono mu" style="font-size:12.5px; line-height: 1.7;">
-        ${S.log.slice(-5).map(l => `<div>${l}</div>`).join('') || '<div>No recent activity recorded.</div>'}
+        ${S.log.slice(-6).map(l => `<div>${l}</div>`).join('') || '<div>No recent activity recorded.</div>'}
       </div>
     </div>`;
   },
@@ -621,6 +735,13 @@ const V = {
     return `${srvh()}
     <div class="cgrid">
       <div class="cwrap">
+        <div class="con-top-bar">
+          <div class="row" style="gap:6px;">
+            ${ic('terminal', 14)}
+            <span>Console Stream &bull; Buffer: ${S.log.length} lines</span>
+          </div>
+          <button class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');">Clear</button>
+        </div>
         <div class="con" id="log" role="log" aria-live="polite"></div>
         <div class="cin">
           <span>&raquo;</span>
@@ -707,28 +828,50 @@ const V = {
   fi() {
     const f = S.ftab;
     return `${srvh()}
-    <div class="grid" style="grid-template-columns: minmax(200px, 260px) 1fr; margin-top:14px;">
-      <div class="card" style="display:flex; flex-direction:column; gap:8px;">
+    <div class="grid" style="grid-template-columns: minmax(240px, 320px) 1fr; gap:14px; margin-top:14px;">
+      <!-- Left Column: File Explorer -->
+      <div class="card" style="display:flex; flex-direction:column; gap:10px;">
         <div class="row sb">
-          <h2 style="margin:0">/server${S.currentDir ? '/' + S.currentDir : ''}</h2>
-          <button class="btn sm" onclick="uploadFileDialog()">Upload</button>
+          <div class="row" style="gap:6px; overflow:hidden;">
+            ${ic('folder', 16)}
+            <b class="mono" style="font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">/server${S.currentDir ? '/' + S.currentDir : ''}</b>
+          </div>
+          <div class="row" style="gap:4px;">
+            <button class="btn sm" onclick="promptNewFile()" title="New File">${ic('file', 14)} New</button>
+            <button class="btn sm" onclick="promptNewFolder()" title="New Folder">${ic('folder', 14)} Dir</button>
+            <button class="btn sm pr" onclick="uploadFileDialog()" title="Upload File">${ic('download', 14)} Up</button>
+          </div>
         </div>
-        ${S.currentDir ? `<button class="btn sm" onclick="browseFolder('..')" style="text-align:left;">📁 .. (Up one level)</button>` : ''}
-        <div style="max-height:480px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;">
-          ${S.fileList.map(item => `
-            <button class="btn sm ${f === item.name ? 'on' : ''}" style="text-align:left; justify-content:flex-start;" onclick="${item.is_dir ? `browseFolder('${item.name}')` : `openFile('${item.name}')`}">
-              ${item.is_dir ? '📁' : '📄'} ${esc(item.name)}
-            </button>
-          `).join('') || '<div class="mu" style="font-size:12px; padding:8px;">Loading server files...</div>'}
+
+        ${S.currentDir ? `<button class="btn sm" onclick="browseFolder('..')" style="text-align:left;">📁 .. (Parent folder)</button>` : ''}
+        
+        <div style="max-height: calc(100vh - 360px); overflow-y:auto; display:flex; flex-direction:column; gap:2px;">
+          ${S.fileList.map((item, idx) => `
+            <div class="fitem ${f === item.name ? 'on' : ''}">
+              <div class="row" style="flex:1; min-width:0;" onclick="${item.is_dir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">
+                ${item.is_dir ? ic('folder', 16) : ic('file', 16)}
+                <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:13px; margin-left:6px;">${esc(item.name)}</span>
+              </div>
+              <div class="factions">
+                ${!item.is_dir ? `<button class="btn sm" onclick="downloadFileItem('${esc(item.path || item.name)}')">${ic('download', 12)}</button>` : ''}
+                <button class="btn sm" onclick="promptRenameFile('${esc(item.path || item.name)}')">${ic('edit', 12)}</button>
+                <button class="btn sm dg" onclick="deleteFileItem('${esc(item.path || item.name)}')">${ic('trash', 12)}</button>
+              </div>
+            </div>
+          `).join('') || '<div class="mu" style="font-size:12px; padding:12px; text-align:center;">Directory is empty</div>'}
         </div>
       </div>
 
-      <div class="card">
-        <div class="row sb" style="margin-bottom:10px">
-          <h2 style="margin:0">${esc(f || 'Select a file to edit')}</h2>
-          ${f ? `<button class="btn pr sm" onclick="saveActiveFile()">Save file</button>` : ''}
+      <!-- Right Column: Full-Height Code & Config Editor -->
+      <div class="card" style="display:flex; flex-direction:column;">
+        <div class="row sb" style="margin-bottom:12px;">
+          <div class="row" style="gap:8px;">
+            ${ic('file', 18)}
+            <h2 style="margin:0; font-size:16px;">${esc(f || 'Select a file to edit')}</h2>
+          </div>
+          ${f ? `<button class="btn pr" onclick="saveActiveFile()">${ic('download', 14)} Save File</button>` : ''}
         </div>
-        <textarea id="ed" spellcheck="false" aria-label="File editor" placeholder="Select or open a file from the left to edit its content...">${esc(S.files[f] || '')}</textarea>
+        <textarea id="ed" spellcheck="false" aria-label="File editor" placeholder="Select or open a configuration file from the directory browser on the left...">${esc(S.files[f] || '')}</textarea>
       </div>
     </div>`;
   },
@@ -750,7 +893,7 @@ const V = {
                 </label>
               </td>
               <td style="text-align:right">
-                <button class="btn sm dg" onclick="deletePlugin('${esc(p[0])}')">Remove</button>
+                <button class="btn sm dg" onclick="deletePlugin('${esc(p[0])}')">${ic('trash', 14)} Remove</button>
               </td>
             </tr>
           `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No plugins found in the /plugins directory.</td></tr>'}
@@ -758,7 +901,7 @@ const V = {
       </table>
       <div class="row sb" style="margin-top:16px; border-top:1px solid var(--ln); padding-top:14px;">
         <span class="mu">Changes apply immediately or after the next server restart.</span>
-        <button class="btn pr" onclick="go('store')">Browse Modrinth Store</button>
+        <button class="btn pr" onclick="go('store')">${ic('store', 16)} Browse Modrinth Store</button>
       </div>
     </div>`;
   },
@@ -772,7 +915,7 @@ const V = {
           <button class="btn sm ${S.cat === c ? 'pr' : ''}" onclick="S.cat='${c}'; searchModrinth();">${c}</button>
         `).join('')}
       </div>
-      <button class="btn" onclick="uploadFileDialog()">Upload .jar</button>
+      <button class="btn" onclick="uploadFileDialog()">${ic('download', 14)} Upload .jar</button>
     </div>
     <div class="grid store" id="store-grid">
       <div class="mu" style="padding:24px;">Loading top plugins from Modrinth...</div>
@@ -860,7 +1003,7 @@ const V = {
     return `${srvh()}
     <div class="row sb" style="margin:14px 0 12px">
       <span class="mu">${S.bk.length} backups recorded</span>
-      <button class="btn pr" onclick="createBackup()">+ Create Full Backup</button>
+      <button class="btn pr" onclick="createBackup()">${ic('plus', 14)} Create Full Backup</button>
     </div>
     <div class="card tw">
       <table>
@@ -873,8 +1016,8 @@ const V = {
               <td class="mu">${b.created_at ? new Date(b.created_at).toLocaleString() : b[2]}</td>
               <td style="text-align:right">
                 <div class="row" style="justify-content:flex-end">
-                  <button class="btn sm" onclick="downloadBackup('${esc(b.name || b[0])}')">Download</button>
-                  <button class="btn sm dg" onclick="deleteBackup('${esc(b.name || b[0])}')">Delete</button>
+                  <button class="btn sm" onclick="downloadBackup('${esc(b.name || b[0])}')">${ic('download', 14)} Download</button>
+                  <button class="btn sm dg" onclick="deleteBackup('${esc(b.name || b[0])}')">${ic('trash', 14)} Delete</button>
                 </div>
               </td>
             </tr>
@@ -991,6 +1134,7 @@ const V = {
 
   set() {
     const p = S.props;
+    const srv = curServer();
     const o = (v, a) => a.map(x => `<option ${x === v ? 'selected' : ''}>${x}</option>`).join('');
     const sw = (k, l) => `<label class="row sb" style="padding:7px 0; border-bottom:1px solid var(--ln);">
       <span>${l}</span>
@@ -1000,7 +1144,7 @@ const V = {
       </span>
     </label>`;
 
-    const curMem = getServerMaxRamMB(curServer());
+    const curMem = getServerMaxRamMB(srv);
 
     return `${srvh()}
     <div class="grid g2" style="margin-top:14px">
@@ -1010,10 +1154,16 @@ const V = {
           <span>Server Message (MOTD)</span>
           <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="S.props.motd=this.value;">
         </label>
-        <label class="f">
-          <span>Max Players</span>
-          <input type="number" min="1" max="1000" id="prop-max" value="${p.max}" oninput="S.props.max=+this.value||1;">
-        </label>
+        <div class="grid g2">
+          <label class="f">
+            <span>Server Game Port</span>
+            <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}">
+          </label>
+          <label class="f">
+            <span>Max Players</span>
+            <input type="number" min="1" max="1000" id="prop-max" value="${p.max}" oninput="S.props.max=+this.value||1;">
+          </label>
+        </div>
         <label class="f">
           <span>Game Difficulty</span>
           <select id="prop-diff" onchange="S.props.diff=this.value">${o(p.diff, ['peaceful', 'easy', 'normal', 'hard'])}</select>
@@ -1034,6 +1184,7 @@ const V = {
         <label class="f">
           <span>Allocated Memory</span>
           <select id="prop-ram">
+            <option value="1024" ${curMem === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
             <option value="2048" ${curMem === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
             <option value="4096" ${curMem === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
             <option value="8192" ${curMem === 8192 ? 'selected' : ''}>8 GB (8192 MB)</option>
@@ -1041,7 +1192,7 @@ const V = {
           </select>
         </label>
         <div class="row" style="margin-top:14px;">
-          <button class="btn pr" onclick="saveProperties()">Save Properties</button>
+          <button class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save Properties</button>
           <button class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
         </div>
       </div>
@@ -1065,6 +1216,70 @@ const V = {
             <tr><td>Started server instance</td><td>${esc(S.acct.un)}</td><td class="mono pv">127.0.0.1</td><td class="mu">Just now</td></tr>
             <tr><td>Saved server.properties</td><td>${esc(S.acct.un)}</td><td class="mono pv">127.0.0.1</td><td class="mu">10 minutes ago</td></tr>
           `}
+        </tbody>
+      </table>
+    </div>`;
+  },
+
+  // Dedicated Admin Area View
+  admin() {
+    const sys = S.system || { os: 'linux', arch: 'amd64', cpus: 2, total_ram_mb: 4096, free_ram_mb: 2048, version: '1.0.0' };
+    const usedRam = (sys.total_ram_mb - sys.free_ram_mb) || 0;
+    const ramPct = Math.round((usedRam / sys.total_ram_mb) * 100) || 50;
+
+    return `<header class="top">
+      ${ic('shield', 26)}
+      <h1>Daemon Administration Panel</h1>
+      <span class="sp"></span>
+      <span class="badge online"><i class="dot"></i>System Healthy</span>
+    </header>
+
+    <div class="grid g4" style="margin-bottom:16px;">
+      <div class="card stat">
+        <span>Host Platform</span>
+        <b style="font-size:18px; padding:6px 0;">${esc(sys.os)} (${esc(sys.arch)})</b>
+        <span class="mu">${sys.cpus} CPU Cores</span>
+      </div>
+      <div class="card stat">
+        <span>Host Memory</span>
+        <b style="font-size:18px; padding:6px 0;">${(usedRam/1024).toFixed(1)} / ${(sys.total_ram_mb/1024).toFixed(1)} GB</b>
+        <div class="bar"><i style="width:${ramPct}%"></i></div>
+      </div>
+      <div class="card stat">
+        <span>Managed Servers</span>
+        <b>${S.servers.length} Instances</b>
+        <span class="mu">Pure-Go Process Manager</span>
+      </div>
+      <div class="card stat">
+        <span>SFTP Daemon</span>
+        <b style="font-size:18px; padding:6px 0;">Port 2022</b>
+        <span class="badge online"><i class="dot"></i>Active</span>
+      </div>
+    </div>
+
+    <div class="card tw" style="margin-bottom:16px;">
+      <div class="row sb" style="margin-bottom:12px;">
+        <h2>All Managed Instances</h2>
+        <div class="row">
+          <button class="btn sm" onclick="bulkRestartServers()">${ic('refresh', 14)} Restart All</button>
+          <button class="btn sm dg" onclick="bulkStopServers()">Stop All</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Server</th><th>Port</th><th>Engine</th><th>RAM Limit</th><th>Status</th><th style="text-align:right">Quick Actions</th></tr></thead>
+        <tbody>
+          ${S.servers.map((s, idx) => `
+            <tr>
+              <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${s.id})</span></td>
+              <td class="mono">${s.port}</td>
+              <td><span class="chip">${esc(s.type)} ${esc(s.version)}</span></td>
+              <td class="mono">${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</td>
+              <td><span class="badge ${(s.stats?.status || s.status) === 'running' ? 'online' : 'offline'}"><i class="dot"></i>${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'}</span></td>
+              <td style="text-align:right">
+                <button class="btn sm" onclick="switchServer(${idx}); go('con');">Manage</button>
+              </td>
+            </tr>
+          `).join('')}
         </tbody>
       </table>
     </div>`;
@@ -1136,7 +1351,7 @@ const V = {
         <p class="mu" style="font-size:13px; margin-bottom:12px;">Allows passwordless public-key authentication for pure-Go SFTP.</p>
         <label class="f"><span>Key Label / Name</span><input type="text" id="kn" placeholder="Work Laptop"></label>
         <label class="f"><span>Public Key</span><textarea id="kk" style="min-height:80px" placeholder="ssh-ed25519 AAAA... or ssh-rsa AAAA..."></textarea></label>
-        <button class="btn pr" onclick="addSSHKey()">Add SSH Key</button>
+        <button class="btn pr" onclick="addSSHKey()">${ic('plus', 14)} Add SSH Key</button>
       </div>
       <div class="card tw" style="margin-top:14px">
         <table>
@@ -1148,10 +1363,10 @@ const V = {
                 <td class="mono">${esc(k.fingerprint || k[1])}</td>
                 <td class="mu">${esc(k.created_at || k[2])}</td>
                 <td style="text-align:right">
-                  <button class="btn sm dg" onclick="deleteSSHKey('${k.id || i}')">Delete</button>
+                  <button class="btn sm dg" onclick="deleteSSHKey('${k.id || i}')">${ic('trash', 14)} Delete</button>
                 </td>
               </tr>
-            `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:20px;">No SSH keys registered. Add your public key above.</td></tr>'}
+            `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No SSH keys registered. Add your public key above for secure SFTP access.</td></tr>'}
           </tbody>
         </table>
       </div>`;
@@ -1167,7 +1382,7 @@ const V = {
         <h2>Create Automation API Key</h2>
         <div class="row">
           <input type="text" id="ad" placeholder="Key description (e.g. CI/CD Deployer)" style="max-width:340px">
-          <button class="btn pr" onclick="createAPIKey()">Generate Key</button>
+          <button class="btn pr" onclick="createAPIKey()">${ic('plus', 14)} Generate Key</button>
         </div>
       </div>
       <div class="card tw" style="margin-top:14px">
@@ -1180,10 +1395,10 @@ const V = {
                 <td class="mono">${esc(k.prefix || k[1])}</td>
                 <td class="mu">${esc(k.last_used || k[2] || 'Never')}</td>
                 <td style="text-align:right">
-                  <button class="btn sm dg" onclick="deleteAPIKey('${k.id || i}')">Revoke</button>
+                  <button class="btn sm dg" onclick="deleteAPIKey('${k.id || i}')">${ic('trash', 14)} Revoke</button>
                 </td>
               </tr>
-            `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:20px;">No active API keys created yet.</td></tr>'}
+            `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No API keys generated yet. Create a key above to automate your server.</td></tr>'}
           </tbody>
         </table>
       </div>`;
@@ -1198,7 +1413,7 @@ const V = {
                 <td class="mono pv">${esc(r[1] || r.ip || '127.0.0.1')}</td>
                 <td class="mu">${esc(r[2] || 'Recent')}</td>
               </tr>
-            `).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:20px;">No recent security events.</td></tr>'}
+            `).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:24px;">No recorded security events.</td></tr>'}
           </tbody>
         </table>
       </div>`;
@@ -1260,32 +1475,33 @@ function navHtml() {
   </div>
   
   <button class="nsearch" onclick="openPalette(1)">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>
-    </svg>
+    ${ic('search', 16)}
     <span>Search</span>
     <kbd>Ctrl K</kbd>
   </button>
 
   <button class="nb" onclick="go('dash')">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M19 12H5M12 5l-7 7 7 7"/>
-    </svg>
+    ${ic('server', 16)}
     All Servers (${S.servers.length})
   </button>
 
-  ${PG.map(([key, label, icon, grp]) => {
+  ${PG.map(([key, label, iconName, grp]) => {
     const header = grp !== group ? `<div class="ng">${grp}</div>` : '';
     group = grp;
     const active = S.view === key ? 'on' : '';
     return `${header}
     <button class="nav-item ${active}" onclick="go('${key}')" ${active ? 'aria-current="page"' : ''}>
-      <span aria-hidden="true" style="font-family:var(--mf); width:18px; text-align:center;">${icon}</span>
-      ${label}
+      ${ic(iconName, 16)}
+      <span>${label}</span>
     </button>`;
   }).join('')}
 
   <span class="sp"></span>
+
+  <button class="nav-item ${S.view === 'admin' ? 'on' : ''}" onclick="go('admin')" style="margin-bottom:6px;">
+    ${ic('shield', 16)}
+    <span>Admin Area</span>
+  </button>
 
   <button class="chip2 ${S.view === 'acc' ? 'on' : ''}" onclick="go('acc')" aria-label="Account Settings">
     ${av(34)}
@@ -1293,16 +1509,24 @@ function navHtml() {
       <b>${esc(S.acct.fn)} ${esc(S.acct.ln)}</b>
       <span class="mu pv">${esc(S.acct.em)}</span>
     </span>
-    <span class="mu" style="font-size:12px;">⚙</span>
+    ${ic('settings', 16)}
   </button>`;
 }
 
-// --- View Router & State Handler (go) ---
+// --- View Router & URL Hash Engine ---
 window.go = function(view) {
   S.view = view;
+  window.location.hash = '#' + view;
   R();
   onEnterView(view);
 };
+
+window.addEventListener('hashchange', () => {
+  const hash = window.location.hash.replace('#', '');
+  if (hash && hash !== S.view && (V[hash] || hash === 'admin' || hash === 'acc')) {
+    go(hash);
+  }
+});
 
 // --- Main Render Function (R) ---
 window.R = function() {
@@ -1314,6 +1538,8 @@ window.R = function() {
     if (S.view === 'con') {
       paintLog();
       bindConsoleInput();
+    } else if (S.view === 'fi') {
+      bindEditorTabKey();
     }
   }
 };
@@ -1336,7 +1562,21 @@ function bindConsoleInput() {
   });
 }
 
-// --- View Lifecycle Hook ---
+function bindEditorTabKey() {
+  const ed = $('#ed');
+  if (!ed) return;
+  ed.addEventListener('keydown', e => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = ed.selectionStart;
+      const end = ed.selectionEnd;
+      ed.value = ed.value.substring(0, start) + '  ' + ed.value.substring(end);
+      ed.selectionStart = ed.selectionEnd = start + 2;
+    }
+  });
+}
+
+// --- View Transition Lifecycle Hook ---
 window.onEnterView = function(view) {
   if (view === 'pl') loadPlayersData();
   else if (view === 'fi') loadFileList(S.currentDir);
@@ -1345,6 +1585,7 @@ window.onEnterView = function(view) {
   else if (view === 'bk') loadBackupsList();
   else if (view === 'set') loadProperties();
   else if (view === 'net') loadSFTPDetails();
+  else if (view === 'admin') loadAdminData();
   else if (view === 'acc') loadAccountData();
   else if (view === 'dash') loadDashboard();
 };
@@ -1364,6 +1605,30 @@ async function loadDashboard() {
     }
     R();
   } catch (e) {}
+}
+
+async function loadAdminData() {
+  try {
+    const sys = await api('/api/system');
+    S.system = sys;
+    R();
+  } catch (e) {}
+}
+
+async function bulkRestartServers() {
+  toast('Restarting all cluster instances...');
+  for (const s of S.servers) {
+    await api(`/api/servers/${s.id}/power`, { method: 'POST', body: JSON.stringify({ action: 'restart' }) }).catch(() => {});
+  }
+  toast('All servers restarted');
+}
+
+async function bulkStopServers() {
+  toast('Stopping all cluster instances...');
+  for (const s of S.servers) {
+    await api(`/api/servers/${s.id}/power`, { method: 'POST', body: JSON.stringify({ action: 'stop' }) }).catch(() => {});
+  }
+  toast('All servers stopped');
 }
 
 async function loadPlayersData() {
@@ -1398,7 +1663,7 @@ function addWhitelistPlayer() {
   inp.value = '';
 }
 
-// Files
+// --- File Manager Operations ---
 async function loadFileList(path = '') {
   const srv = curServer();
   if (!srv) return;
@@ -1450,6 +1715,74 @@ async function saveActiveFile() {
   } catch (e) {}
 }
 
+function downloadFileItem(path) {
+  const srv = curServer();
+  if (!srv) return;
+  window.open(`/api/servers/${srv.id}/files/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(S.token)}`, '_blank');
+}
+
+async function promptRenameFile(oldPath) {
+  const baseName = oldPath.split('/').pop();
+  const newName = prompt('Enter new filename or path:', baseName);
+  if (!newName || newName === baseName) return;
+  const parent = oldPath.split('/').slice(0, -1).join('/');
+  const newPath = parent ? `${parent}/${newName}` : newName;
+  const srv = curServer();
+  if (!srv) return;
+  try {
+    await api(`/api/servers/${srv.id}/files/rename`, {
+      method: 'POST',
+      body: JSON.stringify({ old_path: oldPath, new_path: newPath })
+    });
+    toast(`Renamed to ${newName}`);
+    loadFileList(S.currentDir);
+  } catch (e) {}
+}
+
+async function deleteFileItem(path) {
+  if (!confirm(`Are you sure you want to delete ${path}?`)) return;
+  const srv = curServer();
+  if (!srv) return;
+  try {
+    await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    toast(`Deleted ${path}`);
+    loadFileList(S.currentDir);
+  } catch (e) {}
+}
+
+async function promptNewFile() {
+  const name = prompt('Enter new file name:');
+  if (!name) return;
+  const srv = curServer();
+  if (!srv) return;
+  const target = S.currentDir ? `${S.currentDir}/${name}` : name;
+  try {
+    await api(`/api/servers/${srv.id}/files/create`, {
+      method: 'POST',
+      body: JSON.stringify({ path: target, is_dir: false })
+    });
+    toast(`Created file ${name}`);
+    loadFileList(S.currentDir);
+    openFile(name);
+  } catch (e) {}
+}
+
+async function promptNewFolder() {
+  const name = prompt('Enter new folder name:');
+  if (!name) return;
+  const srv = curServer();
+  if (!srv) return;
+  const target = S.currentDir ? `${S.currentDir}/${name}` : name;
+  try {
+    await api(`/api/servers/${srv.id}/files/create`, {
+      method: 'POST',
+      body: JSON.stringify({ path: target, is_dir: true })
+    });
+    toast(`Created folder ${name}`);
+    loadFileList(S.currentDir);
+  } catch (e) {}
+}
+
 function uploadFileDialog() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -1474,7 +1807,7 @@ function uploadFileDialog() {
   input.click();
 }
 
-// Plugins
+// --- Plugins & Modrinth Store ---
 async function loadPluginsList() {
   const srv = curServer();
   if (!srv) return;
@@ -1516,12 +1849,19 @@ async function searchModrinth() {
     const hits = res.hits || [];
     grid.innerHTML = hits.map(hit => {
       const isInstalled = S.plugins.some(p => p[0].toLowerCase().includes(hit.title.toLowerCase()));
+      const icon = hit.icon_url
+        ? `<img src="${esc(hit.icon_url)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none';this.nextElementSibling.style.display='grid';"><div style="display:none;width:40px;height:40px;border-radius:8px;background:var(--pn2);place-items:center;flex-shrink:0;">${ic('puzzle')}</div>`
+        : `<div style="width:40px;height:40px;border-radius:8px;background:var(--pn2);display:grid;place-items:center;flex-shrink:0;">${ic('puzzle')}</div>`;
+
       return `<div class="card pc">
-        <div class="row sb">
-          <b>${esc(hit.title)}</b>
-          <span class="chip">${hit.categories ? hit.categories[0] : 'plugin'}</span>
+        <div class="row sb" style="gap:10px;">
+          ${icon}
+          <div style="flex:1; min-width:0;">
+            <b style="display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(hit.title)}</b>
+            <span class="chip" style="font-size:11px;">${hit.categories ? hit.categories[0] : 'plugin'}</span>
+          </div>
         </div>
-        <p class="mu" style="font-size:12.5px; margin:4px 0 10px;">${esc(hit.description || '')}</p>
+        <p class="mu" style="font-size:12.5px; margin:8px 0 10px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">${esc(hit.description || '')}</p>
         <div class="row sb">
           <span class="mu" style="font-size:12px;">↓ ${(hit.downloads / 1000).toFixed(0)}k</span>
           ${isInstalled ? '<span class="badge online"><i class="dot"></i>Installed</span>' : `<button class="btn pr sm" onclick="installPlugin('${hit.project_id || hit.slug}', '${esc(hit.title)}')">Install</button>`}
@@ -1547,7 +1887,7 @@ async function installPlugin(projectSlug, title) {
   } catch (e) {}
 }
 
-// Backups
+// --- Backups ---
 async function loadBackupsList() {
   const srv = curServer();
   if (!srv) return;
@@ -1589,7 +1929,7 @@ async function deleteBackup(name) {
   } catch (e) {}
 }
 
-// Software & Properties
+// --- Software & Properties ---
 async function installSoftware(software, version) {
   const srv = curServer();
   if (!srv) return;
@@ -1631,8 +1971,10 @@ async function loadProperties() {
 async function saveProperties() {
   const srv = curServer();
   if (!srv) return;
+  const newPort = parseInt($('#prop-port')?.value) || srv.port || 25565;
   const payload = {
     'motd': S.props.motd,
+    'server-port': String(newPort),
     'max-players': String(S.props.max),
     'difficulty': S.props.diff,
     'gamemode': S.props.mode,
@@ -1645,6 +1987,7 @@ async function saveProperties() {
       method: 'POST',
       body: JSON.stringify(payload)
     });
+    srv.port = newPort;
     toast('Server properties saved! Restart server to apply.');
   } catch (e) {}
 }
@@ -1659,7 +2002,7 @@ async function loadSFTPDetails() {
   } catch (e) {}
 }
 
-// Account
+// --- Account Management ---
 async function loadAccountData() {
   try {
     const prof = await api('/api/account/profile');
@@ -1670,11 +2013,11 @@ async function loadAccountData() {
     S.acct.h = await computeGravatarHash(S.acct.em);
 
     if (S.acct.tab === 2) {
-      S.acct.ssh = await api('/api/account/ssh-keys');
+      S.acct.ssh = (await api('/api/account/ssh-keys')) || [];
     } else if (S.acct.tab === 3) {
-      S.acct.api = await api('/api/account/api-keys');
+      S.acct.api = (await api('/api/account/api-keys')) || [];
     } else if (S.acct.tab === 4) {
-      S.acct.act = await api('/api/account/activity');
+      S.acct.act = (await api('/api/account/activity')) || [];
     }
     R();
   } catch (e) {}
@@ -1762,7 +2105,7 @@ async function deleteAPIKey(id) {
   } catch (e) {}
 }
 
-// Appearance
+// --- Appearance ---
 function setAppearanceMode(mode) {
   S.acct.mode = mode;
   localStorage.setItem('neopanel_mode', mode);
@@ -1799,7 +2142,6 @@ function toggleTheme() {
   setAppearanceMode(cur === 'light' ? 'Dark' : 'Light');
 }
 
-// Server Switching
 function switchServer(index) {
   S.cs = index;
   const srv = S.servers[index];
@@ -1818,6 +2160,7 @@ function paletteItems() {
   const q = (S.pq || '').toLowerCase();
   const items = [
     ...PG.map(p => ['Pages', p[1], 'Go to page', () => go(p[0])]),
+    ['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')],
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
     ...S.servers.map((s, i) => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => switchServer(i)]),
     ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.view = 'pl'; S.ptab = 'online'; R(); }]),
@@ -1913,7 +2256,7 @@ window.addEventListener('keydown', e => {
   }
 });
 
-// --- Flexible & Powerful Server Creation Modal ---
+// --- Flexible Server Creation Modal (With Proxies & Custom Ports) ---
 window.setCreateRam = function(mb) {
   const inp = $('#cs-mem');
   if (inp) inp.value = mb;
@@ -1928,6 +2271,19 @@ window.setCreateEngine = function(type) {
   $$('.engine-card').forEach(card => {
     card.classList.toggle('on', card.dataset.engine === type);
   });
+
+  // Proxy presets
+  if (type === 'velocity') {
+    $('#cs-ver').value = '3.3.0-SNAPSHOT';
+    $('#cs-port').value = '25565';
+    setCreateRam(1024);
+  } else if (type === 'waterfall' || type === 'bungeecord') {
+    $('#cs-ver').value = '1.20';
+    $('#cs-port').value = '25577';
+    setCreateRam(1024);
+  } else if (type === 'paper') {
+    $('#cs-ver').value = '1.21.4';
+  }
 };
 
 window.setCreateVersion = function(ver) {
@@ -1954,37 +2310,45 @@ function openCreateServerModal() {
   const nextPort = getNextSuggestedPort();
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
-    <div class="card pbox" style="padding:26px; max-width:580px; max-height:88vh; overflow-y:auto;">
+    <div class="card pbox" style="padding:26px; max-width:620px; max-height:88vh; overflow-y:auto;">
       <div class="row sb" style="margin-bottom:16px;">
         <div>
-          <h2 style="font-size:22px; margin:0;">Create Minecraft Server</h2>
-          <span class="mu" style="font-size:13px;">Deploy a high-performance instance in seconds</span>
+          <h2 style="font-size:22px; margin:0;">Create Server or Proxy</h2>
+          <span class="mu" style="font-size:13px;">Deploy a high-performance Minecraft instance</span>
         </div>
         <button class="btn sm" onclick="closeModal()">✕</button>
       </div>
 
       <form onsubmit="handleCreateServer(event)">
-        <!-- Basic Info -->
+        <!-- Instance Name -->
         <label class="f">
-          <span>Server Name</span>
-          <input type="text" id="cs-name" required placeholder="e.g. Survival SMP, Bedwars Hub, Modded Realm" value="My Server">
+          <span>Server Instance Name</span>
+          <input type="text" id="cs-name" required placeholder="e.g. Survival SMP, Proxy Network, Minigames" value="Survival Server">
         </label>
 
-        <!-- Engine Choice -->
+        <!-- Category: Game Server vs Network Proxy -->
         <div style="margin-bottom:14px;">
-          <span class="mu" style="display:block; margin-bottom:6px; font-size:13px; font-weight:600;">Server Engine</span>
-          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(115px, 1fr)); gap:8px;">
+          <span class="mu" style="display:block; margin-bottom:6px; font-size:13px; font-weight:600;">Engine / Flavor</span>
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:8px;">
             <button type="button" class="card engine-card sel on" data-engine="paper" onclick="setCreateEngine('paper')" style="padding:10px; text-align:center;">
               <b>Paper</b>
-              <span class="mu" style="font-size:11px; display:block;">Plugins &amp; Fast</span>
+              <span class="mu" style="font-size:11px; display:block;">Fast &bull; Plugins</span>
             </button>
             <button type="button" class="card engine-card sel" data-engine="purpur" onclick="setCreateEngine('purpur')" style="padding:10px; text-align:center;">
               <b>Purpur</b>
-              <span class="mu" style="font-size:11px; display:block;">High Config</span>
+              <span class="mu" style="font-size:11px; display:block;">Extra Configs</span>
             </button>
             <button type="button" class="card engine-card sel" data-engine="fabric" onclick="setCreateEngine('fabric')" style="padding:10px; text-align:center;">
               <b>Fabric</b>
               <span class="mu" style="font-size:11px; display:block;">Modern Mods</span>
+            </button>
+            <button type="button" class="card engine-card sel" data-engine="velocity" onclick="setCreateEngine('velocity')" style="padding:10px; text-align:center;">
+              <b>Velocity</b>
+              <span class="mu" style="font-size:11px; display:block;">Proxy Egg</span>
+            </button>
+            <button type="button" class="card engine-card sel" data-engine="waterfall" onclick="setCreateEngine('waterfall')" style="padding:10px; text-align:center;">
+              <b>Waterfall</b>
+              <span class="mu" style="font-size:11px; display:block;">Bungee Proxy</span>
             </button>
             <button type="button" class="card engine-card sel" data-engine="vanilla" onclick="setCreateEngine('vanilla')" style="padding:10px; text-align:center;">
               <b>Vanilla</b>
@@ -1995,27 +2359,44 @@ function openCreateServerModal() {
             <option value="paper">paper</option>
             <option value="purpur">purpur</option>
             <option value="fabric">fabric</option>
+            <option value="velocity">velocity</option>
+            <option value="waterfall">waterfall</option>
             <option value="vanilla">vanilla</option>
           </select>
         </div>
 
-        <!-- Version Choice with Quick Pills -->
+        <!-- Version Input with Selectable Pills -->
         <div style="margin-bottom:14px;">
           <div class="row sb" style="margin-bottom:6px;">
-            <span class="mu" style="font-size:13px; font-weight:600;">Minecraft Version</span>
+            <span class="mu" style="font-size:13px; font-weight:600;">Minecraft / Release Version</span>
             <div class="row" style="gap:4px;">
               ${['1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4', '1.16.5'].map(v => `
                 <button type="button" class="btn sm ver-pill ${v === '1.21.4' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
               `).join('')}
             </div>
           </div>
-          <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 1.21.4, 1.20.4, 1.16.5">
+          <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 1.21.4, 1.20.4, 3.3.0-SNAPSHOT">
         </div>
 
-        <!-- Memory Allocation with Quick Pills -->
+        <!-- Custom Port Allocation -->
+        <div class="grid g2" style="margin-bottom:14px;">
+          <label class="f" style="margin-bottom:0;">
+            <span>Custom Port (1024 - 65535)</span>
+            <input type="number" id="cs-port" value="${nextPort}" min="1024" max="65535" required>
+          </label>
+          <label class="f" style="margin-bottom:0;">
+            <span>Java Runtime</span>
+            <select id="cs-java">
+              <option value="21" selected>OpenJDK 21 (1.20.5+ / Modern)</option>
+              <option value="17">OpenJDK 17 (1.18 - 1.20.4)</option>
+            </select>
+          </label>
+        </div>
+
+        <!-- Memory Allocation Pills -->
         <div style="margin-bottom:14px;">
           <div class="row sb" style="margin-bottom:6px;">
-            <span class="mu" style="font-size:13px; font-weight:600;">RAM Allocation</span>
+            <span class="mu" style="font-size:13px; font-weight:600;">Memory Allocation</span>
             <div class="row" style="gap:4px;">
               <button type="button" class="btn sm ram-pill" data-ram="1024" onclick="setCreateRam(1024)">1 GB</button>
               <button type="button" class="btn sm ram-pill pr" data-ram="2048" onclick="setCreateRam(2048)">2 GB</button>
@@ -2023,25 +2404,10 @@ function openCreateServerModal() {
               <button type="button" class="btn sm ram-pill" data-ram="8192" onclick="setCreateRam(8192)">8 GB</button>
             </div>
           </div>
-          <input type="number" id="cs-mem" value="2048" min="512" max="65536" step="512" required placeholder="RAM in MB (e.g. 2048)">
+          <input type="number" id="cs-mem" value="2048" min="512" max="65536" step="512" required placeholder="RAM in MB">
         </div>
 
-        <!-- Port Allocation & Java -->
-        <div class="grid g2" style="margin-bottom:14px;">
-          <label class="f" style="margin-bottom:0;">
-            <span>Game Port</span>
-            <input type="number" id="cs-port" value="${nextPort}" min="1024" max="65535" required>
-          </label>
-          <label class="f" style="margin-bottom:0;">
-            <span>Java Runtime</span>
-            <select id="cs-java">
-              <option value="21" selected>OpenJDK 21 (1.20.5+)</option>
-              <option value="17">OpenJDK 17 (1.18 - 1.20.4)</option>
-            </select>
-          </label>
-        </div>
-
-        <!-- Flags & Automations -->
+        <!-- EULA & Optimization Flags -->
         <div style="background:var(--pn2); border:1px solid var(--ln); border-radius:8px; padding:12px; margin-bottom:16px;">
           <label class="row" style="margin-bottom:8px; cursor:pointer;">
             <input type="checkbox" id="cs-eula" checked style="width:auto; margin-right:8px;">
@@ -2053,7 +2419,7 @@ function openCreateServerModal() {
           </label>
           <label class="row" style="cursor:pointer;">
             <input type="checkbox" id="cs-aikar" checked style="width:auto; margin-right:8px;">
-            <span>Apply Aikar's high-performance GC flags</span>
+            <span>Apply Aikar's optimized G1GC flags</span>
           </label>
         </div>
 
@@ -2115,7 +2481,6 @@ async function handleCreateServer(e) {
 
     await loadDashboard();
 
-    // Select newly created server
     const newIdx = S.servers.findIndex(s => s.id === res.id || s.name === name);
     if (newIdx !== -1) {
       switchServer(newIdx);
@@ -2149,13 +2514,18 @@ async function checkAuth() {
     S.acct.em = user.email || S.acct.em;
     S.acct.h = await computeGravatarHash(S.acct.em);
 
-    // Load appearance settings
     const savedMode = localStorage.getItem('neopanel_mode');
     if (savedMode) setAppearanceMode(savedMode);
     if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
     if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
 
     await loadDashboard();
+
+    // Respect URL hash if present
+    const hash = window.location.hash.replace('#', '');
+    if (hash && (V[hash] || hash === 'admin' || hash === 'acc')) {
+      go(hash);
+    }
   } catch (e) {
     showLoginScreen();
   }
@@ -2170,11 +2540,11 @@ function showSetupScreen() {
     <div class="lg">First-Time Initialization</div>
     <h1 class="lt">Create Admin Master Account</h1>
     <label class="lf">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      ${ic('user', 16)}
       <input id="su-name" type="text" placeholder="Username" autocomplete="username">
     </label>
     <label class="lf">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>
+      ${ic('settings', 16)}
       <input id="su-pw" type="password" placeholder="Master Password" autocomplete="new-password">
     </label>
     <div class="lerr" id="lerr" role="alert"></div>
@@ -2226,14 +2596,14 @@ function showLoginScreen() {
     <div class="lg">${greeting}</div>
     <h1 class="lt">Log in to NeoPanel</h1>
     <label class="lf">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+      ${ic('user', 16)}
       <input id="lu" type="text" placeholder="Username or email" autocomplete="username" onkeydown="if(event.key==='Enter')submitLogin()">
     </label>
     <label class="lf">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>
+      ${ic('settings', 16)}
       <input id="lp" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitLogin()">
       <button class="eye" type="button" onclick="const p=$('#lp'); p.type=p.type==='password'?'text':'password';" aria-label="Toggle password visibility">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        ${ic('activity', 16)}
       </button>
     </label>
     <div class="lerr" id="lerr" role="alert"></div>
@@ -2285,7 +2655,7 @@ function logout() {
   showLoginScreen();
 }
 
-// --- Attach All Global Handlers on Window ---
+// --- Attach All Functions to Window for Seamless HTML Event Handling ---
 window.toast = toast;
 window.power = power;
 window.switchServer = switchServer;
@@ -2298,6 +2668,11 @@ window.addWhitelistPlayer = addWhitelistPlayer;
 window.browseFolder = browseFolder;
 window.openFile = openFile;
 window.saveActiveFile = saveActiveFile;
+window.downloadFileItem = downloadFileItem;
+window.promptRenameFile = promptRenameFile;
+window.deleteFileItem = deleteFileItem;
+window.promptNewFile = promptNewFile;
+window.promptNewFolder = promptNewFolder;
 window.uploadFileDialog = uploadFileDialog;
 window.deletePlugin = deletePlugin;
 window.togglePlugin = togglePlugin;
@@ -2329,8 +2704,10 @@ window.logout = logout;
 window.renderVersionRows = renderVersionRows;
 window.loadAccountData = loadAccountData;
 window.loadPlayersData = loadPlayersData;
+window.bulkRestartServers = bulkRestartServers;
+window.bulkStopServers = bulkStopServers;
 
-// --- Initialize App ---
+// --- Initialize Application ---
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
 });
