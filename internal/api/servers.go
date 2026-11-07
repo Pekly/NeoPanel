@@ -156,7 +156,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Record default primary port allocation in database
-	_ = h.db.AddServerPort(server.ID, server.Port, "tcp/udp", "Primary Game Port", true)
+	_, _ = h.db.AddServerPort(server.ID, server.Port, "tcp/udp", "Primary Game Port", true)
 
 	writeJSON(w, http.StatusCreated, ServerWithStats{
 		Server: server,
