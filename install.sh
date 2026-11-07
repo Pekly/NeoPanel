@@ -93,8 +93,8 @@ draw_progress() {
   for ((i=0; i<filled; i++)); do bar+="█"; done
   for ((i=0; i<empty; i++)); do bar+="░"; done
 
-  # Carriage return with padding to cleanly overwrite line
-  printf "\r  ${CYAN}[${GREEN}%s${CYAN}] ${BOLD}%3d%%${NC}  %-48s" "$bar" "$pct" "$text"
+  # Carriage return with ANSI erase-to-end-of-line (\033[K) to cleanly overwrite line
+  printf "\r\033[K  ${CYAN}[${GREEN}%s${CYAN}] ${BOLD}%3d%%${NC}  %-48s" "$bar" "$pct" "$text"
 }
 
 # Executes a background task silently while rendering an animated spinner & smooth percentage progress
@@ -142,7 +142,7 @@ check_root() {
   if [ "$EUID" -ne 0 ]; then
     log_error "Root privileges are required to install packages, configure UFW, and setup systemd."
     echo -e "\n${YELLOW}[REMINDER] Please re-run the installer using sudo:${NC}"
-    echo -e "  ${CYAN}sudo bash <(curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh)${NC}\n"
+    echo -e "  ${CYAN}curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash${NC}\n"
     exit 1
   fi
 }

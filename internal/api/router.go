@@ -27,6 +27,9 @@ type Router struct {
 	console        *ConsoleHandler
 	files          *FileHandler
 	plugins        *PluginHandler
+	backups        *BackupHandler
+	players        *PlayerHandler
+	software       *SoftwareHandler
 	embeddedStatic fs.FS
 }
 
@@ -37,6 +40,9 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	consoleHandler := NewConsoleHandler(authHandler, manager)
 	fileHandler := NewFileHandler(manager)
 	pluginHandler := NewPluginHandler(db, manager)
+	backupHandler := NewBackupHandler(cfg, db, manager)
+	playerHandler := NewPlayerHandler(db, manager)
+	softwareHandler := NewSoftwareHandler(db, manager)
 
 	r := &Router{
 		mux:            http.NewServeMux(),
@@ -47,6 +53,9 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		console:        consoleHandler,
 		files:          fileHandler,
 		plugins:        pluginHandler,
+		backups:        backupHandler,
+		players:        playerHandler,
+		software:       softwareHandler,
 		embeddedStatic: embeddedStatic,
 	}
 
@@ -97,6 +106,21 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/servers/{id}/plugins", r.requireAuth(r.plugins.ListInstalled))
 	r.mux.HandleFunc("POST /api/servers/{id}/plugins/install", r.requireAuth(r.plugins.Install))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/plugins", r.requireAuth(r.plugins.Delete))
+
+	// Backups routes
+	r.mux.HandleFunc("GET /api/servers/{id}/backups", r.requireAuth(r.backups.List))
+	r.mux.HandleFunc("POST /api/servers/{id}/backups", r.requireAuth(r.backups.Create))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/backups", r.requireAuth(r.backups.Delete))
+	r.mux.HandleFunc("GET /api/servers/{id}/backups/download", r.requireAuth(r.backups.Download))
+
+	// Players routes
+	r.mux.HandleFunc("GET /api/servers/{id}/players", r.requireAuth(r.players.GetPlayers))
+	r.mux.HandleFunc("POST /api/servers/{id}/players/action", r.requireAuth(r.players.Action))
+
+	// Software and Properties routes
+	r.mux.HandleFunc("POST /api/servers/{id}/software", r.requireAuth(r.software.ChangeSoftware))
+	r.mux.HandleFunc("GET /api/servers/{id}/properties", r.requireAuth(r.software.GetProperties))
+	r.mux.HandleFunc("POST /api/servers/{id}/properties", r.requireAuth(r.software.SaveProperties))
 
 	// SFTP details endpoint
 	r.mux.HandleFunc("GET /api/servers/{id}/sftp", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {

@@ -345,3 +345,4 @@ func (h *AccountHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, logs)
 }
+

@@ -146,3 +146,4 @@ func DownloadModrinthPlugin(projectIDOrSlug string, destPluginsDir string, prefe
 
 	return chosenFile.Filename, nil
 }
+

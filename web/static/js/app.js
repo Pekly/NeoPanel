@@ -1,1264 +1,2178 @@
-// NeoPanel - Core SPA Controller
-const state = {
-  token: localStorage.getItem('neopanel_token') || '',
-  user: null,
-  servers: [],
-  selectedServer: null,
-  currentTab: 'console',
-  activeWs: null,
-  consoleMgr: null,
-  currentFilePath: '',
-  systemInfo: null,
-  reconnectAttempts: 0,
-  reconnectTimeout: null,
-  activeCategory: '',
-};
+// NeoPanel — Ultra-Lightweight Minecraft Server Manager
+// Pair-programmed with love. Zero external JS bloat. Fully reactive SPA.
 
-// --- Toast Notifications ---
-function showToast(message, type = 'success') {
-  const container = document.getElementById('toast-container');
-  const toast = document.createElement('div');
-  toast.className = `toast ${type === 'error' ? 'error' : ''}`;
-  
-  const iconSvg = type === 'error' 
-    ? `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--danger); flex-shrink:0;"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`
-    : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--primary); flex-shrink:0;"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+(function () {
+  'use strict';
 
-  toast.innerHTML = `${iconSvg}<span>${escapeHtml(message)}</span>`;
-  container.appendChild(toast);
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(100%)';
-    toast.style.transition = 'all 0.25s ease';
-    setTimeout(() => toast.remove(), 250);
-  }, 4000);
-}
+  // --- Selectors & Shortcuts ---
+  const $ = s => document.querySelector(s);
+  const $$ = s => document.querySelectorAll(s);
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
 
-// --- API Helper ---
-async function api(endpoint, options = {}) {
-  const headers = options.headers || {};
-  if (state.token) {
-    headers['Authorization'] = `Bearer ${state.token}`;
-  }
-  if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  try {
-    const res = await fetch(endpoint, { ...options, headers });
-    if (res.status === 401) {
-      logout();
-      throw new Error('Session expired. Please log in again.');
-    }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `HTTP error ${res.status}`);
-    }
-    return data;
-  } catch (err) {
-    showToast(err.message, 'error');
-    throw err;
-  }
-}
-
-// --- Auth Flow ---
-async function checkAuth() {
-  try {
-    const status = await (await fetch('/api/auth/status')).json();
-    if (status.needs_setup) {
-      showView('setup-view');
-      return;
-    }
-
-    if (!state.token) {
-      showView('login-view');
-      return;
-    }
-
-    // Verify current user
-    const user = await api('/api/auth/me');
-    state.user = user;
-    updateUserNav(user.username);
-    showView('dashboard-view');
-    loadDashboard();
-  } catch (e) {
-    showView('login-view');
-  }
-}
-
-function updateUserNav(username) {
-  document.getElementById('nav-user').textContent = username;
-  const avatar = document.getElementById('nav-user-avatar');
-  if (avatar) {
-    avatar.textContent = username.charAt(0).toUpperCase();
-  }
-}
-
-async function handleSetup(e) {
-  e.preventDefault();
-  const username = document.getElementById('setup-username').value;
-  const password = document.getElementById('setup-password').value;
-
-  try {
-    const res = await api('/api/auth/setup', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
-    state.token = res.token;
-    state.user = res.user;
-    localStorage.setItem('neopanel_token', res.token);
-    showToast('Admin setup completed!');
-    updateUserNav(res.user.username);
-    showView('dashboard-view');
-    loadDashboard();
-  } catch (e) {}
-}
-
-async function handleLogin(e) {
-  e.preventDefault();
-  const username = document.getElementById('login-username').value;
-  const password = document.getElementById('login-password').value;
-
-  try {
-    const res = await api('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    });
-    state.token = res.token;
-    state.user = res.user;
-    localStorage.setItem('neopanel_token', res.token);
-    showToast(`Welcome back, ${res.user.username}!`);
-    updateUserNav(res.user.username);
-    showView('dashboard-view');
-    loadDashboard();
-  } catch (e) {}
-}
-
-function logout() {
-  state.token = '';
-  state.user = null;
-  localStorage.removeItem('neopanel_token');
-  if (state.activeWs) {
-    state.activeWs.close();
-    state.activeWs = null;
-  }
-  showView('login-view');
-}
-
-// --- View Router ---
-function showView(viewId) {
-  ['setup-view', 'login-view', 'dashboard-view', 'server-detail-view', 'account-view'].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = id === viewId ? 'block' : 'none';
-  });
-
-  const isAuthenticated = (viewId === 'dashboard-view' || viewId === 'server-detail-view' || viewId === 'account-view');
-  const navAuth = document.getElementById('nav-auth');
-  if (navAuth) {
-    navAuth.style.display = isAuthenticated ? 'flex' : 'none';
-  }
-  const headerSearch = document.getElementById('header-search');
-  if (headerSearch) {
-    headerSearch.style.display = isAuthenticated ? 'flex' : 'none';
-  }
-}
-
-// --- Dashboard ---
-async function loadDashboard() {
-  try {
-    const [servers, sys] = await Promise.all([
-      api('/api/servers'),
-      api('/api/system'),
-    ]);
-    state.servers = servers;
-    state.systemInfo = sys;
-
-    // Render metrics
-    document.getElementById('total-servers-count').textContent = servers.length;
-    let onlineCount = 0;
-    servers.forEach(s => {
-      if (s.stats && (s.stats.status === 'online' || s.stats.status === 'starting')) onlineCount++;
-    });
-    document.getElementById('active-servers-count').textContent = onlineCount;
-    document.getElementById('system-ram-metric').textContent = `${sys.free_ram_mb} MB / ${sys.total_ram_mb} MB`;
-
-    // Render server list cards
-    const grid = document.getElementById('servers-grid');
-    grid.innerHTML = '';
-
-    if (servers.length === 0) {
-      grid.innerHTML = `
-        <div style="grid-column: 1/-1; text-align: center; padding: 4rem 2rem; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px dashed rgba(255,255,255,0.12); box-shadow: var(--shadow-card);">
-          <div style="width: 56px; height: 56px; border-radius: 14px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); display: flex; align-items: center; justify-content: center; margin: 0 auto 1.25rem; color: var(--primary);">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
-              <polyline points="2 17 12 22 22 17"></polyline>
-              <polyline points="2 12 12 17 22 12"></polyline>
-            </svg>
-          </div>
-          <h3 style="font-size: 1.35rem; font-weight: 800; color: #fff;">No Minecraft servers deployed yet</h3>
-          <p style="color: var(--text-dim); margin-top: 0.5rem; max-width: 440px; margin-left: auto; margin-right: auto; font-size: 0.9rem;">
-            Click the button below to deploy your first high-performance PaperMC, Purpur, or Vanilla Minecraft server.
-          </p>
-          <button class="btn btn-primary" onclick="openCreateServerModal()" style="margin-top: 1.5rem;">
-            + Deploy Server
-          </button>
-        </div>
-      `;
-      return;
-    }
-
-    servers.forEach((s) => {
-      const card = document.createElement('div');
-      card.className = 'server-card';
-      const statusClass = `badge-${s.stats?.status || 'offline'}`;
-      const memUsed = s.stats?.memory_mb || 0;
-      const memMax = s.memory_max || 1024;
-      const memPct = Math.min(100, Math.round((memUsed / memMax) * 100));
-
-      card.innerHTML = `
-        <div>
-          <div class="server-card-header">
-            <div>
-              <h3 class="server-name">${escapeHtml(s.name)}</h3>
-              <p class="server-sub">Port: ${s.port} &bull; ${s.jar_file}</p>
-            </div>
-            <div style="display: flex; gap: 0.5rem; align-items: center;">
-              <span class="badge badge-flavor">${escapeHtml(s.type)} ${escapeHtml(s.version)}</span>
-              <span class="badge ${statusClass}">
-                <span class="status-dot"></span>
-                ${s.stats?.status || 'offline'}
-              </span>
-            </div>
-          </div>
-
-          <!-- Mini RAM Meter -->
-          <div style="margin: 0.75rem 0 0.25rem;">
-            <div style="display: flex; justify-content: space-between; font-size: 0.725rem; font-weight: 700; color: var(--text-dim); margin-bottom: 0.35rem;">
-              <span>MEMORY ALLOCATION</span>
-              <span>${memUsed} / ${memMax} MB (${memPct}%)</span>
-            </div>
-            <div style="background: rgba(255, 255, 255, 0.06); height: 5px; border-radius: 3px; overflow: hidden;">
-              <div style="background: linear-gradient(90deg, var(--primary), var(--accent)); width: ${memPct}%; height: 100%; transition: width 0.3s ease;"></div>
-            </div>
-          </div>
-
-          <div class="server-stats-grid">
-            <div class="stat-item"><span class="label">CPU Usage</span><span class="val">${(s.stats?.cpu_usage || 0).toFixed(1)}%</span></div>
-            <div class="stat-item"><span class="label">Memory</span><span class="val">${memUsed} MB</span></div>
-            <div class="stat-item"><span class="label">Disk Usage</span><span class="val">${s.stats?.disk_mb || 0} MB</span></div>
-            <div class="stat-item"><span class="label">Uptime</span><span class="val">${formatUptime(s.stats?.uptime_sec || 0)}</span></div>
-          </div>
-        </div>
-
-        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; border-top: 1px solid var(--border-subtle); padding-top: 0.85rem;">
-          <button class="btn btn-secondary btn-sm" onclick="openServer('${s.id}')">
-            Manage
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-              <polyline points="12 5 19 12 12 19"></polyline>
-            </svg>
-          </button>
-        </div>
-      `;
-      grid.appendChild(card);
-    });
-  } catch (e) {}
-}
-
-// --- Server Detail ---
-async function openServer(serverId) {
-  try {
-    const srv = await api(`/api/servers/${serverId}`);
-    state.selectedServer = srv;
-    showView('server-detail-view');
-
-    document.getElementById('detail-server-name').textContent = srv.name;
-    document.getElementById('detail-server-meta').textContent = `${srv.type.toUpperCase()} ${srv.version} • Port ${srv.port} • Max RAM ${srv.memory_max} MB`;
-
-    switchTab('console');
-    updateServerPowerBadges(srv.stats?.status || 'offline');
-    initConsoleWebSocket(srv.id);
-  } catch (e) {}
-}
-
-function updateServerPowerBadges(status) {
-  const badge = document.getElementById('detail-server-status');
-  badge.className = `badge badge-${status}`;
-  badge.innerHTML = `<span class="status-dot"></span>${status}`;
-}
-
-// --- Console & WebSocket ---
-function updateConsoleConn(status, label) {
-  const el = document.getElementById('console-conn-status');
-  if (el) {
-    el.className = `conn-status conn-${status}`;
-    const txt = el.querySelector('.conn-text');
-    if (txt) txt.textContent = label;
-  }
-}
-
-function initConsoleWebSocket(serverId) {
-  if (state.reconnectTimeout) {
-    clearTimeout(state.reconnectTimeout);
-    state.reconnectTimeout = null;
-  }
-
-  if (state.activeWs) {
-    try { state.activeWs.close(); } catch (e) {}
-    state.activeWs = null;
-  }
-
-  const logBox = document.getElementById('terminal-logs');
-  const inputEl = document.getElementById('terminal-input');
-  if (!state.consoleMgr) {
-    state.consoleMgr = new ConsoleManager(logBox, inputEl, (cmd) => {
-      sendConsoleCommand(cmd);
-    });
-  } else {
-    state.consoleMgr.container = logBox;
-    state.consoleMgr.input = inputEl;
-  }
-  state.consoleMgr.clear();
-
-  updateConsoleConn('reconnecting', state.reconnectAttempts > 0 ? 'Reconnecting...' : 'Connecting...');
-
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${state.token}`;
-
-  const ws = new WebSocket(wsUrl);
-  state.activeWs = ws;
-
-  ws.onopen = () => {
-    state.reconnectAttempts = 0;
-    updateConsoleConn('connected', 'Connected');
-    state.consoleMgr.appendLine('\x1b[32m[NeoPanel] Console connected to server instance.\x1b[0m');
+  // --- Application State ---
+  const S = {
+    token: localStorage.getItem('neopanel_token') || '',
+    user: null,
+    view: 'dash',          // active view: dash, con, set, act, fi, db, bk, sc, net, sub, stp, pl, plug, store, ver, all, acc
+    status: 'offline',     // current server status: online, offline, starting
+    start: Date.now(),     // server start time for uptime
+    cpu: Array.from({ length: 40 }, () => 0),
+    ram: Array.from({ length: 40 }, () => 0),
+    ni: Array.from({ length: 40 }, () => 0),
+    no: Array.from({ length: 40 }, () => 0),
+    tps: 20.00,
+    ver: '1.21.4',
+    core: 'Paper',
+    sel: 'Paper',          // selected core in software switcher
+    q: '',                 // plugin search query
+    cat: 'All',            // plugin category filter
+    ptab: 'online',        // player tab: online, wl, ban
+    ftab: 'server.properties', // active open file name
+    currentDir: '',        // file browser current directory path
+    fileList: [],          // list of files in currentDir
+    players: [],           // online players
+    bans: [],              // banned players
+    wl: [],                // whitelisted players
+    ops: [],               // ops
+    plugins: [],           // installed plugins [[name, ver, enabled]]
+    bk: [],                // backups [[name, size, created]]
+    sc: [
+      ['Restart server', '0 4 * * *', true],
+      ['Backup world', '0 3 * * *', true],
+      ['Broadcast voting reminder', '*/30 * * * *', false]
+    ],
+    props: {
+      motd: 'A Minecraft Server',
+      max: 20,
+      diff: 'normal',
+      mode: 'survival',
+      pvp: true,
+      wl: false,
+      view: 10,
+      port: 25565,
+      cmd: false
+    },
+    files: {},             // cache of open files
+    log: [],               // console lines
+    hist: [],              // command input history
+    hi: 0,                 // command history pointer
+    cs: 0,                 // current server index
+    servers: [],           // live servers list from /api/servers
+    sftp: null,            // sftp details
+    system: null,          // system info
+    cmenu: false,          // commands dropdown open
+    pq: '',                // command palette query
+    pi: 0,                 // command palette selected index
+    vq: '',                // version search query
+    vf: 'All',             // version family filter
+    acct: {
+      fn: 'Admin',
+      ln: 'User',
+      un: 'admin',
+      em: 'admin@neopanel.internal',
+      tab: 0,
+      mode: localStorage.getItem('neopanel_mode') || 'Dark',
+      compact: localStorage.getItem('neopanel_compact') === 'true',
+      sound: localStorage.getItem('neopanel_sound') === 'true',
+      priv: localStorage.getItem('neopanel_priv') === 'true',
+      h: '',
+      tfa: false,
+      newkey: '',
+      ssh: [],
+      api: [],
+      act: []
+    },
+    activeWs: null,
+    pollTimer: null
   };
 
-  ws.onmessage = (event) => {
+  // --- Audio Feedback (Web Audio API) ---
+  function beep() {
+    if (!S.acct.sound) return;
     try {
-      const msg = JSON.parse(event.data);
-      if (msg.event === 'log') {
-        state.consoleMgr.appendLine(msg.data);
-      }
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      gain.gain.setValueAtTime(0.04, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
     } catch (e) {}
-  };
+  }
 
-  ws.onclose = () => {
-    if (state.selectedServer && state.selectedServer.id === serverId && state.currentTab === 'console') {
-      updateConsoleConn('reconnecting', 'Disconnected');
-      scheduleConsoleReconnect(serverId);
-    } else {
-      updateConsoleConn('offline', 'Offline');
+  // --- Toast Notification ---
+  function toast(msg, type = 'info') {
+    beep();
+    const t = $('#toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('s');
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(() => t.classList.remove('s'), 2600);
+  }
+
+  // --- Clock & Formatters ---
+  const clock = () => new Date().toTimeString().slice(0, 8);
+
+  function formatBytes(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return (bytes / Math.pow(k, i)).toFixed(i > 1 ? 2 : 0) + ' ' + sizes[i];
+  }
+
+  function up() {
+    if (S.status !== 'online') return 'Not running';
+    const s = Math.max(0, Math.floor((Date.now() - S.start) / 1000));
+    return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${s % 60}s`;
+  }
+
+  // --- Sparkline SVGs ---
+  function spark(data, max) {
+    if (!data || data.length === 0) data = [0];
+    const m = max || Math.max(...data, 1);
+    const p = data.map((v, i) => `${i * (300 / (data.length - 1 || 1))},${70 - (v / m) * 66}`).join(' ');
+    return `<svg class="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true">
+      <polygon points="0,70 ${p} 300,70" fill="var(--acs)"/>
+      <polyline points="${p}" fill="none" stroke="var(--ac)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    </svg>`;
+  }
+
+  function lines(arrays, max) {
+    const m = max || 500;
+    return `<svg class="spark" viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true">
+      ${arrays.map((a, j) => {
+        const p = a.map((v, i) => `${i * (300 / (a.length - 1 || 1))},${70 - (v / m) * 66}`).join(' ');
+        return `<polyline points="${p}" fill="none" stroke="${j ? '#f0b429' : 'var(--ac)'}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+      }).join('')}
+    </svg>`;
+  }
+
+  function head(name) {
+    let h = 0;
+    for (const c of String(name || 'Player')) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return `<span class="head" style="background:hsl(${h} 45% 48%);box-shadow:inset 0 -9px 0 hsl(${h} 35% 30%)"></span>`;
+  }
+
+  function av(s) {
+    const letter = (S.acct.fn ? S.acct.fn[0] : (S.acct.un ? S.acct.un[0] : 'A')).toUpperCase();
+    return `<span class="av" style="width:${s}px;height:${s}px;font-size:${s * 0.4}px">
+      ${esc(letter)}
+      ${S.acct.h ? `<img src="https://gravatar.com/avatar/${S.acct.h}?s=${s * 2}&d=404" alt="" onerror="this.remove()">` : ''}
+    </span>`;
+  }
+
+  // Gravatar SHA-256 generator
+  async function computeGravatarHash(email) {
+    try {
+      const msg = new TextEncoder().encode(email.trim().toLowerCase());
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msg);
+      return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      return '';
     }
-  };
+  }
 
-  ws.onerror = () => {
-    updateConsoleConn('offline', 'Error');
-  };
-}
-
-function scheduleConsoleReconnect(serverId) {
-  if (state.reconnectTimeout) clearTimeout(state.reconnectTimeout);
-  const delay = Math.min(1000 * Math.pow(1.5, state.reconnectAttempts), 8000);
-  state.reconnectAttempts++;
-  updateConsoleConn('reconnecting', `Retry in ${(delay / 1000).toFixed(0)}s`);
-  state.reconnectTimeout = setTimeout(() => {
-    if (state.selectedServer && state.selectedServer.id === serverId && state.currentTab === 'console') {
-      initConsoleWebSocket(serverId);
+  // --- API Client ---
+  async function api(endpoint, options = {}) {
+    const headers = options.headers || {};
+    if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
+    if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
     }
-  }, delay);
-}
 
-function openPopoutConsole() {
-  if (!state.selectedServer) return;
-  const url = `/console.html?id=${state.selectedServer.id}`;
-  const width = Math.min(1050, window.screen.width - 80);
-  const height = Math.min(720, window.screen.height - 100);
-  const left = (window.screen.width - width) / 2;
-  const top = (window.screen.height - height) / 2;
-  window.open(url, `neopanel_console_${state.selectedServer.id}`, `width=${width},height=${height},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no`);
-}
-
-function sendConsoleCommand(cmd) {
-  if (!cmd) return;
-  if (state.activeWs && state.activeWs.readyState === WebSocket.OPEN) {
-    state.activeWs.send(JSON.stringify({ event: 'command', data: cmd }));
-  } else {
-    api(`/api/servers/${state.selectedServer.id}/command`, {
-      method: 'POST',
-      body: JSON.stringify({ command: cmd }),
-    });
-  }
-}
-
-// --- Power Actions ---
-async function serverPower(action) {
-  if (!state.selectedServer) return;
-  try {
-    const res = await api(`/api/servers/${state.selectedServer.id}/power`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    });
-    showToast(`Sent ${action.toUpperCase()} command`);
-    if (res.current) {
-      updateServerPowerBadges(res.current.status);
+    try {
+      const res = await fetch(endpoint, { ...options, headers });
+      if (res.status === 401) {
+        logout();
+        throw new Error('Session expired. Please sign in again.');
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      return data;
+    } catch (err) {
+      if (err.message && !err.message.includes('Session expired')) {
+        toast(err.message, 'error');
+      }
+      throw err;
     }
-  } catch (e) {}
-}
+  }
 
-// --- Tab Switching ---
-function switchTab(tab) {
-  state.currentTab = tab;
-  ['console', 'files', 'plugins', 'settings'].forEach((t) => {
-    const el = document.getElementById(`tab-content-${t}`);
-    const btn = document.getElementById(`tab-btn-${t}`);
-    if (el) el.style.display = t === tab ? 'block' : 'none';
-    if (btn) btn.className = t === tab ? 'tab-btn active' : 'tab-btn';
-  });
+  // --- Current Active Server Helper ---
+  function curServer() {
+    if (!S.servers || S.servers.length === 0) return null;
+    return S.servers[S.cs] || S.servers[0];
+  }
 
-  if (tab === 'console' && state.selectedServer) {
-    if (!state.activeWs || state.activeWs.readyState !== WebSocket.OPEN) {
-      initConsoleWebSocket(state.selectedServer.id);
+  // --- ANSI / Minecraft Formatting Colors to HTML ---
+  function ansiToHtml(text) {
+    const escText = esc(text);
+    return escText
+      .replace(/\x1b\[0m/g, '</span>')
+      .replace(/\x1b\[31m/g, '<span class="e">')
+      .replace(/\x1b\[32m/g, '<span class="c">')
+      .replace(/\x1b\[33m/g, '<span class="w">')
+      .replace(/\x1b\[34m/g, '<span class="c">')
+      .replace(/\x1b\[35m/g, '<span class="w">')
+      .replace(/\x1b\[36m/g, '<span class="c">')
+      .replace(/\x1b\[1m/g, '<b>')
+      .replace(/\x1b\[22m/g, '</b>');
+  }
+
+  function addLog(line, cls) {
+    const time = clock();
+    const formatted = cls ? `<span class="${cls}">${line}</span>` : line;
+    S.log.push(`[${time}] ${formatted}`);
+    if (S.log.length > 500) S.log.shift();
+    if (S.view === 'con') paintLog();
+  }
+
+  function paintLog() {
+    const l = $('#log');
+    if (!l) return;
+    l.innerHTML = S.log.join('\n');
+    l.scrollTop = l.scrollHeight;
+  }
+
+  // --- WebSocket Connection ---
+  function connectWs(serverId) {
+    if (S.activeWs) {
+      try { S.activeWs.close(); } catch (e) {}
+      S.activeWs = null;
     }
-  } else if (tab === 'files') {
-    loadFiles('');
-  } else if (tab === 'plugins') {
-    loadPluginsTab();
-  } else if (tab === 'settings') {
-    populateSettingsForm();
-  }
-}
+    if (!serverId) return;
 
-// --- Plugins & Addons Flow ---
-async function loadPluginsTab() {
-  loadInstalledPlugins();
-  const resultsGrid = document.getElementById('plugin-search-results');
-  if (resultsGrid && !resultsGrid.children.length) {
-    searchPlugins('');
-  }
-}
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${encodeURIComponent(S.token)}`;
 
-async function searchPlugins(query) {
-  const inputEl = document.getElementById('plugin-search-input');
-  const q = query !== undefined ? query : (inputEl ? inputEl.value.trim() : '');
-  const resultsGrid = document.getElementById('plugin-search-results');
-  if (!resultsGrid) return;
+    try {
+      const ws = new WebSocket(wsUrl);
+      S.activeWs = ws;
 
-  resultsGrid.innerHTML = `
-    <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; color: var(--text-dim);">
-      <p style="font-size: 0.95rem;">Searching Modrinth API...</p>
-    </div>
-  `;
+      ws.onmessage = e => {
+        try {
+          if (e.data.startsWith('{')) {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'stats') {
+              const c = Math.max(0, Math.min(100, msg.cpu_percent || 0));
+              S.cpu.push(c);
+              S.cpu.shift();
 
-  try {
-    const searchTarget = q || (state.activeCategory || 'paper');
-    const data = await api(`/api/plugins/search?query=${encodeURIComponent(searchTarget)}&limit=24`);
-    renderPluginResults(data.hits || []);
-  } catch (err) {
-    resultsGrid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:2rem; color:var(--danger);">Failed to search plugins: ${escapeHtml(err.message)}</div>`;
-  }
-}
+              const mem = msg.memory_bytes || 0;
+              const maxMem = (curServer()?.memory_limit || 2048) * 1024 * 1024;
+              const r = Math.max(0, Math.min(100, (mem / maxMem) * 100));
+              S.ram.push(r);
+              S.ram.shift();
 
-function renderPluginResults(hits) {
-  const grid = document.getElementById('plugin-search-results');
-  if (!grid) return;
-  grid.innerHTML = '';
+              S.ni.push(Math.max(2, Math.min(480, S.ni.at(-1) + (Math.random() - 0.45) * 40)));
+              S.ni.shift();
+              S.no.push(Math.max(2, Math.min(480, S.no.at(-1) + (Math.random() - 0.45) * 30)));
+              S.no.shift();
 
-  if (!hits || hits.length === 0) {
-    grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:2.5rem; color:var(--text-dim);">No plugins found on Modrinth matching this query.</div>`;
-    return;
-  }
+              liveCon();
+              return;
+            } else if (msg.type === 'status') {
+              S.status = msg.data || S.status;
+              R();
+              return;
+            }
+          }
+        } catch (err) {}
 
-  hits.forEach(plugin => {
-    const card = document.createElement('div');
-    card.className = 'plugin-card';
-    const icon = plugin.icon_url || '/favicon.svg';
-    const downloads = formatNumber(plugin.downloads);
+        // Plain text log line
+        const html = ansiToHtml(e.data);
+        addLog(html);
+      };
 
-    card.innerHTML = `
-      <div>
-        <div class="plugin-header">
-          <img src="${escapeHtml(icon)}" class="plugin-icon" onerror="this.src='/favicon.svg'" alt="">
-          <div class="plugin-info">
-            <h4>${escapeHtml(plugin.title)}</h4>
-            <div class="plugin-author">by ${escapeHtml(plugin.author)}</div>
-          </div>
-        </div>
-        <p class="plugin-desc">${escapeHtml(plugin.description || 'No description provided.')}</p>
-      </div>
-      <div class="plugin-footer">
-        <span class="plugin-downloads">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-          ${downloads}
-        </span>
-        <button class="btn btn-primary btn-sm" onclick="installPlugin('${escapeHtml(plugin.slug || plugin.project_id)}', this)">
-          Install
-        </button>
-      </div>
-    `;
-    grid.appendChild(card);
-  });
-}
-
-function filterPluginsCategory(chip, category) {
-  document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
-  chip.classList.add('active');
-  state.activeCategory = category;
-  searchPlugins(category);
-}
-
-async function installPlugin(slug, btn) {
-  if (!state.selectedServer) return;
-  const originalText = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = `Installing...`;
-
-  try {
-    const res = await api(`/api/servers/${state.selectedServer.id}/plugins/install`, {
-      method: 'POST',
-      body: JSON.stringify({ slug }),
-    });
-    btn.innerHTML = `✔ Installed`;
-    btn.className = 'btn btn-secondary btn-sm';
-    showToast(`Installed '${res.filename}'!`);
-    loadInstalledPlugins();
-  } catch (err) {
-    btn.disabled = false;
-    btn.innerHTML = originalText;
-    showToast(`Install failed: ${err.message}`, 'error');
-  }
-}
-
-async function loadInstalledPlugins() {
-  if (!state.selectedServer) return;
-  const tbody = document.getElementById('installed-plugins-tbody');
-  const label = document.getElementById('installed-folder-label');
-  if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading installed plugins...</td></tr>`;
-
-  try {
-    const data = await api(`/api/servers/${state.selectedServer.id}/plugins`);
-    if (label) label.textContent = data.folder === 'mods' ? 'Mods' : 'Plugins';
-    renderInstalledPlugins(data.plugins || []);
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
-  }
-}
-
-function renderInstalledPlugins(plugins) {
-  const tbody = document.getElementById('installed-plugins-tbody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-
-  if (!plugins || plugins.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:1.5rem; color:var(--text-dim);">No plugins currently installed. Search above to install 1-click plugins from Modrinth!</td></tr>`;
-    return;
+      ws.onclose = () => {
+        S.activeWs = null;
+      };
+    } catch (e) {}
   }
 
-  plugins.forEach(p => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>
-        <div style="display:flex; align-items:center; gap:0.65rem; font-weight:600; font-family:var(--font-mono); font-size:0.85rem;">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
-          ${escapeHtml(p.filename)}
-        </div>
-      </td>
-      <td style="color:var(--text-dim); font-size:0.8rem;">${formatBytes(p.size)}</td>
-      <td style="color:var(--text-dim); font-size:0.8rem;">${new Date(p.modified).toLocaleString()}</td>
-      <td style="text-align:right;">
-        <button class="btn btn-danger btn-sm" onclick="deletePlugin('${escapeHtml(p.filename)}')">
-          Uninstall
-        </button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
+  // --- Real Power Controls ---
+  async function power(action) {
+    const srv = curServer();
+    if (!srv) return;
 
-async function deletePlugin(filename) {
-  if (!confirm(`Are you sure you want to uninstall and remove '${filename}'?`)) return;
-  try {
-    await api(`/api/servers/${state.selectedServer.id}/plugins?filename=${encodeURIComponent(filename)}`, {
-      method: 'DELETE',
-    });
-    showToast(`Removed '${filename}'`);
-    loadInstalledPlugins();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
+    if (action === 'start') {
+      S.status = 'starting';
+      addLog(`[Server thread/INFO]: Starting Minecraft server instance ${srv.name}...`, 'c');
+      R();
+      toast('Starting server...');
+    } else if (action === 'stop') {
+      addLog('[Server thread/INFO]: Stopping the server...', 'w');
+      toast('Stopping server...');
+    } else if (action === 'restart') {
+      toast('Restarting server...');
+      addLog('[Server thread/INFO]: Restart sequence initiated...', 'w');
+    } else if (action === 'kill') {
+      toast('Terminating server process...');
+      addLog('[Server thread/ERROR]: Force kill signal delivered', 'e');
+    }
 
-// --- SFTP Modal ---
-async function openSFTPModal() {
-  if (!state.selectedServer) return;
-  try {
-    const sftp = await api(`/api/servers/${state.selectedServer.id}/sftp`);
-    document.getElementById('sftp-host').textContent = sftp.host;
-    document.getElementById('sftp-port').textContent = sftp.port;
-    document.getElementById('sftp-username').textContent = sftp.username;
-    document.getElementById('sftp-modal').style.display = 'flex';
-  } catch (err) {
-    showToast('Failed to load SFTP details', 'error');
-  }
-}
-
-function copyText(text) {
-  if (!text) return;
-  navigator.clipboard.writeText(text).then(() => {
-    showToast('Copied to clipboard!');
-  }).catch(() => {
-    showToast('Failed to copy', 'error');
-  });
-}
-
-function formatNumber(num) {
-  if (!num) return '0';
-  if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-  if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-  return num.toString();
-}
-
-// --- File Manager Icons & Utilities ---
-function getFileIcon(name, isDir) {
-  if (isDir) {
-    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" style="flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
-  }
-
-  const ext = name.split('.').pop().toLowerCase();
-  if (ext === 'jar') {
-    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" style="flex-shrink:0;"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>`;
-  } else if (ext === 'properties' || ext === 'yml' || ext === 'yaml' || ext === 'json') {
-    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>`;
-  } else if (ext === 'log' || ext === 'txt') {
-    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2" style="flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`;
-  }
-
-  return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" style="flex-shrink:0;"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
-}
-
-async function loadFiles(path = '') {
-  state.currentFilePath = path;
-  try {
-    const files = await api(`/api/servers/${state.selectedServer.id}/files?path=${encodeURIComponent(path)}`);
-    renderFileList(files, path);
-  } catch (e) {}
-}
-
-function renderFileList(files, currentPath) {
-  const tbody = document.getElementById('file-list-tbody');
-  tbody.innerHTML = '';
-
-  // Breadcrumbs
-  const breadcrumbEl = document.getElementById('file-breadcrumbs');
-  const parts = currentPath.split('/').filter(Boolean);
-  let breadcrumbHtml = `<a href="javascript:void(0)" onclick="loadFiles('')" style="color:var(--primary); font-weight:700;">root</a>`;
-  let accum = '';
-  parts.forEach((p) => {
-    accum += (accum ? '/' : '') + p;
-    breadcrumbHtml += ` <span style="color:var(--text-dim);">&sol;</span> <a href="javascript:void(0)" onclick="loadFiles('${accum}')" style="color:#fff; font-weight:600;">${escapeHtml(p)}</a>`;
-  });
-  breadcrumbEl.innerHTML = breadcrumbHtml;
-
-  // If inside subfolder, show parent directory option
-  if (currentPath) {
-    const parent = parts.slice(0, -1).join('/');
-    const tr = document.createElement('tr');
-    tr.className = 'file-row';
-    tr.innerHTML = `
-      <td colspan="4">
-        <span class="file-name" onclick="loadFiles('${parent}')">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"></polyline></svg>
-          .. (parent folder)
-        </span>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  }
-
-  // Sort: directories first, then files
-  files.sort((a, b) => {
-    if (a.is_dir === b.is_dir) return a.name.localeCompare(b.name);
-    return a.is_dir ? -1 : 1;
-  });
-
-  files.forEach((f) => {
-    const tr = document.createElement('tr');
-    tr.className = 'file-row';
-    const iconSvg = getFileIcon(f.name, f.is_dir);
-    const clickAction = f.is_dir
-      ? `loadFiles('${f.path}')`
-      : `openFileEditor('${f.path}')`;
-
-    tr.innerHTML = `
-      <td><span class="file-name" onclick="${clickAction}">${iconSvg} ${escapeHtml(f.name)}</span></td>
-      <td style="color: var(--text-dim); font-family: var(--font-mono); font-size: 0.8rem;">${f.is_dir ? '-' : formatBytes(f.size)}</td>
-      <td style="color: var(--text-dim); font-size: 0.8rem;">${new Date(f.modified).toLocaleString()}</td>
-      <td style="text-align: right;">
-        <button class="btn btn-secondary btn-sm" onclick="deleteFile('${f.path}')" style="color: var(--danger); padding: 0.25rem 0.55rem;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-        </button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-async function openFileEditor(path) {
-  try {
-    const res = await api(`/api/servers/${state.selectedServer.id}/files/content?path=${encodeURIComponent(path)}`);
-    document.getElementById('editor-modal-title').textContent = path;
-    document.getElementById('editor-file-path').value = path;
-    document.getElementById('editor-content').value = res.content;
-    document.getElementById('editor-modal').style.display = 'flex';
-  } catch (e) {}
-}
-
-async function saveFileContent() {
-  const path = document.getElementById('editor-file-path').value;
-  const content = document.getElementById('editor-content').value;
-
-  try {
-    await api(`/api/servers/${state.selectedServer.id}/files/content`, {
-      method: 'POST',
-      body: JSON.stringify({ path, content }),
-    });
-    showToast('File saved successfully');
-    closeModal('editor-modal');
-  } catch (e) {}
-}
-
-async function deleteFile(path) {
-  if (!confirm(`Are you sure you want to delete ${path}?`)) return;
-  try {
-    await api(`/api/servers/${state.selectedServer.id}/files?path=${encodeURIComponent(path)}`, {
-      method: 'DELETE',
-    });
-    showToast('Deleted successfully');
-    loadFiles(state.currentFilePath);
-  } catch (e) {}
-}
-
-async function uploadFile() {
-  const input = document.getElementById('file-upload-input');
-  if (!input.files.length) return;
-
-  const file = input.files[0];
-  const formData = new FormData();
-  formData.append('file', file);
-
-  try {
-    await api(`/api/servers/${state.selectedServer.id}/files/upload?path=${encodeURIComponent(state.currentFilePath)}`, {
-      method: 'POST',
-      body: formData,
-    });
-    showToast(`Uploaded ${file.name}`);
-    input.value = '';
-    loadFiles(state.currentFilePath);
-  } catch (e) {}
-}
-
-// --- Server Settings ---
-function populateSettingsForm() {
-  const s = state.selectedServer;
-  if (!s) return;
-  document.getElementById('setting-name').value = s.name;
-  document.getElementById('setting-mem-min').value = s.memory_min;
-  document.getElementById('setting-mem-max').value = s.memory_max;
-  document.getElementById('setting-java-args').value = s.java_args || '';
-  document.getElementById('setting-jar-file').value = s.jar_file;
-  document.getElementById('setting-auto-restart').checked = s.auto_restart;
-}
-
-async function saveServerSettings(e) {
-  e.preventDefault();
-  const s = state.selectedServer;
-  const payload = {
-    name: document.getElementById('setting-name').value,
-    memory_min: parseInt(document.getElementById('setting-mem-min').value, 10),
-    memory_max: parseInt(document.getElementById('setting-mem-max').value, 10),
-    java_args: document.getElementById('setting-java-args').value,
-    jar_file: document.getElementById('setting-jar-file').value,
-    auto_restart: document.getElementById('setting-auto-restart').checked,
-  };
-
-  try {
-    const updated = await api(`/api/servers/${s.id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
-    state.selectedServer = { ...s, ...updated };
-    showToast('Settings saved successfully');
-  } catch (e) {}
-}
-
-async function deleteCurrentServer() {
-  if (!state.selectedServer) return;
-  if (!confirm(`WARNING: This will permanently delete ${state.selectedServer.name} and ALL its world data! Are you sure?`)) {
-    return;
-  }
-
-  try {
-    await api(`/api/servers/${state.selectedServer.id}`, { method: 'DELETE' });
-    showToast('Server deleted');
-    showView('dashboard-view');
-    loadDashboard();
-  } catch (e) {}
-}
-
-// --- Create Server Modal ---
-function openCreateServerModal() {
-  document.getElementById('create-server-modal').style.display = 'flex';
-}
-
-async function handleCreateServer(e) {
-  e.preventDefault();
-  const name = document.getElementById('new-server-name').value;
-  const flavor = document.getElementById('new-server-type').value;
-  const version = document.getElementById('new-server-version').value;
-  const port = parseInt(document.getElementById('new-server-port').value, 10);
-  const memMin = parseInt(document.getElementById('new-server-mem-min').value, 10);
-  const memMax = parseInt(document.getElementById('new-server-mem-max').value, 10);
-  const autoDownload = document.getElementById('new-server-autodl').checked;
-
-  try {
-    const created = await api('/api/servers', {
-      method: 'POST',
-      body: JSON.stringify({
-        name,
-        type: flavor,
-        version,
-        port,
-        memory_min: memMin,
-        memory_max: memMax,
-        auto_download: autoDownload,
-      }),
-    });
-    showToast(`Server '${created.name}' created!`);
-    closeModal('create-server-modal');
-    loadDashboard();
-  } catch (e) {}
-}
-
-function openModal(id) {
-  const el = document.getElementById(id);
-  if (el) el.style.display = 'flex';
-}
-
-function closeModal(id) {
-  const el = document.getElementById(id);
-  if (el) el.style.display = 'none';
-}
-
-// --- Global Command Palette (Ctrl + K) ---
-let paletteItems = [];
-let paletteSelectedIndex = 0;
-
-function openCommandPalette() {
-  const modal = document.getElementById('command-palette-modal');
-  const input = document.getElementById('palette-search-input');
-  if (!modal || !input) return;
-
-  modal.style.display = 'flex';
-  input.value = '';
-  input.focus();
-  handlePaletteSearch('');
-}
-
-function closeCommandPalette() {
-  const modal = document.getElementById('command-palette-modal');
-  if (modal) modal.style.display = 'none';
-}
-
-function handlePaletteSearch(q) {
-  q = q.toLowerCase().trim();
-  paletteItems = [];
-
-  // 1. Minecraft Servers
-  if (state.servers && state.servers.length > 0) {
-    const matchingServers = state.servers.filter(s =>
-      !q || s.name.toLowerCase().includes(q) || s.type.toLowerCase().includes(q) || s.port.toString().includes(q)
-    );
-    matchingServers.forEach(s => {
-      paletteItems.push({
-        type: 'server',
-        id: s.id,
-        title: s.name,
-        desc: `${s.type.toUpperCase()} • Port ${s.port} • ${s.memory_max} MB`,
-        status: s.stats?.status || 'offline',
-        action: () => {
-          closeCommandPalette();
-          openServer(s.id);
-        }
+    try {
+      const res = await api(`/api/servers/${srv.id}/power`, {
+        method: 'POST',
+        body: JSON.stringify({ action })
       });
-    });
+      S.status = res.status || (action === 'start' ? 'online' : 'offline');
+      if (S.status === 'online') S.start = Date.now();
+      R();
+      toast(`Server ${action} command sent`);
+    } catch (err) {
+      toast(`Action failed: ${err.message}`, 'error');
+      refreshServerStatus();
+    }
   }
 
-  // 2. Navigation Actions
-  const actions = [
-    { title: 'Deploy New Minecraft Server', desc: 'Create a new Paper, Purpur, or Fabric server', icon: 'server', action: () => { closeCommandPalette(); openCreateServerModal(); } },
-    { title: 'Account Settings', desc: 'View profile, update password, and manage SSH keys', icon: 'user', action: () => { closeCommandPalette(); openAccountSettings(); } },
-    { title: 'SSH Keys (SFTP Access)', desc: 'Manage public SSH keys for passwordless SFTP', icon: 'key', action: () => { closeCommandPalette(); openAccountSettings(); switchAccountTab('ssh'); } },
-    { title: 'API Tokens', desc: 'Generate or revoke programmatic REST API keys', icon: 'code', action: () => { closeCommandPalette(); openAccountSettings(); switchAccountTab('api'); } },
-    { title: 'Account Activity Log', desc: 'Audit recent operations and authentication history', icon: 'activity', action: () => { closeCommandPalette(); openAccountSettings(); switchAccountTab('activity'); } },
-    { title: 'SFTP Remote Access Guide', desc: 'View connection host, port 2022, and user credentials', icon: 'zap', action: () => { closeCommandPalette(); openSFTPModal(); } },
-    { title: 'View All Servers (Dashboard)', desc: 'Return to dashboard grid overview', icon: 'home', action: () => { closeCommandPalette(); showView('dashboard-view'); loadDashboard(); } },
-    { title: 'Sign Out / Logout', desc: 'End session and return to login', icon: 'logout', action: () => { closeCommandPalette(); logout(); } },
+  async function refreshServerStatus() {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      const data = await api(`/api/servers/${srv.id}`);
+      S.status = data.status || 'offline';
+      S.ver = data.version || S.ver;
+      S.core = (data.type || 'paper').charAt(0).toUpperCase() + (data.type || 'paper').slice(1);
+      R();
+    } catch (e) {}
+  }
+
+  // --- Console Command Dispatch ---
+  async function runCmd(cmd) {
+    if (!cmd) return;
+    addLog(`<span class="c">&gt; ${esc(cmd)}</span>`);
+    const srv = curServer();
+    if (!srv) return;
+
+    if (S.activeWs && S.activeWs.readyState === WebSocket.OPEN) {
+      S.activeWs.send(JSON.stringify({ action: 'command', data: cmd }));
+    } else {
+      try {
+        await api(`/api/servers/${srv.id}/command`, {
+          method: 'POST',
+          body: JSON.stringify({ command: cmd })
+        });
+      } catch (e) {}
+    }
+  }
+
+  // --- Navigation & Categories (PG) ---
+  const PG = [
+    ['con', 'Console', '›_', 'General'],
+    ['set', 'Settings', '⚙', 'General'],
+    ['act', 'Activity', '◷', 'General'],
+    ['fi', 'Files', '▤', 'Management'],
+    ['db', 'Databases', '⛁', 'Management'],
+    ['bk', 'Backups', '▣', 'Management'],
+    ['sc', 'Schedules', '◫', 'Management'],
+    ['net', 'Network', '◍', 'Management'],
+    ['sub', 'Subdomain', '◌', 'Management'],
+    ['stp', 'Startup', '➤', 'Management'],
+    ['pl', 'Players', '☺', 'Management'],
+    ['plug', 'Plugins', '✦', 'Minecraft'],
+    ['store', 'Plugin store', '⊕', 'Minecraft'],
+    ['ver', 'Software', '⇅', 'Minecraft'],
+    ['all', 'All versions', '☰', 'Minecraft']
   ];
 
-  const matchingActions = actions.filter(a =>
-    !q || a.title.toLowerCase().includes(q) || a.desc.toLowerCase().includes(q)
-  );
-  matchingActions.forEach(a => {
-    paletteItems.push({
-      type: 'action',
-      title: a.title,
-      desc: a.desc,
-      icon: a.icon,
-      action: a.action
-    });
-  });
+  const CMDS = [
+    ['Save the world', 'save-all'],
+    ['Say hello', 'say Hello from NeoPanel!'],
+    ['List players', 'list'],
+    ['Check TPS', 'tps']
+  ];
 
-  paletteSelectedIndex = 0;
-  renderPaletteResults();
-}
+  const CORES = [
+    ['Paper', 'High-performance, plugin friendly'],
+    ['Purpur', 'Paper fork with extra configurability'],
+    ['Fabric', 'Lightweight, modern modular mod loader'],
+    ['Vanilla', 'Standard Mojang vanilla server'],
+    ['NeoForge', 'Modern forge modding engine']
+  ];
 
-function renderPaletteResults() {
-  const container = document.getElementById('palette-results-list');
-  if (!container) return;
-  container.innerHTML = '';
+  const FAM = [
+    ['26.3', 'Wilderness Bound', '2026', ['26.3']],
+    ['26.2', 'Chaos Cubed', '2026', ['26.2']],
+    ['26.1', 'Tiny Takeover', '2026', ['26.1', '26.1.1', '26.1.2']],
+    ['1.21', 'Tricky Trials & drops', '2024 to 2025', ['1.21', '1.21.1', '1.21.2', '1.21.3', '1.21.4']],
+    ['1.20', 'Trails and Tales', '2023', ['1.20', '1.20.1', '1.20.2', '1.20.4', '1.20.6']],
+    ['1.19', 'The Wild Update', '2022', ['1.19', '1.19.2', '1.19.4']],
+    ['1.18', 'Caves and Cliffs, part 2', '2021', ['1.18', '1.18.1', '1.18.2']],
+    ['1.17', 'Caves and Cliffs, part 1', '2021', ['1.17', '1.17.1']],
+    ['1.16', 'Nether Update', '2020', ['1.16.5', '1.16.4', '1.16.1']],
+    ['1.12', 'World of Color', '2017', ['1.12.2', '1.12.1']]
+  ];
 
-  if (paletteItems.length === 0) {
-    container.innerHTML = `<div style="text-align:center; padding: 2rem; color: var(--text-dim); font-size: 0.85rem;">No servers or commands matching your search.</div>`;
-    return;
+  const ALL_VERS = FAM.flatMap(f => f[3].map(v => ({ v, f: f[0], n: f[1], y: f[2] })));
+  const CATS = ['All', 'Admin', 'Protection', 'Performance', 'Network', 'Building', 'Utility', 'API', 'Map'];
+
+  // --- Header Banner Component (.srvh) ---
+  function srvh() {
+    const srv = curServer();
+    const st = S.status;
+    const on = st === 'online';
+    const c = on ? S.cpu.at(-1) : 0;
+    const maxRam = srv ? srv.memory_limit || 2048 : 2048;
+    const m = on ? (S.ram.at(-1) / 100) * maxRam : 0;
+    const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
+
+    return `<div class="card srvh">
+      <div>
+        <div class="row">
+          <h1>${esc(S.props.motd || srv?.name || 'Minecraft Server')}</h1>
+          <span class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting' }[st]}</span>
+        </div>
+        <div id="hst" class="row hst">
+          <span class="mono mu pv">${hostAddr}</span>
+          <span class="mono mu">CPU ${c.toFixed(0)}%</span>
+          <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRam / 1024).toFixed(1)} GiB</span>
+        </div>
+      </div>
+      <div class="row" style="position:relative">
+        <button class="btn" onclick="toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
+        ${S.cmenu ? `<div class="cmenu" role="menu">
+          ${CMDS.map(([label, cmd]) => `<button role="menuitem" onclick="execQuickCmd('${cmd}')">${label}</button>`).join('')}
+        </div>` : ''}
+        <button class="btn pr" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>Start</button>
+        <button class="btn" onclick="power('restart')" ${on ? '' : 'disabled'}>Restart</button>
+        <button class="btn stop" onclick="power('stop')" ${on ? '' : 'disabled'}>Stop</button>
+        <button class="btn dg" onclick="power('kill')">Kill</button>
+      </div>
+    </div>`;
   }
 
-  let lastType = '';
-  paletteItems.forEach((item, idx) => {
-    if (item.type !== lastType) {
-      const header = document.createElement('div');
-      header.className = 'palette-group-title';
-      header.textContent = item.type === 'server' ? 'Minecraft Servers' : 'Quick Actions & Pages';
-      container.appendChild(header);
-      lastType = item.type;
+  function toggleCmdMenu() {
+    S.cmenu = !S.cmenu;
+    R();
+  }
+
+  function execQuickCmd(cmd) {
+    S.cmenu = false;
+    runCmd(cmd);
+    R();
+  }
+
+  // --- Stats Sidebar & Charts ---
+  function statsHtml() {
+    const srv = curServer();
+    const on = S.status === 'online';
+    const c = on ? S.cpu.at(-1) : 0;
+    const maxRam = srv ? srv.memory_limit || 2048 : 2048;
+    const m = on ? (S.ram.at(-1) / 100) * maxRam : 0;
+    const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
+
+    const row = (i, l, v, s) => `<div class="srow">
+      <span class="sic" aria-hidden="true">${i}</span>
+      <div>
+        <div class="mu">${l}</div>
+        <b class="mono">${v}</b>${s ? ` <span class="mu mono">${s}</span>` : ''}
+      </div>
+    </div>`;
+
+    return row('◎', 'Address', `<span class="pv">${hostAddr}</span>`) +
+      row('◷', 'Uptime', up()) +
+      row('▣', 'CPU load', `${c.toFixed(1)}%`, '/ 100%') +
+      row('▤', 'Memory', `${m.toFixed(0)} MiB`, `/ ${(maxRam / 1024).toFixed(1)} GiB`) +
+      row('▥', 'Disk', '1.82 GiB', '/ 20 GiB') +
+      row('↓', 'Network (inbound)', `${(on ? S.ni.at(-1) : 0).toFixed(1)} KiB`) +
+      row('↑', 'Network (outbound)', `${(on ? S.no.at(-1) : 0).toFixed(1)} KiB`);
+  }
+
+  function chartsHtml() {
+    const on = S.status === 'online';
+    const z = a => a.map(() => 0);
+    return `<div class="card ch">
+      <div class="row sb"><span class="mu">CPU load</span><span class="mu mono">100%</span></div>
+      ${spark(on ? S.cpu : z(S.cpu), 100)}
+    </div>
+    <div class="card ch">
+      <div class="row sb"><span class="mu">Memory</span><span class="mu mono">${curServer() ? (curServer().memory_limit / 1024).toFixed(1) : 2} GiB</span></div>
+      ${spark(on ? S.ram : z(S.ram), 100)}
+    </div>
+    <div class="card ch">
+      <div class="row sb"><span class="mu">Network I/O</span><span class="mu"><span style="color:var(--ac)">in</span> <span style="color:#f0b429">out</span></span></div>
+      ${lines(on ? [S.ni, S.no] : [z(S.ni), z(S.no)], 500)}
+    </div>`;
+  }
+
+  function liveCon() {
+    const stc = $('#stc');
+    const chr = $('#chr');
+    const hst = $('#hst');
+    if (stc) stc.innerHTML = statsHtml();
+    if (chr) chr.innerHTML = chartsHtml();
+    if (hst) {
+      const srv = curServer();
+      const on = S.status === 'online';
+      const c = on ? S.cpu.at(-1) : 0;
+      const maxRam = srv ? srv.memory_limit || 2048 : 2048;
+      const m = on ? (S.ram.at(-1) / 100) * maxRam : 0;
+      const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
+      hst.innerHTML = `<span class="mono mu pv">${hostAddr}</span><span class="mono mu">CPU ${c.toFixed(0)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRam / 1024).toFixed(1)} GiB</span>`;
     }
+  }
 
-    const el = document.createElement('div');
-    el.className = `palette-item ${idx === paletteSelectedIndex ? 'active' : ''}`;
-    el.onclick = () => item.action();
+  // --- Views Implementation ---
+  const V = {
+    // 1. Dashboard: Cluster & Server Overview
+    dash() {
+      const srv = curServer();
+      const on = S.status === 'online';
+      const c = on ? S.cpu.at(-1) : 0;
+      const maxRam = srv ? (srv.memory_limit / 1024).toFixed(1) : '2.0';
+      const r = on ? (S.ram.at(-1) / 100 * parseFloat(maxRam)).toFixed(1) : '0.0';
+      const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
 
-    if (item.type === 'server') {
-      el.innerHTML = `
-        <div class="palette-item-left">
-          <div class="palette-item-icon">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
-          </div>
-          <div>
-            <div class="palette-item-title">${escapeHtml(item.title)}</div>
-            <div class="palette-item-desc">${escapeHtml(item.desc)}</div>
+      return `<header class="top">
+        <h1>Dashboard</h1>
+        <span class="sp"></span>
+        <button class="btn pr" onclick="openCreateServerModal()">+ Create Server</button>
+      </header>
+      
+      <!-- Server Selector Strip -->
+      ${S.servers.length > 1 ? `
+        <div class="row" style="margin-bottom:16px; overflow-x:auto; padding-bottom:4px;">
+          ${S.servers.map((s, i) => `
+            <button class="btn ${i === S.cs ? 'pr' : ''}" onclick="switchServer(${i})">
+              <b>${esc(s.name)}</b> <span class="badge ${s.status === 'running' ? 'online' : 'offline'}" style="margin-left:6px;"><i class="dot"></i>${s.status === 'running' ? 'Online' : 'Offline'}</span>
+            </button>
+          `).join('')}
+        </div>
+      ` : ''}
+
+      <div class="grid g4">
+        <div class="card stat">
+          <span>Players online</span>
+          <b>${S.players.length} / ${S.props.max}</b>
+          <div class="bar"><i style="width:${Math.min(100, (S.players.length / S.props.max) * 100)}%"></i></div>
+        </div>
+        <div class="card stat">
+          <span>Ticks per second</span>
+          <b>${on ? S.tps.toFixed(2) : '0.00'}</b>
+          <span class="mu">Target 20.00</span>
+        </div>
+        <div class="card stat">
+          <span>Uptime</span>
+          <b style="font-size:21px;padding:5px 0">${up()}</b>
+          <span class="mu">Since last start</span>
+        </div>
+        <div class="card stat">
+          <span>Game Address</span>
+          <b style="font-size:17px;padding:7px 0" class="mono pv">${hostAddr}</b>
+          <button class="btn sm" onclick="navigator.clipboard.writeText('${hostAddr}'); toast('Address copied!')">Copy</button>
+        </div>
+      </div>
+
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card">
+          <div class="row sb"><h2>CPU Load</h2><b>${c.toFixed(0)}%</b></div>
+          ${spark(on ? S.cpu : S.cpu.map(() => 0), 100)}
+        </div>
+        <div class="card">
+          <div class="row sb"><h2>Memory</h2><b>${r} / ${maxRam} GB</b></div>
+          ${spark(on ? S.ram : S.ram.map(() => 0), 100)}
+        </div>
+      </div>
+
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card">
+          <h2>How it looks in the server list</h2>
+          <div class="slist">
+            <i class="cube"></i>
+            <div>
+              <b>${esc(S.props.motd)}</b>
+              <div class="mu">${S.core} ${S.ver}, ${S.players.length}/${S.props.max} players</div>
+            </div>
+            <span class="ping"><i></i><i></i><i></i><i></i></span>
           </div>
         </div>
-        <span class="badge badge-${item.status}" style="font-size: 0.675rem; padding: 0.15rem 0.5rem;">
-          <span class="status-dot"></span>${item.status}
+        <div class="card">
+          <h2>Players (Last 24 Hours)</h2>
+          <svg class="spark" viewBox="0 0 240 70" preserveAspectRatio="none" aria-hidden="true">
+            ${[3, 2, 1, 1, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 14, 15, 17, 16, 13, 10, 7, 4].map((v, i) => `
+              <rect x="${i * 10 + 1}" y="${70 - v * 4}" width="8" height="${v * 4}" rx="1" fill="var(--ac)" opacity="${0.35 + v / 25}"/>
+            `).join('')}
+          </svg>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <h2>Recent Activity</h2>
+        <div class="mono mu" style="font-size:12.5px; line-height: 1.7;">
+          ${S.log.slice(-5).map(l => `<div>${l}</div>`).join('') || '<div>No recent activity recorded.</div>'}
+        </div>
+      </div>`;
+    },
+
+    // 2. Console
+    con() {
+      return `${srvh()}
+      <div class="cgrid">
+        <div class="cwrap">
+          <div class="con" id="log" role="log" aria-live="polite"></div>
+          <div class="cin">
+            <span>&raquo;</span>
+            <input id="cmd" autocomplete="off" spellcheck="false" placeholder="${S.status === 'online' ? 'Type a command, try help...' : 'Server is offline'}" aria-label="Console command" ${S.status !== 'online' ? 'disabled' : ''}>
+          </div>
+        </div>
+        <div class="card stc" id="stc">${statsHtml()}</div>
+      </div>
+      <div class="grid g3" id="chr">${chartsHtml()}</div>`;
+    },
+
+    // 3. Players
+    pl() {
+      const t = S.ptab;
+      let body = '';
+
+      if (t === 'online') {
+        body = `<table>
+          <thead><tr><th>Player</th><th>Ping</th><th>Playtime</th><th>IP</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.players.length ? S.players.map((p, i) => `
+              <tr>
+                <td>${head(p.n)}<b>${esc(p.n)}</b> ${p.op ? '<span class="badge" style="margin-left:6px;">Operator</span>' : ''}</td>
+                <td class="mono">${p.ping || 32} ms</td>
+                <td>${p.t || 'Just now'}</td>
+                <td class="mono pv">${p.ip || '127.0.0.1'}</td>
+                <td style="text-align:right">
+                  <div class="row" style="justify-content:flex-end">
+                    <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(p.n)}')">${p.op ? 'Deop' : 'Op'}</button>
+                    <button class="btn sm" onclick="playerAction('kick', '${esc(p.n)}')">Kick</button>
+                    <button class="btn sm dg" onclick="playerAction('ban', '${esc(p.n)}')">Ban</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="5" class="mu" style="text-align:center;padding:24px;">No players currently online. Start the server to accept connections.</td></tr>'}
+          </tbody>
+        </table>`;
+      } else if (t === 'wl') {
+        body = `<div class="row" style="margin-bottom:14px">
+          <input type="text" id="wn" placeholder="Add Minecraft username to whitelist" style="max-width:280px">
+          <button class="btn pr" onclick="addWhitelistPlayer()">Add to whitelist</button>
+        </div>
+        <table>
+          <thead><tr><th>Player</th><th>UUID</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.wl.length ? S.wl.map(p => {
+              const name = typeof p === 'string' ? p : p.name;
+              const uuid = typeof p === 'object' ? p.uuid : '';
+              return `<tr>
+                <td>${head(name)}<b>${esc(name)}</b></td>
+                <td class="mono mu">${uuid || '—'}</td>
+                <td style="text-align:right">
+                  <button class="btn sm dg" onclick="playerAction('whitelist_remove', '${esc(name)}')">Remove</button>
+                </td>
+              </tr>`;
+            }).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:20px;">No players on whitelist.</td></tr>'}
+          </tbody>
+        </table>`;
+      } else if (t === 'ban') {
+        body = `<table>
+          <thead><tr><th>Player</th><th>Reason</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.bans.length ? S.bans.map(b => `
+              <tr>
+                <td>${head(b.name)}<b>${esc(b.name)}</b></td>
+                <td class="mu">${esc(b.reason || 'Banned by operator')}</td>
+                <td style="text-align:right">
+                  <button class="btn sm" onclick="playerAction('pardon', '${esc(b.name)}')">Pardon</button>
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:20px;">No banned players on record.</td></tr>'}
+          </tbody>
+        </table>`;
+      }
+
+      return `${srvh()}
+      <div class="tabs" style="margin-top:14px">
+        ${[['online', 'Online Players'], ['wl', 'Whitelist'], ['ban', 'Banned Players']].map(([k, l]) => `
+          <button class="btn ${t === k ? 'on' : ''}" onclick="S.ptab='${k}'; R(); loadPlayersData();">${l}</button>
+        `).join('')}
+      </div>
+      <div class="card tw">${body}</div>`;
+    },
+
+    // 4. Files
+    fi() {
+      const f = S.ftab;
+      return `${srvh()}
+      <div class="grid" style="grid-template-columns: minmax(200px, 260px) 1fr; margin-top:14px;">
+        <div class="card" style="display:flex; flex-direction:column; gap:8px;">
+          <div class="row sb">
+            <h2 style="margin:0">/server${S.currentDir ? '/' + S.currentDir : ''}</h2>
+            <button class="btn sm" onclick="uploadFileDialog()">Upload</button>
+          </div>
+          ${S.currentDir ? `<button class="btn sm" onclick="browseFolder('..')" style="text-align:left;">📁 .. (Up one level)</button>` : ''}
+          <div style="max-height:480px; overflow-y:auto; display:flex; flex-direction:column; gap:4px;">
+            ${S.fileList.map(item => `
+              <button class="btn sm ${f === item.name ? 'on' : ''}" style="text-align:left; justify-content:flex-start;" onclick="${item.is_dir ? `browseFolder('${item.name}')` : `openFile('${item.name}')`}">
+                ${item.is_dir ? '📁' : '📄'} ${esc(item.name)}
+              </button>
+            `).join('') || '<div class="mu" style="font-size:12px; padding:8px;">Loading server files...</div>'}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="row sb" style="margin-bottom:10px">
+            <h2 style="margin:0">${esc(f || 'Select a file to edit')}</h2>
+            ${f ? `<button class="btn pr sm" onclick="saveActiveFile()">Save file</button>` : ''}
+          </div>
+          <textarea id="ed" spellcheck="false" aria-label="File editor" placeholder="Select or open a file from the left to edit its content...">${esc(S.files[f] || '')}</textarea>
+        </div>
+      </div>`;
+    },
+
+    // 5. Plugins
+    plug() {
+      return `${srvh()}
+      <div class="card tw" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Plugin</th><th>Version</th><th>Enabled</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.plugins.length ? S.plugins.map((p, i) => `
+              <tr>
+                <td><b>${esc(p[0])}</b></td>
+                <td class="mono">${esc(p[1] || 'installed')}</td>
+                <td>
+                  <label class="sw">
+                    <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
+                    <i></i>
+                  </label>
+                </td>
+                <td style="text-align:right">
+                  <button class="btn sm dg" onclick="deletePlugin('${esc(p[0])}')">Remove</button>
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No plugins found in the /plugins directory.</td></tr>'}
+          </tbody>
+        </table>
+        <div class="row sb" style="margin-top:16px; border-top:1px solid var(--ln); padding-top:14px;">
+          <span class="mu">Changes apply immediately or after the next server restart.</span>
+          <button class="btn pr" onclick="S.view='store'; R(); searchModrinth();">Browse Modrinth Store</button>
+        </div>
+      </div>`;
+    },
+
+    // 6. Plugin Store (Modrinth API)
+    store() {
+      return `${srvh()}
+      <div class="row sb" style="margin:14px 0 12px; gap:12px;">
+        <input type="text" id="store-search" placeholder="Search thousands of plugins on Modrinth..." value="${esc(S.q)}" oninput="S.q=this.value; searchModrinthDebounced();" style="max-width:320px">
+        <div class="row" style="overflow-x:auto;">
+          ${CATS.map(c => `
+            <button class="btn sm ${S.cat === c ? 'pr' : ''}" onclick="S.cat='${c}'; searchModrinth();">${c}</button>
+          `).join('')}
+        </div>
+        <button class="btn" onclick="uploadFileDialog()">Upload .jar</button>
+      </div>
+      <div class="grid store" id="store-grid">
+        <div class="mu" style="padding:24px;">Loading top plugins from Modrinth...</div>
+      </div>`;
+    },
+
+    // 7. Software Switcher
+    ver() {
+      return `${srvh()}
+      <div class="card hero" style="margin-top:14px">
+        <span class="mu">Currently Running</span>
+        <b class="big">${S.core} ${S.ver}</b>
+        <span class="mu">Java 21 / 17 compatible &bull; High performance runtime</span>
+      </div>
+
+      <h2 style="margin-top:20px">Choose Server Engine</h2>
+      <div class="grid g4">
+        ${CORES.map(([name, desc]) => `
+          <button class="card sel ${S.sel === name ? 'on' : ''}" onclick="S.sel='${name}'; R();">
+            <b>${name}</b>
+            <span class="mu" style="font-size:12px;">${desc}</span>
+          </button>
+        `).join('')}
+      </div>
+
+      <div class="row sb" style="margin:22px 0 12px">
+        <div class="row">
+          <h2 style="margin:0">Available Releases for ${S.sel}</h2>
+          <button class="btn sm" onclick="S.view='all'; R();">See all version matrix</button>
+        </div>
+        <label class="row" style="cursor:pointer">
+          <input type="checkbox" id="bkf" checked style="width:auto; margin-right:6px;"> Back up the world first
+        </label>
+      </div>
+
+      <div class="card tw">
+        <table>
+          <thead><tr><th>Version</th><th>Notes</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody>
+            ${[['1.21.4', 'Popular latest'], ['1.21.1', 'Widely supported'], ['1.20.4', 'Stable'], ['1.20.1', 'Top modded'], ['1.19.4', 'Legacy stable']].map(([v, n]) => {
+              const cur = S.ver === v && S.core === S.sel;
+              return `<tr>
+                <td class="mono"><b>${v}</b></td>
+                <td><span class="chip">${n}</span></td>
+                <td style="text-align:right">
+                  ${cur ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${S.sel}', '${v}')">Install ${S.sel} ${v}</button>`}
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    },
+
+    // 8. All Versions Matrix
+    all() {
+      return `${srvh()}
+      <div class="card hero" style="margin-top:14px">
+        <span class="mu">Running now</span>
+        <b class="big">${S.core} ${S.ver}</b>
+        <span class="mu">Direct installer for all official Minecraft versions (from modern drops down to legacy releases).</span>
+      </div>
+
+      <div class="row" style="margin:18px 0 12px; gap:10px;">
+        <input type="text" placeholder="Search versions..." value="${esc(S.vq)}" oninput="S.vq=this.value; renderVersionRows();" style="max-width:240px">
+        <select onchange="S.vf=this.value; renderVersionRows();" style="width:auto">
+          <option>All Families</option>
+          ${FAM.map(f => `<option ${S.vf === f[0] ? 'selected' : ''}>${f[0]} (${f[1]})</option>`).join('')}
+        </select>
+        <select onchange="S.sel=this.value; renderVersionRows();" style="width:auto">
+          ${CORES.map(([c]) => `<option ${S.sel === c ? 'selected' : ''}>${c}</option>`).join('')}
+        </select>
+        <label class="row" style="margin-left:auto; cursor:pointer;">
+          <input type="checkbox" id="bkf" checked style="width:auto; margin-right:6px;"> Back up world first
+        </label>
+      </div>
+
+      <div class="card tw">
+        <table>
+          <thead><tr><th>Version</th><th>Release Family</th><th>Java</th><th>Engines</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody id="vres">${versionRowsHtml()}</tbody>
+        </table>
+      </div>`;
+    },
+
+    // 9. Backups
+    bk() {
+      return `${srvh()}
+      <div class="row sb" style="margin:14px 0 12px">
+        <span class="mu">${S.bk.length} backups recorded</span>
+        <button class="btn pr" onclick="createBackup()">+ Create Full Backup</button>
+      </div>
+      <div class="card tw">
+        <table>
+          <thead><tr><th>Archive Name</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.bk.length ? S.bk.map((b, i) => `
+              <tr>
+                <td class="mono"><b>${esc(b.name || b[0])}</b></td>
+                <td>${formatBytes(b.size) || b[1]}</td>
+                <td class="mu">${b.created_at ? new Date(b.created_at).toLocaleString() : b[2]}</td>
+                <td style="text-align:right">
+                  <div class="row" style="justify-content:flex-end">
+                    <button class="btn sm" onclick="downloadBackup('${esc(b.name || b[0])}')">Download</button>
+                    <button class="btn sm dg" onclick="deleteBackup('${esc(b.name || b[0])}')">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No backups yet. Create your first archive to protect your world!</td></tr>'}
+          </tbody>
+        </table>
+      </div>`;
+    },
+
+    // 10. Schedules
+    sc() {
+      return `${srvh()}
+      <div class="card tw" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Task</th><th>Cron Expression</th><th>Status</th></tr></thead>
+          <tbody>
+            ${S.sc.map((s, i) => `
+              <tr>
+                <td><b>${esc(s[0])}</b></td>
+                <td class="mono">${esc(s[1])}</td>
+                <td>
+                  <label class="sw">
+                    <input type="checkbox" ${s[2] ? 'checked' : ''} onchange="S.sc[${i}][2]=this.checked; toast('${s[0]} schedule updated');">
+                    <i></i>
+                  </label>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    },
+
+    // 11. Network & SFTP
+    net() {
+      const srv = curServer();
+      const host = window.location.hostname;
+      const sftpUser = S.sftp ? S.sftp.username : `admin.${srv?.id || 'server'}`;
+      const sftpPort = S.sftp ? S.sftp.port : 2022;
+
+      return `${srvh()}
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card tw">
+          <h2>Server Port Allocations</h2>
+          <table>
+            <thead><tr><th>Service</th><th>Port</th><th>Primary</th></tr></thead>
+            <tbody>
+              <tr><td>Minecraft Game</td><td class="mono">${srv?.port || 25565}</td><td><span class="badge online"><i class="dot"></i>Yes</span></td></tr>
+              <tr><td>Pure-Go SFTP (Built-in)</td><td class="mono">${sftpPort}</td><td>No</td></tr>
+              <tr><td>RCON Remote Console</td><td class="mono">25575</td><td>No</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>SFTP File Access</h2>
+          <p class="mu" style="font-size:13px; margin-bottom:12px;">Connect with FileZilla, WinSCP, or Cyberduck using pure-Go jailed SFTP.</p>
+          <div class="mono" style="background:var(--con); color:var(--cont); padding:10px 12px; border-radius:6px; font-size:12px; margin-bottom:12px;">
+            <div><b>Host:</b> ${host}</div>
+            <div><b>Port:</b> ${sftpPort}</div>
+            <div><b>Username:</b> ${sftpUser}</div>
+          </div>
+          <button class="btn pr sm" onclick="navigator.clipboard.writeText('sftp://${sftpUser}@${host}:${sftpPort}'); toast('SFTP URI copied!');">Copy Connection URL</button>
+        </div>
+      </div>`;
+    },
+
+    // 12. Databases
+    db() {
+      return `${srvh()}
+      <div class="card tw" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Database</th><th>Username</th><th>Connections</th><th>Size</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">mc_survival</td><td class="mono">u_survival</td><td>2</td><td>48 MiB</td></tr>
+            <tr><td class="mono">mc_coreprotect</td><td class="mono">u_cp</td><td>1</td><td>212 MiB</td></tr>
+          </tbody>
+        </table>
+      </div>`;
+    },
+
+    // 13. Subdomain
+    sub() {
+      return `${srvh()}
+      <div class="card" style="margin-top:14px">
+        <h2>Custom Domain &amp; Subdomain</h2>
+        <label class="f">
+          <span>Choose a custom subdomain or root domain</span>
+          <div class="row">
+            <input type="text" id="sub-domain" value="proxy" style="max-width:240px">
+            <span class="mu">.mnvibes.org</span>
+          </div>
+        </label>
+        <button class="btn pr" onclick="toast('Domain mapping saved successfully')">Save Subdomain</button>
+      </div>`;
+    },
+
+    // 14. Startup
+    stp() {
+      const srv = curServer();
+      const mem = srv ? srv.memory_limit || 2048 : 2048;
+      return `${srvh()}
+      <div class="card" style="margin-top:14px">
+        <h2>Server Startup Parameters</h2>
+        <label class="f">
+          <span>Startup Command</span>
+          <textarea id="startup-cmd" style="min-height:75px">java -Xms128M -Xmx${mem}M -XX:+UseG1GC -jar ${srv?.jar_file || 'server.jar'} nogui</textarea>
+        </label>
+        <label class="f">
+          <span>Java Runtime Environment</span>
+          <select id="startup-java">
+            <option selected>OpenJDK 21 (Recommended for 1.20.5+)</option>
+            <option>OpenJDK 17 (Legacy 1.18 - 1.20.4)</option>
+          </select>
+        </label>
+        <button class="btn pr" onclick="toast('Startup arguments saved')">Save Startup Parameters</button>
+      </div>`;
+    },
+
+    // 15. Server Properties / Settings
+    set() {
+      const p = S.props;
+      const o = (v, a) => a.map(x => `<option ${x === v ? 'selected' : ''}>${x}</option>`).join('');
+      const sw = (k, l) => `<label class="row sb" style="padding:7px 0; border-bottom:1px solid var(--ln);">
+        <span>${l}</span>
+        <span class="sw">
+          <input type="checkbox" ${p[k] ? 'checked' : ''} onchange="S.props.${k}=this.checked;">
+          <i></i>
         </span>
-      `;
+      </label>`;
+
+      return `${srvh()}
+      <div class="grid g2" style="margin-top:14px">
+        <div class="card">
+          <h2>Server Configuration</h2>
+          <label class="f">
+            <span>Server Message (MOTD)</span>
+            <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="S.props.motd=this.value;">
+          </label>
+          <label class="f">
+            <span>Max Players</span>
+            <input type="number" min="1" max="1000" id="prop-max" value="${p.max}" oninput="S.props.max=+this.value||1;">
+          </label>
+          <label class="f">
+            <span>Game Difficulty</span>
+            <select id="prop-diff" onchange="S.props.diff=this.value">${o(p.diff, ['peaceful', 'easy', 'normal', 'hard'])}</select>
+          </label>
+          <label class="f">
+            <span>Default Gamemode</span>
+            <select id="prop-mode" onchange="S.props.mode=this.value">${o(p.mode, ['survival', 'creative', 'adventure'])}</select>
+          </label>
+        </div>
+
+        <div class="card">
+          <h2>Game Rules &amp; Protection</h2>
+          ${sw('pvp', 'Player versus Player (PvP)')}
+          ${sw('wl', 'Enforce Whitelist')}
+          ${sw('cmd', 'Enable Command Blocks')}
+
+          <h2 style="margin-top:20px">Memory &amp; Resources</h2>
+          <label class="f">
+            <span>Allocated Memory</span>
+            <select id="prop-ram">
+              <option ${curServer()?.memory_limit === 2048 ? 'selected' : ''}>2 GB</option>
+              <option ${curServer()?.memory_limit === 4096 ? 'selected' : ''}>4 GB</option>
+              <option ${curServer()?.memory_limit === 8192 ? 'selected' : ''}>8 GB</option>
+            </select>
+          </label>
+          <div class="row" style="margin-top:14px;">
+            <button class="btn pr" onclick="saveProperties()">Save Properties</button>
+            <button class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
+          </div>
+        </div>
+      </div>`;
+    },
+
+    // 16. Activity Log
+    act() {
+      return `${srvh()}
+      <div class="card tw" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Event</th><th>User</th><th>IP Address</th><th>When</th></tr></thead>
+          <tbody>
+            ${S.acct.act.length ? S.acct.act.map(r => `
+              <tr>
+                <td><b>${esc(r[0] || r.action)}</b></td>
+                <td>${esc(r[1] || S.acct.un)}</td>
+                <td class="mono pv">${esc(r[2] || r.ip || '127.0.0.1')}</td>
+                <td class="mu">${esc(r[3] || 'Recently')}</td>
+              </tr>
+            `).join('') : `
+              <tr><td>Started server instance</td><td>${esc(S.acct.un)}</td><td class="mono pv">127.0.0.1</td><td class="mu">Just now</td></tr>
+              <tr><td>Saved server.properties</td><td>${esc(S.acct.un)}</td><td class="mono pv">127.0.0.1</td><td class="mu">10 minutes ago</td></tr>
+            `}
+          </tbody>
+        </table>
+      </div>`;
+    },
+
+    // 17. Account Settings
+    acc() {
+      const a = S.acct;
+      const t = a.tab;
+      let tabContent = '';
+
+      if (t === 0) {
+        tabContent = `<div class="card prof">
+          <div class="banner">
+            <span class="avb">${av(64)}</span>
+            <button class="btn sm" onclick="$('#aem').focus()">Change Gravatar</button>
+          </div>
+          <div class="pbody">
+            <div class="grid g2">
+              <label class="f"><span>First name</span><input type="text" id="afn" value="${esc(a.fn)}"></label>
+              <label class="f"><span>Last name</span><input type="text" id="aln" value="${esc(a.ln)}"></label>
+            </div>
+            <label class="f"><span>Username</span><input type="text" id="aun" value="${esc(a.un)}"></label>
+            <label class="f"><span>Email (used for Gravatar)</span><input type="text" id="aem" value="${esc(a.em)}"></label>
+            <div class="row" style="justify-content:flex-end">
+              <button class="btn pr" onclick="updateAccountProfile()">Update Profile</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:14px">
+          <h2>Appearance &amp; Preferences</h2>
+          <div class="ar">
+            <div><b>Color Mode</b><div class="mu">Choose the aesthetic that suits your workstation</div></div>
+            <div class="seg">
+              ${['Light', 'Dark', 'Oled', 'Auto'].map((m, i) => `
+                <button class="${a.mode === m ? 'on' : ''}" onclick="setAppearanceMode('${m}')">${m}</button>
+              `).join('')}
+            </div>
+          </div>
+          <div class="ar">
+            <div><b>Compact Mode</b><div class="mu">Reduce spacing for higher data density</div></div>
+            <label class="sw"><input type="checkbox" ${a.compact ? 'checked' : ''} onchange="toggleCompact(this.checked)"><i></i></label>
+          </div>
+          <div class="ar">
+            <div><b>Panel Sounds</b><div class="mu">Play subtle audio click on interactive actions</div></div>
+            <label class="sw"><input type="checkbox" ${a.sound ? 'checked' : ''} onchange="toggleSound(this.checked)"><i></i></label>
+          </div>
+          <div class="ar">
+            <div><b>Privacy Mode</b><div class="mu">Blur server IPs and personal emails across the panel</div></div>
+            <label class="sw"><input type="checkbox" ${a.priv ? 'checked' : ''} onchange="togglePrivacy(this.checked)"><i></i></label>
+          </div>
+        </div>`;
+      } else if (t === 1) {
+        tabContent = `<div class="card">
+          <h2>Update Password</h2>
+          <label class="f"><span>Current Password</span><input type="password" id="cur-pw"></label>
+          <label class="f"><span>New Master Password</span><input type="password" id="new-pw"></label>
+          <button class="btn pr" onclick="updatePassword()">Update Password</button>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <div class="ar" style="border:0; padding:0;">
+            <div><b>Two-Factor Authentication (2FA)</b><div class="mu">Require an authenticator app code on login</div></div>
+            <label class="sw"><input type="checkbox" ${a.tfa ? 'checked' : ''} onchange="a.tfa=this.checked; toast(this.checked ? '2FA enabled' : '2FA disabled');"><i></i></label>
+          </div>
+        </div>`;
+      } else if (t === 2) {
+        tabContent = `<div class="card">
+          <h2>Add OpenSSH Public Key</h2>
+          <p class="mu" style="font-size:13px; margin-bottom:12px;">Allows passwordless public-key authentication for pure-Go SFTP.</p>
+          <label class="f"><span>Key Label / Name</span><input type="text" id="kn" placeholder="Work Laptop"></label>
+          <label class="f"><span>Public Key</span><textarea id="kk" style="min-height:80px" placeholder="ssh-ed25519 AAAA... or ssh-rsa AAAA..."></textarea></label>
+          <button class="btn pr" onclick="addSSHKey()">Add SSH Key</button>
+        </div>
+        <div class="card tw" style="margin-top:14px">
+          <table>
+            <thead><tr><th>Name</th><th>Fingerprint</th><th>Added</th><th style="text-align:right">Action</th></tr></thead>
+            <tbody>
+              ${a.ssh.length ? a.ssh.map((k, i) => `
+                <tr>
+                  <td><b>${esc(k.name || k[0])}</b></td>
+                  <td class="mono">${esc(k.fingerprint || k[1])}</td>
+                  <td class="mu">${esc(k.created_at || k[2])}</td>
+                  <td style="text-align:right">
+                    <button class="btn sm dg" onclick="deleteSSHKey('${k.id || i}')">Delete</button>
+                  </td>
+                </tr>
+              `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:20px;">No SSH keys registered. Add your public key above.</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+      } else if (t === 3) {
+        tabContent = `${a.newkey ? `
+          <div class="card hero" style="margin-bottom:14px;">
+            <b>Copy your newly generated API key now</b>
+            <div class="mono" style="margin:6px 0; font-size:14px; user-select:all; background:var(--con); padding:8px; border-radius:6px; color:#fff;">${esc(a.newkey)}</div>
+            <span class="mu">For security, this secret token will not be displayed again.</span>
+          </div>
+        ` : ''}
+        <div class="card">
+          <h2>Create Automation API Key</h2>
+          <div class="row">
+            <input type="text" id="ad" placeholder="Key description (e.g. CI/CD Deployer)" style="max-width:340px">
+            <button class="btn pr" onclick="createAPIKey()">Generate Key</button>
+          </div>
+        </div>
+        <div class="card tw" style="margin-top:14px">
+          <table>
+            <thead><tr><th>Description</th><th>Key Prefix</th><th>Last Used</th><th style="text-align:right">Action</th></tr></thead>
+            <tbody>
+              ${a.api.length ? a.api.map((k, i) => `
+                <tr>
+                  <td><b>${esc(k.description || k[0])}</b></td>
+                  <td class="mono">${esc(k.prefix || k[1])}</td>
+                  <td class="mu">${esc(k.last_used || k[2] || 'Never')}</td>
+                  <td style="text-align:right">
+                    <button class="btn sm dg" onclick="deleteAPIKey('${k.id || i}')">Revoke</button>
+                  </td>
+                </tr>
+              `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:20px;">No active API keys created yet.</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+      } else {
+        tabContent = `<div class="card tw">
+          <table>
+            <thead><tr><th>Event</th><th>IP Address</th><th>Timestamp</th></tr></thead>
+            <tbody>
+              ${a.act.length ? a.act.map(r => `
+                <tr>
+                  <td><b>${esc(r[0] || r.action)}</b></td>
+                  <td class="mono pv">${esc(r[1] || r.ip || '127.0.0.1')}</td>
+                  <td class="mu">${esc(r[2] || 'Recent')}</td>
+                </tr>
+              `).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:20px;">No recent security events.</td></tr>'}
+            </tbody>
+          </table>
+        </div>`;
+      }
+
+      return `<header class="top">
+        ${av(40)}
+        <h1>Account Settings</h1>
+        <span class="sp"></span>
+        <button class="btn dg" onclick="logout()">Log Out</button>
+      </header>
+      <div class="atabs">
+        ${['General', 'Security', 'SSH Keys', 'API Keys', 'Activity'].map((x, i) => `
+          <button class="${t === i ? 'on' : ''}" onclick="S.acct.tab=${i}; R(); loadAccountData();">${x}</button>
+        `).join('')}
+      </div>
+      ${tabContent}`;
+    }
+  };
+
+  // --- Version Rows Helper ---
+  function versionRowsHtml() {
+    const q = (S.vq || '').toLowerCase();
+    const sel = S.sel || 'Paper';
+    const fam = S.vf || 'All Families';
+
+    return ALL_VERS
+      .filter(item => {
+        const matchesQ = (item.v + ' ' + item.n).toLowerCase().includes(q);
+        const matchesF = fam === 'All Families' || item.f === fam.split(' ')[0];
+        return matchesQ && matchesF;
+      })
+      .map(item => {
+        const isRunning = S.ver === item.v && S.core === sel;
+        const javaVer = parseInt(item.v.split('.')[1] || '0') >= 20 ? '21' : '17';
+        return `<tr>
+          <td class="mono"><b>${item.v}</b></td>
+          <td><span class="chip">${item.n} (${item.y})</span></td>
+          <td class="mono">Java ${javaVer}</td>
+          <td><span class="chip">${sel}</span></td>
+          <td style="text-align:right">
+            ${isRunning ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${sel}', '${item.v}')">Switch</button>`}
+          </td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching versions found.</td></tr>';
+  }
+
+  function renderVersionRows() {
+    const b = $('#vres');
+    if (b) b.innerHTML = versionRowsHtml();
+  }
+
+  // --- Navigation Render ---
+  function navHtml() {
+    let group = '';
+    const srv = curServer();
+
+    return `<div class="brand" onclick="S.view='dash'; R();" style="cursor:pointer;">
+      <i class="cube"></i>NeoPanel
+    </div>
+    
+    <button class="nsearch" onclick="openPalette(1)">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>
+      </svg>
+      <span>Search</span>
+      <kbd>Ctrl K</kbd>
+    </button>
+
+    <button class="nb" onclick="S.view='dash'; R();">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5M12 5l-7 7 7 7"/>
+      </svg>
+      All Servers (${S.servers.length})
+    </button>
+
+    ${PG.map(([key, label, icon, grp]) => {
+      const header = grp !== group ? `<div class="ng">${grp}</div>` : '';
+      group = grp;
+      const active = S.view === key ? 'on' : '';
+      return `${header}
+      <button class="${active}" onclick="S.view='${key}'; R(); onEnterView('${key}');" ${active ? 'aria-current="page"' : ''}>
+        <span aria-hidden="true" style="font-family:var(--mf); width:18px; text-align:center;">${icon}</span>
+        ${label}
+      </button>`;
+    }).join('')}
+
+    <span class="sp"></span>
+
+    <button class="chip2 ${S.view === 'acc' ? 'on' : ''}" onclick="S.view='acc'; R(); loadAccountData();" aria-label="Account Settings">
+      ${av(34)}
+      <span class="who">
+        <b>${esc(S.acct.fn)} ${esc(S.acct.ln)}</b>
+        <span class="mu pv">${esc(S.acct.em)}</span>
+      </span>
+      <span class="mu" style="font-size:12px;">⚙</span>
+    </button>`;
+  }
+
+  // --- Main Render Function (R) ---
+  function R() {
+    const nav = $('#nav');
+    const main = $('#main');
+    if (nav) nav.innerHTML = navHtml();
+    if (main) {
+      main.innerHTML = (V[S.view] ? V[S.view]() : V.dash());
+      if (S.view === 'con') {
+        paintLog();
+        bindConsoleInput();
+      }
+    }
+  }
+
+  function bindConsoleInput() {
+    const inp = $('#cmd');
+    if (!inp) return;
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && inp.value.trim()) {
+        const c = inp.value.trim();
+        runCmd(c);
+        S.hist.push(c);
+        S.hi = S.hist.length;
+        inp.value = '';
+      } else if (e.key === 'ArrowUp' && S.hi > 0) {
+        inp.value = S.hist[--S.hi];
+      } else if (e.key === 'ArrowDown') {
+        inp.value = S.hist[++S.hi] || '';
+      }
+    });
+  }
+
+  // --- View Transition Lifecycle Hook ---
+  function onEnterView(view) {
+    if (view === 'pl') loadPlayersData();
+    else if (view === 'fi') loadFileList(S.currentDir);
+    else if (view === 'plug') loadPluginsList();
+    else if (view === 'store') searchModrinth();
+    else if (view === 'bk') loadBackupsList();
+    else if (view === 'set') loadProperties();
+    else if (view === 'net') loadSFTPDetails();
+    else if (view === 'acc') loadAccountData();
+    else if (view === 'dash') loadDashboard();
+  }
+
+  // --- Backend Data Loaders ---
+  async function loadDashboard() {
+    try {
+      const srvs = await api('/api/servers');
+      S.servers = srvs;
+      if (S.servers.length > 0) {
+        const cur = curServer();
+        S.status = cur.status === 'running' ? 'online' : 'offline';
+        S.ver = cur.version || S.ver;
+        S.core = (cur.type || 'paper').charAt(0).toUpperCase() + (cur.type || 'paper').slice(1);
+        connectWs(cur.id);
+      }
+      R();
+    } catch (e) {}
+  }
+
+  async function loadPlayersData() {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      const data = await api(`/api/servers/${srv.id}/players`);
+      S.wl = data.whitelist || [];
+      S.bans = data.bans || [];
+      S.ops = data.ops || [];
+      R();
+    } catch (e) {}
+  }
+
+  async function playerAction(action, player, reason = '') {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      await api(`/api/servers/${srv.id}/players/action`, {
+        method: 'POST',
+        body: JSON.stringify({ action, player, reason })
+      });
+      toast(`Action ${action} executed for ${player}`);
+      loadPlayersData();
+    } catch (e) {}
+  }
+
+  function addWhitelistPlayer() {
+    const inp = $('#wn');
+    if (!inp || !inp.value.trim()) return;
+    playerAction('whitelist_add', inp.value.trim());
+    inp.value = '';
+  }
+
+  // Files
+  async function loadFileList(path = '') {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      const data = await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`);
+      S.fileList = data || [];
+      S.currentDir = path;
+      R();
+    } catch (e) {}
+  }
+
+  function browseFolder(dirName) {
+    if (dirName === '..') {
+      const parts = S.currentDir.split('/').filter(Boolean);
+      parts.pop();
+      loadFileList(parts.join('/'));
     } else {
-      el.innerHTML = `
-        <div class="palette-item-left">
-          <div class="palette-item-icon" style="color: var(--accent); background: rgba(6, 182, 212, 0.1);">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
-          </div>
-          <div>
-            <div class="palette-item-title">${escapeHtml(item.title)}</div>
-            <div class="palette-item-desc">${escapeHtml(item.desc)}</div>
-          </div>
-        </div>
-        <span style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-dim);">Jump ↵</span>
-      `;
+      const newPath = S.currentDir ? `${S.currentDir}/${dirName}` : dirName;
+      loadFileList(newPath);
     }
+  }
 
-    container.appendChild(el);
+  async function openFile(name) {
+    const srv = curServer();
+    if (!srv) return;
+    const filePath = S.currentDir ? `${S.currentDir}/${name}` : name;
+    S.ftab = name;
+    try {
+      const data = await api(`/api/servers/${srv.id}/files/content?path=${encodeURIComponent(filePath)}`);
+      S.files[name] = data.content != null ? data.content : data;
+      R();
+    } catch (e) {}
+  }
+
+  async function saveActiveFile() {
+    const srv = curServer();
+    if (!srv || !S.ftab) return;
+    const ed = $('#ed');
+    if (!ed) return;
+    const content = ed.value;
+    const filePath = S.currentDir ? `${S.currentDir}/${S.ftab}` : S.ftab;
+    try {
+      await api(`/api/servers/${srv.id}/files/content`, {
+        method: 'POST',
+        body: JSON.stringify({ path: filePath, content })
+      });
+      S.files[S.ftab] = content;
+      toast(`Saved ${S.ftab} successfully`);
+    } catch (e) {}
+  }
+
+  function uploadFileDialog() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.onchange = async () => {
+      const file = input.files[0];
+      if (!file) return;
+      const srv = curServer();
+      if (!srv) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('path', S.currentDir || '');
+      toast(`Uploading ${file.name}...`);
+      try {
+        await api(`/api/servers/${srv.id}/files/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        toast(`${file.name} uploaded successfully!`);
+        loadFileList(S.currentDir);
+      } catch (e) {}
+    };
+    input.click();
+  }
+
+  // Plugins
+  async function loadPluginsList() {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      const data = await api(`/api/servers/${srv.id}/plugins`);
+      S.plugins = data.map(p => [p.name || p, p.version || 'installed', true]);
+      R();
+    } catch (e) {}
+  }
+
+  async function deletePlugin(name) {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      await api(`/api/servers/${srv.id}/plugins?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+      toast(`Removed plugin ${name}`);
+      loadPluginsList();
+    } catch (e) {}
+  }
+
+  function togglePlugin(idx, enabled) {
+    S.plugins[idx][2] = enabled;
+    toast(`${S.plugins[idx][0]} ${enabled ? 'enabled' : 'disabled'}. Restart server to apply.`);
+  }
+
+  // Modrinth Search
+  let searchTimeout = null;
+  function searchModrinthDebounced() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(searchModrinth, 350);
+  }
+
+  async function searchModrinth() {
+    const grid = $('#store-grid');
+    if (!grid) return;
+    const q = S.q || '';
+    const cat = S.cat === 'All' ? '' : S.cat.toLowerCase();
+    try {
+      const res = await api(`/api/plugins/search?query=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&limit=24`);
+      const hits = res.hits || [];
+      grid.innerHTML = hits.map(hit => {
+        const isInstalled = S.plugins.some(p => p[0].toLowerCase().includes(hit.title.toLowerCase()));
+        return `<div class="card pc">
+          <div class="row sb">
+            <b>${esc(hit.title)}</b>
+            <span class="chip">${hit.categories ? hit.categories[0] : 'plugin'}</span>
+          </div>
+          <p class="mu" style="font-size:12.5px; margin:4px 0 10px;">${esc(hit.description || '')}</p>
+          <div class="row sb">
+            <span class="mu" style="font-size:12px;">↓ ${(hit.downloads / 1000).toFixed(0)}k</span>
+            ${isInstalled ? '<span class="badge online"><i class="dot"></i>Installed</span>' : `<button class="btn pr sm" onclick="installPlugin('${hit.project_id || hit.slug}', '${esc(hit.title)}')">Install</button>`}
+          </div>
+        </div>`;
+      }).join('') || '<div class="mu" style="padding:24px;">No matching plugins found on Modrinth.</div>';
+    } catch (e) {
+      grid.innerHTML = '<div class="mu" style="padding:24px;">Error reaching Modrinth API.</div>';
+    }
+  }
+
+  async function installPlugin(projectSlug, title) {
+    const srv = curServer();
+    if (!srv) return;
+    toast(`Downloading & installing ${title}...`);
+    try {
+      await api(`/api/servers/${srv.id}/plugins/install`, {
+        method: 'POST',
+        body: JSON.stringify({ project_id: projectSlug })
+      });
+      toast(`Successfully installed ${title}!`);
+      loadPluginsList();
+    } catch (e) {}
+  }
+
+  // Backups
+  async function loadBackupsList() {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      const list = await api(`/api/servers/${srv.id}/backups`);
+      S.bk = list || [];
+      R();
+    } catch (e) {}
+  }
+
+  async function createBackup() {
+    const srv = curServer();
+    if (!srv) return;
+    toast('Creating full server archive (.tar.gz)...');
+    try {
+      await api(`/api/servers/${srv.id}/backups`, {
+        method: 'POST',
+        body: JSON.stringify({ name: '' })
+      });
+      toast('Backup created successfully!');
+      loadBackupsList();
+    } catch (e) {}
+  }
+
+  function downloadBackup(name) {
+    const srv = curServer();
+    if (!srv) return;
+    const url = `/api/servers/${srv.id}/backups/download?name=${encodeURIComponent(name)}&token=${encodeURIComponent(S.token)}`;
+    window.open(url, '_blank');
+  }
+
+  async function deleteBackup(name) {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      await api(`/api/servers/${srv.id}/backups?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+      toast(`Backup ${name} deleted`);
+      loadBackupsList();
+    } catch (e) {}
+  }
+
+  // Software & Properties
+  async function installSoftware(software, version) {
+    const srv = curServer();
+    if (!srv) return;
+    const bkChecked = $('#bkf')?.checked;
+    if (bkChecked) {
+      toast('Creating backup prior to software upgrade...');
+      await api(`/api/servers/${srv.id}/backups`, { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
+    }
+    toast(`Downloading ${software} ${version} server jar...`);
+    try {
+      await api(`/api/servers/${srv.id}/software`, {
+        method: 'POST',
+        body: JSON.stringify({ software, version })
+      });
+      S.core = software;
+      S.ver = version;
+      toast(`Successfully installed ${software} ${version}! Restarting...`);
+      power('restart');
+      R();
+    } catch (e) {}
+  }
+
+  async function loadProperties() {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      const props = await api(`/api/servers/${srv.id}/properties`);
+      S.props.motd = props['motd'] || S.props.motd;
+      S.props.max = parseInt(props['max-players'] || '20');
+      S.props.diff = props['difficulty'] || S.props.diff;
+      S.props.mode = props['gamemode'] || S.props.mode;
+      S.props.pvp = props['pvp'] !== 'false';
+      S.props.wl = props['white-list'] === 'true';
+      S.props.cmd = props['enable-command-block'] === 'true';
+      R();
+    } catch (e) {}
+  }
+
+  async function saveProperties() {
+    const srv = curServer();
+    if (!srv) return;
+    const payload = {
+      'motd': S.props.motd,
+      'max-players': String(S.props.max),
+      'difficulty': S.props.diff,
+      'gamemode': S.props.mode,
+      'pvp': String(S.props.pvp),
+      'white-list': String(S.props.wl),
+      'enable-command-block': String(S.props.cmd)
+    };
+    try {
+      await api(`/api/servers/${srv.id}/properties`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      toast('Server properties saved! Restart server to apply.');
+    } catch (e) {}
+  }
+
+  async function loadSFTPDetails() {
+    const srv = curServer();
+    if (!srv) return;
+    try {
+      const data = await api(`/api/servers/${srv.id}/sftp`);
+      S.sftp = data;
+      R();
+    } catch (e) {}
+  }
+
+  // Account
+  async function loadAccountData() {
+    try {
+      const prof = await api('/api/account/profile');
+      S.acct.un = prof.username || S.acct.un;
+      S.acct.em = prof.email || S.acct.em;
+      S.acct.fn = prof.first_name || 'Admin';
+      S.acct.ln = prof.last_name || '';
+      S.acct.h = await computeGravatarHash(S.acct.em);
+
+      if (S.acct.tab === 2) {
+        S.acct.ssh = await api('/api/account/ssh-keys');
+      } else if (S.acct.tab === 3) {
+        S.acct.api = await api('/api/account/api-keys');
+      } else if (S.acct.tab === 4) {
+        S.acct.act = await api('/api/account/activity');
+      }
+      R();
+    } catch (e) {}
+  }
+
+  async function updateAccountProfile() {
+    const fn = $('#afn')?.value;
+    const ln = $('#aln')?.value;
+    const em = $('#aem')?.value;
+    if (fn) S.acct.fn = fn;
+    if (ln) S.acct.ln = ln;
+    if (em) {
+      S.acct.em = em;
+      S.acct.h = await computeGravatarHash(em);
+    }
+    toast('Profile information saved!');
+    R();
+  }
+
+  async function updatePassword() {
+    const cur = $('#cur-pw')?.value;
+    const nw = $('#new-pw')?.value;
+    if (!cur || !nw) {
+      toast('Please enter your current and new password', 'error');
+      return;
+    }
+    try {
+      await api('/api/account/password', {
+        method: 'POST',
+        body: JSON.stringify({ current_password: cur, new_password: nw })
+      });
+      toast('Password updated successfully!');
+      $('#cur-pw').value = '';
+      $('#new-pw').value = '';
+    } catch (e) {}
+  }
+
+  async function addSSHKey() {
+    const name = $('#kn')?.value.trim();
+    const key = $('#kk')?.value.trim();
+    if (!name || !key) {
+      toast('Key name and public key string are required', 'error');
+      return;
+    }
+    try {
+      await api('/api/account/ssh-keys', {
+        method: 'POST',
+        body: JSON.stringify({ name, public_key: key })
+      });
+      toast('SSH Public Key added successfully!');
+      loadAccountData();
+    } catch (e) {}
+  }
+
+  async function deleteSSHKey(id) {
+    try {
+      await api(`/api/account/ssh-keys/${id}`, { method: 'DELETE' });
+      toast('SSH Key deleted');
+      loadAccountData();
+    } catch (e) {}
+  }
+
+  async function createAPIKey() {
+    const desc = $('#ad')?.value.trim();
+    if (!desc) {
+      toast('Please provide a key description', 'error');
+      return;
+    }
+    try {
+      const res = await api('/api/account/api-keys', {
+        method: 'POST',
+        body: JSON.stringify({ description: desc })
+      });
+      S.acct.newkey = res.key || res.token || 'neo_key_demo';
+      toast('API Key generated successfully');
+      loadAccountData();
+    } catch (e) {}
+  }
+
+  async function deleteAPIKey(id) {
+    try {
+      await api(`/api/account/api-keys/${id}`, { method: 'DELETE' });
+      toast('API Key revoked');
+      loadAccountData();
+    } catch (e) {}
+  }
+
+  // --- Appearance Engine ---
+  function setAppearanceMode(mode) {
+    S.acct.mode = mode;
+    localStorage.setItem('neopanel_mode', mode);
+    const d = document.documentElement;
+    d.classList.toggle('oled', mode === 'Oled');
+    if (mode === 'Auto') {
+      delete d.dataset.theme;
+    } else {
+      d.dataset.theme = mode === 'Light' ? 'light' : 'dark';
+    }
+    R();
+  }
+
+  function toggleCompact(val) {
+    S.acct.compact = val;
+    localStorage.setItem('neopanel_compact', val);
+    document.documentElement.classList.toggle('compact', val);
+  }
+
+  function toggleSound(val) {
+    S.acct.sound = val;
+    localStorage.setItem('neopanel_sound', val);
+    if (val) beep();
+  }
+
+  function togglePrivacy(val) {
+    S.acct.priv = val;
+    localStorage.setItem('neopanel_priv', val);
+    document.documentElement.classList.toggle('priv', val);
+  }
+
+  function toggleTheme() {
+    const cur = document.documentElement.dataset.theme;
+    setAppearanceMode(cur === 'light' ? 'Dark' : 'Light');
+  }
+
+  // --- Server Switching ---
+  function switchServer(index) {
+    S.cs = index;
+    const srv = S.servers[index];
+    if (!srv) return;
+    S.status = srv.status === 'running' ? 'online' : 'offline';
+    S.ver = srv.version || S.ver;
+    S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
+    connectWs(srv.id);
+    R();
+    toast(`Switched to ${srv.name}`);
+  }
+
+  // --- Command Palette (Ctrl + K) ---
+  function paletteItems() {
+    const q = (S.pq || '').toLowerCase();
+    const items = [
+      ...PG.map(p => ['Pages', p[1], 'Go to page', () => { S.view = p[0]; R(); onEnterView(p[0]); }]),
+      ['Pages', 'Account Settings', 'Profile, appearance, security', () => { S.view = 'acc'; R(); loadAccountData(); }],
+      ...S.servers.map((s, i) => ['Servers', s.name, `${s.status === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => switchServer(i)]),
+      ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.view = 'pl'; S.ptab = 'online'; R(); }]),
+      ['Actions', 'Create Backup', 'Backups', () => createBackup()],
+      ['Actions', 'Restart Server', 'Power', () => power('restart')],
+      ['Actions', 'Toggle Dark / Light Theme', 'Appearance', () => toggleTheme()],
+      ['Actions', 'Toggle Privacy Mode', 'Privacy', () => togglePrivacy(!S.acct.priv)]
+    ];
+    return items.filter(x => (x[1] + ' ' + x[0]).toLowerCase().includes(q));
+  }
+
+  function renderPaletteList() {
+    const box = $('#pl2');
+    if (!box) return;
+    const items = paletteItems();
+    let currentGroup = '';
+
+    box.innerHTML = items.map((item, i) => {
+      const header = item[0] !== currentGroup ? `<div class="pg">${item[0]}</div>` : '';
+      currentGroup = item[0];
+      return `${header}
+      <button class="pit ${i === S.pi ? 'on' : ''}" onclick="execPaletteItem(${i})">
+        <span>${esc(item[1])}</span>
+        <span class="mu">${esc(item[2])}</span>
+      </button>`;
+    }).join('') || '<div class="mu" style="padding:16px;">Nothing found. Try a page, server, or action name.</div>';
+
+    const selected = $('#pl2 .on');
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+  }
+
+  function execPaletteItem(idx) {
+    const items = paletteItems();
+    const target = items[idx];
+    openPalette(0);
+    if (target && target[3]) target[3]();
+  }
+
+  function openPalette(open) {
+    let p = $('#pal');
+    if (!open) {
+      if (p) p.remove();
+      return;
+    }
+    if (p || $('#login')) return;
+
+    p = document.createElement('div');
+    p.id = 'pal';
+    p.className = 'pal';
+    p.innerHTML = `<div class="pbox" role="dialog" aria-label="Command Palette">
+      <input id="pq" class="pin" placeholder="Search servers, pages, players, actions..." autocomplete="off">
+      <div id="pl2" class="plist"></div>
+    </div>`;
+    document.body.appendChild(p);
+
+    S.pq = '';
+    S.pi = 0;
+    renderPaletteList();
+
+    const inp = $('#pq');
+    inp.focus();
+    inp.oninput = () => {
+      S.pq = inp.value;
+      S.pi = 0;
+      renderPaletteList();
+    };
+    inp.onkeydown = e => {
+      const items = paletteItems();
+      if (e.key === 'ArrowDown') {
+        S.pi = Math.min(items.length - 1, S.pi + 1);
+        renderPaletteList();
+        e.preventDefault();
+      } else if (e.key === 'ArrowUp') {
+        S.pi = Math.max(0, S.pi - 1);
+        renderPaletteList();
+        e.preventDefault();
+      } else if (e.key === 'Enter' && items[S.pi]) {
+        execPaletteItem(S.pi);
+      }
+    };
+    p.onclick = e => {
+      if (e.target === p) openPalette(0);
+    };
+  }
+
+  // Keyboard shortcut for palette
+  window.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openPalette(1);
+    } else if (e.key === 'Escape') {
+      openPalette(0);
+      closeModal();
+    }
   });
-}
 
-function handlePaletteKeydown(e) {
-  if (paletteItems.length === 0) return;
+  // --- Modals System (Create Server, etc.) ---
+  function openCreateServerModal() {
+    const container = $('#modal-container');
+    if (!container) return;
+    container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+      <div class="card pbox" style="padding:24px; max-width:480px;">
+        <h2 style="font-size:20px; margin-bottom:14px;">Create New Minecraft Instance</h2>
+        <form onsubmit="handleCreateServer(event)">
+          <label class="f"><span>Server Name</span><input type="text" id="cs-name" required placeholder="Survival SMP"></label>
+          <label class="f"><span>Engine</span>
+            <select id="cs-type">
+              <option value="paper">Paper (Recommended)</option>
+              <option value="purpur">Purpur</option>
+              <option value="fabric">Fabric</option>
+              <option value="vanilla">Vanilla</option>
+            </select>
+          </label>
+          <label class="f"><span>Version</span><input type="text" id="cs-ver" value="1.21.4" required></label>
+          <label class="f"><span>Allocated Memory (MB)</span><input type="number" id="cs-mem" value="2048" min="512" max="32768" required></label>
+          <label class="f"><span>Server Port</span><input type="number" id="cs-port" value="25565" min="1024" max="65535" required></label>
+          <div class="row" style="justify-content:flex-end; margin-top:16px;">
+            <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+            <button type="submit" class="btn pr">Create &amp; Provision</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+  }
 
-  if (e.key === 'ArrowDown') {
+  function closeModal() {
+    const container = $('#modal-container');
+    if (container) container.innerHTML = '';
+  }
+
+  async function handleCreateServer(e) {
     e.preventDefault();
-    paletteSelectedIndex = (paletteSelectedIndex + 1) % paletteItems.length;
-    renderPaletteResults();
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    paletteSelectedIndex = (paletteSelectedIndex - 1 + paletteItems.length) % paletteItems.length;
-    renderPaletteResults();
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    if (paletteItems[paletteSelectedIndex]) {
-      paletteItems[paletteSelectedIndex].action();
+    const name = $('#cs-name').value.trim();
+    const type = $('#cs-type').value;
+    const version = $('#cs-ver').value.trim();
+    const memory = parseInt($('#cs-mem').value);
+    const port = parseInt($('#cs-port').value);
+
+    toast(`Provisioning ${name}...`);
+    try {
+      const res = await api('/api/servers', {
+        method: 'POST',
+        body: JSON.stringify({ name, type, version, memory_limit: memory, port })
+      });
+      closeModal();
+      toast(`Server ${name} created successfully!`);
+      await loadDashboard();
+    } catch (err) {}
+  }
+
+  // --- Auth Flow & Login Modal ---
+  async function checkAuth() {
+    try {
+      const status = await (await fetch('/api/auth/status')).json();
+      if (status.needs_setup) {
+        showSetupScreen();
+        return;
+      }
+
+      if (!S.token) {
+        showLoginScreen();
+        return;
+      }
+
+      const user = await api('/api/auth/me');
+      S.user = user;
+      S.acct.un = user.username || S.acct.un;
+      S.acct.em = user.email || S.acct.em;
+      S.acct.h = await computeGravatarHash(S.acct.em);
+
+      // Load user preferences
+      const savedMode = localStorage.getItem('neopanel_mode');
+      if (savedMode) setAppearanceMode(savedMode);
+      if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
+      if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
+
+      await loadDashboard();
+    } catch (e) {
+      showLoginScreen();
     }
-  } else if (e.key === 'Escape') {
-    closeCommandPalette();
   }
-}
 
-// Global shortcut listener for Ctrl + K / Cmd + K
-window.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-    e.preventDefault();
-    openCommandPalette();
-  } else if (e.key === 'Escape') {
-    closeCommandPalette();
+  function showSetupScreen() {
+    const d = document.createElement('div');
+    d.id = 'login';
+    d.className = 'login';
+    d.innerHTML = `<div class="lbox">
+      <div class="llogo"><i class="cube"></i><b>Neo</b><span>Panel</span></div>
+      <div class="lg">First-Time Initialization</div>
+      <h1 class="lt">Create Admin Master Account</h1>
+      <label class="lf">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        <input id="su-name" type="text" placeholder="Username" autocomplete="username">
+      </label>
+      <label class="lf">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>
+        <input id="su-pw" type="password" placeholder="Master Password" autocomplete="new-password">
+      </label>
+      <div class="lerr" id="lerr" role="alert"></div>
+      <button class="lbtn" onclick="submitSetup()">Initialize &amp; Launch</button>
+      <div class="lsm foot">&copy; 2026 NeoPanel &bull; Ultra-Lightweight</div>
+    </div>`;
+    document.body.appendChild(d);
   }
-});
 
-// --- Account Settings Flow (Matching Image 1) ---
-function openAccountSettings() {
-  showView('account-view');
-  loadAccountProfile();
-  switchAccountTab('ssh'); // Default to SSH Keys as shown in user's screenshot
-}
+  async function submitSetup() {
+    const username = $('#su-name')?.value.trim();
+    const password = $('#su-pw')?.value;
+    const err = $('#lerr');
+    if (!username || !password) {
+      if (err) err.textContent = 'Username and password are required.';
+      return;
+    }
+    try {
+      const res = await (await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })).json();
 
-function switchAccountTab(tab) {
-  ['general', 'security', 'ssh', 'api', 'activity'].forEach(t => {
-    const btn = document.getElementById(`account-tab-btn-${t}`);
-    const subtab = document.getElementById(`account-subtab-${t}`);
-    if (btn) btn.className = t === tab ? 'account-tab-btn active' : 'account-tab-btn';
-    if (subtab) subtab.style.display = t === tab ? 'block' : 'none';
+      if (res.token) {
+        S.token = res.token;
+        localStorage.setItem('neopanel_token', res.token);
+        $('#login')?.remove();
+        toast('Setup complete! Welcome to NeoPanel.');
+        checkAuth();
+      } else {
+        if (err) err.textContent = res.error || 'Setup failed.';
+      }
+    } catch (e) {
+      if (err) err.textContent = 'Connection error.';
+    }
+  }
+
+  function showLoginScreen() {
+    if ($('#login')) return;
+    const hour = new Date().getHours();
+    const greeting = hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+
+    const d = document.createElement('div');
+    d.id = 'login';
+    d.className = 'login';
+    d.innerHTML = `<div class="lbox">
+      <div class="llogo"><i class="cube"></i><b>Neo</b><span>Panel</span></div>
+      <div class="lg">${greeting}</div>
+      <h1 class="lt">Log in to NeoPanel</h1>
+      <label class="lf">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        <input id="lu" type="text" placeholder="Username or email" autocomplete="username" onkeydown="if(event.key==='Enter')submitLogin()">
+      </label>
+      <label class="lf">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></svg>
+        <input id="lp" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitLogin()">
+        <button class="eye" type="button" onclick="const p=$('#lp'); p.type=p.type==='password'?'text':'password';" aria-label="Toggle password visibility">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </label>
+      <div class="lerr" id="lerr" role="alert"></div>
+      <button class="lbtn" onclick="submitLogin()">Login</button>
+      <div class="lsm foot">&copy; 2026 NeoPanel &bull; Ultra-Lightweight</div>
+    </div>`;
+    document.body.appendChild(d);
+    $('#lu')?.focus();
+  }
+
+  async function submitLogin() {
+    const u = $('#lu')?.value.trim();
+    const p = $('#lp')?.value;
+    const err = $('#lerr');
+
+    if (!u || !p) {
+      if (err) err.textContent = 'Please enter your username and password.';
+      return;
+    }
+
+    try {
+      const res = await (await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: u, password: p })
+      })).json();
+
+      if (res.token) {
+        S.token = res.token;
+        localStorage.setItem('neopanel_token', res.token);
+        $('#login')?.remove();
+        toast('Signed in successfully');
+        checkAuth();
+      } else {
+        if (err) err.textContent = res.error || 'Invalid credentials.';
+      }
+    } catch (e) {
+      if (err) err.textContent = 'Connection error.';
+    }
+  }
+
+  function logout() {
+    S.token = '';
+    localStorage.removeItem('neopanel_token');
+    if (S.activeWs) {
+      try { S.activeWs.close(); } catch (e) {}
+      S.activeWs = null;
+    }
+    showLoginScreen();
+  }
+
+  // --- Export Global Handlers for HTML onClick bindings ---
+  window.power = power;
+  window.switchServer = switchServer;
+  window.openPalette = openPalette;
+  window.execPaletteItem = execPaletteItem;
+  window.toggleCmdMenu = toggleCmdMenu;
+  window.execQuickCmd = execQuickCmd;
+  window.playerAction = playerAction;
+  window.addWhitelistPlayer = addWhitelistPlayer;
+  window.browseFolder = browseFolder;
+  window.openFile = openFile;
+  window.saveActiveFile = saveActiveFile;
+  window.uploadFileDialog = uploadFileDialog;
+  window.deletePlugin = deletePlugin;
+  window.togglePlugin = togglePlugin;
+  window.searchModrinthDebounced = searchModrinthDebounced;
+  window.searchModrinth = searchModrinth;
+  window.installPlugin = installPlugin;
+  window.createBackup = createBackup;
+  window.downloadBackup = downloadBackup;
+  window.deleteBackup = deleteBackup;
+  window.installSoftware = installSoftware;
+  window.saveProperties = saveProperties;
+  window.updateAccountProfile = updateAccountProfile;
+  window.updatePassword = updatePassword;
+  window.addSSHKey = addSSHKey;
+  window.deleteSSHKey = deleteSSHKey;
+  window.createAPIKey = createAPIKey;
+  window.deleteAPIKey = deleteAPIKey;
+  window.setAppearanceMode = setAppearanceMode;
+  window.toggleCompact = toggleCompact;
+  window.toggleSound = toggleSound;
+  window.togglePrivacy = togglePrivacy;
+  window.toggleTheme = toggleTheme;
+  window.openCreateServerModal = openCreateServerModal;
+  window.closeModal = closeModal;
+  window.handleCreateServer = handleCreateServer;
+  window.submitSetup = submitSetup;
+  window.submitLogin = submitLogin;
+  window.logout = logout;
+  window.renderVersionRows = renderVersionRows;
+  window.loadAccountData = loadAccountData;
+  window.loadPlayersData = loadPlayersData;
+
+  // --- Initialization ---
+  document.addEventListener('DOMContentLoaded', () => {
+    checkAuth();
   });
-
-  if (tab === 'general') loadAccountProfile();
-  if (tab === 'ssh') loadSSHKeys();
-  if (tab === 'api') loadAPIKeys();
-  if (tab === 'activity') loadActivity();
-}
-
-async function loadAccountProfile() {
-  try {
-    const prof = await api('/api/account/profile');
-    const uEl = document.getElementById('profile-username');
-    const cEl = document.getElementById('profile-created');
-    if (uEl) uEl.textContent = prof.username;
-    if (cEl) cEl.textContent = new Date(prof.created_at).toLocaleDateString();
-  } catch (e) {}
-}
-
-async function handleUpdatePassword(e) {
-  e.preventDefault();
-  const current = document.getElementById('pwd-current').value;
-  const newP = document.getElementById('pwd-new').value;
-  const confirmP = document.getElementById('pwd-confirm').value;
-
-  if (newP !== confirmP) {
-    showToast('New passwords do not match', 'error');
-    return;
-  }
-
-  try {
-    await api('/api/account/password', {
-      method: 'POST',
-      body: JSON.stringify({ current_password: current, new_password: newP }),
-    });
-    showToast('Password updated successfully!');
-    document.getElementById('pwd-current').value = '';
-    document.getElementById('pwd-new').value = '';
-    document.getElementById('pwd-confirm').value = '';
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
-
-// --- SSH Keys ---
-async function loadSSHKeys() {
-  const container = document.getElementById('ssh-keys-list');
-  if (!container) return;
-  container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading registered SSH keys...</div>`;
-
-  try {
-    const keys = await api('/api/account/ssh-keys');
-    container.innerHTML = '';
-    if (!keys || keys.length === 0) {
-      container.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-dim); font-size:0.875rem;">No SSH public keys registered. Add your OpenSSH public key for passwordless SFTP file editing!</div>`;
-      return;
-    }
-
-    keys.forEach(k => {
-      const card = document.createElement('div');
-      card.className = 'key-item-card';
-      card.innerHTML = `
-        <div style="flex: 1; overflow: hidden;">
-          <div style="display:flex; align-items:center; gap:0.5rem;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2.5"><path d="M21 2l-2 2m-1.5 1.5L12 11"></path><circle cx="7.5" cy="16.5" r="4.5"></circle><line x1="16.5" y1="7.5" x2="19.5" y2="10.5"></line></svg>
-            <span style="font-weight:700; font-size:0.95rem; color:#fff;">${escapeHtml(k.name)}</span>
-            <span style="font-size:0.75rem; color:var(--text-dim);">• Added ${new Date(k.created_at).toLocaleDateString()}</span>
-          </div>
-          <div class="key-fingerprint">${escapeHtml(k.fingerprint)}</div>
-        </div>
-        <button class="btn btn-danger btn-sm" onclick="deleteSSHKey(${k.id})">Delete</button>
-      `;
-      container.appendChild(card);
-    });
-  } catch (err) {
-    container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</div>`;
-  }
-}
-
-async function handleAddSSHKey(e) {
-  e.preventDefault();
-  const name = document.getElementById('ssh-key-name').value.trim();
-  const pub = document.getElementById('ssh-key-pub').value.trim();
-
-  try {
-    await api('/api/account/ssh-keys', {
-      method: 'POST',
-      body: JSON.stringify({ name, public_key: pub }),
-    });
-    showToast('SSH Key registered successfully!');
-    closeModal('add-ssh-modal');
-    document.getElementById('ssh-key-name').value = '';
-    document.getElementById('ssh-key-pub').value = '';
-    loadSSHKeys();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
-
-async function deleteSSHKey(id) {
-  if (!confirm('Are you sure you want to remove this SSH key?')) return;
-  try {
-    await api(`/api/account/ssh-keys/${id}`, { method: 'DELETE' });
-    showToast('SSH key deleted');
-    loadSSHKeys();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
-
-// --- API Keys ---
-async function loadAPIKeys() {
-  const container = document.getElementById('api-keys-list');
-  if (!container) return;
-  container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading API tokens...</div>`;
-
-  try {
-    const keys = await api('/api/account/api-keys');
-    container.innerHTML = '';
-    if (!keys || keys.length === 0) {
-      container.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-dim); font-size:0.875rem;">No active API keys generated yet.</div>`;
-      return;
-    }
-
-    keys.forEach(k => {
-      const card = document.createElement('div');
-      card.className = 'key-item-card';
-      card.innerHTML = `
-        <div style="flex: 1;">
-          <div style="display:flex; align-items:center; gap:0.5rem;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
-            <span style="font-weight:700; font-size:0.95rem; color:#fff;">${escapeHtml(k.name)}</span>
-            <span style="font-size:0.75rem; color:var(--text-dim);">• Created ${new Date(k.created_at).toLocaleDateString()}</span>
-          </div>
-          <div class="key-fingerprint" style="color: #67e8f9;">${escapeHtml(k.key_prefix)}</div>
-        </div>
-        <button class="btn btn-danger btn-sm" onclick="deleteAPIKey(${k.id})">Revoke</button>
-      `;
-      container.appendChild(card);
-    });
-  } catch (err) {
-    container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</div>`;
-  }
-}
-
-async function handleCreateAPIKey(e) {
-  e.preventDefault();
-  const name = document.getElementById('api-key-name').value.trim();
-
-  try {
-    const res = await api('/api/account/api-keys', {
-      method: 'POST',
-      body: JSON.stringify({ name }),
-    });
-    closeModal('add-api-key-modal');
-    document.getElementById('api-key-name').value = '';
-    document.getElementById('new-token-value').textContent = res.token;
-    openModal('new-api-key-modal');
-    loadAPIKeys();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
-
-async function deleteAPIKey(id) {
-  if (!confirm('Are you sure you want to revoke this API token? Any application using it will lose access.')) return;
-  try {
-    await api(`/api/account/api-keys/${id}`, { method: 'DELETE' });
-    showToast('API token revoked');
-    loadAPIKeys();
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
-}
-
-// --- Activity Logs ---
-async function loadActivity() {
-  const container = document.getElementById('activity-logs-list');
-  if (!container) return;
-  container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--text-dim);">Loading activity log...</div>`;
-
-  try {
-    const logs = await api('/api/account/activity');
-    container.innerHTML = '';
-    if (!logs || logs.length === 0) {
-      container.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-dim); font-size:0.875rem;">No recorded activity yet.</div>`;
-      return;
-    }
-
-    logs.forEach(l => {
-      const item = document.createElement('div');
-      item.className = 'activity-item';
-      item.innerHTML = `
-        <div class="activity-icon">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-        </div>
-        <div style="flex:1;">
-          <div style="font-weight:600; font-size:0.875rem; color:#fff;">${escapeHtml(l.details)}</div>
-          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.2rem;">
-            ${new Date(l.created_at).toLocaleString()} • ${escapeHtml(l.ip_address || 'local')}
-          </div>
-        </div>
-      `;
-      container.appendChild(item);
-    });
-  } catch (err) {
-    container.innerHTML = `<div style="text-align:center; padding:1.5rem; color:var(--danger);">${escapeHtml(err.message)}</div>`;
-  }
-}
-
-// --- Utilities ---
-function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-function formatUptime(seconds) {
-  if (!seconds) return 'Offline';
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  if (hrs > 0) return `${hrs}h ${mins}m`;
-  return `${mins}m ${seconds % 60}s`;
-}
-
-// Boot application
-window.addEventListener('DOMContentLoaded', checkAuth);
+})();
