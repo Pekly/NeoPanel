@@ -1794,10 +1794,10 @@ function navHtml() {
       <i class="cube"></i>NeoPanel
     </div>
     
-    <button class="nsearch" onclick="openPalette(1)">
-      ${ic('search', 16)}
-      <span>Search servers or pages...</span>
-      <kbd>Ctrl + K</kbd>
+    <button class="nsearch" onclick="openPalette(1)" aria-label="Search (Ctrl+K)">
+      ${ic('search', 15)}
+      <span>Search</span>
+      <kbd>Ctrl K</kbd>
     </button>
 
     <button class="nav-item on" onclick="go('dash')">
@@ -1847,10 +1847,10 @@ function navHtml() {
     <i class="cube"></i>NeoPanel
   </div>
   
-  <button class="nsearch" onclick="openPalette(1)">
-    ${ic('search', 16)}
+  <button class="nsearch" onclick="openPalette(1)" aria-label="Search (Ctrl+K)">
+    ${ic('search', 15)}
     <span>Search</span>
-    <kbd>Ctrl + K</kbd>
+    <kbd>Ctrl K</kbd>
   </button>
 
   <button class="nb" onclick="go('dash')" style="margin-bottom: 6px;">

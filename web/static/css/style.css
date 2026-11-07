@@ -55,6 +55,21 @@
   padding: 0;
 }
 
+button, input, select, textarea {
+  font-family: inherit;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus {
+  outline: none;
+}
+
+button:focus:not(:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 html, body {
   height: 100%;
   width: 100%;
@@ -165,6 +180,8 @@ nav::-webkit-scrollbar-thumb {
   font-size: 12.5px;
   margin-bottom: 12px;
   transition: all 0.15s ease;
+  outline: none !important;
+  user-select: none;
 }
 
 .nsearch:hover {
@@ -173,17 +190,23 @@ nav::-webkit-scrollbar-thumb {
   color: var(--tx);
 }
 
+.nsearch:focus, .nsearch:focus-visible {
+  outline: none !important;
+  border-color: var(--border-light);
+}
+
 .nsearch span {
   flex: 1;
 }
 
 .nsearch kbd {
-  font: 600 11px var(--font-mono);
-  background: rgba(0, 0, 0, 0.4);
+  font: 600 10.5px var(--font-sans);
+  background: rgba(0, 0, 0, 0.35);
   color: var(--tx-muted);
   padding: 2px 6px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  letter-spacing: 0.02em;
 }
 
 /* Return to All Servers Button */
@@ -201,6 +224,13 @@ nav::-webkit-scrollbar-thumb {
   font-weight: 500;
   margin-bottom: 10px;
   transition: all 0.15s ease;
+  outline: none !important;
+  user-select: none;
+}
+
+.nb:focus, .nb:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .nb:hover {
@@ -233,11 +263,19 @@ nav button, nav button.nav-item {
   font-weight: 500;
   font-size: 13.5px;
   transition: all 0.15s ease;
+  outline: none !important;
+  user-select: none;
 }
 
 nav button:hover, nav button.nav-item:hover {
   background: rgba(255, 255, 255, 0.04);
   color: #fff;
+}
+
+nav button:focus, nav button:focus-visible,
+nav button.nav-item:focus, nav button.nav-item:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 nav button.on, nav button.nav-item.on {
@@ -269,6 +307,13 @@ nav button.on svg, nav button.nav-item.on svg {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   transition: all 0.15s ease;
+  outline: none !important;
+  user-select: none;
+}
+
+.chip2:focus, .chip2:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .chip2:hover, .chip2.on {
@@ -1202,6 +1247,7 @@ input:focus, select:focus, textarea:focus {
 
 .tabs button, .atabs button {
   all: unset;
+  box-sizing: border-box;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1212,6 +1258,19 @@ input:focus, select:focus, textarea:focus {
   color: var(--tx-muted);
   position: relative;
   transition: all 0.18s ease;
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tabs button:focus, .tabs button:focus-visible,
+.atabs button:focus, .atabs button:focus-visible,
+.tabs button:active, .atabs button:active {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 .tabs button:hover, .atabs button:hover {
