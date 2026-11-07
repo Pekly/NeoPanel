@@ -103,9 +103,23 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Slug string `json:"slug"`
+		Slug      string `json:"slug"`
+		ProjectID string `json:"project_id"`
+		ID        string `json:"id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Slug) == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		return
+	}
+
+	slug := strings.TrimSpace(req.Slug)
+	if slug == "" {
+		slug = strings.TrimSpace(req.ProjectID)
+	}
+	if slug == "" {
+		slug = strings.TrimSpace(req.ID)
+	}
+	if slug == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid plugin slug is required"})
 		return
 	}
@@ -116,7 +130,7 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 	}
 	pluginsDir := filepath.Join(h.manager.GetWorkingDir(serverID), folderName)
 
-	filename, err := downloader.DownloadModrinthPlugin(req.Slug, pluginsDir, srv.Type)
+	filename, err := downloader.DownloadModrinthPlugin(slug, pluginsDir, srv.Type)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

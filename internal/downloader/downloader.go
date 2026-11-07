@@ -229,10 +229,13 @@ func getFabricURL(version string) (string, error) {
 }
 
 func getVelocityURL(version string) (string, error) {
-	if version == "" {
-		version = "3.3.0-SNAPSHOT"
+	v := strings.TrimSpace(version)
+	// If version is empty, "latest", or looks like Minecraft version ("1.21.4"), default to "3.4.0-SNAPSHOT"
+	if v == "" || strings.EqualFold(v, "latest") || strings.HasPrefix(v, "1.") {
+		v = "3.4.0-SNAPSHOT"
 	}
-	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/velocity/versions/%s/builds", version)
+
+	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/velocity/versions/%s/builds", v)
 	resp, err := httpGet(apiURL)
 	if err == nil {
 		defer resp.Body.Close()
@@ -243,6 +246,9 @@ func getVelocityURL(version string) (string, error) {
 				} `json:"downloads"`
 			}
 			if json.NewDecoder(resp.Body).Decode(&builds) == nil && len(builds) > 0 {
+				if dl, ok := builds[0].Downloads["server:default"]; ok && dl.URL != "" {
+					return dl.URL, nil
+				}
 				for _, dl := range builds[0].Downloads {
 					if dl.URL != "" {
 						return dl.URL, nil
@@ -251,14 +257,17 @@ func getVelocityURL(version string) (string, error) {
 			}
 		}
 	}
-	return "https://api.papermc.io/v2/projects/velocity/versions/3.3.0-SNAPSHOT/builds/434/downloads/velocity-3.3.0-SNAPSHOT-434.jar", nil
+	// Fallback to verified direct PaperMC fill-data object
+	return "https://fill-data.papermc.io/v1/objects/fe53021f3168322cb6cb68f78699866fd098df3c306e4359847a10b0d02689ef/velocity-3.4.0-SNAPSHOT-563.jar", nil
 }
 
 func getWaterfallURL(version string) (string, error) {
-	if version == "" {
-		version = "1.20"
+	v := strings.TrimSpace(version)
+	if v == "" || strings.EqualFold(v, "latest") || (!strings.HasPrefix(v, "1.20") && !strings.HasPrefix(v, "1.21") && !strings.HasPrefix(v, "1.19")) {
+		v = "1.20"
 	}
-	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/waterfall/versions/%s/builds", version)
+
+	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/waterfall/versions/%s/builds", v)
 	resp, err := httpGet(apiURL)
 	if err == nil {
 		defer resp.Body.Close()
@@ -269,6 +278,9 @@ func getWaterfallURL(version string) (string, error) {
 				} `json:"downloads"`
 			}
 			if json.NewDecoder(resp.Body).Decode(&builds) == nil && len(builds) > 0 {
+				if dl, ok := builds[0].Downloads["server:default"]; ok && dl.URL != "" {
+					return dl.URL, nil
+				}
 				for _, dl := range builds[0].Downloads {
 					if dl.URL != "" {
 						return dl.URL, nil
@@ -277,7 +289,8 @@ func getWaterfallURL(version string) (string, error) {
 			}
 		}
 	}
-	return "https://api.papermc.io/v2/projects/waterfall/versions/1.20/builds/556/downloads/waterfall-1.20-556.jar", nil
+	// Fallback to verified direct PaperMC fill-data object
+	return "https://fill-data.papermc.io/v1/objects/a6786337d4d41e19b5d0f771027b01956e6fb11a62244e762f5dae2e76c34644/waterfall-1.20-578.jar", nil
 }
 
 func getBungeeCordURL() (string, error) {

@@ -30,7 +30,11 @@ function ic(name, size = 18) {
     file: `<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>`,
     plus: `<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>`,
     refresh: `<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>`,
-    more: `<circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>`
+    more: `<circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/>`,
+    key: `<path d="M21 2l-2 2m-1.5 1.5L16 7l-2-2m-2 2l-2-2-4 4a5.5 5.5 0 1 0 7.78 7.78l4.22-4.22V11h3v-3h2V5h-2.5z"/><circle cx="7.5" cy="16.5" r="1.5"/>`,
+    lock: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,
+    code: `<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>`,
+    eye: `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic" aria-hidden="true">${p[name] || p.terminal}</svg>`;
 }
@@ -160,8 +164,24 @@ function formatBytes(bytes) {
 
 function getServerMaxRamMB(srv) {
   if (!srv) return 2048;
-  const mem = srv.memory_max || srv.memory_limit || 2048;
-  return typeof mem === 'number' ? mem : parseInt(mem) || 2048;
+  let val = srv.memory_max || srv.memory_limit || srv.memory || 2048;
+  if (typeof val === 'string') {
+    val = val.trim();
+    if (val.toLowerCase().endsWith('g')) {
+      const parsedG = parseFloat(val);
+      return !isNaN(parsedG) && parsedG > 0 ? Math.round(parsedG * 1024) : 2048;
+    }
+    if (val.toLowerCase().endsWith('m')) {
+      const parsedM = parseFloat(val);
+      return !isNaN(parsedM) && parsedM > 0 ? Math.round(parsedM) : 2048;
+    }
+    const parsed = parseInt(val, 10);
+    return !isNaN(parsed) && parsed > 0 ? (parsed < 64 ? parsed * 1024 : parsed) : 2048;
+  }
+  if (typeof val === 'number' && !isNaN(val) && val > 0) {
+    return val < 64 ? Math.round(val * 1024) : Math.round(val);
+  }
+  return 2048;
 }
 
 function up() {
@@ -251,14 +271,24 @@ function curServer() {
 function formatLogLine(raw) {
   if (!raw) return '';
 
-  // 1. Unwrap JSON if raw starts with {"event":"log"
-  if (raw.startsWith('{')) {
-    try {
-      const obj = JSON.parse(raw);
-      if (obj.event === 'log' && obj.data != null) {
-        raw = obj.data;
-      }
-    } catch (e) {}
+  // 1. Unwrap JSON payload even if preceded by timestamp like [03:06:34] or whitespace
+  if (typeof raw === 'string') {
+    const jsonIdx = raw.indexOf('{"event"');
+    if (jsonIdx !== -1) {
+      try {
+        const obj = JSON.parse(raw.substring(jsonIdx));
+        if (obj.event === 'log' && obj.data != null) {
+          raw = obj.data;
+        }
+      } catch (e) {}
+    } else if (raw.trim().startsWith('{')) {
+      try {
+        const obj = JSON.parse(raw.trim());
+        if (obj.event === 'log' && obj.data != null) {
+          raw = obj.data;
+        }
+      } catch (e) {}
+    }
   }
 
   // 2. Automatically detect if server is ready
@@ -274,10 +304,10 @@ function formatLogLine(raw) {
     updateHeaderBadge();
   }
 
-  // 3. Escape HTML
+  // 3. Escape HTML entities
   let text = esc(raw);
 
-  // 4. Minecraft Section Color Codes (§0-§f)
+  // 4. Minecraft Section Color Codes (§0-§f, §l, §r)
   const mcColors = {
     '0': '#000000', '1': '#0000aa', '2': '#00aa00', '3': '#00aaaa',
     '4': '#aa0000', '5': '#aa00aa', '6': '#ffaa00', '7': '#aaaaaa',
@@ -287,26 +317,34 @@ function formatLogLine(raw) {
   text = text.replace(/§([0-9a-f])/gi, (_, c) => `</span><span style="color:${mcColors[c.toLowerCase()] || '#fff'}">`);
   text = text.replace(/§l/gi, '<b>').replace(/§r/gi, '</b></span>');
 
-  // 5. ANSI Color Escape Sequences
-  text = text
-    .replace(/\x1b\[0m/g, '</span>')
-    .replace(/\x1b\[1m/g, '<b>')
-    .replace(/\x1b\[22m/g, '</b>')
-    .replace(/\x1b\[31m/g, '<span class="e">')
-    .replace(/\x1b\[32m/g, '<span class="c">')
-    .replace(/\x1b\[33m/g, '<span class="w">')
-    .replace(/\x1b\[34m/g, '<span class="info">')
-    .replace(/\x1b\[35m/g, '<span class="w">')
-    .replace(/\x1b\[36m/g, '<span class="c">')
-    .replace(/\x1b\[37m/g, '<span class="cont">');
+  // 5. ANSI Color Escape Sequences (compound codes like \x1b[0;33;1m, \x1b[m, etc.)
+  const ansiMap = {
+    30: '#4b5563', 31: '#ef4444', 32: '#10b981', 33: '#f59e0b',
+    34: '#3b82f6', 35: '#ec4899', 36: '#06b6d4', 37: '#f3f4f6',
+    90: '#6b7280', 91: '#f87171', 92: '#34d399', 93: '#fbbf24',
+    94: '#60a5fa', 95: '#f472b6', 96: '#22d3ee', 97: '#ffffff'
+  };
+  text = text.replace(/\x1b\[([0-9;]*)m/g, (_, codeStr) => {
+    if (!codeStr || codeStr === '0') return '</span>';
+    const codes = codeStr.split(';').map(Number);
+    let styles = [];
+    for (const c of codes) {
+      if (c === 0) styles = [];
+      else if (c === 1) styles.push('font-weight:bold');
+      else if (ansiMap[c]) styles.push(`color:${ansiMap[c]}`);
+    }
+    return styles.length ? `</span><span style="${styles.join(';')}">` : '</span>';
+  });
 
-  // 6. Highlight Log Levels & Timestamps
-  if (text.includes('WARN]:') || text.includes('WARN:')) {
+  // 6. Highlight Log Levels & Timestamps (authentic to Sift theme)
+  if (text.includes('WARN]:') || text.includes('WARN:') || text.includes('WARNING:')) {
     text = `<span class="w">${text}</span>`;
-  } else if (text.includes('ERROR]:') || text.includes('ERROR:') || text.includes('Exception:')) {
+  } else if (text.includes('ERROR]:') || text.includes('ERROR:') || text.includes('Exception:') || text.includes('at java.') || text.includes('at net.minecraft.')) {
     text = `<span class="e">${text}</span>`;
   } else if (text.includes('INFO]:')) {
     text = text.replace(/\[([0-9:]+)\s+INFO\]:/g, '<span class="dim">[$1</span> <span class="c">INFO</span><span class="dim">]:</span>');
+  } else if (text.includes('[NeoPanel]')) {
+    text = text.replace(/\[NeoPanel\]/g, '<span class="c" style="font-weight:600;">[NeoPanel]</span>');
   }
 
   // 7. Highlight advancements & player activity
@@ -1090,16 +1128,42 @@ const V = {
       <table>
         <thead><tr><th>Version</th><th>Notes</th><th style="text-align:right">Action</th></tr></thead>
         <tbody>
-          ${[['1.21.4', 'Popular latest'], ['1.21.1', 'Widely supported'], ['1.20.4', 'Stable'], ['1.20.1', 'Top modded'], ['1.19.4', 'Legacy stable']].map(([v, n]) => {
-            const cur = S.ver === v && S.core === S.sel;
-            return `<tr>
-              <td class="mono"><b>${v}</b></td>
-              <td><span class="chip">${n}</span></td>
-              <td style="text-align:right">
-                ${cur ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${S.sel}', '${v}')">Install ${S.sel} ${v}</button>`}
-              </td>
-            </tr>`;
-          }).join('')}
+          ${(() => {
+            let releases = [];
+            if (S.sel === 'Velocity') {
+              releases = [
+                ['3.4.0-SNAPSHOT', 'Popular latest (Java 17-21)'],
+                ['3.3.0-SNAPSHOT', 'Stable proxy release']
+              ];
+            } else if (S.sel === 'Waterfall') {
+              releases = [
+                ['1.20', 'Final Waterfall release (Build 578)'],
+                ['1.19', 'Legacy stable proxy']
+              ];
+            } else if (S.sel === 'BungeeCord') {
+              releases = [
+                ['latest', 'Continuous Jenkins CI build']
+              ];
+            } else {
+              releases = [
+                ['1.21.4', 'Popular latest'],
+                ['1.21.1', 'Widely supported'],
+                ['1.20.4', 'Stable'],
+                ['1.20.1', 'Top modded'],
+                ['1.19.4', 'Legacy stable']
+              ];
+            }
+            return releases.map(([v, n]) => {
+              const cur = S.ver === v && S.core === S.sel;
+              return `<tr>
+                <td class="mono"><b>${v}</b></td>
+                <td><span class="chip">${n}</span></td>
+                <td style="text-align:right">
+                  ${cur ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${S.sel}', '${v}')">Install ${S.sel} ${v}</button>`}
+                </td>
+              </tr>`;
+            }).join('');
+          })()}
         </tbody>
       </table>
     </div>`;
@@ -1622,27 +1686,29 @@ const V = {
     }
 
     const accTabs = [
-      ['⚙', 'General'],
-      ['🔒', 'Security'],
-      ['🔑', 'SSH Keys'],
-      ['&lt;/&gt;', 'API Keys'],
-      ['👁', 'Activity']
+      ['settings', 'General'],
+      ['lock', 'Security'],
+      ['key', 'SSH Keys'],
+      ['code', 'API Keys'],
+      ['activity', 'Activity']
     ];
 
     return `
-    <div class="row sb" style="margin-bottom: 20px;">
-      <div class="row" style="gap: 12px; align-items: center;">
-        <div style="width: 44px; height: 44px; border-radius: 10px; background: #6366f1; display: grid; place-items: center; color: #fff; font-size: 20px; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);">
-          👤
+    <div class="row sb" style="margin-bottom: 24px;">
+      <div class="row" style="gap: 14px; align-items: center;">
+        <div style="width: 44px; height: 44px; border-radius: 12px; background: #6366f1; display: grid; place-items: center; color: #fff; box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);">
+          ${ic('user', 22)}
         </div>
-        <h1 style="font-size: 24px; font-weight: 800; color: #fff;">Account Settings</h1>
+        <div>
+          <h1 style="font-size: 24px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.01em;">Account Settings</h1>
+        </div>
       </div>
       <button class="btn dg sm" onclick="logout()">Log Out</button>
     </div>
-    <div class="atabs">
+    <div class="tabs">
       ${accTabs.map(([icon, label], i) => `
         <button class="${t === i ? 'on' : ''}" onclick="S.acct.tab=${i}; R(); loadAccountData();">
-          <span style="font-size: 13px;">${icon}</span>
+          ${ic(icon, 15)}
           <span>${label}</span>
         </button>
       `).join('')}
@@ -1696,7 +1762,7 @@ function navHtml() {
     <button class="nsearch" onclick="openPalette(1)">
       ${ic('search', 16)}
       <span>Search servers or pages...</span>
-      <kbd>Ctrl K</kbd>
+      <kbd>Ctrl + K</kbd>
     </button>
 
     <button class="nav-item on" onclick="go('dash')">
@@ -1749,7 +1815,7 @@ function navHtml() {
   <button class="nsearch" onclick="openPalette(1)">
     ${ic('search', 16)}
     <span>Search</span>
-    <kbd>Ctrl K</kbd>
+    <kbd>Ctrl + K</kbd>
   </button>
 
   <button class="nb" onclick="go('dash')" style="margin-bottom: 6px;">
@@ -2237,7 +2303,7 @@ async function searchModrinth() {
         <div>
           ${isInstalled
             ? '<span class="badge online"><i class="dot"></i>Installed</span>'
-            : `<button class="btn pr" onclick="installPlugin('${hit.project_id || hit.slug}', '${esc(hit.title)}')" style="min-width: 95px; justify-content: center;">${ic('download', 14)} Install</button>`
+            : `<button class="btn pr" onclick="installPlugin('${hit.slug || hit.project_id || hit.id}', '${esc(hit.title)}')" style="min-width: 95px; justify-content: center;">${ic('download', 14)} Install</button>`
           }
         </div>
       </div>`;
@@ -2254,7 +2320,7 @@ async function installPlugin(projectSlug, title) {
   try {
     await api(`/api/servers/${srv.id}/plugins/install`, {
       method: 'POST',
-      body: JSON.stringify({ project_id: projectSlug })
+      body: JSON.stringify({ slug: projectSlug, project_id: projectSlug })
     });
     toast(`Successfully installed ${title}!`);
     loadPluginsList();

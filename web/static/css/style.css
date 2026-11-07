@@ -1191,7 +1191,7 @@ input:focus, select:focus, textarea:focus {
 /* =============================================================================
    ACCOUNT SETTINGS TABS (Matching Screenshot)
 ============================================================================= */
-.atabs {
+.tabs, .atabs {
   display: flex;
   align-items: center;
   gap: 24px;
@@ -1200,7 +1200,7 @@ input:focus, select:focus, textarea:focus {
   padding-bottom: 2px;
 }
 
-.atabs button {
+.tabs button, .atabs button {
   all: unset;
   cursor: pointer;
   display: inline-flex;
@@ -1214,15 +1214,17 @@ input:focus, select:focus, textarea:focus {
   transition: all 0.18s ease;
 }
 
-.atabs button:hover {
+.tabs button:hover, .atabs button:hover {
   color: #fff;
 }
 
-.atabs button.on {
+.tabs button.on, .atabs button.on,
+.tabs button.active, .atabs button.active {
   color: #fff;
 }
 
-.atabs button.on::after {
+.tabs button.on::after, .atabs button.on::after,
+.tabs button.active::after, .atabs button.active::after {
   content: '';
   position: absolute;
   left: 0;
