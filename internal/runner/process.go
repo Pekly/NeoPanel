@@ -89,12 +89,47 @@ func (p *ProcessInstance) Start() error {
 	javaBinary, javaLabel := ResolveJavaBinary(p.server.JavaPath)
 	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Starting instance using %s (%s)...\x1b[0m", javaLabel, javaBinary))
 
-	jarPath := filepath.Join(p.workingDir, p.server.JarFile)
-	if _, err := os.Stat(jarPath); os.IsNotExist(err) {
+	// Validate Java binary existence
+	if !isExecutableBinary(javaBinary) {
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
-		return fmt.Errorf("server jar file not found at %s", jarPath)
+
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel ERROR] JAVA RUNTIME NOT FOUND!\x1b[0m")
+		p.broadcast(fmt.Sprintf("\x1b[31mThe specified Java binary does not exist or is not executable on this host:\x1b[0m"))
+		p.broadcast(fmt.Sprintf("  \x1b[33;1mPath:  %s\x1b[0m", javaBinary))
+		p.broadcast(fmt.Sprintf("  \x1b[33;1mLabel: %s\x1b[0m", javaLabel))
+		p.broadcast("\x1b[36m👉 Solution: Open Server Settings -> Java Version and choose an installed runtime (e.g. Java 21, Java 17, Java 25), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return fmt.Errorf("Java binary '%s' (%s) was not found. Please verify your Java settings in Server Settings", javaBinary, javaLabel)
+	}
+
+	jarPath := filepath.Join(p.workingDir, p.server.JarFile)
+	if fi, err := os.Stat(jarPath); os.IsNotExist(err) || (err == nil && fi.IsDir()) {
+		p.mu.Lock()
+		p.status = "offline"
+		p.mu.Unlock()
+
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel ERROR] SERVER JAR FILE NOT FOUND!\x1b[0m")
+		p.broadcast("\x1b[31mCould not locate the executable JAR file in server directory:\x1b[0m")
+		p.broadcast(fmt.Sprintf("  \x1b[33;1mExpected file: %s\x1b[0m", p.server.JarFile))
+		p.broadcast(fmt.Sprintf("  \x1b[33;1mFull path:     %s\x1b[0m", jarPath))
+		p.broadcast("\x1b[36m👉 Solution: Click 'Reinstall Server' in Settings to cleanly download an official JAR from mcjarfiles.com, or upload your server JAR to the root folder via the File Manager.\x1b[0m")
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return fmt.Errorf("server JAR file '%s' not found. Please upload it or use 'Reinstall Server'", p.server.JarFile)
+	}
+
+	// Validate memory settings
+	if p.server.MemoryMinMB > 0 && p.server.MemoryMaxMB > 0 && p.server.MemoryMinMB > p.server.MemoryMaxMB {
+		p.mu.Lock()
+		p.status = "offline"
+		p.mu.Unlock()
+
+		errMsg := fmt.Sprintf("Minimum RAM (%d MB) cannot exceed Maximum RAM (%d MB)", p.server.MemoryMinMB, p.server.MemoryMaxMB)
+		p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] INVALID RAM SETTINGS: %s\x1b[0m", errMsg))
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	args := []string{}
@@ -121,6 +156,7 @@ func (p *ProcessInstance) Start() error {
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
+		p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] Failed to open stdin pipe: %v\x1b[0m", err))
 		return fmt.Errorf("failed to open stdin pipe: %w", err)
 	}
 
@@ -130,6 +166,7 @@ func (p *ProcessInstance) Start() error {
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
+		p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] Failed to open stdout pipe: %v\x1b[0m", err))
 		return fmt.Errorf("failed to open stdout pipe: %w", err)
 	}
 
@@ -140,6 +177,7 @@ func (p *ProcessInstance) Start() error {
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
+		p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] Failed to open stderr pipe: %v\x1b[0m", err))
 		return fmt.Errorf("failed to open stderr pipe: %w", err)
 	}
 
@@ -150,7 +188,13 @@ func (p *ProcessInstance) Start() error {
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
-		return fmt.Errorf("failed to start process: %w", err)
+
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel ERROR] PROCESS LAUNCH FAILED!\x1b[0m")
+		p.broadcast(fmt.Sprintf("\x1b[31mFailed to start Java process: %v\x1b[0m", err))
+		p.broadcast(fmt.Sprintf("  \x1b[33;1mCommand: %s %s\x1b[0m", javaBinary, strings.Join(args, " ")))
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return fmt.Errorf("failed to start Java process: %w", err)
 	}
 
 	p.mu.Lock()
@@ -168,7 +212,7 @@ func (p *ProcessInstance) Start() error {
 
 	// Wait for process exit in background
 	go func() {
-		_ = cmd.Wait()
+		waitErr := cmd.Wait()
 
 		p.mu.Lock()
 		p.status = "offline"
@@ -177,7 +221,11 @@ func (p *ProcessInstance) Start() error {
 		expected := p.stopExpected
 		p.mu.Unlock()
 
-		p.broadcast("\x1b[33m[NeoPanel] Server process stopped.\x1b[0m")
+		if waitErr != nil && !expected {
+			p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel] Server process terminated unexpectedly (%v).\x1b[0m", waitErr))
+		} else {
+			p.broadcast("\x1b[33m[NeoPanel] Server process stopped.\x1b[0m")
+		}
 
 		if p.onExit != nil {
 			p.onExit(p.server.ID, !expected)
@@ -200,7 +248,87 @@ func (p *ProcessInstance) streamOutput(r io.Reader) {
 		p.mu.Unlock()
 
 		p.broadcast(line)
+
+		// Real-time runtime diagnostic detectors
+		p.detectRuntimeDiagnostics(line)
 	}
+}
+
+func (p *ProcessInstance) detectRuntimeDiagnostics(line string) {
+	lower := strings.ToLower(line)
+
+	// 1. Java Version Mismatch / UnsupportedClassVersionError
+	if strings.Contains(line, "UnsupportedClassVersionError") ||
+		strings.Contains(lower, "has been compiled by a more recent version of the java runtime") ||
+		strings.Contains(lower, "requires running the server with java") ||
+		strings.Contains(lower, "unsupported major.minor version") ||
+		(strings.Contains(lower, "requires java") && strings.Contains(lower, "or higher")) {
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] JAVA VERSION MISMATCH DETECTED!\x1b[0m")
+		p.broadcast("\x1b[31mYour Minecraft server JAR was compiled for a newer Java runtime than the one currently selected.\x1b[0m")
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Go to Server Settings -> Java Version, change to Java 21 or Java 25, then restart.\x1b[0m")
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return
+	}
+
+	// 2. Minecraft EULA not accepted
+	if strings.Contains(lower, "agree to the eula") || strings.Contains(lower, "eula.txt") {
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] MOJANG EULA NOT ACCEPTED!\x1b[0m")
+		p.broadcast("\x1b[31mThe Minecraft server requires accepting Mojang's End User License Agreement.\x1b[0m")
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Open 'eula.txt' in the File Manager and change 'eula=false' to 'eula=true'.\x1b[0m")
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return
+	}
+
+	// 3. Port Bind / Address In Use
+	if strings.Contains(line, "FAILED TO BIND TO PORT") ||
+		strings.Contains(line, "BindException: Address already in use") ||
+		strings.Contains(lower, "port already in use") {
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] PORT BIND CONFLICT (PORT IN USE)!\x1b[0m")
+		p.broadcast(fmt.Sprintf("\x1b[31mGame port %d is already bound by another running server or service on this host.\x1b[0m", p.server.Port))
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Stop conflicting servers, or allocate a different port under Settings -> Network.\x1b[0m")
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return
+	}
+
+	// 4. Out of Memory / Object Heap Allocation
+	if strings.Contains(lower, "could not reserve enough space for") ||
+		strings.Contains(lower, "invalid maximum heap size") ||
+		strings.Contains(lower, "outofmemoryerror") ||
+		strings.Contains(lower, "insufficient memory for the java runtime") {
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] OUT OF MEMORY (RAM ALLOCATION FAILED)!\x1b[0m")
+		p.broadcast(fmt.Sprintf("\x1b[31mThe host machine cannot allocate the configured %d MB of RAM to Java.\x1b[0m", p.server.MemoryMaxMB))
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Lower your RAM allocation in Settings -> Startup, or create a swap file on the host.\x1b[0m")
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return
+	}
+
+	// 5. Corrupt or Invalid JAR
+	if strings.Contains(lower, "invalid or corrupt jarfile") ||
+		strings.Contains(lower, "unable to access jarfile") ||
+		strings.Contains(lower, "zipexception: error in opening zip file") {
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] CORRUPT OR INVALID JAR FILE!\x1b[0m")
+		p.broadcast(fmt.Sprintf("\x1b[31mThe server jar file '%s' cannot be executed because it is damaged or incomplete.\x1b[0m", p.server.JarFile))
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Click 'Reinstall Server' in Settings to cleanly re-download the JAR.\x1b[0m")
+		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+		return
+	}
+}
+
+func isExecutableBinary(path string) bool {
+	if path == "" {
+		return false
+	}
+	if filepath.IsAbs(path) {
+		fi, err := os.Stat(path)
+		return err == nil && !fi.IsDir()
+	}
+	_, err := exec.LookPath(path)
+	return err == nil
 }
 
 func (p *ProcessInstance) WriteCommand(cmd string) error {

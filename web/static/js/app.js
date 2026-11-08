@@ -727,9 +727,52 @@ async function power(action) {
     if (S.status === 'online') S.start = Date.now();
     updateInputState();
     updateHeaderBadge();
-    toast(`Server ${action} command sent`);
+    toast(`Server ${action} command sent`, 'ok');
   } catch (err) {
-    toast(`Action failed: ${err.message}`, 'error');
+    S.status = 'offline';
+    updateInputState();
+    updateHeaderBadge();
+    addLog(`\x1b[31;1m[NeoPanel Error]: ${err.message}\x1b[0m`);
+    toast(`Action failed: ${err.message}`, 'bad');
+
+    let modalTitle = 'Server Action Failed';
+    let modalMsg = `Failed to ${action} server: <b>${esc(err.message)}</b>`;
+
+    const lower = (err.message || '').toLowerCase();
+    if (lower.includes('jar file') || lower.includes('jar') || lower.includes('not found')) {
+      modalTitle = 'Server Executable JAR Not Found';
+      modalMsg = `<div style="line-height:1.6;">
+        The server executable JAR file <b>${esc(srv.jar_file || 'server.jar')}</b> could not be found in the server directory.<br><br>
+        <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#fca5a5;">
+          ${esc(err.message)}
+        </div>
+        <b>How to resolve:</b>
+        <ol style="margin: 8px 0 0 18px; padding: 0; line-height: 1.6;">
+          <li>Click <b>Reinstall Server</b> in Settings to automatically download an official build from mcjarfiles.com.</li>
+          <li>Or navigate to <b>Files</b> and upload your JAR as <code>${esc(srv.jar_file || 'server.jar')}</code>.</li>
+          <li>Or verify your <b>Server Executable File</b> name in <b>Startup Settings</b>.</li>
+        </ol>
+      </div>`;
+    } else if (lower.includes('java')) {
+      modalTitle = 'Java Runtime Error';
+      modalMsg = `<div style="line-height:1.6;">
+        The server could not launch with the selected Java runtime.<br><br>
+        <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#fca5a5;">
+          ${esc(err.message)}
+        </div>
+        <b>How to resolve:</b>
+        <ol style="margin: 8px 0 0 18px; padding: 0; line-height: 1.6;">
+          <li>Go to <b>Settings -> Startup</b> and choose an installed Java runtime (e.g., <b>Java 21</b>, <b>Java 17</b>, or <b>Java 25</b>).</li>
+          <li>Run <code>sudo neopanel-installer --java</code> on your server to install all supported Java versions.</li>
+        </ol>
+      </div>`;
+    }
+
+    uiAlert({
+      title: modalTitle,
+      message: modalMsg,
+      type: 'error'
+    });
     refreshServerStatus();
   }
 }
@@ -2786,6 +2829,11 @@ async function saveStartupSettings() {
     R();
   } catch (err) {
     toast(err.message || 'Failed to save startup configuration', 'bad');
+    uiAlert({
+      title: 'Failed to Save Startup Settings',
+      message: `Could not save startup settings: ${esc(err.message || 'Invalid parameters')}`,
+      type: 'error'
+    });
   }
 }
 
@@ -2801,6 +2849,12 @@ async function openFile(name) {
     R();
   } catch (e) {
     S.editingFile = null;
+    toast(`Failed to open file: ${e.message}`, 'bad');
+    uiAlert({
+      title: 'File Open Error',
+      message: `Could not open file <b>${esc(filePath)}</b>: ${esc(e.message || 'File not found or exceeds 5MB limit.')}`,
+      type: 'error'
+    });
   }
 }
 
@@ -2817,8 +2871,15 @@ async function saveActiveFile() {
       body: JSON.stringify({ path: filePath, content })
     });
     S.files[filePath] = content;
-    toast(`Saved ${filePath.split('/').pop()} successfully`);
-  } catch (e) {}
+    toast(`Saved ${filePath.split('/').pop()} successfully`, 'ok');
+  } catch (e) {
+    toast(`Failed to save file: ${e.message}`, 'bad');
+    uiAlert({
+      title: 'Failed to Save File',
+      message: `Could not save file <b>${esc(filePath)}</b>: ${esc(e.message || 'Permission denied or disk is full')}`,
+      type: 'error'
+    });
+  }
 }
 
 function downloadFileItem(path) {
@@ -2891,7 +2952,14 @@ async function promptRenameFile(oldPath) {
     });
     toast(`Renamed to ${newName}`, 'ok');
     loadFileList(S.currentDir);
-  } catch (e) {}
+  } catch (e) {
+    toast(`Rename failed: ${e.message}`, 'bad');
+    uiAlert({
+      title: 'Rename Failed',
+      message: `Could not rename <b>${esc(baseName)}</b> to <b>${esc(newName)}</b>:<br><br>${esc(e.message || 'File already exists or invalid name.')}`,
+      type: 'error'
+    });
+  }
 }
 
 async function deleteFileItem(path) {
@@ -2911,7 +2979,14 @@ async function deleteFileItem(path) {
     await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
     toast(`Deleted ${baseName}`, 'ok');
     loadFileList(S.currentDir);
-  } catch (e) {}
+  } catch (e) {
+    toast(`Delete failed: ${e.message}`, 'bad');
+    uiAlert({
+      title: 'Delete Failed',
+      message: `Could not delete <b>${esc(baseName)}</b>: ${esc(e.message || 'Permission denied or file in use.')}`,
+      type: 'error'
+    });
+  }
 }
 
 async function promptNewFile() {
@@ -2933,7 +3008,14 @@ async function promptNewFile() {
     toast(`Created file ${name}`, 'ok');
     loadFileList(S.currentDir);
     openFile(name);
-  } catch (e) {}
+  } catch (e) {
+    toast(`Create file failed: ${e.message}`, 'bad');
+    uiAlert({
+      title: 'Failed to Create File',
+      message: `Could not create file <b>${esc(name)}</b>: ${esc(e.message || 'File may already exist or filename is invalid.')}`,
+      type: 'error'
+    });
+  }
 }
 
 async function promptNewFolder() {
@@ -2954,7 +3036,14 @@ async function promptNewFolder() {
     });
     toast(`Created folder ${name}`, 'ok');
     loadFileList(S.currentDir);
-  } catch (e) {}
+  } catch (e) {
+    toast(`Create folder failed: ${e.message}`, 'bad');
+    uiAlert({
+      title: 'Failed to Create Folder',
+      message: `Could not create directory <b>${esc(name)}</b>: ${esc(e.message || 'Folder already exists or invalid path.')}`,
+      type: 'error'
+    });
+  }
 }
 
 // --- File Selection & Bulk Actions ---
@@ -3000,13 +3089,25 @@ async function deleteSelectedFiles() {
 
   toast(`Deleting ${count} items...`);
   const paths = Array.from(S.selectedFiles);
+  let failed = 0;
   for (const path of paths) {
     try {
       await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-    } catch (e) {}
+    } catch (e) {
+      failed++;
+    }
   }
   S.selectedFiles.clear();
-  toast(`Deleted ${count} items`, 'ok');
+  if (failed > 0) {
+    toast(`Deleted ${count - failed} items (${failed} failed)`, 'bad');
+    uiAlert({
+      title: 'Bulk Delete Incomplete',
+      message: `Deleted ${count - failed} items. <b>${failed} item(s) could not be deleted</b> (files may be locked or permission denied).`,
+      type: 'error'
+    });
+  } else {
+    toast(`Deleted ${count} items`, 'ok');
+  }
   loadFileList(S.currentDir);
 }
 
@@ -3367,7 +3468,14 @@ async function installSoftware(software, version) {
     toast(`Successfully installed ${software} ${version}! Restarting...`);
     power('restart');
     R();
-  } catch (e) {}
+  } catch (e) {
+    toast(`Software installation failed: ${e.message}`, 'bad');
+    uiAlert({
+      title: 'Installation Failed',
+      message: `Failed to install <b>${esc(software)} ${esc(version)}</b>:<br><br>${esc(e.message || 'Download failed or version unavailable.')}`,
+      type: 'error'
+    });
+  }
 }
 
 async function loadProperties() {
@@ -3441,6 +3549,11 @@ async function saveProperties() {
     R();
   } catch (e) {
     toast(e.message || 'Failed to save server settings', 'bad');
+    uiAlert({
+      title: 'Failed to Save Settings',
+      message: `Could not save server properties: ${esc(e.message || 'Validation error')}`,
+      type: 'error'
+    });
   }
 }
 
@@ -3963,6 +4076,16 @@ async function handleCreateServer(e) {
       btn.disabled = false;
       btn.textContent = '🚀 Create & Launch Server';
     }
+    toast(err.message || 'Server creation failed', 'bad');
+    uiAlert({
+      title: 'Server Creation Failed',
+      message: `Failed to create server <b>${esc(name)}</b>:<br><br>
+        <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#fca5a5;">
+          ${esc(err.message)}
+        </div>
+        Please verify that port <b>${port}</b> is free and disk space is available.`,
+      type: 'error'
+    });
   }
 }
 
@@ -4088,6 +4211,11 @@ async function submitAddPort(e) {
   } catch (err) {
     toast(err.message || 'Failed to assign port', 'bad');
     if (btn) btn.disabled = false;
+    uiAlert({
+      title: 'Port Allocation Failed',
+      message: `Failed to allocate port <b>${port}</b>:<br><br>${esc(err.message || 'Port is already assigned or unavailable.')}`,
+      type: 'error'
+    });
   }
 }
 
@@ -4331,6 +4459,15 @@ async function submitReinstall(e, srvId) {
       btn.disabled = false;
       btn.innerHTML = `${ic('refresh', 14)} Start Reinstallation`;
     }
+    uiAlert({
+      title: 'Server Reinstallation Failed',
+      message: `Failed to download or reinstall <b>${esc(software)} ${esc(version)}</b>:<br><br>
+        <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#fca5a5;">
+          ${esc(err.message)}
+        </div>
+        Please verify the version and software engine, or check network connectivity to mcjarfiles.com.`,
+      type: 'error'
+    });
   }
 }
 
@@ -4400,6 +4537,11 @@ async function submitAddUser(e) {
   } catch (err) {
     toast(err.message || 'Failed to create user', 'bad');
     if (btn) btn.disabled = false;
+    uiAlert({
+      title: 'User Creation Failed',
+      message: `Failed to create user account <b>${esc(username)}</b>:<br><br>${esc(err.message || 'Username already exists or password too short')}`,
+      type: 'error'
+    });
   }
 }
 
