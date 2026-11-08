@@ -1182,6 +1182,171 @@ input[type=text], input[type=number], input[type=password], select, textarea {
   transition: all 0.15s ease;
 }
 
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238b949e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+  padding-right: 36px !important;
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+select option {
+  background: var(--card-bg-solid);
+  color: #fff;
+  padding: 10px 12px;
+}
+
+/* =============================================================================
+   CUSTOM GLASSMORPHIC DROPDOWN WIDGET (.cselect-wrap, .cselect-trigger)
+============================================================================= */
+.cselect-native-hidden {
+  display: none !important;
+}
+
+.cselect-wrap {
+  position: relative;
+  width: 100%;
+  user-select: none;
+  display: block;
+}
+
+.cselect-wrap[style*="width: auto"],
+.cselect-wrap[style*="width:auto"] {
+  display: inline-block;
+  min-width: 140px;
+}
+
+.cselect-wrap.cselect-up .cselect-menu {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.cselect-trigger {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #fff;
+  font-size: 13.5px;
+  font-family: inherit;
+  text-align: left;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.cselect-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.cselect-trigger:hover,
+.cselect-wrap.open .cselect-trigger {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--border-accent);
+}
+
+.cselect-wrap.open .cselect-trigger {
+  box-shadow: 0 0 0 3px var(--ac-glow);
+  border-color: var(--ac);
+}
+
+.cselect-val {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+
+.cselect-arrow {
+  color: var(--tx-muted);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: transform 0.2s ease, color 0.15s ease;
+}
+
+.cselect-wrap.open .cselect-arrow {
+  transform: rotate(180deg);
+  color: var(--ac);
+}
+
+.cselect-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--card-bg-solid);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 500;
+  padding: 5px;
+  max-height: 250px;
+  overflow-y: auto;
+  display: none;
+  animation: modalPop 0.12s ease-out;
+}
+
+.cselect-wrap.open .cselect-menu {
+  display: block;
+}
+
+.cselect-menu::-webkit-scrollbar {
+  width: 5px;
+}
+
+.cselect-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+}
+
+.cselect-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--tx);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.cselect-opt:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+}
+
+.cselect-opt.on {
+  background: var(--ac-subtle);
+  color: #fff;
+  font-weight: 600;
+}
+
+.cselect-opt.on::after {
+  content: '✓';
+  color: var(--ac);
+  font-size: 12px;
+  font-weight: 800;
+  margin-left: 8px;
+}
+
 input:focus, select:focus, textarea:focus {
   border-color: var(--ac);
   background: rgba(255, 255, 255, 0.06);

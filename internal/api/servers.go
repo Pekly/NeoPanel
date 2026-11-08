@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -339,10 +341,16 @@ func (h *ServerHandler) AddServerPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If set as primary, also update server.properties
+	// If set as primary, also update server.properties and in-memory instance
 	if req.IsPrimary {
 		h.updateServerPropertiesPort(serverID, req.Port)
+		if srv, err := h.db.GetServer(serverID); err == nil {
+			h.manager.UpdateInstanceServer(srv)
+		}
 	}
+
+	// Open port in host Linux firewall if UFW is active
+	allowHostPort(req.Port, req.Protocol)
 
 	writeJSON(w, http.StatusCreated, port)
 }
@@ -356,9 +364,23 @@ func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Retrieve port number for firewall rule cleanup
+	ports, _ := h.db.ListServerPorts(serverID)
+	var portNum int
+	for _, p := range ports {
+		if p.ID == portID {
+			portNum = p.Port
+			break
+		}
+	}
+
 	if err := h.db.DeleteServerPort(serverID, portID); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
+	}
+
+	if portNum > 0 {
+		removeHostPort(portNum)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Port allocation deleted successfully"})
@@ -382,10 +404,42 @@ func (h *ServerHandler) SetPrimaryPort(w http.ResponseWriter, r *http.Request) {
 	// Update server.properties with the new primary port
 	h.updateServerPropertiesPort(serverID, newPort)
 
+	// Live sync in-memory server instance
+	if srv, err := h.db.GetServer(serverID); err == nil {
+		h.manager.UpdateInstanceServer(srv)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Primary port updated",
 		"port":    newPort,
 	})
+}
+
+func allowHostPort(port int, protocol string) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if _, err := exec.LookPath("ufw"); err == nil {
+		proto := strings.ToLower(protocol)
+		if strings.Contains(proto, "udp") && !strings.Contains(proto, "tcp") {
+			_ = exec.Command("ufw", "allow", fmt.Sprintf("%d/udp", port)).Run()
+		} else if strings.Contains(proto, "tcp") && !strings.Contains(proto, "udp") {
+			_ = exec.Command("ufw", "allow", fmt.Sprintf("%d/tcp", port)).Run()
+		} else {
+			_ = exec.Command("ufw", "allow", fmt.Sprintf("%d", port)).Run()
+		}
+	}
+}
+
+func removeHostPort(port int) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	if _, err := exec.LookPath("ufw"); err == nil {
+		_ = exec.Command("ufw", "delete", "allow", fmt.Sprintf("%d", port)).Run()
+		_ = exec.Command("ufw", "delete", "allow", fmt.Sprintf("%d/tcp", port)).Run()
+		_ = exec.Command("ufw", "delete", "allow", fmt.Sprintf("%d/udp", port)).Run()
+	}
 }
 
 func (h *ServerHandler) updateServerPropertiesPort(serverID string, port int) {

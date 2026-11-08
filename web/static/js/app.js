@@ -2547,6 +2547,7 @@ window.R = function() {
     } else if (S.view === 'fi') {
       bindEditorTabKey();
     }
+    enhanceSelects(main);
   }
 };
 
@@ -4008,6 +4009,9 @@ function openCreateServerModal() {
       </form>
     </div>
   </div>`;
+
+  enhanceSelects(container);
+  setTimeout(() => $('#cs-name')?.focus(), 50);
 }
 
 function closeModal() {
@@ -4167,6 +4171,7 @@ function openAddPortModal() {
     </div>
   </div>`;
 
+  enhanceSelects(container);
   setTimeout(() => $('#ap-port')?.focus(), 50);
 }
 
@@ -4410,6 +4415,8 @@ function openReinstallModal(srvId) {
       </form>
     </div>
   </div>`;
+
+  enhanceSelects(container);
 }
 
 async function submitReinstall(e, srvId) {
@@ -4509,6 +4516,8 @@ function openAddUserModal() {
       </form>
     </div>
   </div>`;
+
+  enhanceSelects(container);
 }
 
 async function submitAddUser(e) {
@@ -4850,9 +4859,204 @@ window.toggleCustomPropJava = toggleCustomPropJava;
 window.isArchiveFile = isArchiveFile;
 window.unzipFileItem = unzipFileItem;
 window.unzipSelectedArchive = unzipSelectedArchive;
+window.enhanceSelects = enhanceSelects;
+window.closeAllCustomSelects = closeAllCustomSelects;
+
+// --- Custom Glassmorphic Selects System ---
+function closeAllCustomSelects() {
+  document.querySelectorAll('.cselect-wrap.open').forEach(el => {
+    el.classList.remove('open');
+    const trigger = el.querySelector('.cselect-trigger');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function enhanceSelects(root = document) {
+  if (!root || !root.querySelectorAll) return;
+  const selects = root.tagName === 'SELECT' ? [root] : Array.from(root.querySelectorAll('select'));
+  for (const sel of selects) {
+    if (sel.dataset.cselectInit === '1') continue;
+    if (sel.classList.contains('no-cselect')) continue;
+    if (sel.id === 'cs-type') continue;
+    if (sel.style.display === 'none' && !sel.classList.contains('cselect-native-hidden')) continue;
+
+    sel.dataset.cselectInit = '1';
+    sel.classList.add('cselect-native-hidden');
+    sel.style.display = 'none';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'cselect-wrap';
+    if (sel.id) wrap.dataset.for = sel.id;
+    if (sel.style.width) wrap.style.width = sel.style.width;
+    if (sel.style.minWidth) wrap.style.minWidth = sel.style.minWidth;
+    if (sel.style.marginBottom) wrap.style.marginBottom = sel.style.marginBottom;
+    if (sel.style.marginTop) wrap.style.marginTop = sel.style.marginTop;
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'cselect-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (sel.disabled) trigger.disabled = true;
+
+    const valSpan = document.createElement('span');
+    valSpan.className = 'cselect-val';
+
+    const arrowSpan = document.createElement('span');
+    arrowSpan.className = 'cselect-arrow';
+    arrowSpan.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
+    trigger.appendChild(valSpan);
+    trigger.appendChild(arrowSpan);
+
+    const menu = document.createElement('div');
+    menu.className = 'cselect-menu';
+    menu.setAttribute('role', 'listbox');
+
+    function rebuildOptions() {
+      menu.innerHTML = '';
+      const opts = Array.from(sel.options);
+      opts.forEach((opt, idx) => {
+        const item = document.createElement('div');
+        item.className = 'cselect-opt' + (opt.selected ? ' on' : '');
+        item.textContent = opt.textContent;
+        item.dataset.value = opt.value;
+        item.dataset.index = String(idx);
+        item.setAttribute('role', 'option');
+        if (opt.disabled) item.style.opacity = '0.5';
+
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (opt.disabled) return;
+          sel.selectedIndex = idx;
+          valSpan.textContent = opt.textContent;
+          menu.querySelectorAll('.cselect-opt').forEach(el => el.classList.remove('on'));
+          item.classList.add('on');
+          closeAllCustomSelects();
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        menu.appendChild(item);
+      });
+
+      const currentOpt = sel.options[sel.selectedIndex] || sel.options[0];
+      valSpan.textContent = currentOpt ? currentOpt.textContent : 'Select...';
+    }
+
+    rebuildOptions();
+
+    wrap.appendChild(trigger);
+    wrap.appendChild(menu);
+
+    if (sel.parentNode) {
+      sel.parentNode.insertBefore(wrap, sel.nextSibling);
+    }
+
+    sel._cselectWrap = wrap;
+    sel._cselectRebuild = rebuildOptions;
+
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (sel.disabled) return;
+      const isOpen = wrap.classList.contains('open');
+      closeAllCustomSelects();
+      if (!isOpen) {
+        const rect = wrap.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom;
+        if (spaceBelow < 220 && rect.top > 220) {
+          wrap.classList.add('cselect-up');
+        } else {
+          wrap.classList.remove('cselect-up');
+        }
+        wrap.classList.add('open');
+        trigger.setAttribute('aria-expanded', 'true');
+        const active = menu.querySelector('.cselect-opt.on');
+        if (active) active.scrollIntoView({ block: 'nearest' });
+      }
+    });
+
+    trigger.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        trigger.click();
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!wrap.classList.contains('open')) {
+          trigger.click();
+        } else {
+          const items = Array.from(menu.querySelectorAll('.cselect-opt'));
+          const cur = items.findIndex(o => o.classList.contains('on'));
+          const next = Math.min(items.length - 1, cur + 1);
+          if (items[next]) items[next].click();
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!wrap.classList.contains('open')) {
+          trigger.click();
+        } else {
+          const items = Array.from(menu.querySelectorAll('.cselect-opt'));
+          const cur = items.findIndex(o => o.classList.contains('on'));
+          const prev = Math.max(0, cur - 1);
+          if (items[prev]) items[prev].click();
+        }
+      } else if (e.key === 'Escape') {
+        closeAllCustomSelects();
+      }
+    });
+
+    sel.addEventListener('change', () => {
+      const currentOpt = sel.options[sel.selectedIndex];
+      if (currentOpt) {
+        valSpan.textContent = currentOpt.textContent;
+        menu.querySelectorAll('.cselect-opt').forEach((el, i) => {
+          el.classList.toggle('on', i === sel.selectedIndex);
+        });
+      }
+    });
+
+    if (window.MutationObserver) {
+      const selObserver = new MutationObserver(() => {
+        trigger.disabled = sel.disabled;
+        rebuildOptions();
+      });
+      selObserver.observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+    }
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.cselect-wrap')) {
+    closeAllCustomSelects();
+  }
+});
+
+let _enhanceTimeout = null;
+const globalSelectObserver = (typeof MutationObserver !== 'undefined') ? new MutationObserver((mutations) => {
+  let hasSelect = false;
+  for (const m of mutations) {
+    for (const node of m.addedNodes) {
+      if (node.nodeType === 1) {
+        if (node.tagName === 'SELECT' || (node.querySelector && node.querySelector('select'))) {
+          hasSelect = true;
+          break;
+        }
+      }
+    }
+    if (hasSelect) break;
+  }
+  if (hasSelect) {
+    if (_enhanceTimeout) cancelAnimationFrame(_enhanceTimeout);
+    _enhanceTimeout = requestAnimationFrame(() => {
+      enhanceSelects(document.body);
+    });
+  }
+}) : null;
 
 // --- Initialize Application ---
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
   initDragAndDrop();
+  enhanceSelects(document.body);
+  if (globalSelectObserver) {
+    globalSelectObserver.observe(document.body, { childList: true, subtree: true });
+  }
 });
