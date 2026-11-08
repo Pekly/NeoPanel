@@ -1,6 +1,9 @@
 package api
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -275,6 +278,190 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Renamed successfully"})
+}
+
+func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	var req struct {
+		Path        string `json:"path"`
+		Destination string `json:"destination"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return
+	}
+
+	if req.Path == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Archive path is required"})
+		return
+	}
+
+	archiveFullPath, err := h.safePath(serverID, req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	destDir := req.Destination
+	if destDir == "" {
+		destDir = filepath.ToSlash(filepath.Dir(req.Path))
+		if destDir == "." {
+			destDir = ""
+		}
+	}
+
+	destFullPath, err := h.safePath(serverID, destDir)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid destination directory: " + err.Error()})
+		return
+	}
+
+	if err := os.MkdirAll(destFullPath, 0755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create destination folder: " + err.Error()})
+		return
+	}
+
+	lower := strings.ToLower(req.Path)
+	var count int
+	if strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") {
+		count, err = extractTarGz(archiveFullPath, destFullPath)
+	} else if strings.HasSuffix(lower, ".tar") {
+		count, err = extractTar(archiveFullPath, destFullPath)
+	} else {
+		// Default to standard zip (handles .zip, .jar, etc.)
+		count, err = extractZip(archiveFullPath, destFullPath)
+	}
+
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to extract archive: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": fmt.Sprintf("Successfully extracted %d file(s)", count),
+		"count":   count,
+	})
+}
+
+func extractZip(zipPath, destDir string) (int, error) {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+
+	count := 0
+	for _, f := range r.File {
+		cleanName := filepath.Clean("/" + f.Name)
+		target := filepath.Join(destDir, cleanName)
+		rel, err := filepath.Rel(destDir, target)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue // skip illegal paths (ZipSlip protection)
+		}
+
+		if f.FileInfo().IsDir() {
+			_ = os.MkdirAll(target, 0755)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return count, err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return count, err
+		}
+
+		mode := f.Mode()
+		if mode == 0 {
+			mode = 0644
+		}
+		outFile, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+		if err != nil {
+			rc.Close()
+			return count, err
+		}
+
+		_, copyErr := io.Copy(outFile, rc)
+		rc.Close()
+		outFile.Close()
+		if copyErr != nil {
+			return count, copyErr
+		}
+		count++
+	}
+	return count, nil
+}
+
+func extractTarGz(tarGzPath, destDir string) (int, error) {
+	f, err := os.Open(tarGzPath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	gzr, err := gzip.NewReader(f)
+	if err != nil {
+		return 0, err
+	}
+	defer gzr.Close()
+
+	return extractTarReader(tar.NewReader(gzr), destDir)
+}
+
+func extractTar(tarPath, destDir string) (int, error) {
+	f, err := os.Open(tarPath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	return extractTarReader(tar.NewReader(f), destDir)
+}
+
+func extractTarReader(tr *tar.Reader, destDir string) (int, error) {
+	count := 0
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return count, err
+		}
+
+		cleanName := filepath.Clean("/" + header.Name)
+		target := filepath.Join(destDir, cleanName)
+		rel, err := filepath.Rel(destDir, target)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue // ZipSlip protection
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			_ = os.MkdirAll(target, 0755)
+		case tar.TypeReg, tar.TypeRegA:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return count, err
+			}
+			mode := header.FileInfo().Mode()
+			if mode == 0 {
+				mode = 0644
+			}
+			outFile, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+			if err != nil {
+				return count, err
+			}
+			_, copyErr := io.Copy(outFile, tr)
+			outFile.Close()
+			if copyErr != nil {
+				return count, copyErr
+			}
+			count++
+		}
+	}
+	return count, nil
 }
 
 

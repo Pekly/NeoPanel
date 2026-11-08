@@ -34,7 +34,11 @@ function ic(name, size = 18) {
     key: `<path d="M21 2l-2 2m-1.5 1.5L16 7l-2-2m-2 2l-2-2-4 4a5.5 5.5 0 1 0 7.78 7.78l4.22-4.22V11h3v-3h2V5h-2.5z"/><circle cx="7.5" cy="16.5" r="1.5"/>`,
     lock: `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`,
     code: `<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>`,
-    eye: `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`
+    eye: `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`,
+    alert: `<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
+    info: `<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>`,
+    check: `<polyline points="20 6 9 17 4 12"/>`,
+    archive: `<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>`
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic" aria-hidden="true">${p[name] || p.terminal}</svg>`;
 }
@@ -164,6 +168,203 @@ function toast(msg, type = 'info') {
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.remove('s'), 2600);
 }
+
+// --- Custom Modal Dialog System (Replacing browser default alert, confirm, prompt) ---
+let _uiModalResolver = null;
+
+function closeUiModal(value) {
+  const container = $('#modal-container');
+  if (container) container.innerHTML = '';
+  if (_uiModalResolver) {
+    const resolve = _uiModalResolver;
+    _uiModalResolver = null;
+    resolve(value);
+  }
+}
+
+function uiAlert(opts, titleFallback) {
+  return new Promise(resolve => {
+    let title = 'Notice';
+    let message = '';
+    let confirmText = 'OK';
+    let iconName = 'info';
+
+    if (typeof opts === 'string') {
+      message = opts;
+      if (titleFallback) title = titleFallback;
+    } else if (opts && typeof opts === 'object') {
+      title = opts.title || title;
+      message = opts.message || '';
+      confirmText = opts.confirmText || confirmText;
+      iconName = opts.icon || (opts.type === 'error' ? 'alert' : 'info');
+    }
+
+    if (_uiModalResolver) {
+      _uiModalResolver(null);
+    }
+    _uiModalResolver = () => resolve(true);
+
+    const container = $('#modal-container') || document.body;
+    container.innerHTML = `
+      <div class="pal" onclick="if(event.target===this) closeUiModal(true)">
+        <div class="pbox ui-modal-box">
+          <div class="row sb" style="margin-bottom: 14px; align-items: center;">
+            <h3 style="font-size: 17px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; color: var(--tx);">
+              ${ic(iconName, 18)} <span>${esc(title)}</span>
+            </h3>
+            <button class="btn sm" onclick="closeUiModal(true)" aria-label="Close" style="padding: 4px 8px; font-size: 15px; opacity: 0.8;">&times;</button>
+          </div>
+          <div class="ui-modal-body">
+            ${message}
+          </div>
+          <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" id="ui-modal-confirm-btn" class="btn pr" onclick="closeUiModal(true)">
+              ${esc(confirmText)}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    setTimeout(() => $('#ui-modal-confirm-btn')?.focus(), 40);
+  });
+}
+
+function uiConfirm(opts, titleFallback) {
+  return new Promise(resolve => {
+    let title = 'Confirm Action';
+    let message = '';
+    let confirmText = 'Confirm';
+    let cancelText = 'Cancel';
+    let isDanger = false;
+    let iconName = 'alert';
+
+    if (typeof opts === 'string') {
+      message = opts;
+      if (titleFallback) title = titleFallback;
+      if (opts.toLowerCase().includes('delete') || opts.toLowerCase().includes('remove')) {
+        isDanger = true;
+      }
+    } else if (opts && typeof opts === 'object') {
+      title = opts.title || title;
+      message = opts.message || '';
+      confirmText = opts.confirmText || confirmText;
+      cancelText = opts.cancelText || cancelText;
+      isDanger = Boolean(opts.isDanger);
+      iconName = opts.icon || (isDanger ? 'trash' : 'alert');
+    }
+
+    if (_uiModalResolver) {
+      _uiModalResolver(false);
+    }
+    _uiModalResolver = (val) => resolve(Boolean(val));
+
+    const titleColor = isDanger ? '#ef4444' : 'var(--tx)';
+    const confirmBtnClass = isDanger ? 'btn dg' : 'btn pr';
+    const container = $('#modal-container') || document.body;
+
+    container.innerHTML = `
+      <div class="pal" onclick="if(event.target===this) closeUiModal(false)">
+        <div class="pbox ui-modal-box">
+          <div class="row sb" style="margin-bottom: 14px; align-items: center;">
+            <h3 style="font-size: 17px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; color: ${titleColor};">
+              ${ic(iconName, 18)} <span>${esc(title)}</span>
+            </h3>
+            <button class="btn sm" onclick="closeUiModal(false)" aria-label="Close" style="padding: 4px 8px; font-size: 15px; opacity: 0.8;">&times;</button>
+          </div>
+          <div class="ui-modal-body">
+            ${message}
+          </div>
+          <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn" onclick="closeUiModal(false)">${esc(cancelText)}</button>
+            <button type="button" id="ui-modal-confirm-btn" class="${confirmBtnClass}" onclick="closeUiModal(true)">
+              ${esc(confirmText)}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    setTimeout(() => $('#ui-modal-confirm-btn')?.focus(), 40);
+  });
+}
+
+function uiPrompt(opts, defaultValFallback, titleFallback) {
+  return new Promise(resolve => {
+    let title = 'Input Required';
+    let message = '';
+    let defaultValue = '';
+    let placeholder = '';
+    let confirmText = 'Submit';
+    let cancelText = 'Cancel';
+    let inputType = 'text';
+
+    if (typeof opts === 'string') {
+      message = opts;
+      if (defaultValFallback != null) defaultValue = defaultValFallback;
+      if (titleFallback) title = titleFallback;
+    } else if (opts && typeof opts === 'object') {
+      title = opts.title || title;
+      message = opts.message || '';
+      defaultValue = opts.defaultValue != null ? String(opts.defaultValue) : '';
+      placeholder = opts.placeholder || '';
+      confirmText = opts.confirmText || confirmText;
+      cancelText = opts.cancelText || cancelText;
+      inputType = opts.inputType || 'text';
+    }
+
+    if (_uiModalResolver) {
+      _uiModalResolver(null);
+    }
+    _uiModalResolver = (val) => resolve(val != null ? String(val) : null);
+
+    const container = $('#modal-container') || document.body;
+    container.innerHTML = `
+      <div class="pal" onclick="if(event.target===this) closeUiModal(null)">
+        <div class="pbox ui-modal-box">
+          <div class="row sb" style="margin-bottom: 14px; align-items: center;">
+            <h3 style="font-size: 17px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; color: var(--tx);">
+              ${ic('edit', 18)} <span>${esc(title)}</span>
+            </h3>
+            <button class="btn sm" onclick="closeUiModal(null)" aria-label="Close" style="padding: 4px 8px; font-size: 15px; opacity: 0.8;">&times;</button>
+          </div>
+          ${message ? `<div class="ui-modal-body" style="margin-bottom: 14px;">${message}</div>` : ''}
+          <form id="ui-modal-prompt-form" onsubmit="event.preventDefault(); submitUiPrompt();" style="margin: 0;">
+            <input type="${esc(inputType)}" id="ui-modal-input" value="${esc(defaultValue)}" placeholder="${esc(placeholder)}"
+              autocomplete="off" spellcheck="false"
+              class="ui-modal-input">
+            <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 18px;">
+              <button type="button" class="btn" onclick="closeUiModal(null)">${esc(cancelText)}</button>
+              <button type="submit" id="ui-modal-submit-btn" class="btn pr">${esc(confirmText)}</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+
+    setTimeout(() => {
+      const inp = $('#ui-modal-input');
+      if (inp) {
+        inp.focus();
+        inp.select();
+      }
+    }, 40);
+  });
+}
+
+function submitUiPrompt() {
+  const inp = $('#ui-modal-input');
+  const val = inp ? inp.value : '';
+  closeUiModal(val);
+}
+
+// Override native window.alert to always use modern custom modal
+window.uiAlert = uiAlert;
+window.uiConfirm = uiConfirm;
+window.uiPrompt = uiPrompt;
+window.closeUiModal = closeUiModal;
+window.submitUiPrompt = submitUiPrompt;
+window.alert = (msg) => { uiAlert(msg); };
 
 const clock = () => new Date().toTimeString().slice(0, 8);
 
@@ -758,9 +959,9 @@ const V = {
       </div>
     </div>
 
-    <div style="display: grid; grid-template-columns: 1fr 310px; gap: 20px; align-items: start;">
+    <div class="dash-grid">
       <!-- Left Column: Server Cards Grid -->
-      <div id="srv-card-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px;">
+      <div id="srv-card-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
         ${S.servers.map((s, i) => {
           const isRun = (s.stats?.status || s.status) === 'running' || (s.stats?.status || s.status) === 'online' || (i === S.cs && S.status === 'online');
           const maxRam = getServerMaxRamMB(s);
@@ -1079,6 +1280,7 @@ const V = {
                   <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
                     ${!isDir ? `<button onclick="openFile('${esc(item.name)}'); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
                     ${!isDir ? `<button onclick="downloadFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
+                    ${isArchiveFile(item.name) ? `<button onclick="unzipFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('archive', 14)} Extract</button>` : ''}
                     <button onclick="promptRenameFile('${esc(itemPath)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
                     <button onclick="copyFilePath('${esc(itemPath)}'); closeAllCtx();">📋 Copy Path</button>
                     <button class="dg" onclick="deleteFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
@@ -1095,8 +1297,11 @@ const V = {
       ${S.selectedFiles.size > 0 ? `
         <div class="bulk-action-bar">
           <span style="font-weight: 600; font-size: 13.5px; color: #fff;">${S.selectedFiles.size} item${S.selectedFiles.size > 1 ? 's' : ''} selected</span>
-          <button class="btn sm dg" onclick="deleteSelectedFiles()">${ic('trash', 14)} Delete Selected</button>
-          <button class="btn sm" onclick="deselectAllFiles()">Deselect</button>
+          <div class="row" style="gap: 8px;">
+            ${Array.from(S.selectedFiles).some(p => isArchiveFile(p)) ? `<button class="btn sm" onclick="unzipSelectedArchive()">${ic('archive', 14)} Extract</button>` : ''}
+            <button class="btn sm dg" onclick="deleteSelectedFiles()">${ic('trash', 14)} Delete Selected</button>
+            <button class="btn sm" onclick="deselectAllFiles()">Deselect</button>
+          </div>
         </div>
       ` : ''}
     </div>`;
@@ -2622,9 +2827,58 @@ function downloadFileItem(path) {
   window.open(`/api/servers/${srv.id}/files/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(S.token)}`, '_blank');
 }
 
+function isArchiveFile(filename) {
+  const f = (filename || '').toLowerCase();
+  return f.endsWith('.zip') || f.endsWith('.tar.gz') || f.endsWith('.tgz') || f.endsWith('.tar') || f.endsWith('.jar');
+}
+
+async function unzipFileItem(path) {
+  const srv = curServer();
+  if (!srv) return;
+  const fileName = path.split('/').pop();
+
+  const dest = await uiPrompt({
+    title: 'Extract Archive File',
+    message: `Extract <b>${esc(fileName)}</b> to directory:`,
+    defaultValue: S.currentDir || '',
+    placeholder: 'Destination folder (leave blank for current folder)',
+    confirmText: 'Extract Archive'
+  });
+  if (dest === null) return;
+
+  toast(`Extracting ${fileName}...`);
+  try {
+    const res = await api(`/api/servers/${srv.id}/files/unzip`, {
+      method: 'POST',
+      body: JSON.stringify({ path: path, destination: dest.trim() })
+    });
+    toast(res.message || `Extracted ${fileName} successfully!`, 'ok');
+    loadFileList(S.currentDir);
+  } catch (err) {
+    uiAlert({
+      title: 'Extraction Error',
+      message: err.message || 'Failed to extract archive.',
+      type: 'error'
+    });
+  }
+}
+
+async function unzipSelectedArchive() {
+  const archives = Array.from(S.selectedFiles).filter(p => isArchiveFile(p));
+  if (archives.length > 0) {
+    await unzipFileItem(archives[0]);
+  }
+}
+
 async function promptRenameFile(oldPath) {
   const baseName = oldPath.split('/').pop();
-  const newName = prompt('Enter new filename or path:', baseName);
+  const newName = await uiPrompt({
+    title: 'Rename File or Folder',
+    message: `Enter new name for <b>${esc(baseName)}</b>:`,
+    defaultValue: baseName,
+    placeholder: 'Filename or path',
+    confirmText: 'Rename'
+  });
   if (!newName || newName === baseName) return;
   const parent = oldPath.split('/').slice(0, -1).join('/');
   const newPath = parent ? `${parent}/${newName}` : newName;
@@ -2635,24 +2889,38 @@ async function promptRenameFile(oldPath) {
       method: 'POST',
       body: JSON.stringify({ old_path: oldPath, new_path: newPath })
     });
-    toast(`Renamed to ${newName}`);
+    toast(`Renamed to ${newName}`, 'ok');
     loadFileList(S.currentDir);
   } catch (e) {}
 }
 
 async function deleteFileItem(path) {
-  if (!confirm(`Are you sure you want to delete ${path}?`)) return;
+  const baseName = path.split('/').pop();
+  const ok = await uiConfirm({
+    title: 'Delete Item',
+    message: `Are you sure you want to permanently delete <b>${esc(baseName)}</b>? This action cannot be undone.`,
+    confirmText: 'Delete',
+    cancelText: 'Cancel',
+    isDanger: true
+  });
+  if (!ok) return;
+
   const srv = curServer();
   if (!srv) return;
   try {
     await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-    toast(`Deleted ${path}`);
+    toast(`Deleted ${baseName}`, 'ok');
     loadFileList(S.currentDir);
   } catch (e) {}
 }
 
 async function promptNewFile() {
-  const name = prompt('Enter new file name:');
+  const name = await uiPrompt({
+    title: 'Create New File',
+    message: `Enter file name in <code>/${esc(S.currentDir || '')}</code>:`,
+    placeholder: 'e.g. server.properties, rules.txt',
+    confirmText: 'Create File'
+  });
   if (!name) return;
   const srv = curServer();
   if (!srv) return;
@@ -2662,14 +2930,19 @@ async function promptNewFile() {
       method: 'POST',
       body: JSON.stringify({ path: target, is_dir: false })
     });
-    toast(`Created file ${name}`);
+    toast(`Created file ${name}`, 'ok');
     loadFileList(S.currentDir);
     openFile(name);
   } catch (e) {}
 }
 
 async function promptNewFolder() {
-  const name = prompt('Enter new folder name:');
+  const name = await uiPrompt({
+    title: 'Create New Folder',
+    message: `Enter directory name in <code>/${esc(S.currentDir || '')}</code>:`,
+    placeholder: 'e.g. plugins, config, backups',
+    confirmText: 'Create Folder'
+  });
   if (!name) return;
   const srv = curServer();
   if (!srv) return;
@@ -2679,7 +2952,7 @@ async function promptNewFolder() {
       method: 'POST',
       body: JSON.stringify({ path: target, is_dir: true })
     });
-    toast(`Created folder ${name}`);
+    toast(`Created folder ${name}`, 'ok');
     loadFileList(S.currentDir);
   } catch (e) {}
 }
@@ -2713,7 +2986,14 @@ function deselectAllFiles() {
 async function deleteSelectedFiles() {
   const count = S.selectedFiles.size;
   if (count === 0) return;
-  if (!confirm(`Are you sure you want to delete ${count} selected item${count > 1 ? 's' : ''}?`)) return;
+  const ok = await uiConfirm({
+    title: 'Delete Selected Items',
+    message: `Are you sure you want to permanently delete <b>${count}</b> selected item${count > 1 ? 's' : ''}? This action cannot be undone.`,
+    confirmText: `Delete ${count} Item${count > 1 ? 's' : ''}`,
+    cancelText: 'Cancel',
+    isDanger: true
+  });
+  if (!ok) return;
 
   const srv = curServer();
   if (!srv) return;
@@ -2735,17 +3015,29 @@ function copyFilePath(path) {
     navigator.clipboard.writeText(path).then(() => {
       toast(`Copied "${path}" to clipboard!`, 'ok');
     }).catch(() => {
-      prompt('Copy path:', path);
+      uiPrompt({
+        title: 'Copy File Path',
+        message: 'Copy the path below:',
+        defaultValue: path,
+        confirmText: 'Done'
+      });
     });
   } else {
-    prompt('Copy path:', path);
+    uiPrompt({
+      title: 'Copy File Path',
+      message: 'Copy the path below:',
+      defaultValue: path,
+      confirmText: 'Done'
+    });
   }
 }
 
 // --- Floating Context Menu ---
 function handleFileContextMenu(e, idx) {
-  e.preventDefault();
-  e.stopPropagation();
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
   const item = S.fileList[idx];
   if (!item) return;
 
@@ -2755,6 +3047,7 @@ function handleFileContextMenu(e, idx) {
   const isDir = item.is_dir;
   const path = item.path || item.name;
   const name = item.name;
+  const isArchive = isArchiveFile(name);
 
   menu.innerHTML = `
     ${!isDir ? `
@@ -2764,6 +3057,11 @@ function handleFileContextMenu(e, idx) {
       <button onclick="downloadFileItem('${esc(path)}'); closeFloatingCtx();">
         ${ic('download', 14)} Download
       </button>
+      ${isArchive ? `
+        <button onclick="unzipFileItem('${esc(path)}'); closeFloatingCtx();">
+          ${ic('archive', 14)} Extract / Unzip
+        </button>
+      ` : ''}
     ` : `
       <button onclick="browseFolder('${esc(name)}'); closeFloatingCtx();">
         📁 Open Folder
@@ -2781,8 +3079,11 @@ function handleFileContextMenu(e, idx) {
     </button>
   `;
 
-  const x = Math.min(e.clientX, window.innerWidth - 190);
-  const y = Math.min(e.clientY, window.innerHeight - 200);
+  const clientX = e?.clientX ?? (e?.touches?.[0]?.clientX ?? 100);
+  const clientY = e?.clientY ?? (e?.touches?.[0]?.clientY ?? 150);
+  const menuWidth = 185;
+  const x = Math.max(10, Math.min(clientX, window.innerWidth - menuWidth - 10));
+  const y = Math.max(10, Math.min(clientY, window.innerHeight - 250));
 
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -3599,6 +3900,11 @@ function openCreateServerModal() {
 function closeModal() {
   const container = $('#modal-container');
   if (container) container.innerHTML = '';
+  if (_uiModalResolver) {
+    const resolve = _uiModalResolver;
+    _uiModalResolver = null;
+    resolve(null);
+  }
 }
 
 async function handleCreateServer(e) {
@@ -3789,9 +4095,14 @@ async function deletePort(portId, portNum) {
   const srv = curServer();
   if (!srv) return;
 
-  if (!confirm(`Are you sure you want to delete port allocation ${portNum}?`)) {
-    return;
-  }
+  const ok = await uiConfirm({
+    title: 'Delete Port Allocation',
+    message: `Are you sure you want to delete port allocation <b>${esc(portNum)}</b>? Any external connections using this port will stop working.`,
+    confirmText: 'Delete Port',
+    cancelText: 'Cancel',
+    isDanger: true
+  });
+  if (!ok) return;
 
   try {
     await api(`/api/servers/${srv.id}/ports/${portId}`, { method: 'DELETE' });
@@ -4093,7 +4404,14 @@ async function submitAddUser(e) {
 }
 
 async function deleteAdminUser(id, username) {
-  if (!confirm(`Are you sure you want to delete user "${username}"?`)) return;
+  const ok = await uiConfirm({
+    title: 'Delete User Account',
+    message: `Are you sure you want to permanently delete user account <b>${esc(username)}</b>? This action cannot be reversed.`,
+    confirmText: 'Delete User',
+    cancelText: 'Cancel',
+    isDanger: true
+  });
+  if (!ok) return;
 
   try {
     await api(`/api/admin/users/${id}`, { method: 'DELETE' });
@@ -4387,6 +4705,9 @@ window.triggerAdminGC = triggerAdminGC;
 window.saveAdminDaemonSettings = saveAdminDaemonSettings;
 window.toggleCustomJavaInput = toggleCustomJavaInput;
 window.toggleCustomPropJava = toggleCustomPropJava;
+window.isArchiveFile = isArchiveFile;
+window.unzipFileItem = unzipFileItem;
+window.unzipSelectedArchive = unzipSelectedArchive;
 
 // --- Initialize Application ---
 document.addEventListener('DOMContentLoaded', () => {

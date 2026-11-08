@@ -108,6 +108,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload", r.requireAuth(r.files.Upload))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/download", r.requireAuth(r.files.Download))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/rename", r.requireAuth(r.files.Rename))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/unzip", r.requireAuth(r.files.Unzip))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/extract", r.requireAuth(r.files.Unzip))
 
 	// Modrinth Plugins & Addons routes
 	r.mux.HandleFunc("GET /api/plugins/search", r.requireAuth(r.plugins.Search))
