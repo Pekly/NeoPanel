@@ -140,6 +140,14 @@ func (p *ProcessInstance) Start() error {
 		args = append(args, fmt.Sprintf("-Xmx%dM", p.server.MemoryMaxMB))
 	}
 
+	// Force full ANSI terminal color output even when piped in daemons/subprocesses
+	args = append(args,
+		"-Dterminal.ansi=true",
+		"-Dterminal.jline=false",
+		"-Dnet.minecrell.terminalconsole.ansi=true",
+		"-Dlog4j.skipJansi=false",
+	)
+
 	// Add custom JVM flags if provided
 	if strings.TrimSpace(p.server.JavaArgs) != "" {
 		customArgs := strings.Fields(p.server.JavaArgs)

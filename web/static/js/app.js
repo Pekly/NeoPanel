@@ -481,7 +481,108 @@ function curServer() {
   return S.servers[S.cs] || S.servers[0];
 }
 
-// --- Advanced Minecraft & Terminal Log Parser ---
+// --- Advanced Minecraft & Terminal Log Parser & Palette System ---
+const _pluginColorPalette = [
+  { fg: '#38bdf8', bg: 'rgba(56, 189, 248, 0.12)', border: 'rgba(56, 189, 248, 0.28)' }, // Sky
+  { fg: '#34d399', bg: 'rgba(52, 211, 153, 0.12)', border: 'rgba(52, 211, 153, 0.28)' }, // Emerald
+  { fg: '#a78bfa', bg: 'rgba(167, 139, 250, 0.12)', border: 'rgba(167, 139, 250, 0.28)' }, // Purple
+  { fg: '#f472b6', bg: 'rgba(244, 114, 182, 0.12)', border: 'rgba(244, 114, 182, 0.28)' }, // Pink
+  { fg: '#fbbf24', bg: 'rgba(251, 191, 36, 0.12)', border: 'rgba(251, 191, 36, 0.28)' },   // Amber
+  { fg: '#2dd4bf', bg: 'rgba(45, 212, 191, 0.12)', border: 'rgba(45, 212, 191, 0.28)' },  // Teal
+  { fg: '#818cf8', bg: 'rgba(129, 140, 248, 0.12)', border: 'rgba(129, 140, 248, 0.28)' }, // Indigo
+  { fg: '#fb923c', bg: 'rgba(251, 146, 60, 0.12)', border: 'rgba(251, 146, 60, 0.28)' },   // Orange
+  { fg: '#e879f9', bg: 'rgba(232, 121, 249, 0.12)', border: 'rgba(232, 121, 249, 0.28)' }  // Fuchsia
+];
+
+function getPluginColor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return _pluginColorPalette[Math.abs(hash) % _pluginColorPalette.length];
+}
+
+function parseAnsi(text) {
+  const ansi16 = {
+    30: '#4b5563', 31: '#ef4444', 32: '#10b981', 33: '#f59e0b',
+    34: '#3b82f6', 35: '#ec4899', 36: '#06b6d4', 37: '#f3f4f6',
+    90: '#6b7280', 91: '#f87171', 92: '#34d399', 93: '#fbbf24',
+    94: '#60a5fa', 95: '#f472b6', 96: '#22d3ee', 97: '#ffffff'
+  };
+
+  const ansiBg16 = {
+    40: '#1f2937', 41: '#7f1d1d', 42: '#064e3b', 43: '#78350f',
+    44: '#1e3a8a', 45: '#831843', 46: '#164e63', 47: '#374151',
+    100: '#374151', 101: '#991b1b', 102: '#065f46', 103: '#92400e',
+    104: '#1e40af', 105: '#9d174d', 106: '#155e75', 107: '#4b5563'
+  };
+
+  function get256Color(n) {
+    if (n < 16) return ansi16[30 + (n % 8)] || '#ffffff';
+    if (n >= 16 && n <= 231) {
+      n -= 16;
+      const r = Math.floor(n / 36);
+      const g = Math.floor((n % 36) / 6);
+      const b = n % 6;
+      const toVal = (v) => v ? 55 + v * 40 : 0;
+      return `rgb(${toVal(r)}, ${toVal(g)}, ${toVal(b)})`;
+    }
+    if (n >= 232 && n <= 255) {
+      const g = Math.round((n - 232) * 10.9 + 8);
+      return `rgb(${g}, ${g}, ${g})`;
+    }
+    return '#ffffff';
+  }
+
+  return text.replace(/\x1b\[([0-9;]*)m/g, (_, codeStr) => {
+    if (!codeStr || codeStr === '0') return '</span>';
+    const tokens = codeStr.split(';').map(t => parseInt(t, 10) || 0);
+    const styles = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const c = tokens[i];
+      if (c === 0) {
+        styles.length = 0;
+      } else if (c === 1) {
+        styles.push('font-weight:bold');
+      } else if (c === 2) {
+        styles.push('opacity:0.65');
+      } else if (c === 3) {
+        styles.push('font-style:italic');
+      } else if (c === 4) {
+        styles.push('text-decoration:underline');
+      } else if (c === 9) {
+        styles.push('text-decoration:line-through');
+      } else if (c === 38) {
+        if (tokens[i + 1] === 2 && tokens.length > i + 4) {
+          styles.push(`color:rgb(${tokens[i+2]},${tokens[i+3]},${tokens[i+4]})`);
+          i += 4;
+        } else if (tokens[i + 1] === 5 && tokens.length > i + 2) {
+          styles.push(`color:${get256Color(tokens[i+2])}`);
+          i += 2;
+        }
+      } else if (c === 48) {
+        if (tokens[i + 1] === 2 && tokens.length > i + 4) {
+          styles.push(`background-color:rgb(${tokens[i+2]},${tokens[i+3]},${tokens[i+4]})`);
+          i += 4;
+        } else if (tokens[i + 1] === 5 && tokens.length > i + 2) {
+          styles.push(`background-color:${get256Color(tokens[i+2])}`);
+          i += 2;
+        }
+      } else if (ansi16[c]) {
+        styles.push(`color:${ansi16[c]}`);
+      } else if (ansiBg16[c]) {
+        styles.push(`background-color:${ansiBg16[c]}`);
+      }
+    }
+    return styles.length ? `</span><span style="${styles.join(';')}">` : '</span>';
+  });
+}
+
+function formatCommandLine(cmd) {
+  const ts = new Date().toTimeString().split(' ')[0];
+  return `<div class="con-cmd-row"><span class="con-ts">[${ts}]</span><span class="con-cmd-badge">CMD</span><span class="con-cmd-prefix">&gt;</span><span class="con-cmd-text">${esc(cmd)}</span></div>`;
+}
+
 function formatLogLine(raw) {
   if (!raw) return '';
 
@@ -505,7 +606,18 @@ function formatLogLine(raw) {
     }
   }
 
-  // 2. Automatically detect if server is ready
+  // 2. If already formatted HTML command row, preserve directly
+  if (typeof raw === 'string') {
+    if (raw.startsWith('<div class="con-cmd-row"')) {
+      return raw;
+    }
+    if (raw.startsWith('<span class="c">&gt;') || raw.startsWith('&gt; ') || raw.startsWith('> ')) {
+      const cleanCmd = raw.replace(/<[^>]+>/g, '').replace(/^[>&;gt\s]+/, '').trim();
+      return formatCommandLine(cleanCmd);
+    }
+  }
+
+  // 3. Automatically detect if server is ready
   if (raw.includes('Done (') || raw.includes('For help, type "help"') || raw.includes('Server Ping Player Sample Count')) {
     if (S.status !== 'online') {
       S.status = 'online';
@@ -518,51 +630,73 @@ function formatLogLine(raw) {
     updateHeaderBadge();
   }
 
-  // 3. Escape HTML entities
+  // 4. Escape HTML entities
   let text = esc(raw);
 
-  // 4. Minecraft Section Color Codes (§0-§f, §l, §r)
+  // 5. Minecraft Section & Ampersand Color Codes and RGB Hex Colors
   const mcColors = {
     '0': '#000000', '1': '#0000aa', '2': '#00aa00', '3': '#00aaaa',
     '4': '#aa0000', '5': '#aa00aa', '6': '#ffaa00', '7': '#aaaaaa',
     '8': '#555555', '9': '#5555ff', 'a': '#55ff55', 'b': '#55ffff',
     'c': '#ff5555', 'd': '#ff55ff', 'e': '#ffff55', 'f': '#ffffff'
   };
-  text = text.replace(/§([0-9a-f])/gi, (_, c) => `</span><span style="color:${mcColors[c.toLowerCase()] || '#fff'}">`);
-  text = text.replace(/§l/gi, '<b>').replace(/§r/gi, '</b></span>');
 
-  // 5. ANSI Color Escape Sequences (compound codes like \x1b[0;33;1m, \x1b[m, etc.)
-  const ansiMap = {
-    30: '#4b5563', 31: '#ef4444', 32: '#10b981', 33: '#f59e0b',
-    34: '#3b82f6', 35: '#ec4899', 36: '#06b6d4', 37: '#f3f4f6',
-    90: '#6b7280', 91: '#f87171', 92: '#34d399', 93: '#fbbf24',
-    94: '#60a5fa', 95: '#f472b6', 96: '#22d3ee', 97: '#ffffff'
-  };
-  text = text.replace(/\x1b\[([0-9;]*)m/g, (_, codeStr) => {
-    if (!codeStr || codeStr === '0') return '</span>';
-    const codes = codeStr.split(';').map(Number);
-    let styles = [];
-    for (const c of codes) {
-      if (c === 0) styles = [];
-      else if (c === 1) styles.push('font-weight:bold');
-      else if (ansiMap[c]) styles.push(`color:${ansiMap[c]}`);
-    }
-    return styles.length ? `</span><span style="${styles.join(';')}">` : '</span>';
+  // Modern Hex formats: &#RRGGBB, §#RRGGBB, <#RRGGBB>, &x&r&r&g&g&b&b
+  text = text.replace(/(?:§|&amp;|&)#([0-9a-fA-F]{6})/gi, (_, hex) => `</span><span style="color:#${hex}">`);
+  text = text.replace(/&lt;#([0-9a-fA-F]{6})&gt;/gi, (_, hex) => `</span><span style="color:#${hex}">`);
+  text = text.replace(/(?:&amp;x|§x)(?:(?:&amp;|§)([0-9a-fA-F])){6}/gi, (match) => {
+    const chars = match.replace(/&amp;|§|x/gi, '');
+    return chars.length === 6 ? `</span><span style="color:#${chars}">` : '';
   });
 
-  // 6. Highlight Log Levels & Timestamps (authentic to Sift theme)
-  if (text.includes('WARN]:') || text.includes('WARN:') || text.includes('WARNING:')) {
-    text = `<span class="w">${text}</span>`;
-  } else if (text.includes('ERROR]:') || text.includes('ERROR:') || text.includes('Exception:') || text.includes('at java.') || text.includes('at net.minecraft.')) {
-    text = `<span class="e">${text}</span>`;
-  } else if (text.includes('INFO]:')) {
-    text = text.replace(/\[([0-9:]+)\s+INFO\]:/g, '<span class="dim">[$1</span> <span class="c">INFO</span><span class="dim">]:</span>');
-  } else if (text.includes('[NeoPanel]')) {
-    text = text.replace(/\[NeoPanel\]/g, '<span class="c" style="font-weight:600;">[NeoPanel]</span>');
-  }
+  // Standard § and & formatting codes
+  text = text.replace(/(?:§|&amp;)([0-9a-f])/gi, (_, c) => `</span><span style="color:${mcColors[c.toLowerCase()] || '#fff'}">`);
+  text = text.replace(/(?:§|&amp;)l/gi, '<b>').replace(/(?:§|&amp;)r/gi, '</b></span>');
+  text = text.replace(/(?:§|&amp;)o/gi, '<i>').replace(/(?:§|&amp;)n/gi, '<ins>').replace(/(?:§|&amp;)m/gi, '<del>');
 
-  // 7. Highlight advancements & player activity
-  if (text.includes('joined the game') || text.includes('has made the advancement')) {
+  // 6. ANSI Color Escape Sequences (Full 24-bit TrueColor RGB, 256-color, 16-color)
+  text = parseAnsi(text);
+
+  // 7. Highlight Log Levels & Timestamps
+  text = text.replace(/\[([0-9:.]+)\s*(INFO|WARN|WARNING|ERROR|SEVERE|FATAL|DEBUG|TRACE)\]:/g, (_, ts, lvl) => {
+    const upper = lvl.toUpperCase();
+    let lvlClass = 'info';
+    if (upper.includes('WARN')) lvlClass = 'warn';
+    else if (upper.includes('ERR') || upper.includes('SEV') || upper.includes('FATAL')) lvlClass = 'error';
+    return `<span class="con-ts">[${ts}]</span> <span class="con-lvl con-lvl-${lvlClass}">${upper}</span><span class="con-colon">:</span>`;
+  });
+
+  // 8. Highlight Plugin Bracket Badges like [SKSpawn], [SKCore], [Vault], [NeoPanel]
+  text = text.replace(/\[([A-Za-z0-9_-]{2,30})\]/g, (match, pName) => {
+    const reserved = ['INFO', 'WARN', 'WARNING', 'ERROR', 'SEVERE', 'FATAL', 'DEBUG', 'TRACE', 'SERVER', 'CLIENT'];
+    if (reserved.includes(pName.toUpperCase())) return match;
+    if (pName === 'NeoPanel') {
+      return `<span class="con-plug-badge" style="color:#10b981; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); font-weight:700;">[NeoPanel]</span>`;
+    }
+    const c = getPluginColor(pName);
+    return `<span class="con-plug-badge" style="color:${c.fg}; background:${c.bg}; border:1px solid ${c.border}; font-weight:600;">[${pName}]</span>`;
+  });
+
+  // 9. Brand / Server prefixes with chevrons: SMP » or Network » or Server ->
+  text = text.replace(/\b([A-Za-z0-9_-]{2,20})\s*(»|&raquo;|->|›)\s*/g, (_, brand, arrow) => {
+    return `<span class="con-brand-prefix">${brand}</span> <span class="con-brand-arrow">${arrow}</span> `;
+  });
+
+  // 10. Highlight property keys like protection.collision: or Economy hooked:
+  text = text.replace(/(\b[a-zA-Z0-9_.-]{3,30}:)\s+/g, (match, prop) => {
+    if (prop.startsWith('http:') || prop.startsWith('https:') || prop === 'INFO:' || prop === 'WARN:' || prop === 'ERROR:') {
+      return match;
+    }
+    return `<span class="con-prop-key">${prop}</span> `;
+  });
+
+  // 11. Parenthetical notes: (through TAB). or (/help)
+  text = text.replace(/\(([a-zA-Z0-9_\-/\s.]+)\)/g, '<span class="dim" style="color:#94a3b8;">($1)</span>');
+
+  // 12. Full line error / warning fallbacks if unhandled
+  if (text.includes('Exception:') || text.includes('at java.') || text.includes('at net.minecraft.')) {
+    text = `<span class="e">${text}</span>`;
+  } else if (text.includes('joined the game') || text.includes('has made the advancement')) {
     text = `<span class="c">${text}</span>`;
   } else if (text.includes('left the game')) {
     text = `<span class="w">${text}</span>`;
@@ -793,7 +927,7 @@ async function refreshServerStatus() {
 
 async function runCmd(cmd) {
   if (!cmd) return;
-  addLog(`<span class="c">&gt; ${esc(cmd)}</span>`);
+  addLog(formatCommandLine(cmd));
   const srv = curServer();
   if (!srv) return;
 
