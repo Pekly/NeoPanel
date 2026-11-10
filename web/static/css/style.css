@@ -1871,6 +1871,78 @@ input:focus, select:focus, textarea:focus {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.fi-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: #94a3b8;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.fi-badge.up {
+  background: rgba(56, 122, 255, 0.14);
+  border-color: rgba(56, 122, 255, 0.28);
+  color: #60a5fa;
+}
+
+.fi-badge.dir {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.28);
+  color: #fbbf24;
+}
+
+.fi-badge.dir svg {
+  fill: rgba(251, 191, 36, 0.18);
+}
+
+.fi-badge.jar {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: #a78bfa;
+}
+
+.fi-badge.arc {
+  background: rgba(249, 115, 22, 0.14);
+  border-color: rgba(249, 115, 22, 0.28);
+  color: #fb923c;
+}
+
+.fi-badge.cfg {
+  background: rgba(14, 165, 233, 0.14);
+  border-color: rgba(14, 165, 233, 0.28);
+  color: #38bdf8;
+}
+
+.fi-badge.scr {
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.28);
+  color: #34d399;
+}
+
+.fi-badge.doc {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.28);
+  color: #818cf8;
+}
+
+.fi-badge.img {
+  background: rgba(236, 72, 153, 0.14);
+  border-color: rgba(236, 72, 153, 0.28);
+  color: #f472b6;
+}
+
+.fi-badge.db {
+  background: rgba(168, 85, 247, 0.14);
+  border-color: rgba(168, 85, 247, 0.28);
+  color: #c084fc;
+}
+
 .file-ctx-menu {
   position: absolute;
   right: 18px;

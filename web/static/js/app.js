@@ -38,9 +38,45 @@ function ic(name, size = 18) {
     alert: `<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
     info: `<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>`,
     check: `<polyline points="20 6 9 17 4 12"/>`,
-    archive: `<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>`
+    archive: `<polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>`,
+    copy: `<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`,
+    folderUp: `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 10 12 16"/><polyline points="9 13 12 10 15 13"/>`,
+    package: `<line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>`,
+    fileText: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>`,
+    image: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>`
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic" aria-hidden="true">${p[name] || p.terminal}</svg>`;
+}
+
+function fileListIconHtml(item) {
+  if (!item) return `<span class="fi-badge">${ic('file', 15)}</span>`;
+  if (item.is_dir) {
+    return `<span class="fi-badge dir" title="Folder">${ic('folder', 15)}</span>`;
+  }
+  const name = String(item.name || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() : '';
+  if (ext === 'jar') {
+    return `<span class="fi-badge jar" title="Java Archive (.jar)">${ic('package', 15)}</span>`;
+  }
+  if (['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz'].includes(ext)) {
+    return `<span class="fi-badge arc" title="Compressed Archive">${ic('archive', 15)}</span>`;
+  }
+  if (['yml', 'yaml', 'json', 'toml', 'properties', 'conf', 'cfg', 'ini', 'xml'].includes(ext)) {
+    return `<span class="fi-badge cfg" title="Configuration File">${ic('code', 15)}</span>`;
+  }
+  if (['sh', 'bat', 'cmd', 'ps1', 'js', 'ts', 'py', 'go'].includes(ext)) {
+    return `<span class="fi-badge scr" title="Script File">${ic('terminal', 15)}</span>`;
+  }
+  if (['log', 'txt', 'md'].includes(ext)) {
+    return `<span class="fi-badge doc" title="Text / Log File">${ic('fileText', 15)}</span>`;
+  }
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(ext)) {
+    return `<span class="fi-badge img" title="Image File">${ic('image', 15)}</span>`;
+  }
+  if (['db', 'sqlite', 'sqlite3', 'sql'].includes(ext)) {
+    return `<span class="fi-badge db" title="Database File">${ic('database', 15)}</span>`;
+  }
+  return `<span class="fi-badge" title="File">${ic('file', 15)}</span>`;
 }
 
 // --- Selectors & Shortcuts ---
@@ -1709,12 +1745,12 @@ const V = {
     <div style="margin-top: 16px;">
       <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
         <!-- Breadcrumb Navigation -->
-        <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500;">
-          <span onclick="browseFolder('')" style="color: var(--tx-muted); cursor: pointer;">/ home / container /</span>
+        <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+          <span onclick="browseFolder('')" style="color: var(--tx-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">${ic('folder', 15)} / home / container /</span>
           ${pathParts.map((part, idx) => {
             const sub = pathParts.slice(0, idx + 1).join('/');
             const isLast = idx === pathParts.length - 1;
-            return `<span onclick="browseFolder('${sub}')" style="cursor: pointer; color: ${isLast ? '#fff' : 'var(--tx-muted)'}; margin-left: 4px;">${esc(part)} /</span>`;
+            return `<span onclick="browseFolder('${sub}')" style="cursor: pointer; color: ${isLast ? '#fff' : 'var(--tx-muted)'};">${esc(part)} /</span>`;
           }).join('')}
         </div>
 
@@ -1724,9 +1760,9 @@ const V = {
             <input type="text" id="fi-filter" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 200px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
             <kbd style="position: absolute; right: 10px; top: 9px; font-size: 11px; color: var(--tx-muted); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;">/</kbd>
           </div>
-          <button class="btn" onclick="promptNewFolder()" style="height: 36px;">+ New folder</button>
+          <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
           <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('download', 14)} Upload</button>
-          <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">+ New file</button>
+          <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
         </div>
       </div>
 
@@ -1738,7 +1774,7 @@ const V = {
               <th style="width: 36px; padding: 12px 0 12px 18px; text-align: left;">
                 <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" style="cursor: pointer; width: 15px; height: 15px; accent-color: var(--ac);" ${allSelected ? 'checked' : ''}>
               </th>
-              <th style="width: 32px; padding: 12px 4px;"></th>
+              <th style="width: 40px; padding: 12px 4px;"></th>
               <th style="padding: 12px 10px; text-align: left;">Name</th>
               <th style="width: 140px; padding: 12px 10px; text-align: left;">Size</th>
               <th style="width: 180px; padding: 12px 10px; text-align: left;">Modified</th>
@@ -1749,13 +1785,13 @@ const V = {
             ${isSubdir ? `
               <tr onclick="browseFolder('..')">
                 <td style="padding-left: 18px;"></td>
-                <td style="color: var(--ac); font-size: 16px;">📁</td>
+                <td style="width: 40px; padding: 8px 4px;"><span class="fi-badge up" title="Parent folder">${ic('folderUp', 15)}</span></td>
                 <td colspan="4" style="font-weight: 600; color: #fff;">.. (Parent folder)</td>
               </tr>
             ` : ''}
             ${S.fileList.map((item, idx) => {
               const isDir = item.is_dir;
-              const icon = isDir ? '📁' : '📄';
+              const icon = fileListIconHtml(item);
               const sizeStr = formatFileSize(item.size, isDir);
               const dateStr = formatFileDate(item.modified);
               const itemPath = item.path || item.name;
@@ -1770,7 +1806,7 @@ const V = {
                          onchange="toggleFileSelect('${esc(itemPath)}', this.checked)" 
                          style="cursor: pointer; width: 15px; height: 15px; accent-color: var(--ac);">
                 </td>
-                <td style="width: 32px; padding: 0 4px; font-size: 16px;">${icon}</td>
+                <td style="width: 40px; padding: 8px 4px;">${icon}</td>
                 <td style="font-weight: 500; color: #fff;">${esc(item.name)}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 140px;">${sizeStr}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 180px;">${dateStr}</td>
@@ -1781,7 +1817,7 @@ const V = {
                     ${!isDir ? `<button onclick="downloadFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
                     ${isArchiveFile(item.name) ? `<button onclick="unzipFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('archive', 14)} Extract</button>` : ''}
                     <button onclick="promptRenameFile('${esc(itemPath)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
-                    <button onclick="copyFilePath('${esc(itemPath)}'); closeAllCtx();">📋 Copy Path</button>
+                    <button onclick="copyFilePath('${esc(itemPath)}'); closeAllCtx();">${ic('copy', 14)} Copy Path</button>
                     <button class="dg" onclick="deleteFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
                   </div>
                 </td>
@@ -3747,14 +3783,14 @@ function handleFileContextMenu(e, idx) {
       ` : ''}
     ` : `
       <button onclick="browseFolder('${esc(name)}'); closeFloatingCtx();">
-        📁 Open Folder
+        ${ic('folder', 14)} Open Folder
       </button>
     `}
     <button onclick="promptRenameFile('${esc(path)}'); closeFloatingCtx();">
       ${ic('settings', 14)} Rename
     </button>
     <button onclick="copyFilePath('${esc(path)}'); closeFloatingCtx();">
-      📋 Copy Path
+      ${ic('copy', 14)} Copy Path
     </button>
     <div class="floating-ctx-divider"></div>
     <button class="dg" onclick="deleteFileItem('${esc(path)}'); closeFloatingCtx();">
