@@ -27,6 +27,13 @@ BINARY_NAME="neopanel"
 LOG_FILE="/tmp/neopanel-install.log"
 BUILD_DIR="/tmp/neopanel-build"
 
+# Cloudflare Turnstile defaults
+DEFAULT_TURNSTILE_SITE_KEY="0x4AAAAAAF7CgzdQmoC3Ho3H"
+DEFAULT_TURNSTILE_SECRET_KEY="0x4AAAAAAF7Cg6ZKTqdgSA2s8Sg2oZ2HApU"
+TURNSTILE_ENABLED="false"
+TURNSTILE_SITE_KEY=""
+TURNSTILE_SECRET_KEY=""
+
 # Prevent apt interactive prompts from hanging in background
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -252,9 +259,90 @@ EOF
   chmod +x "$INSTALL_DIR/neopanel-installer"
 }
 
+prompt_turnstile_setup() {
+  echo -e "\n${CYAN}${BOLD}Cloudflare Turnstile Bot Protection${NC}"
+  echo -e "${YELLOW}Adds Cloudflare Turnstile challenge verification to your NeoPanel login and setup pages.${NC}"
+  prompt_user "Would you like to enable Cloudflare Turnstile? (y/n) [default: y]: " ts_choice
+  ts_choice=${ts_choice:-y}
+
+  if [[ "$ts_choice" =~ ^[Yy]$ ]]; then
+    TURNSTILE_ENABLED="true"
+    prompt_user "Enter Turnstile Site Key [default: ${DEFAULT_TURNSTILE_SITE_KEY}]: " ts_site
+    TURNSTILE_SITE_KEY=${ts_site:-$DEFAULT_TURNSTILE_SITE_KEY}
+
+    prompt_user "Enter Turnstile Secret Key [default: ${DEFAULT_TURNSTILE_SECRET_KEY}]: " ts_secret
+    TURNSTILE_SECRET_KEY=${ts_secret:-$DEFAULT_TURNSTILE_SECRET_KEY}
+    log_success "Cloudflare Turnstile enabled (Site Key: ${TURNSTILE_SITE_KEY})."
+  else
+    TURNSTILE_ENABLED="false"
+    TURNSTILE_SITE_KEY=""
+    TURNSTILE_SECRET_KEY=""
+    log_info "Cloudflare Turnstile skipped (you can enable it anytime via 'sudo neopanel-installer --turnstile' or Admin Settings)."
+  fi
+}
+
+configure_turnstile_in_config() {
+  local enabled="$1"
+  local site_key="$2"
+  local secret_key="$3"
+  local cfg_file="$CONFIG_DIR/config.yaml"
+
+  if [ ! -f "$cfg_file" ]; then
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file=$(mktemp)
+
+  awk -v en="$enabled" -v sk="$site_key" -v sec="$secret_key" '
+    BEGIN { in_ts=0; inserted=0; in_sec=0 }
+    /^security:/ { in_sec=1; print; next }
+    in_sec && /^[^[:space:]]/ {
+      if (!inserted) {
+        print "  turnstile:"
+        print "    enabled: " en
+        print "    site_key: \"" sk "\""
+        print "    secret_key: \"" sec "\""
+        inserted=1
+      }
+      in_sec=0
+    }
+    in_sec && /^[[:space:]]+turnstile:/ {
+      in_ts=1
+      next
+    }
+    in_ts {
+      if ($0 ~ /^[[:space:]]{4,}/) {
+        next
+      } else {
+        in_ts=0
+      }
+    }
+    { print }
+    END {
+      if (!inserted) {
+        if (!in_sec) {
+          print ""
+          print "security:"
+        }
+        print "  turnstile:"
+        print "    enabled: " en
+        print "    site_key: \"" sk "\""
+        print "    secret_key: \"" sec "\""
+      }
+    }
+  ' "$cfg_file" > "$tmp_file"
+
+  mv "$tmp_file" "$cfg_file"
+  chmod 600 "$cfg_file"
+}
+
 step_config_service() {
   local host="$1"
   local port="$2"
+  local ts_enabled="${3:-false}"
+  local ts_site="${4:-}"
+  local ts_secret="${5:-}"
 
   local secret
   secret=$(generate_secret)
@@ -273,6 +361,10 @@ paths:
 security:
   jwt_secret: "${secret}"
   token_expiration_hours: 72
+  turnstile:
+    enabled: ${ts_enabled}
+    site_key: "${ts_site}"
+    secret_key: "${ts_secret}"
 
 java:
   default_path: "java"
@@ -393,6 +485,8 @@ run_full_installation() {
   prompt_user "Would you like to configure UFW firewall rules automatically? (y/n) [default: y]: " conf_ufw
   conf_ufw=${conf_ufw:-y}
 
+  prompt_turnstile_setup
+
   # Clear terminal for clean, premium progress view
   print_banner
   echo -e "${BOLD}Installing NeoPanel...${NC} (Silent background execution, logs -> ${CYAN}${LOG_FILE}${NC})\n"
@@ -402,7 +496,7 @@ run_full_installation() {
   run_step 15 35 "Installing Minecraft Java runtimes (8, 17, 21 & 25)" "step_java"
   run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
   run_step 55 75 "Compiling NeoPanel core binary from source" "step_build_neopanel"
-  run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT'"
+  run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT' '$TURNSTILE_ENABLED' '$TURNSTILE_SITE_KEY' '$TURNSTILE_SECRET_KEY'"
 
   if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
     run_step 85 95 "Setting up automated Let's Encrypt SSL & Caddy" "step_ssl_caddy '$domain' '$email'"
@@ -508,6 +602,17 @@ EOF
 update_neopanel() {
   print_banner
   check_root
+
+  # Prompt for Cloudflare Turnstile if upgrading from a version prior to Turnstile support
+  if [ -f "$CONFIG_DIR/config.yaml" ] && ! grep -q "turnstile:" "$CONFIG_DIR/config.yaml"; then
+    if [ -t 0 ] || [ -e /dev/tty ]; then
+      echo -e "${CYAN}${BOLD}[NEW IN THIS VERSION] Cloudflare Turnstile Bot Protection${NC}"
+      prompt_turnstile_setup
+      configure_turnstile_in_config "$TURNSTILE_ENABLED" "$TURNSTILE_SITE_KEY" "$TURNSTILE_SECRET_KEY"
+      echo ""
+    fi
+  fi
+
   echo -e "${BOLD}Updating NeoPanel to Latest Release...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
   run_step 0 35 "Fetching latest updates from GitHub" "step_update_fetch"
@@ -534,8 +639,9 @@ interactive_menu() {
   echo -e "  ${GREEN}[3]${NC} Install Java Runtimes (OpenJDK 8, 17, 21 & Java 25)"
   echo -e "  ${GREEN}[4]${NC} Configure / Reconfigure Let's Encrypt SSL (Caddy)"
   echo -e "  ${GREEN}[5]${NC} Configure UFW Firewall"
-  echo -e "  ${GREEN}[6]${NC} Restart NeoPanel Service"
-  echo -e "  ${GREEN}[7]${NC} Uninstall NeoPanel"
+  echo -e "  ${GREEN}[6]${NC} Configure Cloudflare Turnstile Bot Protection"
+  echo -e "  ${GREEN}[7]${NC} Restart NeoPanel Service"
+  echo -e "  ${GREEN}[8]${NC} Uninstall NeoPanel"
   echo -e "  ${RED}[0]${NC} Exit"
   echo ""
   prompt_user "Enter selection [1]: " choice
@@ -569,10 +675,18 @@ interactive_menu() {
       log_success "Firewall configured."
       ;;
     6)
+      check_root
+      print_banner
+      prompt_turnstile_setup
+      configure_turnstile_in_config "$TURNSTILE_ENABLED" "$TURNSTILE_SITE_KEY" "$TURNSTILE_SECRET_KEY"
+      systemctl restart neopanel || true
+      log_success "Cloudflare Turnstile configuration saved and NeoPanel restarted."
+      ;;
+    7)
       systemctl restart neopanel
       log_success "NeoPanel restarted."
       ;;
-    7)
+    8)
       check_root
       prompt_user "Are you sure you want to completely uninstall NeoPanel? (y/N): " uninst
       if [[ "$uninst" =~ ^[Yy]$ ]]; then
@@ -613,6 +727,14 @@ else
     --firewall)
       check_root
       run_step 0 100 "Configuring UFW Firewall" "step_firewall"
+      ;;
+    --turnstile)
+      check_root
+      print_banner
+      prompt_turnstile_setup
+      configure_turnstile_in_config "$TURNSTILE_ENABLED" "$TURNSTILE_SITE_KEY" "$TURNSTILE_SECRET_KEY"
+      systemctl restart neopanel || true
+      log_success "Cloudflare Turnstile configuration saved and NeoPanel restarted."
       ;;
     *)
       interactive_menu

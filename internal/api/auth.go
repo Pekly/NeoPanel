@@ -5,15 +5,19 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthHandler struct {
 	db        *database.DB
+	cfg       *config.Config
+	mu        sync.RWMutex
 	jwtSecret []byte
 	expHours  int
 }
@@ -25,12 +29,24 @@ type JWTClaims struct {
 	jwt.RegisteredClaims
 }
 
-func NewAuthHandler(db *database.DB, jwtSecret string, expHours int) *AuthHandler {
+func NewAuthHandler(db *database.DB, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
 		db:        db,
-		jwtSecret: []byte(jwtSecret),
-		expHours:  expHours,
+		cfg:       cfg,
+		jwtSecret: []byte(cfg.Security.JWTSecret),
+		expHours:  cfg.Security.TokenExpiration,
 	}
+}
+
+func (h *AuthHandler) isTurnstileActive() (bool, string, string) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.cfg == nil {
+		return false, "", ""
+	}
+	t := h.cfg.Security.Turnstile
+	active := t.Enabled && strings.TrimSpace(t.SiteKey) != "" && strings.TrimSpace(t.SecretKey) != ""
+	return active, strings.TrimSpace(t.SiteKey), strings.TrimSpace(t.SecretKey)
 }
 
 func (h *AuthHandler) HashPassword(password string) (string, error) {
@@ -76,9 +92,16 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tsActive, tsSiteKey, _ := h.isTurnstileActive()
+	if !tsActive {
+		tsSiteKey = ""
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"needs_setup": count == 0,
-		"version":     "1.0.0",
+		"needs_setup":        count == 0,
+		"version":            "1.0.0",
+		"turnstile_enabled":  tsActive,
+		"turnstile_site_key": tsSiteKey,
 	})
 }
 
@@ -94,12 +117,25 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username         string `json:"username"`
+		Password         string `json:"password"`
+		TurnstileResp    string `json:"cf-turnstile-response"`
+		TurnstileToken   string `json:"turnstile_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid input"})
 		return
+	}
+
+	if tsActive, _, tsSecret := h.isTurnstileActive(); tsActive {
+		token := req.TurnstileResp
+		if token == "" {
+			token = req.TurnstileToken
+		}
+		if err := VerifyTurnstileToken(tsSecret, token, r); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
@@ -130,12 +166,25 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		TurnstileResp  string `json:"cf-turnstile-response"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
+	}
+
+	if tsActive, _, tsSecret := h.isTurnstileActive(); tsActive {
+		token := req.TurnstileResp
+		if token == "" {
+			token = req.TurnstileToken
+		}
+		if err := VerifyTurnstileToken(tsSecret, token, r); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 
 	user, err := h.db.GetUserByUsername(req.Username)
@@ -236,5 +285,61 @@ func (h *AuthHandler) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	user := r.Context().Value(contextUserKey).(*JWTClaims)
 	writeJSON(w, http.StatusOK, user)
+}
+
+func (h *AuthHandler) GetTurnstileConfig(w http.ResponseWriter, r *http.Request) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	t := h.cfg.Security.Turnstile
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"enabled":        t.Enabled,
+		"site_key":       t.SiteKey,
+		"has_secret_key": strings.TrimSpace(t.SecretKey) != "",
+	})
+}
+
+func (h *AuthHandler) UpdateTurnstileConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled   bool   `json:"enabled"`
+		SiteKey   string `json:"site_key"`
+		SecretKey string `json:"secret_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request payload"})
+		return
+	}
+
+	h.mu.Lock()
+	h.cfg.Security.Turnstile.Enabled = req.Enabled
+	h.cfg.Security.Turnstile.SiteKey = strings.TrimSpace(req.SiteKey)
+	if strings.TrimSpace(req.SecretKey) != "" {
+		h.cfg.Security.Turnstile.SecretKey = strings.TrimSpace(req.SecretKey)
+	}
+	if h.cfg.Security.Turnstile.Enabled && (h.cfg.Security.Turnstile.SiteKey == "" || h.cfg.Security.Turnstile.SecretKey == "") {
+		h.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Both Site Key and Secret Key are required when enabling Turnstile"})
+		return
+	}
+	cfgPath := h.cfg.FilePath
+	var saveErr error
+	if cfgPath != "" {
+		saveErr = config.SaveConfig(cfgPath, h.cfg)
+	}
+	enabled := h.cfg.Security.Turnstile.Enabled
+	siteKey := h.cfg.Security.Turnstile.SiteKey
+	hasSecret := strings.TrimSpace(h.cfg.Security.Turnstile.SecretKey) != ""
+	h.mu.Unlock()
+
+	if saveErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Updated in memory, but failed to write config.yaml: " + saveErr.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":        "Cloudflare Turnstile settings saved",
+		"enabled":        enabled,
+		"site_key":       siteKey,
+		"has_secret_key": hasSecret,
+	})
 }
 

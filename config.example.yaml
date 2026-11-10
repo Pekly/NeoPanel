@@ -12,6 +12,10 @@ paths:
 security:
   jwt_secret: "change-this-to-a-very-secure-random-32-byte-hex-string"
   token_expiration_hours: 72
+  turnstile:
+    enabled: false
+    site_key: ""
+    secret_key: ""
 
 java:
   default_path: "java"

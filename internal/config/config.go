@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+	FilePath string         `yaml:"-"`
 	Server   ServerConfig   `yaml:"server"`
 	Paths    PathsConfig    `yaml:"paths"`
 	Security SecurityConfig `yaml:"security"`
@@ -36,9 +37,16 @@ type PathsConfig struct {
 	DBPath     string `yaml:"db_path"`
 }
 
+type TurnstileConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	SiteKey   string `yaml:"site_key"`
+	SecretKey string `yaml:"secret_key"`
+}
+
 type SecurityConfig struct {
-	JWTSecret       string `yaml:"jwt_secret"`
-	TokenExpiration int    `yaml:"token_expiration_hours"` // in hours (default 72)
+	JWTSecret       string          `yaml:"jwt_secret"`
+	TokenExpiration int             `yaml:"token_expiration_hours"` // in hours (default 72)
+	Turnstile       TurnstileConfig `yaml:"turnstile"`
 }
 
 type JavaConfig struct {
@@ -81,6 +89,7 @@ func DefaultConfig() *Config {
 
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
+	cfg.FilePath = path
 
 	// If file doesn't exist, try to save default config
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -102,6 +111,17 @@ func LoadConfig(path string) (*Config, error) {
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Optional environment variable overrides for Turnstile
+	if envEnabled := os.Getenv("NEOPANEL_TURNSTILE_ENABLED"); envEnabled != "" {
+		cfg.Security.Turnstile.Enabled = envEnabled == "true" || envEnabled == "1"
+	}
+	if envSiteKey := os.Getenv("NEOPANEL_TURNSTILE_SITE_KEY"); envSiteKey != "" {
+		cfg.Security.Turnstile.SiteKey = envSiteKey
+	}
+	if envSecretKey := os.Getenv("NEOPANEL_TURNSTILE_SECRET_KEY"); envSecretKey != "" {
+		cfg.Security.Turnstile.SecretKey = envSecretKey
 	}
 
 	// Ensure directories exist

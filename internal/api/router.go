@@ -34,7 +34,7 @@ type Router struct {
 }
 
 func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManager, embeddedStatic fs.FS) *Router {
-	authHandler := NewAuthHandler(db, cfg.Security.JWTSecret, cfg.Security.TokenExpiration)
+	authHandler := NewAuthHandler(db, cfg)
 	accountHandler := NewAccountHandler(db, authHandler)
 	serverHandler := NewServerHandler(db, manager)
 	consoleHandler := NewConsoleHandler(authHandler, manager)
@@ -175,6 +175,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))
 	r.mux.HandleFunc("GET /api/system/java", r.requireAuth(HandleGetJavaRuntimes))
 	r.mux.HandleFunc("POST /api/admin/gc", r.requireAuth(HandleRunGC))
+	r.mux.HandleFunc("GET /api/admin/turnstile", r.requireAuth(r.auth.GetTurnstileConfig))
+	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAuth(r.auth.UpdateTurnstileConfig))
 	r.mux.HandleFunc("GET /api/admin/users", r.requireAuth(r.auth.ListUsers))
 	r.mux.HandleFunc("POST /api/admin/users", r.requireAuth(r.auth.AdminCreateUser))
 	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAuth(r.auth.AdminDeleteUser))

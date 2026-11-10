@@ -84,6 +84,15 @@ window.S = {
   fileMenuOpen: null,
   adminTab: 0,
   adminUsers: [],
+  adminTurnstile: {
+    enabled: false,
+    site_key: '',
+    has_secret_key: false
+  },
+  turnstileEnabled: false,
+  turnstileSiteKey: '',
+  turnstileToken: '',
+  turnstileWidgetId: null,
   adminDaemonCfg: JSON.parse(localStorage.getItem('neopanel_admin_cfg') || JSON.stringify({
     brandName: 'NeoPanel',
     fqdn: window.location.hostname || '127.0.0.1',
@@ -2562,6 +2571,45 @@ const V = {
             </div>
           </form>
         </div>
+
+        <div class="card" style="margin-bottom:18px;">
+          <div class="row sb" style="margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+            <h2 style="margin:0; color:var(--tx);">Cloudflare Turnstile Bot Protection</h2>
+            <span class="badge ${S.adminTurnstile?.enabled ? 'online' : 'offline'}">
+              <i class="dot"></i>${S.adminTurnstile?.enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </div>
+          <span class="mu" style="font-size:13px; display:block; margin-bottom:18px;">
+            Protect Login and Initial Setup endpoints against automated brute-force attacks with Cloudflare Turnstile.
+          </span>
+          <form onsubmit="saveAdminTurnstileSettings(event)">
+            <div style="margin-bottom:14px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px;">
+              <label class="row sb" style="cursor:pointer;">
+                <div>
+                  <b style="color:var(--tx); display:block;">Enable Cloudflare Turnstile</b>
+                  <span class="mu" style="font-size:12.5px;">Require Turnstile challenge verification on login &amp; setup screens</span>
+                </div>
+                <span class="sw">
+                  <input type="checkbox" id="adm-ts-enabled" ${S.adminTurnstile?.enabled ? 'checked' : ''}>
+                  <i></i>
+                </span>
+              </label>
+            </div>
+            <div class="grid g2">
+              <label class="f">
+                <span>Turnstile Site Key</span>
+                <input type="text" id="adm-ts-site" placeholder="0x4AAAAAA..." value="${esc(S.adminTurnstile?.site_key || '')}">
+              </label>
+              <label class="f">
+                <span>Turnstile Secret Key ${S.adminTurnstile?.has_secret_key ? '<span class="mu">(saved — leave blank to keep)</span>' : ''}</span>
+                <input type="password" id="adm-ts-secret" placeholder="${S.adminTurnstile?.has_secret_key ? '••••••••••••••••••••••••••••' : '0x4AAAAAA...'}" autocomplete="new-password">
+              </label>
+            </div>
+            <div class="row" style="justify-content:flex-end; margin-top:18px;">
+              <button type="submit" class="btn pr">${ic('shield', 14)} Save Turnstile Settings</button>
+            </div>
+          </form>
+        </div>
       `;
     } else if (t === 4) {
       content = `
@@ -3065,7 +3113,40 @@ async function loadAdminData() {
     const users = await api('/api/admin/users');
     S.adminUsers = users || [];
   } catch (e) {}
+  try {
+    const ts = await api('/api/admin/turnstile');
+    if (ts) S.adminTurnstile = ts;
+  } catch (e) {}
   R();
+}
+
+async function saveAdminTurnstileSettings(e) {
+  if (e) e.preventDefault();
+  const enabled = Boolean($('#adm-ts-enabled')?.checked);
+  const siteKey = $('#adm-ts-site')?.value.trim() || '';
+  const secretKey = $('#adm-ts-secret')?.value.trim() || '';
+
+  try {
+    const res = await api('/api/admin/turnstile', {
+      method: 'POST',
+      body: JSON.stringify({
+        enabled,
+        site_key: siteKey,
+        secret_key: secretKey
+      })
+    });
+    S.adminTurnstile = {
+      enabled: Boolean(res.enabled),
+      site_key: res.site_key || siteKey,
+      has_secret_key: Boolean(res.has_secret_key)
+    };
+    S.turnstileEnabled = Boolean(res.enabled);
+    S.turnstileSiteKey = res.enabled ? (res.site_key || siteKey) : '';
+    toast(res.message || 'Turnstile settings updated', 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to save Turnstile settings', 'bad');
+  }
 }
 
 async function bulkRestartServers() {
@@ -5113,6 +5194,57 @@ function saveAdminDaemonSettings(e) {
   R();
 }
 
+// --- Cloudflare Turnstile Explicit SPA Integration ---
+function mountTurnstileWidget(selector) {
+  S.turnstileToken = '';
+  if (!S.turnstileEnabled || !S.turnstileSiteKey) return;
+  const container = $(selector);
+  if (!container) return;
+
+  container.innerHTML = '<div class="turnstile-loading">Loading Cloudflare security check...</div>';
+
+  let attempts = 0;
+  const tryRender = () => {
+    const el = $(selector);
+    if (!el) return;
+    if (window.turnstile && typeof window.turnstile.render === 'function') {
+      el.innerHTML = '';
+      if (S.turnstileWidgetId !== null && typeof window.turnstile.remove === 'function') {
+        try { window.turnstile.remove(S.turnstileWidgetId); } catch (e) {}
+        S.turnstileWidgetId = null;
+      }
+      const widgetTheme = S.acct?.mode === 'Light' ? 'light' : 'dark';
+      S.turnstileWidgetId = window.turnstile.render(el, {
+        sitekey: S.turnstileSiteKey,
+        theme: widgetTheme,
+        callback: (token) => {
+          S.turnstileToken = token || '';
+          const err = $('#lerr');
+          if (err && err.textContent.includes('Turnstile')) err.textContent = '';
+        },
+        'expired-callback': () => {
+          S.turnstileToken = '';
+        },
+        'error-callback': () => {
+          S.turnstileToken = '';
+        }
+      });
+    } else if (++attempts < 100) {
+      setTimeout(tryRender, 100);
+    } else {
+      el.innerHTML = '<div class="turnstile-loading">Unable to load Cloudflare Turnstile. Please check your network or disable adblockers.</div>';
+    }
+  };
+  tryRender();
+}
+
+function resetTurnstileWidget() {
+  S.turnstileToken = '';
+  if (S.turnstileEnabled && window.turnstile && S.turnstileWidgetId !== null) {
+    try { window.turnstile.reset(S.turnstileWidgetId); } catch (e) {}
+  }
+}
+
 // --- Auth Flow & Setup Screen ---
 async function checkAuth() {
   const savedMode = localStorage.getItem('neopanel_mode');
@@ -5122,6 +5254,9 @@ async function checkAuth() {
 
   try {
     const status = await (await fetch('/api/auth/status')).json();
+    S.turnstileEnabled = Boolean(status.turnstile_enabled && status.turnstile_site_key);
+    S.turnstileSiteKey = S.turnstileEnabled ? status.turnstile_site_key : '';
+
     if (status.needs_setup) {
       showSetupScreen();
       return;
@@ -5176,11 +5311,13 @@ function showSetupScreen() {
         ${ic('eye', 16)}
       </button>
     </label>
+    ${S.turnstileEnabled ? '<div id="turnstile-setup" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitSetup()">Initialize &amp; Launch</button>
     <div class="lsm foot">&copy; 2026 NeoPanel &bull; Ultra-Lightweight</div>
   </div>`;
   document.body.appendChild(d);
+  if (S.turnstileEnabled) mountTurnstileWidget('#turnstile-setup');
   $('#su-name')?.focus();
 }
 
@@ -5192,23 +5329,34 @@ async function submitSetup() {
     if (err) err.textContent = 'Username and password are required.';
     return;
   }
+  if (S.turnstileEnabled && !S.turnstileToken) {
+    if (err) err.textContent = 'Please complete the Cloudflare Turnstile security check.';
+    return;
+  }
   try {
     const res = await (await fetch('/api/auth/setup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({
+        username,
+        password,
+        'cf-turnstile-response': S.turnstileToken
+      })
     })).json();
 
     if (res.token) {
       S.token = res.token;
+      S.turnstileToken = '';
       localStorage.setItem('neopanel_token', res.token);
       $('#login')?.remove();
       toast('Setup complete! Welcome to NeoPanel.');
       checkAuth();
     } else {
+      resetTurnstileWidget();
       if (err) err.textContent = res.error || 'Setup failed.';
     }
   } catch (e) {
+    resetTurnstileWidget();
     if (err) err.textContent = 'Connection error.';
   }
 }
@@ -5236,11 +5384,13 @@ function showLoginScreen() {
         ${ic('eye', 16)}
       </button>
     </label>
+    ${S.turnstileEnabled ? '<div id="turnstile-login" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitLogin()">Login</button>
     <div class="lsm foot">&copy; 2026 NeoPanel &bull; Ultra-Lightweight</div>
   </div>`;
   document.body.appendChild(d);
+  if (S.turnstileEnabled) mountTurnstileWidget('#turnstile-login');
   $('#lu')?.focus();
 }
 
@@ -5254,23 +5404,35 @@ async function submitLogin() {
     return;
   }
 
+  if (S.turnstileEnabled && !S.turnstileToken) {
+    if (err) err.textContent = 'Please complete the Cloudflare Turnstile security check.';
+    return;
+  }
+
   try {
     const res = await (await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: u, password: p })
+      body: JSON.stringify({
+        username: u,
+        password: p,
+        'cf-turnstile-response': S.turnstileToken
+      })
     })).json();
 
     if (res.token) {
       S.token = res.token;
+      S.turnstileToken = '';
       localStorage.setItem('neopanel_token', res.token);
       $('#login')?.remove();
       toast('Signed in successfully');
       checkAuth();
     } else {
+      resetTurnstileWidget();
       if (err) err.textContent = res.error || 'Invalid credentials.';
     }
   } catch (e) {
+    resetTurnstileWidget();
     if (err) err.textContent = 'Connection error.';
   }
 }
@@ -5389,6 +5551,7 @@ window.submitAddUser = submitAddUser;
 window.deleteAdminUser = deleteAdminUser;
 window.triggerAdminGC = triggerAdminGC;
 window.saveAdminDaemonSettings = saveAdminDaemonSettings;
+window.saveAdminTurnstileSettings = saveAdminTurnstileSettings;
 window.toggleCustomJavaInput = toggleCustomJavaInput;
 window.toggleCustomPropJava = toggleCustomPropJava;
 window.isArchiveFile = isArchiveFile;
