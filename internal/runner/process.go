@@ -46,29 +46,30 @@ const (
 )
 
 type ProcessInstance struct {
-	mu             sync.RWMutex
-	server         *database.Server
-	workingDir     string
-	cmd            *exec.Cmd
-	stdin          io.WriteCloser
-	status         string
-	startedAt      time.Time
-	metrics        *ProcessMetrics
-	logBuffer      []string
-	subscribers    map[chan string]struct{}
-	onlinePlayers  map[string]*OnlinePlayer
-	uuidCache      map[string]string
-	stopExpected   bool
-	reachedOnline  bool
-	timedOut       bool
-	runID          uint64
-	startupTimeout time.Duration
-	startupStopCh  chan struct{}
-	onReady        func(srvID string)
-	onExit         func(srvID string, unexpected bool, reachedOnline bool, timedOut bool, uptime time.Duration)
-	cachedDiskMB   int64
-	lastDiskCheck  time.Time
-	diskScanning   bool
+	mu               sync.RWMutex
+	server           *database.Server
+	workingDir       string
+	cmd              *exec.Cmd
+	stdin            io.WriteCloser
+	status           string
+	startedAt        time.Time
+	metrics          *ProcessMetrics
+	logBuffer        []string
+	subscribers      map[chan string]struct{}
+	onlinePlayers    map[string]*OnlinePlayer
+	uuidCache        map[string]string
+	zeroPlayersSince time.Time
+	stopExpected     bool
+	reachedOnline    bool
+	timedOut         bool
+	runID            uint64
+	startupTimeout   time.Duration
+	startupStopCh    chan struct{}
+	onReady          func(srvID string)
+	onExit           func(srvID string, unexpected bool, reachedOnline bool, timedOut bool, uptime time.Duration)
+	cachedDiskMB     int64
+	lastDiskCheck    time.Time
+	diskScanning     bool
 }
 
 func NewProcessInstance(server *database.Server, workingDir string, startupTimeout time.Duration, onReady func(string), onExit func(string, bool, bool, bool, time.Duration)) *ProcessInstance {
@@ -283,8 +284,8 @@ func (p *ProcessInstance) Start() error {
 		args = append(args, "--port", fmt.Sprintf("%d", port))
 	}
 
-	cmd := exec.Command(javaBinary, args...)
-	cmd.Dir = p.workingDir
+	cmd, isolationMode := p.buildCommand(javaBinary, args)
+	p.broadcast(fmt.Sprintf("\x1b[35m[NeoPanel Security] Isolation Engine: %s\x1b[0m", isolationMode))
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -443,6 +444,9 @@ func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 			p.status = "online"
 			p.reachedOnline = true
 			p.stopStartupTimerLocked()
+			if len(p.onlinePlayers) == 0 {
+				p.zeroPlayersSince = time.Now()
+			}
 			readyCallback = p.onReady
 			readySrvID = p.server.ID
 		}
@@ -489,6 +493,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		low := strings.ToLower(name)
 		p.mu.Lock()
 		if p.runID == runID {
+			p.zeroPlayersSince = time.Time{}
 			if p.onlinePlayers == nil {
 				p.onlinePlayers = make(map[string]*OnlinePlayer)
 			}
@@ -509,6 +514,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		low := strings.ToLower(name)
 		p.mu.Lock()
 		if p.runID == runID {
+			p.zeroPlayersSince = time.Time{}
 			if p.onlinePlayers == nil {
 				p.onlinePlayers = make(map[string]*OnlinePlayer)
 			}
@@ -532,6 +538,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		low := strings.ToLower(name)
 		p.mu.Lock()
 		if p.runID == runID {
+			p.zeroPlayersSince = time.Time{}
 			if p.onlinePlayers == nil {
 				p.onlinePlayers = make(map[string]*OnlinePlayer)
 			}
@@ -551,6 +558,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		low := strings.ToLower(name)
 		p.mu.Lock()
 		if p.runID == runID {
+			p.zeroPlayersSince = time.Time{}
 			if p.onlinePlayers == nil {
 				p.onlinePlayers = make(map[string]*OnlinePlayer)
 			}
@@ -571,6 +579,9 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
+			if len(p.onlinePlayers) == 0 && p.status == "online" {
+				p.zeroPlayersSince = time.Now()
+			}
 		}
 		p.mu.Unlock()
 		return
@@ -581,6 +592,9 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
+			if len(p.onlinePlayers) == 0 && p.status == "online" {
+				p.zeroPlayersSince = time.Now()
+			}
 		}
 		p.mu.Unlock()
 		return
@@ -591,6 +605,9 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
+			if len(p.onlinePlayers) == 0 && p.status == "online" {
+				p.zeroPlayersSince = time.Now()
+			}
 		}
 		p.mu.Unlock()
 		return
@@ -601,6 +618,9 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
+			if len(p.onlinePlayers) == 0 && p.status == "online" {
+				p.zeroPlayersSince = time.Now()
+			}
 		}
 		p.mu.Unlock()
 		return
@@ -613,7 +633,11 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		if p.runID == runID {
 			if cnt == 0 || rawNames == "" {
 				p.onlinePlayers = make(map[string]*OnlinePlayer)
+				if p.status == "online" {
+					p.zeroPlayersSince = time.Now()
+				}
 			} else {
+				p.zeroPlayersSince = time.Time{}
 				nextMap := make(map[string]*OnlinePlayer)
 				for _, part := range strings.Split(rawNames, ",") {
 					nm := strings.TrimSpace(part)
@@ -638,6 +662,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 			}
 		}
 		p.mu.Unlock()
+		return
 	}
 }
 
@@ -941,4 +966,91 @@ func syncBungeePort(workingDir string, port int) {
 		}
 	}
 	_ = os.WriteFile(cfgPath, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// buildCommand constructs the execution command for the server process.
+// If bubblewrap (`bwrap`) is installed, it runs within an unprivileged Linux
+// sandbox jailing the filesystem so malicious plugins cannot read host files
+// or traverse into other servers. If `systemd-run` is available, it applies slice
+// resource limits (e.g. TasksMax=512) to thwart fork bombs.
+func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.Cmd, string) {
+	bwrapPath, bwrapErr := exec.LookPath("bwrap")
+	if bwrapErr == nil && bwrapPath != "" {
+		bwrapArgs := []string{
+			"--unshare-all",
+			"--share-net",
+			"--die-with-parent",
+			"--ro-bind", "/usr", "/usr",
+			"--ro-bind", "/lib", "/lib",
+			"--ro-bind", "/bin", "/bin",
+			"--dev", "/dev",
+			"--proc", "/proc",
+			"--tmpfs", "/tmp",
+		}
+
+		for _, optDir := range []string{"/lib64", "/sbin", "/etc/ssl", "/etc/pki", "/etc/resolv.conf", "/etc/hosts", "/etc/alternatives", "/etc/java", "/usr/lib/jvm", "/opt"} {
+			if _, err := os.Stat(optDir); err == nil {
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", optDir, optDir)
+			}
+		}
+
+		cleanWorkDir := filepath.Clean(p.workingDir)
+		bwrapArgs = append(bwrapArgs,
+			"--bind", cleanWorkDir, cleanWorkDir,
+			"--chdir", cleanWorkDir,
+		)
+
+		javaDir := filepath.Dir(javaBinary)
+		if !strings.HasPrefix(javaDir, "/usr") && !strings.HasPrefix(javaDir, "/bin") && !strings.HasPrefix(javaDir, "/lib") {
+			if _, err := os.Stat(javaDir); err == nil {
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaDir, javaDir)
+			}
+		}
+
+		bwrapArgs = append(bwrapArgs, javaBinary)
+		bwrapArgs = append(bwrapArgs, args...)
+
+		systemdPath, sysErr := exec.LookPath("systemd-run")
+		if sysErr == nil && systemdPath != "" {
+			sysArgs := []string{
+				"--scope",
+				"-q",
+				"-p", "TasksMax=512",
+			}
+			if p.server != nil && p.server.CPULimitPercent > 0 {
+				sysArgs = append(sysArgs, fmt.Sprintf("-p CPUQuota=%d%%", p.server.CPULimitPercent))
+			}
+			sysArgs = append(sysArgs, bwrapPath)
+			sysArgs = append(sysArgs, bwrapArgs...)
+
+			cmd := exec.Command(systemdPath, sysArgs...)
+			cmd.Dir = p.workingDir
+			return cmd, "Bubblewrap Jailed Filesystem + Systemd Slice (TasksMax=512)"
+		}
+
+		cmd := exec.Command(bwrapPath, bwrapArgs...)
+		cmd.Dir = p.workingDir
+		return cmd, "Bubblewrap Jailed Filesystem (unprivileged user namespace)"
+	}
+
+	cmd := exec.Command(javaBinary, args...)
+	cmd.Dir = p.workingDir
+	return cmd, "Native Host Process"
+}
+
+// GetIdleDuration returns how long the server has been online with 0 players connected.
+func (p *ProcessInstance) GetIdleDuration() (time.Duration, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.status != "online" || len(p.onlinePlayers) > 0 || p.zeroPlayersSince.IsZero() {
+		return 0, false
+	}
+	return time.Since(p.zeroPlayersSince), true
+}
+
+// GetPlayerCount returns the count of currently connected players.
+func (p *ProcessInstance) GetPlayerCount() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return len(p.onlinePlayers)
 }

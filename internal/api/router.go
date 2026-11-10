@@ -38,6 +38,11 @@ type Router struct {
 	databases      *DatabaseHandler
 	nodes          *NodeHandler
 	subdomains     *SubdomainHandler
+	subusers       *SubuserHandler
+	schedules      *ScheduleHandler
+	clientAPI      *ClientAPIHandler
+	globalLimiter  *IPRateLimiter
+	authLimiter    *IPRateLimiter
 	embeddedStatic fs.FS
 }
 
@@ -56,6 +61,9 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	databaseHandler := NewDatabaseHandler(cfg, db)
 	nodeHandler := NewNodeHandler(cfg, db, authHandler, manager)
 	subdomainHandler := NewSubdomainHandler(db, nodeHandler)
+	subuserHandler := NewSubuserHandler(db)
+	scheduleHandler := NewScheduleHandler(db, manager)
+	clientAPIHandler := NewClientAPIHandler(cfg, db, manager)
 
 	r := &Router{
 		mux:            http.NewServeMux(),
@@ -74,6 +82,11 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		databases:      databaseHandler,
 		nodes:          nodeHandler,
 		subdomains:     subdomainHandler,
+		subusers:       subuserHandler,
+		schedules:      scheduleHandler,
+		clientAPI:      clientAPIHandler,
+		globalLimiter:  NewIPRateLimiter(60, 100),
+		authLimiter:    NewIPRateLimiter(1, 15),
 		embeddedStatic: embeddedStatic,
 	}
 
@@ -87,6 +100,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
 
+	if r.globalLimiter != nil {
+		r.globalLimiter.Middleware(r.mux).ServeHTTP(w, req)
+		return
+	}
 	r.mux.ServeHTTP(w, req)
 }
 
@@ -94,11 +111,19 @@ func (r *Router) registerRoutes(db *database.DB) {
 	// Public auth, branding & mods runtime routes
 	r.mux.HandleFunc("GET /api/auth/status", r.auth.Status)
 	r.mux.HandleFunc("POST /api/auth/setup", r.auth.Setup)
-	r.mux.HandleFunc("POST /api/auth/login", r.auth.Login)
+	if r.authLimiter != nil {
+		r.mux.Handle("POST /api/auth/login", r.authLimiter.Middleware(http.HandlerFunc(r.auth.Login)))
+	} else {
+		r.mux.HandleFunc("POST /api/auth/login", r.auth.Login)
+	}
 	r.mux.HandleFunc("GET /api/branding", r.branding.GetPublicBranding)
 	r.mux.HandleFunc("GET /branding/{filename}", r.branding.ServeBrandingAsset)
 	r.mux.HandleFunc("GET /api/mods", r.mods.ListRuntimeMods)
 	r.mux.HandleFunc("GET /mods/{id}/{path...}", r.mods.ServeModAsset)
+
+	// Automated Client Area Provisioning API (WHMCS, Blesta, Billing portals)
+	r.mux.HandleFunc("POST /api/client-api/v1/provision", r.clientAPI.Provision)
+	r.mux.HandleFunc("GET /api/client-api/v1/code-samples", r.requireAuth(r.clientAPI.GetCodeSamples))
 
 	// Protected auth routes
 	r.mux.HandleFunc("GET /api/auth/me", r.requireAuth(r.auth.Me))
@@ -111,6 +136,30 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("DELETE /api/servers/{id}", r.requireAuth(r.servers.DeleteServer))
 	r.mux.HandleFunc("POST /api/servers/{id}/power", r.requireAuth(r.servers.PowerAction))
 	r.mux.HandleFunc("POST /api/servers/{id}/command", r.requireAuth(r.servers.SendCommand))
+
+	// Server Icon routes
+	r.mux.HandleFunc("POST /api/servers/{id}/icon", r.requireAuth(r.servers.UploadServerIcon))
+	r.mux.HandleFunc("GET /api/servers/{id}/icon", r.servers.GetServerIcon)
+	r.mux.HandleFunc("DELETE /api/servers/{id}/icon", r.requireAuth(r.servers.DeleteServerIcon))
+
+	// Server Quick Configs & Optimization Presets
+	r.mux.HandleFunc("GET /api/servers/{id}/configs", r.requireAuth(r.servers.GetQuickConfigs))
+	r.mux.HandleFunc("POST /api/servers/{id}/configs", r.requireAuth(r.servers.UpdateQuickConfigs))
+
+	// Subusers & Permission Management
+	r.mux.HandleFunc("GET /api/servers/{id}/subusers", r.requireAuth(r.subusers.ListSubusers))
+	r.mux.HandleFunc("POST /api/servers/{id}/subusers", r.requireAuth(r.subusers.AddSubuser))
+	r.mux.HandleFunc("PUT /api/servers/{id}/subusers/{sub_id}", r.requireAuth(r.subusers.UpdateSubuser))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/subusers/{sub_id}", r.requireAuth(r.subusers.DeleteSubuser))
+	r.mux.HandleFunc("GET /api/servers/{id}/permissions", r.requireAuth(r.subusers.GetMyPermissions))
+
+	// Schedules & Automation
+	r.mux.HandleFunc("GET /api/servers/{id}/schedules", r.requireAuth(r.schedules.ListSchedules))
+	r.mux.HandleFunc("POST /api/servers/{id}/schedules", r.requireAuth(r.schedules.CreateSchedule))
+	r.mux.HandleFunc("PUT /api/servers/{id}/schedules/{schedId}", r.requireAuth(r.schedules.UpdateSchedule))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/schedules/{schedId}", r.requireAuth(r.schedules.DeleteSchedule))
+	r.mux.HandleFunc("POST /api/servers/{id}/schedules/{schedId}/toggle", r.requireAuth(r.schedules.ToggleSchedule))
+	r.mux.HandleFunc("POST /api/servers/{id}/schedules/{schedId}/run", r.requireAuth(r.schedules.RunScheduleNow))
 
 	// Port allocations routes
 	r.mux.HandleFunc("GET /api/servers/{id}/ports", r.requireAuth(r.servers.ListServerPorts))

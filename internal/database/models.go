@@ -23,6 +23,8 @@ type Server struct {
 	JavaArgs    string    `json:"java_args"`  // custom JVM flags
 	JavaPath    string    `json:"java_path"`  // custom Java binary path (optional)
 	AutoRestart bool      `json:"auto_restart"`
+	IconURL     string    `json:"icon_url,omitempty"`
+	OwnerID     int       `json:"owner_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -79,14 +81,45 @@ type ServerPort struct {
 }
 
 type ClusterNode struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	BaseURL   string    `json:"base_url"`
-	APIToken  string    `json:"-"`
-	FQDN      string    `json:"fqdn"`
-	Location  string    `json:"location"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	BaseURL         string    `json:"base_url"`
+	APIToken        string    `json:"-"`
+	FQDN            string    `json:"fqdn"`
+	Location        string    `json:"location"`
+	IsFree          bool      `json:"is_free"`
+	IdleTimeoutMin  int       `json:"idle_timeout_min"` // minutes of 0 players before auto-stop (e.g. 15)
+	AllowUserRAM    bool      `json:"allow_user_ram"`   // allow non-admin users to change RAM
+	AllowUserPorts  bool      `json:"allow_user_ports"` // allow non-admin users to change game port
+	AllowUserJava   bool      `json:"allow_user_java"`  // allow non-admin users to change java version
+	IsolationEngine string    `json:"isolation_engine"` // "auto", "bwrap", "systemd", "process"
+	CPULimitPercent int       `json:"cpu_limit_percent"`
+	TasksMax        int       `json:"tasks_max"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type ServerSubuser struct {
+	ID          int       `json:"id"`
+	ServerID    string    `json:"server_id"`
+	UserID      int       `json:"user_id"`
+	Username    string    `json:"username"`
+	Permissions []string  `json:"permissions"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type ServerSchedule struct {
+	ID        string     `json:"id"`
+	ServerID  string     `json:"server_id"`
+	Name      string     `json:"name"`
+	CronExpr  string     `json:"cron_expr"`
+	Action    string     `json:"action"` // "command", "restart", "backup", "start", "stop"
+	Payload   string     `json:"payload"`
+	IsActive  bool       `json:"is_active"`
+	LastRunAt *time.Time `json:"last_run_at,omitempty"`
+	NextRunAt *time.Time `json:"next_run_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type ServerDatabase struct {

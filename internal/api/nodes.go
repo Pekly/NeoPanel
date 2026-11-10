@@ -42,21 +42,27 @@ func NewNodeHandler(cfg *config.Config, db *database.DB, auth *AuthHandler, mana
 }
 
 type NodeStatusView struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	BaseURL     string      `json:"base_url"`
-	FQDN        string      `json:"fqdn"`
-	Location    string      `json:"location"`
-	IsLocal     bool        `json:"is_local"`
-	Online      bool        `json:"online"`
-	Error       string      `json:"error,omitempty"`
-	LatencyMS   int64       `json:"latency_ms"`
-	ServerCount int         `json:"server_count"`
-	System      *SystemInfo `json:"system,omitempty"`
-	HasToken    bool        `json:"has_token"`
-	TokenPrefix string      `json:"token_prefix"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	ID              string      `json:"id"`
+	Name            string      `json:"name"`
+	BaseURL         string      `json:"base_url"`
+	FQDN            string      `json:"fqdn"`
+	Location        string      `json:"location"`
+	IsLocal         bool        `json:"is_local"`
+	Online          bool        `json:"online"`
+	Error           string      `json:"error,omitempty"`
+	LatencyMS       int64       `json:"latency_ms"`
+	ServerCount     int         `json:"server_count"`
+	System          *SystemInfo `json:"system,omitempty"`
+	HasToken        bool        `json:"has_token"`
+	TokenPrefix     string      `json:"token_prefix"`
+	IsFree          bool        `json:"is_free"`
+	IdleTimeoutMin  int         `json:"idle_timeout_min"`
+	AllowUserRAM    bool        `json:"allow_user_ram"`
+	AllowUserPorts  bool        `json:"allow_user_ports"`
+	AllowUserJava   bool        `json:"allow_user_java"`
+	IsolationEngine string      `json:"isolation_engine"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 func normalizeNodeBaseURL(raw string) (string, error) {
@@ -117,19 +123,42 @@ func (h *NodeHandler) resolveLocalFQDN(reqHost string) string {
 func (h *NodeHandler) buildLocalNodeView(reqHost string) NodeStatusView {
 	sys := collectSystemInfo()
 	srvs, _ := h.db.ListServers()
+	localNode, _ := h.db.GetNode("local")
+	isFree := false
+	idleMin := 0
+	allowRAM := true
+	allowPorts := true
+	allowJava := true
+	isoEngine := "Bubblewrap + Systemd Slices"
+	if localNode != nil {
+		isFree = localNode.IsFree
+		idleMin = localNode.IdleTimeoutMin
+		allowRAM = localNode.AllowUserRAM
+		allowPorts = localNode.AllowUserPorts
+		allowJava = localNode.AllowUserJava
+		if localNode.IsolationEngine != "" {
+			isoEngine = localNode.IsolationEngine
+		}
+	}
 	return NodeStatusView{
-		ID:          "local",
-		Name:        "Local Master Node",
-		BaseURL:     "",
-		FQDN:        h.resolveLocalFQDN(reqHost),
-		Location:    "Primary Host",
-		IsLocal:     true,
-		Online:      true,
-		LatencyMS:   0,
-		ServerCount: len(srvs),
-		System:      &sys,
-		HasToken:    true,
-		TokenPrefix: "local",
+		ID:              "local",
+		Name:            "Local Master Node",
+		BaseURL:         "",
+		FQDN:            h.resolveLocalFQDN(reqHost),
+		Location:        "Primary Host",
+		IsLocal:         true,
+		Online:          true,
+		LatencyMS:       0,
+		ServerCount:     len(srvs),
+		System:          &sys,
+		HasToken:        true,
+		TokenPrefix:     "local",
+		IsFree:          isFree,
+		IdleTimeoutMin:  idleMin,
+		AllowUserRAM:    allowRAM,
+		AllowUserPorts:  allowPorts,
+		AllowUserJava:   allowJava,
+		IsolationEngine: isoEngine,
 	}
 }
 
@@ -201,16 +230,22 @@ func (h *NodeHandler) ListNodes(w http.ResponseWriter, r *http.Request) {
 	for i, n := range remoteNodes {
 		hasTok, tokPrefix := maskNodeToken(n.APIToken)
 		views[i+1] = NodeStatusView{
-			ID:          n.ID,
-			Name:        n.Name,
-			BaseURL:     n.BaseURL,
-			FQDN:        n.FQDN,
-			Location:    n.Location,
-			IsLocal:     false,
-			HasToken:    hasTok,
-			TokenPrefix: tokPrefix,
-			CreatedAt:   n.CreatedAt,
-			UpdatedAt:   n.UpdatedAt,
+			ID:              n.ID,
+			Name:            n.Name,
+			BaseURL:         n.BaseURL,
+			FQDN:            n.FQDN,
+			Location:        n.Location,
+			IsLocal:         false,
+			HasToken:        hasTok,
+			TokenPrefix:     tokPrefix,
+			IsFree:          n.IsFree,
+			IdleTimeoutMin:  n.IdleTimeoutMin,
+			AllowUserRAM:    n.AllowUserRAM,
+			AllowUserPorts:  n.AllowUserPorts,
+			AllowUserJava:   n.AllowUserJava,
+			IsolationEngine: n.IsolationEngine,
+			CreatedAt:       n.CreatedAt,
+			UpdatedAt:       n.UpdatedAt,
 		}
 		wg.Add(1)
 		go func(idx int, node *database.ClusterNode) {
@@ -420,12 +455,18 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name     string `json:"name"`
-		BaseURL  string `json:"base_url"`
-		APIToken string `json:"api_token"`
-		FQDN     string `json:"fqdn"`
-		Location string `json:"location"`
-		Upsert   bool   `json:"upsert"`
+		Name            string `json:"name"`
+		BaseURL         string `json:"base_url"`
+		APIToken        string `json:"api_token"`
+		FQDN            string `json:"fqdn"`
+		Location        string `json:"location"`
+		Upsert          bool   `json:"upsert"`
+		IsFree          bool   `json:"is_free"`
+		IdleTimeoutMin  int    `json:"idle_timeout_min"`
+		AllowUserRAM    *bool  `json:"allow_user_ram"`
+		AllowUserPorts  *bool  `json:"allow_user_ports"`
+		AllowUserJava   *bool  `json:"allow_user_java"`
+		IsolationEngine string `json:"isolation_engine"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
@@ -500,13 +541,36 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 	_, _ = rand.Read(idBytes)
 	nodeID := "node-" + hex.EncodeToString(idBytes)
 
+	allowRAM := true
+	if req.AllowUserRAM != nil {
+		allowRAM = *req.AllowUserRAM
+	}
+	allowPorts := true
+	if req.AllowUserPorts != nil {
+		allowPorts = *req.AllowUserPorts
+	}
+	allowJava := true
+	if req.AllowUserJava != nil {
+		allowJava = *req.AllowUserJava
+	}
+	isoEngine := "Bubblewrap + Systemd Slices"
+	if req.IsolationEngine != "" {
+		isoEngine = req.IsolationEngine
+	}
+
 	node := &database.ClusterNode{
-		ID:       nodeID,
-		Name:     req.Name,
-		BaseURL:  baseURL,
-		APIToken: apiToken,
-		FQDN:     fqdn,
-		Location: strings.TrimSpace(req.Location),
+		ID:              nodeID,
+		Name:            req.Name,
+		BaseURL:         baseURL,
+		APIToken:        apiToken,
+		FQDN:            fqdn,
+		Location:        strings.TrimSpace(req.Location),
+		IsFree:          req.IsFree,
+		IdleTimeoutMin:  req.IdleTimeoutMin,
+		AllowUserRAM:    allowRAM,
+		AllowUserPorts:  allowPorts,
+		AllowUserJava:   allowJava,
+		IsolationEngine: isoEngine,
 	}
 
 	if err := h.db.CreateNode(node); err != nil {
@@ -520,21 +584,27 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 	logAudit(h.db, r, "node_add", fmt.Sprintf("Connected cluster node '%s' (%s) at %s", node.Name, node.ID, node.BaseURL))
 
 	writeJSON(w, http.StatusCreated, NodeStatusView{
-		ID:          node.ID,
-		Name:        node.Name,
-		BaseURL:     node.BaseURL,
-		FQDN:        node.FQDN,
-		Location:    node.Location,
-		IsLocal:     false,
-		Online:      online,
-		Error:       probeErr,
-		LatencyMS:   latency,
-		ServerCount: cnt,
-		System:      sys,
-		HasToken:    hasTok,
-		TokenPrefix: tokPrefix,
-		CreatedAt:   node.CreatedAt,
-		UpdatedAt:   node.UpdatedAt,
+		ID:              node.ID,
+		Name:            node.Name,
+		BaseURL:         node.BaseURL,
+		FQDN:            node.FQDN,
+		Location:        node.Location,
+		IsLocal:         false,
+		Online:          online,
+		Error:           probeErr,
+		LatencyMS:       latency,
+		ServerCount:     cnt,
+		System:          sys,
+		HasToken:        hasTok,
+		TokenPrefix:     tokPrefix,
+		IsFree:          node.IsFree,
+		IdleTimeoutMin:  node.IdleTimeoutMin,
+		AllowUserRAM:    node.AllowUserRAM,
+		AllowUserPorts:  node.AllowUserPorts,
+		AllowUserJava:   node.AllowUserJava,
+		IsolationEngine: node.IsolationEngine,
+		CreatedAt:       node.CreatedAt,
+		UpdatedAt:       node.UpdatedAt,
 	})
 }
 
@@ -558,11 +628,17 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Name     string `json:"name"`
-		BaseURL  string `json:"base_url"`
-		APIToken string `json:"api_token"`
-		FQDN     string `json:"fqdn"`
-		Location string `json:"location"`
+		Name            string `json:"name"`
+		BaseURL         string `json:"base_url"`
+		APIToken        string `json:"api_token"`
+		FQDN            string `json:"fqdn"`
+		Location        string `json:"location"`
+		IsFree          bool   `json:"is_free"`
+		IdleTimeoutMin  int    `json:"idle_timeout_min"`
+		AllowUserRAM    *bool  `json:"allow_user_ram"`
+		AllowUserPorts  *bool  `json:"allow_user_ports"`
+		AllowUserJava   *bool  `json:"allow_user_java"`
+		IsolationEngine string `json:"isolation_engine"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
@@ -590,6 +666,20 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	existing.Location = strings.TrimSpace(req.Location)
+	existing.IsFree = req.IsFree
+	existing.IdleTimeoutMin = req.IdleTimeoutMin
+	if req.AllowUserRAM != nil {
+		existing.AllowUserRAM = *req.AllowUserRAM
+	}
+	if req.AllowUserPorts != nil {
+		existing.AllowUserPorts = *req.AllowUserPorts
+	}
+	if req.AllowUserJava != nil {
+		existing.AllowUserJava = *req.AllowUserJava
+	}
+	if req.IsolationEngine != "" {
+		existing.IsolationEngine = req.IsolationEngine
+	}
 
 	if err := h.db.UpdateNode(existing); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update node: " + err.Error()})
@@ -602,21 +692,27 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 	logAudit(h.db, r, "node_update", fmt.Sprintf("Updated cluster node '%s' (%s)", existing.Name, existing.ID))
 
 	writeJSON(w, http.StatusOK, NodeStatusView{
-		ID:          existing.ID,
-		Name:        existing.Name,
-		BaseURL:     existing.BaseURL,
-		FQDN:        existing.FQDN,
-		Location:    existing.Location,
-		IsLocal:     false,
-		Online:      online,
-		Error:       probeErr,
-		LatencyMS:   latency,
-		ServerCount: cnt,
-		System:      sys,
-		HasToken:    hasTok,
-		TokenPrefix: tokPrefix,
-		CreatedAt:   existing.CreatedAt,
-		UpdatedAt:   existing.UpdatedAt,
+		ID:              existing.ID,
+		Name:            existing.Name,
+		BaseURL:         existing.BaseURL,
+		FQDN:            existing.FQDN,
+		Location:        existing.Location,
+		IsLocal:         false,
+		Online:          online,
+		Error:           probeErr,
+		LatencyMS:       latency,
+		ServerCount:     cnt,
+		System:          sys,
+		HasToken:        hasTok,
+		TokenPrefix:     tokPrefix,
+		IsFree:          existing.IsFree,
+		IdleTimeoutMin:  existing.IdleTimeoutMin,
+		AllowUserRAM:    existing.AllowUserRAM,
+		AllowUserPorts:  existing.AllowUserPorts,
+		AllowUserJava:   existing.AllowUserJava,
+		IsolationEngine: existing.IsolationEngine,
+		CreatedAt:       existing.CreatedAt,
+		UpdatedAt:       existing.UpdatedAt,
 	})
 }
 

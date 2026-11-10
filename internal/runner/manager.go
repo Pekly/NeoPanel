@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +27,7 @@ type ServerManager struct {
 
 func NewServerManager(baseDir string, db *database.DB) *ServerManager {
 	_ = os.MkdirAll(baseDir, 0755)
-	return &ServerManager{
+	mgr := &ServerManager{
 		baseDir:         baseDir,
 		db:              db,
 		instances:       make(map[string]*ProcessInstance),
@@ -35,6 +37,9 @@ func NewServerManager(baseDir string, db *database.DB) *ServerManager {
 		startupTimeout:  DefaultStartupTimeout,
 		shutdownCh:      make(chan struct{}),
 	}
+	mgr.startIdleWatchdog()
+	mgr.startScheduleRunner()
+	return mgr
 }
 
 func (m *ServerManager) SetStartupTimeout(d time.Duration) {
@@ -451,4 +456,222 @@ func (m *ServerManager) ShutdownAll() {
 		}
 	}
 	wg.Wait()
+}
+
+func (m *ServerManager) startIdleWatchdog() {
+	ticker := time.NewTicker(20 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.shutdownCh:
+				return
+			case <-ticker.C:
+				m.checkIdleTimeouts()
+			}
+		}
+	}()
+}
+
+func (m *ServerManager) checkIdleTimeouts() {
+	if m.db == nil {
+		return
+	}
+	m.mu.RLock()
+	instances := make([]*ProcessInstance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		instances = append(instances, inst)
+	}
+	m.mu.RUnlock()
+
+	for _, inst := range instances {
+		if inst.GetStatus() != "online" {
+			continue
+		}
+		inst.mu.RLock()
+		srv := inst.server
+		inst.mu.RUnlock()
+		if srv == nil {
+			continue
+		}
+
+		node, err := m.db.GetNode(srv.NodeID)
+		if err != nil || node == nil {
+			continue
+		}
+
+		if !node.IsFree && node.IdleTimeoutMin <= 0 {
+			continue
+		}
+
+		timeoutMin := node.IdleTimeoutMin
+		if timeoutMin <= 0 && node.IsFree {
+			timeoutMin = 15 // Default 15 minutes for free node
+		}
+
+		idleDur, isIdle := inst.GetIdleDuration()
+		if !isIdle || idleDur < time.Duration(timeoutMin)*time.Minute {
+			continue
+		}
+
+		// Timeout reached!
+		inst.broadcast(fmt.Sprintf("\x1b[33;1m[NeoPanel] Server idle timeout reached (0 players connected for %d minutes on free node).\x1b[0m", int(idleDur.Minutes())))
+		inst.broadcast("\x1b[33m[NeoPanel] Gracefully stopping server to conserve host resources...\x1b[0m")
+		_ = m.StopServer(srv.ID, false)
+		_ = m.db.CreateAuditLog("system", "server.idle_timeout", fmt.Sprintf("Server %s auto-stopped after %d min idle on free node %s", srv.Name, int(idleDur.Minutes()), node.Name), "")
+	}
+}
+
+func (m *ServerManager) startScheduleRunner() {
+	ticker := time.NewTicker(30 * time.Second)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.shutdownCh:
+				return
+			case now := <-ticker.C:
+				m.runScheduledTasks(now.UTC())
+			}
+		}
+	}()
+}
+
+func (m *ServerManager) runScheduledTasks(now time.Time) {
+	if m.db == nil {
+		return
+	}
+	schedules, err := m.db.ListAllActiveSchedules()
+	if err != nil || len(schedules) == 0 {
+		return
+	}
+
+	for _, sched := range schedules {
+		if !MatchesCron(sched.CronExpr, now) {
+			continue
+		}
+
+		// Prevent re-triggering within the same minute
+		if !sched.LastRunAt.IsZero() && now.Sub(sched.LastRunAt) < 55*time.Second {
+			continue
+		}
+
+		_ = m.db.RecordScheduleRun(sched.ID)
+		go m.ExecuteSchedule(sched)
+	}
+}
+
+func (m *ServerManager) ExecuteSchedule(sched database.ServerSchedule) {
+	inst, ok := m.GetInstance(sched.ServerID)
+	srv, srvErr := m.db.GetServer(sched.ServerID)
+	srvName := sched.ServerID
+	if srvErr == nil && srv != nil {
+		srvName = srv.Name
+	}
+
+	switch strings.ToLower(sched.Action) {
+	case "command":
+		if ok && inst.GetStatus() == "online" && strings.TrimSpace(sched.Payload) != "" {
+			_ = inst.WriteInput(strings.TrimSpace(sched.Payload) + "\n")
+			_ = m.db.CreateAuditLog("system", "schedule.command", fmt.Sprintf("Executed schedule '%s' command: %s on %s", sched.Name, sched.Payload, srvName), "")
+		}
+	case "restart":
+		_ = m.db.CreateAuditLog("system", "schedule.restart", fmt.Sprintf("Executed schedule '%s' restart on %s", sched.Name, srvName), "")
+		_ = m.RestartServer(sched.ServerID)
+	case "start":
+		_ = m.db.CreateAuditLog("system", "schedule.start", fmt.Sprintf("Executed schedule '%s' start on %s", sched.Name, srvName), "")
+		_ = m.StartServer(sched.ServerID)
+	case "stop":
+		_ = m.db.CreateAuditLog("system", "schedule.stop", fmt.Sprintf("Executed schedule '%s' stop on %s", sched.Name, srvName), "")
+		_ = m.StopServer(sched.ServerID, false)
+	case "backup":
+		_ = m.db.CreateAuditLog("system", "schedule.backup", fmt.Sprintf("Executed schedule '%s' backup on %s", sched.Name, srvName), "")
+		backupName := fmt.Sprintf("Scheduled Backup %s", time.Now().Format("2006-01-02 15:04"))
+		workDir := m.GetWorkingDir(sched.ServerID)
+		bId := fmt.Sprintf("bk-%d", time.Now().UnixNano())
+		bPath := filepath.Join(workDir, "..", "backups", bId+".tar.gz")
+		_ = os.MkdirAll(filepath.Dir(bPath), 0755)
+		_ = m.db.CreateBackup(database.Backup{
+			ID:        bId,
+			ServerID:  sched.ServerID,
+			Name:      backupName,
+			FilePath:  bPath,
+			SizeBytes: 0,
+		})
+	}
+}
+
+func MatchesCron(expr string, t time.Time) bool {
+	expr = strings.TrimSpace(expr)
+	switch strings.ToLower(expr) {
+	case "@hourly":
+		return t.Minute() == 0
+	case "@daily", "@midnight":
+		return t.Hour() == 0 && t.Minute() == 0
+	case "@weekly":
+		return t.Weekday() == time.Sunday && t.Hour() == 0 && t.Minute() == 0
+	}
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return false
+	}
+	if !matchCronField(fields[0], t.Minute(), 0, 59) {
+		return false
+	}
+	if !matchCronField(fields[1], t.Hour(), 0, 23) {
+		return false
+	}
+	if !matchCronField(fields[2], t.Day(), 1, 31) {
+		return false
+	}
+	if !matchCronField(fields[3], int(t.Month()), 1, 12) {
+		return false
+	}
+	if !matchCronField(fields[4], int(t.Weekday()), 0, 6) {
+		return false
+	}
+	return true
+}
+
+func matchCronField(field string, value int, min, max int) bool {
+	if field == "*" || field == "?" {
+		return true
+	}
+	if strings.Contains(field, "/") {
+		parts := strings.Split(field, "/")
+		if len(parts) == 2 {
+			step, err := strconv.Atoi(parts[1])
+			if err != nil || step <= 0 {
+				return false
+			}
+			base := parts[0]
+			if base == "*" {
+				return (value-min)%step == 0
+			}
+			baseVal, err := strconv.Atoi(base)
+			if err == nil {
+				return value >= baseVal && (value-baseVal)%step == 0
+			}
+		}
+	}
+	if strings.Contains(field, ",") {
+		for _, part := range strings.Split(field, ",") {
+			if matchCronField(part, value, min, max) {
+				return true
+			}
+		}
+		return false
+	}
+	if strings.Contains(field, "-") {
+		parts := strings.Split(field, "-")
+		if len(parts) == 2 {
+			low, err1 := strconv.Atoi(parts[0])
+			high, err2 := strconv.Atoi(parts[1])
+			if err1 == nil && err2 == nil {
+				return value >= low && value <= high
+			}
+		}
+	}
+	val, err := strconv.Atoi(field)
+	return err == nil && val == value
 }

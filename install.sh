@@ -81,7 +81,7 @@ print_banner() {
 EOF
   echo -e "${NC}"
   echo -e "${GREEN}${BOLD}>> Ultra-Lightweight Minecraft Server Manager Installer <<${NC}"
-  echo -e "${YELLOW}Target: Ubuntu 24.04 LTS (Noble Numbat)${NC}\n"
+  echo -e "${YELLOW}Target: Linux (Debian, Ubuntu, CentOS, RHEL, Rocky, Alma, Fedora, Arch, Alpine)${NC}\n"
 }
 
 log_info() {
@@ -228,10 +228,48 @@ detect_installed_role() {
 # Background Installation Steps
 # -----------------------------------------------------------------------------
 
+detect_os_pkg_manager() {
+  if command -v apt-get &>/dev/null; then
+    PKG_MGR="apt"
+  elif command -v dnf &>/dev/null; then
+    PKG_MGR="dnf"
+  elif command -v yum &>/dev/null; then
+    PKG_MGR="yum"
+  elif command -v pacman &>/dev/null; then
+    PKG_MGR="pacman"
+  elif command -v apk &>/dev/null; then
+    PKG_MGR="apk"
+  else
+    PKG_MGR="unknown"
+  fi
+}
+
 step_prerequisites() {
-  apt-get update -y -q
-  apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-    curl wget jq tar ufw ca-certificates software-properties-common git openssl
+  detect_os_pkg_manager
+  case "$PKG_MGR" in
+    apt)
+      apt-get update -y -q
+      apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+        curl wget jq tar ufw ca-certificates software-properties-common git openssl bubblewrap
+      ;;
+    dnf)
+      dnf install -y curl wget jq tar firewalld ca-certificates git openssl bubblewrap
+      ;;
+    yum)
+      yum install -y curl wget jq tar firewalld ca-certificates git openssl bubblewrap
+      ;;
+    pacman)
+      pacman -Sy --noconfirm curl wget jq tar ufw ca-certificates git openssl bubblewrap
+      ;;
+    apk)
+      apk update
+      apk add curl wget jq tar ca-certificates git openssl bubblewrap
+      ;;
+    *)
+      apt-get update -y -q 2>/dev/null || true
+      apt-get install -y -q curl wget jq tar git openssl bubblewrap 2>/dev/null || true
+      ;;
+  esac
 }
 
 has_java_version() {
@@ -264,7 +302,7 @@ install_java_25() {
   fi
 
   # Try Ubuntu apt repository if OpenJDK 25 is available
-  if apt-cache show openjdk-25-jre-headless >/dev/null 2>&1; then
+  if [ "$PKG_MGR" = "apt" ] && apt-cache show openjdk-25-jre-headless >/dev/null 2>&1; then
     apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
       openjdk-25-jre-headless || true
     if has_java_version "25"; then
@@ -316,20 +354,60 @@ install_java_25() {
 }
 
 step_java() {
-  apt-get update -y -q
-  apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-    openjdk-21-jre-headless openjdk-17-jre-headless || true
-  apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-    openjdk-8-jre-headless || true
+  detect_os_pkg_manager
+  case "$PKG_MGR" in
+    apt)
+      apt-get update -y -q
+      apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+        openjdk-21-jre-headless openjdk-17-jre-headless openjdk-8-jre-headless || true
+      ;;
+    dnf|yum)
+      $PKG_MGR install -y java-21-openjdk-headless java-17-openjdk-headless java-1.8.0-openjdk-headless || true
+      ;;
+    pacman)
+      pacman -Sy --noconfirm jre21-openjdk-headless jre17-openjdk-headless jre8-openjdk-headless || true
+      ;;
+    apk)
+      apk add openjdk21-jre-headless openjdk17-jre-headless openjdk8-jre-base || true
+      ;;
+  esac
 
   # Install latest Java 25 runtime cleanly
   install_java_25 || true
 }
 
 step_go_compiler() {
+  if command -v go &>/dev/null; then
+    return 0
+  fi
+  detect_os_pkg_manager
+  case "$PKG_MGR" in
+    apt)
+      apt-get update -y -q
+      apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" golang-go || true
+      ;;
+    dnf|yum)
+      $PKG_MGR install -y golang || true
+      ;;
+    pacman)
+      pacman -Sy --noconfirm go || true
+      ;;
+    apk)
+      apk add go || true
+      ;;
+  esac
+
   if ! command -v go &>/dev/null; then
-    apt-get update -y -q
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" golang-go
+    local arch="amd64"
+    if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+      arch="arm64"
+    fi
+    curl -fsSL "https://go.dev/dl/go1.22.4.linux-${arch}.tar.gz" -o /tmp/go.tar.gz 2>/dev/null || true
+    if [ -f /tmp/go.tar.gz ]; then
+      tar -C /usr/local -xzf /tmp/go.tar.gz 2>/dev/null || true
+      export PATH=$PATH:/usr/local/go/bin
+      rm -f /tmp/go.tar.gz
+    fi
   fi
 }
 

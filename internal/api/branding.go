@@ -38,38 +38,40 @@ var (
 )
 
 type PanelBrandingConfig struct {
-	BrandName           string `json:"brand_name"`
-	BrandSubtitle       string `json:"brand_subtitle"`
-	LogoURL             string `json:"logo_url"`
-	FaviconURL          string `json:"favicon_url"`
-	LoginBgURL          string `json:"login_bg_url"`
-	ServerHeroURL       string `json:"server_hero_url"`
-	CardCoverURL        string `json:"card_cover_url"`
-	DefaultAvatarURL    string `json:"default_avatar_url"`
-	FooterText          string `json:"footer_text"`
-	Preset              string `json:"preset"`
-	AccentColor         string `json:"accent_color"`
-	AccentHover         string `json:"accent_hover"`
-	BgDeep              string `json:"bg_deep"`
-	BgCanvas            string `json:"bg_canvas"`
-	CardBg              string `json:"card_bg"`
-	NavBg               string `json:"nav_bg"`
-	TextColor           string `json:"text_color"`
-	CardOpacity         int    `json:"card_opacity"`
-	BorderRadiusPx      int    `json:"border_radius_px"`
-	GlassBlurPx         int    `json:"glass_blur_px"`
-	DefaultTheme        string `json:"default_theme"`
-	CustomCSS           string `json:"custom_css"`
-	MaintenanceEnabled  bool   `json:"maintenance_enabled"`
-	MaintenanceTitle    string `json:"maintenance_title"`
-	MaintenanceMessage  string `json:"maintenance_message"`
-	MaintenanceETA      string `json:"maintenance_eta"`
-	ClientAreaEnabled   bool   `json:"client_area_enabled"`
-	ClientAreaAvailable bool   `json:"client_area_available"`
-	ClientAreaLabel     string `json:"client_area_label"`
-	ClientAreaURL       string `json:"client_area_url"`
-	ClientAreaOpenMode  string `json:"client_area_open_mode"`
-	ClientAreaSubtitle  string `json:"client_area_subtitle"`
+	BrandName            string `json:"brand_name"`
+	BrandSubtitle        string `json:"brand_subtitle"`
+	LogoURL              string `json:"logo_url"`
+	FaviconURL           string `json:"favicon_url"`
+	LoginBgURL           string `json:"login_bg_url"`
+	ServerHeroURL        string `json:"server_hero_url"`
+	CardCoverURL         string `json:"card_cover_url"`
+	DefaultAvatarURL     string `json:"default_avatar_url"`
+	FooterText           string `json:"footer_text"`
+	Preset               string `json:"preset"`
+	AccentColor          string `json:"accent_color"`
+	AccentHover          string `json:"accent_hover"`
+	BgDeep               string `json:"bg_deep"`
+	BgCanvas             string `json:"bg_canvas"`
+	CardBg               string `json:"card_bg"`
+	NavBg                string `json:"nav_bg"`
+	TextColor            string `json:"text_color"`
+	CardOpacity          int    `json:"card_opacity"`
+	BorderRadiusPx       int    `json:"border_radius_px"`
+	GlassBlurPx          int    `json:"glass_blur_px"`
+	DefaultTheme         string `json:"default_theme"`
+	CustomCSS            string `json:"custom_css"`
+	MaintenanceEnabled   bool   `json:"maintenance_enabled"`
+	MaintenanceTitle     string `json:"maintenance_title"`
+	MaintenanceMessage   string `json:"maintenance_message"`
+	MaintenanceETA       string `json:"maintenance_eta"`
+	ClientAreaEnabled    bool   `json:"client_area_enabled"`
+	ClientAreaAvailable  bool   `json:"client_area_available"`
+	ClientAreaLabel      string `json:"client_area_label"`
+	ClientAreaURL        string `json:"client_area_url"`
+	ClientAreaOpenMode   string `json:"client_area_open_mode"`
+	ClientAreaSubtitle   string `json:"client_area_subtitle"`
+	ShowClientAreaButton bool   `json:"show_client_area_button"`
+	Timezone             string `json:"timezone"`
 }
 
 type DaemonSettingsConfig struct {
@@ -95,38 +97,40 @@ func NewBrandingHandler(db *database.DB, cfg *config.Config) *BrandingHandler {
 
 func defaultPanelBranding() PanelBrandingConfig {
 	return PanelBrandingConfig{
-		BrandName:           "NeoPanel",
-		BrandSubtitle:       "Ultra-Lightweight Minecraft Server Manager",
-		LogoURL:             "",
-		FaviconURL:          "",
-		LoginBgURL:          "",
-		ServerHeroURL:       "https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg",
-		CardCoverURL:        "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MC-Downloadables_Image-0_15th-Anniversary_1110x624.jpg",
-		DefaultAvatarURL:    "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MCV_SummerDrop_Hero_DotNet_Downloadable_Wallpaper_r414x414.png",
-		FooterText:          "Powered by NeoPanel Daemon",
-		Preset:              "obsidian",
-		AccentColor:         "#387aff",
-		AccentHover:         "#4f8aff",
-		BgDeep:              "",
-		BgCanvas:            "",
-		CardBg:              "",
-		NavBg:               "",
-		TextColor:           "",
-		CardOpacity:         72,
-		BorderRadiusPx:      14,
-		GlassBlurPx:         16,
-		DefaultTheme:        "dark",
-		CustomCSS:           "",
-		MaintenanceEnabled:  false,
-		MaintenanceTitle:    "Scheduled Maintenance",
-		MaintenanceMessage:  "We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.",
-		MaintenanceETA:      "",
-		ClientAreaEnabled:   false,
-		ClientAreaAvailable: true,
-		ClientAreaLabel:     "Client Area",
-		ClientAreaURL:       "",
-		ClientAreaOpenMode:  "tab",
-		ClientAreaSubtitle:  "Purchase servers, manage subscriptions, and view invoices in your storefront.",
+		BrandName:            "NeoPanel",
+		BrandSubtitle:        "Ultra-Lightweight Minecraft Server Manager",
+		LogoURL:              "",
+		FaviconURL:           "",
+		LoginBgURL:           "",
+		ServerHeroURL:        "https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg",
+		CardCoverURL:         "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MC-Downloadables_Image-0_15th-Anniversary_1110x624.jpg",
+		DefaultAvatarURL:     "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MCV_SummerDrop_Hero_DotNet_Downloadable_Wallpaper_r414x414.png",
+		FooterText:           "Powered by NeoPanel Daemon",
+		Preset:               "obsidian",
+		AccentColor:          "#387aff",
+		AccentHover:          "#4f8aff",
+		BgDeep:               "",
+		BgCanvas:             "",
+		CardBg:               "",
+		NavBg:                "",
+		TextColor:            "",
+		CardOpacity:          72,
+		BorderRadiusPx:       14,
+		GlassBlurPx:          16,
+		DefaultTheme:         "dark",
+		CustomCSS:            "",
+		MaintenanceEnabled:   false,
+		MaintenanceTitle:     "Scheduled Maintenance",
+		MaintenanceMessage:   "We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.",
+		MaintenanceETA:       "",
+		ClientAreaEnabled:    false,
+		ClientAreaAvailable:  true,
+		ClientAreaLabel:      "Client Area",
+		ClientAreaURL:        "",
+		ClientAreaOpenMode:   "tab",
+		ClientAreaSubtitle:   "Purchase servers, manage subscriptions, and view invoices in your storefront.",
+		ShowClientAreaButton: true,
+		Timezone:             "UTC",
 	}
 }
 

@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -148,8 +149,57 @@ func (db *DB) migrate() error {
 		value TEXT NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS server_subusers (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		server_id TEXT NOT NULL,
+		user_id INTEGER NOT NULL,
+		permissions TEXT NOT NULL DEFAULT '[]',
+		created_at DATETIME NOT NULL,
+		UNIQUE(server_id, user_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_subusers_srv ON server_subusers(server_id);
+	CREATE INDEX IF NOT EXISTS idx_subusers_usr ON server_subusers(user_id);
+
+	CREATE TABLE IF NOT EXISTS server_schedules (
+		id TEXT PRIMARY KEY,
+		server_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		cron_expr TEXT NOT NULL,
+		action TEXT NOT NULL,
+		payload TEXT NOT NULL DEFAULT '',
+		is_active BOOLEAN NOT NULL DEFAULT 1,
+		last_run_at DATETIME,
+		next_run_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_schedules_srv ON server_schedules(server_id);
 	`
-	_, err := db.conn.Exec(schema)
+	if _, err := db.conn.Exec(schema); err != nil {
+		return err
+	}
+
+	// Safe automatic schema column migrations
+	_ = db.addColumnIfNotExists("servers", "icon_url", "TEXT DEFAULT ''")
+	_ = db.addColumnIfNotExists("servers", "owner_id", "INTEGER DEFAULT 1")
+	_ = db.addColumnIfNotExists("nodes", "is_free", "BOOLEAN NOT NULL DEFAULT 0")
+	_ = db.addColumnIfNotExists("nodes", "idle_timeout_min", "INTEGER NOT NULL DEFAULT 0")
+	_ = db.addColumnIfNotExists("nodes", "allow_user_ram", "BOOLEAN NOT NULL DEFAULT 0")
+	_ = db.addColumnIfNotExists("nodes", "allow_user_ports", "BOOLEAN NOT NULL DEFAULT 0")
+	_ = db.addColumnIfNotExists("nodes", "allow_user_java", "BOOLEAN NOT NULL DEFAULT 1")
+	_ = db.addColumnIfNotExists("nodes", "isolation_engine", "TEXT NOT NULL DEFAULT 'auto'")
+	_ = db.addColumnIfNotExists("nodes", "cpu_limit_percent", "INTEGER NOT NULL DEFAULT 0")
+	_ = db.addColumnIfNotExists("nodes", "tasks_max", "INTEGER NOT NULL DEFAULT 512")
+
+	return nil
+}
+
+func (db *DB) addColumnIfNotExists(table, column, colDef string) error {
+	query := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colDef)
+	_, err := db.conn.Exec(query)
 	return err
 }
 
@@ -226,7 +276,7 @@ func (db *DB) DeleteUser(id int) error {
 }
 
 func (db *DB) ListServers() ([]*Server, error) {
-	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, created_at, updated_at FROM servers ORDER BY created_at DESC`)
+	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), created_at, updated_at FROM servers ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +289,7 @@ func (db *DB) ListServers() ([]*Server, error) {
 		err := rows.Scan(
 			&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 			&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-			&autoRestart, &s.CreatedAt, &s.UpdatedAt,
+			&autoRestart, &s.IconURL, &s.OwnerID, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -257,13 +307,13 @@ func (db *DB) ListServers() ([]*Server, error) {
 }
 
 func (db *DB) GetServer(id string) (*Server, error) {
-	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, created_at, updated_at FROM servers WHERE id = ?`, id)
+	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), created_at, updated_at FROM servers WHERE id = ?`, id)
 	s := &Server{}
 	var autoRestart int
 	err := row.Scan(
 		&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 		&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-		&autoRestart, &s.CreatedAt, &s.UpdatedAt,
+		&autoRestart, &s.IconURL, &s.OwnerID, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -281,9 +331,9 @@ func (db *DB) CreateServer(s *Server) error {
 	s.CreatedAt = now
 	s.UpdatedAt = now
 
-	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.CreatedAt, s.UpdatedAt)
+	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, icon_url, owner_id, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.CreatedAt, s.UpdatedAt)
 	return err
 }
 
@@ -294,8 +344,13 @@ func (db *DB) UpdateServer(s *Server) error {
 	}
 	s.UpdatedAt = time.Now().UTC()
 
-	_, err := db.conn.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, updated_at = ? WHERE id = ?`,
-		s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.UpdatedAt, s.ID)
+	_, err := db.conn.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, icon_url = ?, owner_id = ?, updated_at = ? WHERE id = ?`,
+		s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.UpdatedAt, s.ID)
+	return err
+}
+
+func (db *DB) UpdateServerIcon(id string, iconURL string) error {
+	_, err := db.conn.Exec(`UPDATE servers SET icon_url = ?, updated_at = ? WHERE id = ?`, iconURL, time.Now().UTC(), id)
 	return err
 }
 
@@ -616,7 +671,7 @@ func (db *DB) GetUserByAPIKeyHash(keyHash string) (*User, error) {
 // --- Cluster Nodes ---
 
 func (db *DB) ListNodes() ([]*ClusterNode, error) {
-	rows, err := db.conn.Query(`SELECT id, name, base_url, api_token, fqdn, location, created_at, updated_at FROM nodes ORDER BY created_at ASC`)
+	rows, err := db.conn.Query(`SELECT id, name, base_url, api_token, fqdn, location, COALESCE(is_free, 0), COALESCE(idle_timeout_min, 0), COALESCE(allow_user_ram, 0), COALESCE(allow_user_ports, 0), COALESCE(allow_user_java, 1), COALESCE(isolation_engine, 'auto'), COALESCE(cpu_limit_percent, 0), COALESCE(tasks_max, 512), created_at, updated_at FROM nodes ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -625,9 +680,19 @@ func (db *DB) ListNodes() ([]*ClusterNode, error) {
 	var nodes []*ClusterNode
 	for rows.Next() {
 		n := &ClusterNode{}
-		if err := rows.Scan(&n.ID, &n.Name, &n.BaseURL, &n.APIToken, &n.FQDN, &n.Location, &n.CreatedAt, &n.UpdatedAt); err != nil {
+		var isFree, allowRam, allowPorts, allowJava int
+		if err := rows.Scan(
+			&n.ID, &n.Name, &n.BaseURL, &n.APIToken, &n.FQDN, &n.Location,
+			&isFree, &n.IdleTimeoutMin, &allowRam, &allowPorts, &allowJava,
+			&n.IsolationEngine, &n.CPULimitPercent, &n.TasksMax,
+			&n.CreatedAt, &n.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
+		n.IsFree = isFree == 1
+		n.AllowUserRAM = allowRam == 1
+		n.AllowUserPorts = allowPorts == 1
+		n.AllowUserJava = allowJava == 1
 		nodes = append(nodes, n)
 	}
 	if err := rows.Err(); err != nil {
@@ -640,11 +705,21 @@ func (db *DB) ListNodes() ([]*ClusterNode, error) {
 }
 
 func (db *DB) GetNode(id string) (*ClusterNode, error) {
-	row := db.conn.QueryRow(`SELECT id, name, base_url, api_token, fqdn, location, created_at, updated_at FROM nodes WHERE id = ?`, id)
+	row := db.conn.QueryRow(`SELECT id, name, base_url, api_token, fqdn, location, COALESCE(is_free, 0), COALESCE(idle_timeout_min, 0), COALESCE(allow_user_ram, 0), COALESCE(allow_user_ports, 0), COALESCE(allow_user_java, 1), COALESCE(isolation_engine, 'auto'), COALESCE(cpu_limit_percent, 0), COALESCE(tasks_max, 512), created_at, updated_at FROM nodes WHERE id = ?`, id)
 	n := &ClusterNode{}
-	if err := row.Scan(&n.ID, &n.Name, &n.BaseURL, &n.APIToken, &n.FQDN, &n.Location, &n.CreatedAt, &n.UpdatedAt); err != nil {
+	var isFree, allowRam, allowPorts, allowJava int
+	if err := row.Scan(
+		&n.ID, &n.Name, &n.BaseURL, &n.APIToken, &n.FQDN, &n.Location,
+		&isFree, &n.IdleTimeoutMin, &allowRam, &allowPorts, &allowJava,
+		&n.IsolationEngine, &n.CPULimitPercent, &n.TasksMax,
+		&n.CreatedAt, &n.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
+	n.IsFree = isFree == 1
+	n.AllowUserRAM = allowRam == 1
+	n.AllowUserPorts = allowPorts == 1
+	n.AllowUserJava = allowJava == 1
 	return n, nil
 }
 
@@ -652,15 +727,60 @@ func (db *DB) CreateNode(n *ClusterNode) error {
 	now := time.Now().UTC()
 	n.CreatedAt = now
 	n.UpdatedAt = now
-	_, err := db.conn.Exec(`INSERT INTO nodes (id, name, base_url, api_token, fqdn, location, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		n.ID, n.Name, n.BaseURL, n.APIToken, n.FQDN, n.Location, n.CreatedAt, n.UpdatedAt)
+	if n.IsolationEngine == "" {
+		n.IsolationEngine = "auto"
+	}
+	if n.TasksMax <= 0 {
+		n.TasksMax = 512
+	}
+	isFree := 0
+	if n.IsFree {
+		isFree = 1
+	}
+	allowRam := 0
+	if n.AllowUserRAM {
+		allowRam = 1
+	}
+	allowPorts := 0
+	if n.AllowUserPorts {
+		allowPorts = 1
+	}
+	allowJava := 1
+	if !n.AllowUserJava {
+		allowJava = 0
+	}
+	_, err := db.conn.Exec(`INSERT INTO nodes (id, name, base_url, api_token, fqdn, location, is_free, idle_timeout_min, allow_user_ram, allow_user_ports, allow_user_java, isolation_engine, cpu_limit_percent, tasks_max, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, n.BaseURL, n.APIToken, n.FQDN, n.Location, isFree, n.IdleTimeoutMin, allowRam, allowPorts, allowJava, n.IsolationEngine, n.CPULimitPercent, n.TasksMax, n.CreatedAt, n.UpdatedAt)
 	return err
 }
 
 func (db *DB) UpdateNode(n *ClusterNode) error {
 	n.UpdatedAt = time.Now().UTC()
-	_, err := db.conn.Exec(`UPDATE nodes SET name = ?, base_url = ?, api_token = ?, fqdn = ?, location = ?, updated_at = ? WHERE id = ?`,
-		n.Name, n.BaseURL, n.APIToken, n.FQDN, n.Location, n.UpdatedAt, n.ID)
+	if n.IsolationEngine == "" {
+		n.IsolationEngine = "auto"
+	}
+	if n.TasksMax <= 0 {
+		n.TasksMax = 512
+	}
+	isFree := 0
+	if n.IsFree {
+		isFree = 1
+	}
+	allowRam := 0
+	if n.AllowUserRAM {
+		allowRam = 1
+	}
+	allowPorts := 0
+	if n.AllowUserPorts {
+		allowPorts = 1
+	}
+	allowJava := 1
+	if !n.AllowUserJava {
+		allowJava = 0
+	}
+	_, err := db.conn.Exec(`UPDATE nodes SET name = ?, base_url = ?, api_token = ?, fqdn = ?, location = ?, is_free = ?, idle_timeout_min = ?, allow_user_ram = ?, allow_user_ports = ?, allow_user_java = ?, isolation_engine = ?, cpu_limit_percent = ?, tasks_max = ?, updated_at = ? WHERE id = ?`,
+		n.Name, n.BaseURL, n.APIToken, n.FQDN, n.Location, isFree, n.IdleTimeoutMin, allowRam, allowPorts, allowJava, n.IsolationEngine, n.CPULimitPercent, n.TasksMax, n.UpdatedAt, n.ID)
 	return err
 }
 
@@ -747,4 +867,238 @@ func (db *DB) SetPanelSetting(key, value string) error {
 func (db *DB) DeletePanelSetting(key string) error {
 	_, err := db.conn.Exec(`DELETE FROM panel_settings WHERE key = ?`, key)
 	return err
+}
+
+// --- Server Subusers & Permission Management ---
+
+func (db *DB) ListServerSubusers(serverID string) ([]*ServerSubuser, error) {
+	rows, err := db.conn.Query(`
+		SELECT su.id, su.server_id, su.user_id, u.username, su.permissions, su.created_at
+		FROM server_subusers su
+		JOIN users u ON su.user_id = u.id
+		WHERE su.server_id = ?
+		ORDER BY su.created_at ASC
+	`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*ServerSubuser
+	for rows.Next() {
+		su := &ServerSubuser{}
+		var permJSON string
+		if err := rows.Scan(&su.ID, &su.ServerID, &su.UserID, &su.Username, &permJSON, &su.CreatedAt); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(permJSON), &su.Permissions)
+		if su.Permissions == nil {
+			su.Permissions = []string{}
+		}
+		list = append(list, su)
+	}
+	if list == nil {
+		list = []*ServerSubuser{}
+	}
+	return list, nil
+}
+
+func (db *DB) AddServerSubuser(serverID string, userID int, permissions []string) (*ServerSubuser, error) {
+	if permissions == nil {
+		permissions = []string{}
+	}
+	permJSON, _ := json.Marshal(permissions)
+	now := time.Now().UTC()
+
+	res, err := db.conn.Exec(`INSERT INTO server_subusers (server_id, user_id, permissions, created_at) VALUES (?, ?, ?, ?)`,
+		serverID, userID, string(permJSON), now)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+
+	var username string
+	_ = db.conn.QueryRow(`SELECT username FROM users WHERE id = ?`, userID).Scan(&username)
+
+	return &ServerSubuser{
+		ID:          int(id),
+		ServerID:    serverID,
+		UserID:      userID,
+		Username:    username,
+		Permissions: permissions,
+		CreatedAt:   now,
+	}, nil
+}
+
+func (db *DB) UpdateServerSubuser(id int, permissions []string) error {
+	if permissions == nil {
+		permissions = []string{}
+	}
+	permJSON, _ := json.Marshal(permissions)
+	_, err := db.conn.Exec(`UPDATE server_subusers SET permissions = ? WHERE id = ?`, string(permJSON), id)
+	return err
+}
+
+func (db *DB) DeleteServerSubuser(serverID string, id int) error {
+	_, err := db.conn.Exec(`DELETE FROM server_subusers WHERE server_id = ? AND id = ?`, serverID, id)
+	return err
+}
+
+func (db *DB) GetUserServerPermissions(serverID string, userID int) ([]string, error) {
+	var permJSON string
+	err := db.conn.QueryRow(`SELECT permissions FROM server_subusers WHERE server_id = ? AND user_id = ?`, serverID, userID).Scan(&permJSON)
+	if err != nil {
+		return nil, err
+	}
+	var perms []string
+	_ = json.Unmarshal([]byte(permJSON), &perms)
+	if perms == nil {
+		perms = []string{}
+	}
+	return perms, nil
+}
+
+func (db *DB) IsServerSubuser(serverID string, userID int) (bool, error) {
+	var count int
+	err := db.conn.QueryRow(`SELECT COUNT(*) FROM server_subusers WHERE server_id = ? AND user_id = ?`, serverID, userID).Scan(&count)
+	return count > 0, err
+}
+
+// --- Server Schedules ---
+
+func (db *DB) ListServerSchedules(serverID string) ([]*ServerSchedule, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
+		FROM server_schedules
+		WHERE server_id = ?
+		ORDER BY created_at ASC
+	`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*ServerSchedule
+	for rows.Next() {
+		s := &ServerSchedule{}
+		var isActive int
+		var lastRun, nextRun sql.NullTime
+		if err := rows.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		s.IsActive = isActive == 1
+		if lastRun.Valid {
+			s.LastRunAt = &lastRun.Time
+		}
+		if nextRun.Valid {
+			s.NextRunAt = &nextRun.Time
+		}
+		list = append(list, s)
+	}
+	if list == nil {
+		list = []*ServerSchedule{}
+	}
+	return list, nil
+}
+
+func (db *DB) GetServerSchedule(serverID, id string) (*ServerSchedule, error) {
+	row := db.conn.QueryRow(`
+		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
+		FROM server_schedules
+		WHERE server_id = ? AND id = ?
+	`, serverID, id)
+	s := &ServerSchedule{}
+	var isActive int
+	var lastRun, nextRun sql.NullTime
+	if err := row.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		return nil, err
+	}
+	s.IsActive = isActive == 1
+	if lastRun.Valid {
+		s.LastRunAt = &lastRun.Time
+	}
+	if nextRun.Valid {
+		s.NextRunAt = &nextRun.Time
+	}
+	return s, nil
+}
+
+func (db *DB) CreateServerSchedule(s *ServerSchedule) error {
+	now := time.Now().UTC()
+	s.CreatedAt = now
+	s.UpdatedAt = now
+	isActive := 0
+	if s.IsActive {
+		isActive = 1
+	}
+	_, err := db.conn.Exec(`
+		INSERT INTO server_schedules (id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, s.ID, s.ServerID, s.Name, s.CronExpr, s.Action, s.Payload, isActive, s.LastRunAt, s.NextRunAt, s.CreatedAt, s.UpdatedAt)
+	return err
+}
+
+func (db *DB) UpdateServerSchedule(s *ServerSchedule) error {
+	s.UpdatedAt = time.Now().UTC()
+	isActive := 0
+	if s.IsActive {
+		isActive = 1
+	}
+	_, err := db.conn.Exec(`
+		UPDATE server_schedules
+		SET name = ?, cron_expr = ?, action = ?, payload = ?, is_active = ?, updated_at = ?
+		WHERE server_id = ? AND id = ?
+	`, s.Name, s.CronExpr, s.Action, s.Payload, isActive, s.UpdatedAt, s.ServerID, s.ID)
+	return err
+}
+
+func (db *DB) DeleteServerSchedule(serverID, id string) error {
+	_, err := db.conn.Exec(`DELETE FROM server_schedules WHERE server_id = ? AND id = ?`, serverID, id)
+	return err
+}
+
+func (db *DB) ToggleServerSchedule(serverID, id string, active bool) error {
+	val := 0
+	if active {
+		val = 1
+	}
+	_, err := db.conn.Exec(`UPDATE server_schedules SET is_active = ?, updated_at = ? WHERE server_id = ? AND id = ?`, val, time.Now().UTC(), serverID, id)
+	return err
+}
+
+func (db *DB) RecordScheduleRun(id string, lastRun time.Time, nextRun *time.Time) error {
+	_, err := db.conn.Exec(`UPDATE server_schedules SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, lastRun, nextRun, time.Now().UTC(), id)
+	return err
+}
+
+func (db *DB) ListAllActiveSchedules() ([]*ServerSchedule, error) {
+	rows, err := db.conn.Query(`
+		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
+		FROM server_schedules
+		WHERE is_active = 1
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*ServerSchedule
+	for rows.Next() {
+		s := &ServerSchedule{}
+		var isActive int
+		var lastRun, nextRun sql.NullTime
+		if err := rows.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		s.IsActive = isActive == 1
+		if lastRun.Valid {
+			s.LastRunAt = &lastRun.Time
+		}
+		if nextRun.Valid {
+			s.NextRunAt = &nextRun.Time
+		}
+		list = append(list, s)
+	}
+	return list, nil
 }

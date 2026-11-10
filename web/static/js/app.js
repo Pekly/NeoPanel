@@ -867,7 +867,9 @@ const DEFAULT_BRANDING = {
   client_area_label: 'Client Area',
   client_area_url: '',
   client_area_open_mode: 'tab',
-  client_area_subtitle: 'Purchase servers, manage subscriptions, and view invoices in your storefront.'
+  client_area_subtitle: 'Purchase servers, manage subscriptions, and view invoices in your storefront.',
+  show_client_area_button: true,
+  timezone: 'UTC'
 };
 
 const BRAND_PRESETS = [
@@ -4385,10 +4387,7 @@ const CORES = [
 ];
 
 const FAM = [
-  ['26.3', 'Wilderness Bound', '2026', ['26.3']],
-  ['26.2', 'Chaos Cubed', '2026', ['26.2']],
-  ['26.1', 'Tiny Takeover', '2026', ['26.1.2', '26.1.1', '26.1']],
-  ['1.21', 'Tricky Trials & Drops', '2024–2025', ['1.21.11', '1.21.10', '1.21.9', '1.21.8', '1.21.7', '1.21.6', '1.21.5', '1.21.4', '1.21.3', '1.21.2', '1.21.1', '1.21']],
+  ['1.21', 'Tricky Trials & Drops', '2024–2025', ['1.21.4', '1.21.3', '1.21.2', '1.21.1', '1.21']],
   ['1.20', 'Trails & Tales', '2023–2024', ['1.20.6', '1.20.5', '1.20.4', '1.20.3', '1.20.2', '1.20.1', '1.20']],
   ['1.19', 'The Wild Update', '2022–2023', ['1.19.4', '1.19.3', '1.19.2', '1.19.1', '1.19']],
   ['1.18', 'Caves & Cliffs: Part II', '2021–2022', ['1.18.2', '1.18.1', '1.18']],
@@ -5056,7 +5055,12 @@ function formatFullDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return String(iso);
-  return d.toLocaleString();
+  const tz = S.branding?.timezone || 'UTC';
+  try {
+    return d.toLocaleString(undefined, { timeZone: tz });
+  } catch (e) {
+    return d.toLocaleString();
+  }
 }
 
 function getScopedActivityRows(scope = 'all') {
@@ -6420,25 +6424,89 @@ const V = {
   },
 
   sc() {
+    const srv = curServer();
+    const schedules = Array.isArray(S.serverSchedules) ? S.serverSchedules : [];
+    const isLoading = S.loading?.schedules;
+
     return `${srvh()}
-    <div class="card tw" style="margin-top:14px">
-      <table>
-        <thead><tr><th>Task</th><th>Cron Expression</th><th>Status</th></tr></thead>
-        <tbody>
-          ${S.sc.map((s, i) => `
-            <tr>
-              <td><b>${esc(s[0])}</b></td>
-              <td class="mono">${esc(s[1])}</td>
-              <td>
-                <label class="sw">
-                  <input type="checkbox" ${s[2] ? 'checked' : ''} onchange="S.sc[${i}][2]=this.checked; toast('${s[0]} schedule updated');">
-                  <i></i>
-                </label>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 14px;">
+      <div class="card" style="padding: 22px;">
+        <div class="row sb" style="align-items: flex-start; flex-wrap: wrap; gap: 14px;">
+          <div>
+            <h2 style="margin: 0; font-size: 18px; color: var(--tx);">Automated Schedules &amp; Tasks</h2>
+            <p class="mu" style="font-size: 13px; margin: 4px 0 0; max-width: 650px;">
+              Schedule recurring server console commands (e.g. broadcasts, world saves), automatic restarts, and world backups using standard cron expressions.
+            </p>
+          </div>
+          <div class="row" style="gap: 8px;">
+            <button class="btn sm" onclick="loadServerSchedules('${esc(srv?.id || '')}')">${ic('refresh', 13)} Refresh</button>
+            <button class="btn pr sm" onclick="openScheduleModal()" style="height: 36px; padding: 0 16px;">
+              ${ic('plus', 14)} Create Schedule
+            </button>
+          </div>
+        </div>
+      </div>
+
+      ${isLoading ? `<div class="card">${loaderHtml('Loading automated schedules...')}</div>` : (
+        schedules.length === 0 ? `
+          <div class="card mu" style="text-align: center; padding: 36px 20px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">⏰</div>
+            <h3 style="color: var(--tx); margin: 0 0 6px; font-size: 16px;">No Automated Schedules Configured</h3>
+            <p style="margin: 0 auto 16px; max-width: 480px; font-size: 13px; line-height: 1.5;">
+              Create automated schedules to restart your server during quiet hours, broadcast automated warnings to online players, or archive world backups.
+            </p>
+            <button class="btn pr" onclick="openScheduleModal()">${ic('plus', 14)} Create Your First Schedule</button>
+          </div>
+        ` : `
+          <div class="card tw">
+            <table>
+              <thead>
+                <tr>
+                  <th>Schedule Name</th>
+                  <th>Action</th>
+                  <th>Cron Expression</th>
+                  <th>Schedule Frequency</th>
+                  <th>Last Executed</th>
+                  <th>Status</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${schedules.map(sch => {
+                  const actBadge = getScheduleActionBadge(sch.action);
+                  const cronHuman = describeCron(sch.cron_expr);
+                  const lastRunStr = sch.last_run_at && !sch.last_run_at.startsWith('0001')
+                    ? formatFileDate(sch.last_run_at)
+                    : 'Never run';
+                  return `<tr>
+                    <td>
+                      <b style="color: var(--tx); display: block;">${esc(sch.name)}</b>
+                      ${sch.payload ? `<span class="mono mu" style="font-size: 11.5px;">${esc(sch.payload)}</span>` : ''}
+                    </td>
+                    <td>${actBadge}</td>
+                    <td class="mono" style="font-weight: 600;">${esc(sch.cron_expr)}</td>
+                    <td style="font-size: 12.5px; color: var(--tx-muted);">${esc(cronHuman)}</td>
+                    <td style="font-size: 12px;" class="mu">${esc(lastRunStr)}</td>
+                    <td>
+                      <label class="sw" title="Toggle active status">
+                        <input type="checkbox" ${sch.is_active ? 'checked' : ''} onchange="toggleServerSchedule('${esc(sch.id)}', this.checked)">
+                        <i></i>
+                      </label>
+                    </td>
+                    <td style="text-align: right;">
+                      <div class="row" style="justify-content: flex-end; gap: 6px;">
+                        <button class="btn sm" onclick="runScheduleNow('${esc(sch.id)}')" title="Run immediately once">${ic('play', 12)} Run Now</button>
+                        <button class="btn sm" onclick="openScheduleModal('${esc(sch.id)}')" title="Edit schedule settings">${ic('edit', 12)} Edit</button>
+                        <button class="btn sm dg" onclick="deleteServerSchedule('${esc(sch.id)}')" title="Delete schedule">${ic('trash', 12)}</button>
+                      </div>
+                    </td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `
+      )}
     </div>`;
   },
 
@@ -7024,6 +7092,11 @@ const V = {
     const verList = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
     const saveStatus = _settingsUiState?.status || 'saved';
     const saveText = _settingsUiState?.text || 'Real-time auto-save active';
+    const node = getNode(srv?.node_id || 'local');
+    const isAdmin = S.user?.role === 'admin';
+    const isRamLocked = Boolean(node && node.allow_user_ram === false && !isAdmin);
+    const isPortsLocked = Boolean(node && node.allow_user_ports === false && !isAdmin);
+    const isJavaLocked = Boolean(node && node.allow_user_java === false && !isAdmin);
 
     return `${srvh()}
     <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 16px;">
@@ -7037,6 +7110,26 @@ const V = {
               <span class="settings-autosave-text">${esc(saveText)}</span>
             </span>
           </div>
+
+          <!-- Server Icon Preview & Quick Configs -->
+          <div class="row" style="gap: 16px; align-items: center; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+            <div style="position: relative; width: 64px; height: 64px; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,0.3); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+              <img id="set-srv-icon-img" src="${srv?.icon_url ? esc(srv.icon_url) : '/static/img/default-server-icon.png'}" onerror="this.src='/static/img/default-server-icon.png'" style="width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated;" alt="Server Icon">
+            </div>
+            <div style="flex: 1; min-width: 180px;">
+              <div style="font-weight: 600; font-size: 13.5px; margin-bottom: 3px; color: var(--tx);">Server Icon &amp; Quick Configs</div>
+              <div class="mu" style="font-size: 12px; margin-bottom: 8px;">64×64 PNG for Minecraft server list &amp; instant gameplay config editor</div>
+              <div class="row" style="gap: 8px; flex-wrap: wrap;">
+                <label class="btn sm" style="cursor: pointer; margin: 0;">
+                  ${ic('upload', 12)} Upload Icon
+                  <input type="file" accept="image/png,image/jpeg,image/webp" style="display: none;" onchange="if(this.files[0]) uploadServerIcon('${esc(srv?.id || '')}', this.files[0])">
+                </label>
+                ${srv?.icon_url ? `<button type="button" class="btn sm dg" onclick="deleteServerIcon('${esc(srv?.id || '')}')">${ic('trash', 12)} Remove</button>` : ''}
+                <button type="button" class="btn sm" onclick="openQuickConfigsModal('${esc(srv?.id || '')}')">${ic('sliders', 12)} Quick Configs</button>
+              </div>
+            </div>
+          </div>
+
           <div class="grid g2" style="gap: 10px; margin-bottom: 12px;">
             <label class="f" style="margin-bottom: 0;">
               <span>Server Panel Name</span>
@@ -7055,13 +7148,16 @@ const V = {
         <div class="card" style="padding: 20px;">
           <h2 style="font-size: 16px; margin-bottom: 12px;">Java Runtime Environment</h2>
           <label class="f" style="margin-bottom: 8px;">
-            <span>Java Runtime Version</span>
-            <select id="prop-java" onchange="onPropJavaChange(this.value)">
+            <span class="row sb">
+              <span>Java Runtime Version</span>
+              ${isJavaLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked by Node Policy</span>' : ''}
+            </span>
+            <select id="prop-java" ${isJavaLocked ? 'disabled title="Java runtime changes are restricted by node policy."' : 'onchange="onPropJavaChange(this.value)"'}>
               ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type, srv?.node_id || 'local')}
             </select>
           </label>
           <div id="prop-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
-            <input type="text" id="prop-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
+            <input type="text" id="prop-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;" ${isJavaLocked ? 'disabled' : ''} oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
           </div>
           ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
           <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Choose Java 25, 21, 17, 8, or a custom JVM binary path for this server.</span>
@@ -7085,8 +7181,11 @@ const V = {
           </div>
           <div class="grid g2">
             <label class="f">
-              <span>Server Game Port</span>
-              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}" oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()">
+              <span class="row sb">
+                <span>Server Game Port</span>
+                ${isPortsLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked</span>' : ''}
+              </span>
+              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}" ${isPortsLocked ? 'disabled title="Port changes are restricted by node policy."' : 'oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()"'} >
             </label>
             <label class="f">
               <span>Max Players</span>
@@ -7113,15 +7212,24 @@ const V = {
           <h2>Startup Variables &amp; Allocation</h2>
           <div class="grid g2">
             <label class="f">
-              <span>Allocated Memory (-Xmx)</span>
-              <select id="prop-ram" onchange="updateSettingsCmdPreview(); saveSettingsAutoNow();">
-                <option value="1024" ${curMem === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
-                <option value="2048" ${curMem === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
-                <option value="4096" ${curMem === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
-                <option value="6144" ${curMem === 6144 ? 'selected' : ''}>6 GB (6144 MB)</option>
-                <option value="8192" ${curMem === 8192 ? 'selected' : ''}>8 GB (8192 MB)</option>
-                <option value="16384" ${curMem === 16384 ? 'selected' : ''}>16 GB (16384 MB)</option>
-              </select>
+              <span class="row sb">
+                <span>Allocated Memory (-Xmx)</span>
+                ${isRamLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked by Node Policy</span>' : ''}
+              </span>
+              ${isRamLocked ? `
+                <select id="prop-ram" disabled title="Memory allocation is managed by cluster administrators on this node.">
+                  <option value="${curMem}" selected>${curMem >= 1024 ? (curMem/1024) + ' GB' : curMem + ' MB'} (${curMem} MB)</option>
+                </select>
+              ` : `
+                <select id="prop-ram" onchange="updateSettingsCmdPreview(); saveSettingsAutoNow();">
+                  <option value="1024" ${curMem === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
+                  <option value="2048" ${curMem === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
+                  <option value="4096" ${curMem === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
+                  <option value="6144" ${curMem === 6144 ? 'selected' : ''}>6 GB (6144 MB)</option>
+                  <option value="8192" ${curMem === 8192 ? 'selected' : ''}>8 GB (8192 MB)</option>
+                  <option value="16384" ${curMem === 16384 ? 'selected' : ''}>16 GB (16384 MB)</option>
+                </select>
+              `}
             </label>
             <label class="f">
               <span>Server Executable JAR</span>
@@ -7155,6 +7263,26 @@ const V = {
             <span class="settings-autosave-dot"></span>
             <span class="settings-autosave-text">${esc(saveText)}</span>
           </div>
+        </div>
+      </div>
+
+      <!-- Server Subusers & Team Access -->
+      <div class="card" style="padding: 22px;">
+        <div class="row sb" style="align-items: flex-start; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
+          <div>
+            <h2 style="font-size: 16px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; color: var(--tx);">
+              ${ic('users', 16)} Server Subusers &amp; Team Access
+            </h2>
+            <p class="mu" style="font-size: 13px; margin: 0; max-width: 650px;">
+              Invite teammates or staff members to manage this server with fine-grained RBAC permissions (console access, file management, power controls, databases, backups, and schedules).
+            </p>
+          </div>
+          <button type="button" class="btn pr sm" onclick="openSubuserModal()" style="height: 36px; padding: 0 16px;">
+            ${ic('plus', 14)} Add Subuser
+          </button>
+        </div>
+        <div id="subusers-list-wrap">
+          ${renderSubusersListHtml(srv)}
         </div>
       </div>
 
@@ -7654,6 +7782,12 @@ const V = {
                   <option value="auto" ${draft.default_theme === 'auto' ? 'selected' : ''}>Match OS Preference</option>
                 </select>
               </label>
+              <label class="f" style="margin-bottom: 0;">
+                <span>Panel Timezone</span>
+                <select onchange="onBrandInputChange('timezone', this.value)">
+                  ${['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Ulaanbaatar', 'Australia/Sydney'].map(tz => `<option value="${tz}" ${(draft.timezone || 'UTC') === tz ? 'selected' : ''}>${tz}</option>`).join('')}
+                </select>
+              </label>
             </div>
 
             <div style="margin-top: 18px;">
@@ -7920,6 +8054,13 @@ const V = {
                   <i></i>
                 </span>
               </label>
+              <label class="row sb" style="cursor:pointer; margin-bottom:8px;">
+                <span style="font-size:13px; color:var(--tx-muted);">Show "Client Area" Navigation Button in Sidebar</span>
+                <span class="sw">
+                  <input type="checkbox" ${draft.show_client_area_button !== false ? 'checked' : ''} onchange="onBrandInputChange('show_client_area_button', this.checked)">
+                  <i></i>
+                </span>
+              </label>
               <label class="row sb" style="cursor:pointer;">
                 <span style="font-size:13px; color:var(--tx-muted);">Mark Storefront Available (off = 503 Unavailable error)</span>
                 <span class="sw">
@@ -7952,6 +8093,26 @@ const V = {
             <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px; flex-wrap:wrap;">
               <a href="/client-area" onclick="return handleNavClick(event, 'client')" class="btn sm" style="text-decoration:none;">${ic('external', 13)} Open /client-area</a>
               <button type="button" class="btn sm pr" onclick="saveBrandingAndDaemon()">${ic('check', 13)} Save Storefront</button>
+            </div>
+
+            <!-- Automated Provisioning Integration & API Code Samples -->
+            <div style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px;">
+              <div class="row sb" style="margin-bottom: 8px;">
+                <div>
+                  <b style="color: var(--tx); font-size: 13.5px; display: block;">Automated Billing &amp; Server Provisioning API</b>
+                  <span class="mu" style="font-size: 12px;">Call <code>POST /api/client-api/v1/provision</code> from WHMCS, Blesta, or billing systems when an order is placed</span>
+                </div>
+              </div>
+              <div class="tabs" style="margin-bottom: 8px;">
+                <button type="button" class="btn sm ${S.clientCodeLang === 'php' || !S.clientCodeLang ? 'pr' : ''}" onclick="setClientCodeLang('php')">PHP (WHMCS / Blesta)</button>
+                <button type="button" class="btn sm ${S.clientCodeLang === 'node' ? 'pr' : ''}" onclick="setClientCodeLang('node')">Node.js</button>
+                <button type="button" class="btn sm ${S.clientCodeLang === 'python' ? 'pr' : ''}" onclick="setClientCodeLang('python')">Python</button>
+                <button type="button" class="btn sm ${S.clientCodeLang === 'curl' ? 'pr' : ''}" onclick="setClientCodeLang('curl')">cURL</button>
+              </div>
+              <div style="position: relative;">
+                <pre class="mono" style="background: var(--con-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #f0f3f6; overflow-x: auto; max-height: 220px; white-space: pre;">${esc(getClientProvisioningCode(S.clientCodeLang || 'php'))}</pre>
+                <button type="button" class="btn sm" style="position: absolute; right: 8px; top: 8px;" onclick="copyClientProvisioningCode()">${ic('copy', 12)} Copy</button>
+              </div>
             </div>
           </div>
         </div>
@@ -8028,6 +8189,12 @@ const V = {
         <div class="ar">
           <div><b>Privacy Mode</b><div class="mu">Blur server IPs and personal emails across the panel</div></div>
           <label class="sw"><input type="checkbox" ${a.priv ? 'checked' : ''} onchange="togglePrivacy(this.checked)"><i></i></label>
+        </div>
+        <div class="ar">
+          <div><b>Timezone</b><div class="mu">Display activity logs, console timestamps, and file dates in your timezone</div></div>
+          <select id="acc-timezone" onchange="setUserTimezone(this.value)" style="max-width: 220px;">
+            ${['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Ulaanbaatar', 'Australia/Sydney'].map(tz => `<option value="${tz}" ${(S.branding?.timezone || 'UTC') === tz ? 'selected' : ''}>${tz}</option>`).join('')}
+          </select>
         </div>
       </div>`;
     } else if (t === 1) {
@@ -8335,11 +8502,12 @@ function navHtml() {
       ${ic('activity', 16)}
       <span>Activity</span>
     </a>
+    ${b.show_client_area_button !== false ? `
     <a class="nav-item ${S.view === 'client' ? 'on' : ''}" href="${esc(routeUrl('client'))}" onclick="return handleNavClick(event, 'client')" ${S.view === 'client' ? 'aria-current="page"' : ''}>
       ${ic('store', 16)}
       <span>${esc(clientLabel)}</span>
       ${clientStatusBadge}
-    </a>
+    </a>` : ''}
 
     ${renderModSidebarItemsHtml('global')}
     <div class="np-slot-container" data-np-slot="nav:bottom"></div>
@@ -8555,11 +8723,13 @@ async function loadInitialRouteData(view) {
     if ((S.plugTab || 'browse') === 'browse') jobs.push(searchModrinth(true));
   }
   else if (view === 'bk') jobs.push(loadBackupsList(true));
+  else if (view === 'sc') jobs.push(loadServerSchedules(curServer()?.id, true));
   else if (view === 'set' || view === 'stp') {
     jobs.push(loadProperties(true));
     jobs.push(loadVersionsCatalog());
     jobs.push(loadSFTPDetails(true));
     jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
+    jobs.push(loadServerSubusers(curServer()?.id, true));
   }
   else if (view === 'ver') {
     jobs.push(loadVersionsCatalog());
@@ -8587,11 +8757,13 @@ window.onEnterView = function(view) {
     if ((S.plugTab || 'browse') === 'browse') searchModrinth();
   }
   else if (view === 'bk') loadBackupsList();
+  else if (view === 'sc') loadServerSchedules();
   else if (view === 'set' || view === 'stp') {
     loadProperties();
     loadVersionsCatalog();
     loadSFTPDetails();
     loadJavaRuntimes(false, curServer()?.node_id || 'local');
+    loadServerSubusers();
   }
   else if (view === 'ver') { loadVersionsCatalog(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
   else if (view === 'sub') loadSubdomainData();
@@ -8824,6 +8996,64 @@ function openNodeModal(nodeId = null) {
           <input type="password" id="nm-token" ${isEdit ? '' : 'required'} autocomplete="new-password" placeholder="${isEdit ? `Saved (${esc(existing.token_prefix || 'neo_...')})` : 'neo_node_... or neo_...'}">
         </label>
 
+        <!-- Free Node Idle Player Timeout -->
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+          <label class="row sb" style="cursor: pointer; margin-bottom: 8px;">
+            <div>
+              <b style="color: var(--tx); display: block;">Free Node (Idle Player Auto-Shutdown)</b>
+              <span class="mu" style="font-size: 12px;">Automatically stops running servers when 0 players are connected for the configured duration</span>
+            </div>
+            <span class="sw">
+              <input type="checkbox" id="nm-free" ${existing?.is_free ? 'checked' : ''} onchange="$('#nm-timeout-wrap').style.display = this.checked ? 'block' : 'none'">
+              <i></i>
+            </span>
+          </label>
+          <div id="nm-timeout-wrap" style="display: ${existing?.is_free ? 'block' : 'none'}; margin-top: 8px;">
+            <label class="f" style="margin-bottom: 0;">
+              <span>Idle Timeout (Minutes with 0 Players, default 15)</span>
+              <input type="number" id="nm-idle-timeout" value="${existing?.idle_timeout_min || 15}" min="1" max="1440" placeholder="15">
+            </label>
+          </div>
+        </div>
+
+        <!-- Node Permissions Policy -->
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+          <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 8px;">Non-Admin Permissions Policy</div>
+          <label class="row sb" style="cursor: pointer; margin-bottom: 6px;">
+            <span style="font-size: 13px; color: var(--tx);">Allow Non-Admin Subusers to Modify RAM Allocation</span>
+            <span class="sw">
+              <input type="checkbox" id="nm-allow-ram" ${existing?.allow_user_ram !== false ? 'checked' : ''}>
+              <i></i>
+            </span>
+          </label>
+          <label class="row sb" style="cursor: pointer; margin-bottom: 6px;">
+            <span style="font-size: 13px; color: var(--tx);">Allow Non-Admin Subusers to Modify Server Port</span>
+            <span class="sw">
+              <input type="checkbox" id="nm-allow-ports" ${existing?.allow_user_ports !== false ? 'checked' : ''}>
+              <i></i>
+            </span>
+          </label>
+          <label class="row sb" style="cursor: pointer;">
+            <span style="font-size: 13px; color: var(--tx);">Allow Non-Admin Subusers to Change Java Version</span>
+            <span class="sw">
+              <input type="checkbox" id="nm-allow-java" ${existing?.allow_user_java !== false ? 'checked' : ''}>
+              <i></i>
+            </span>
+          </label>
+        </div>
+
+        <!-- Process Isolation -->
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+          <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 8px;">Security &amp; Sandboxing</div>
+          <label class="f" style="margin-bottom: 0;">
+            <span>Process Isolation Engine</span>
+            <select id="nm-isolation">
+              <option value="bubblewrap" ${(existing?.isolation_engine || 'bubblewrap') === 'bubblewrap' ? 'selected' : ''}>Bubblewrap (bwrap jailed filesystem + systemd slice)</option>
+              <option value="none" ${existing?.isolation_engine === 'none' ? 'selected' : ''}>Host Direct (No filesystem jail)</option>
+            </select>
+          </label>
+        </div>
+
         <div id="node-modal-test-res" style="margin-bottom: 14px;"></div>
 
         <div class="row sb" style="gap:10px; margin-top:6px;">
@@ -8892,7 +9122,13 @@ async function submitNodeModal(e, nodeId = '') {
     location: $('#nm-loc')?.value.trim() || '',
     base_url: $('#nm-url')?.value.trim() || '',
     fqdn: $('#nm-fqdn')?.value.trim() || '',
-    api_token: $('#nm-token')?.value.trim() || ''
+    api_token: $('#nm-token')?.value.trim() || '',
+    is_free: $('#nm-free') ? $('#nm-free').checked : false,
+    idle_timeout_min: parseInt($('#nm-idle-timeout')?.value, 10) || 15,
+    allow_user_ram: $('#nm-allow-ram') ? $('#nm-allow-ram').checked : true,
+    allow_user_ports: $('#nm-allow-ports') ? $('#nm-allow-ports').checked : true,
+    allow_user_java: $('#nm-allow-java') ? $('#nm-allow-java').checked : true,
+    isolation_engine: $('#nm-isolation')?.value || 'bubblewrap'
   };
 
   try {
@@ -9132,7 +9368,8 @@ function formatFileDate(iso) {
     if (diffSec < 60) return 'Just now';
     if (diffSec < 3600) return `${Math.floor(diffSec / 60)} minutes ago`;
     if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} hours ago`;
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    const tz = S.branding?.timezone || 'UTC';
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: tz });
   } catch (e) {
     return '—';
   }
@@ -10996,12 +11233,13 @@ function paletteItems() {
   const q = (S.pq || '').toLowerCase();
   const isModSrv = isModdedEngine(curServer()?.type || S.core);
   const clientLabel = (getBrand('client_area_label') || 'Client Area').trim() || 'Client Area';
+  const showClientArea = getBrand('show_client_area_button') !== false;
   const modCmds = Array.isArray(window.NP?._paletteCommands)
     ? window.NP._paletteCommands.map(c => [c.group || 'Extensions', c.label || 'Extension Action', c.subtitle || 'Mod command', () => c.action && c.action()])
     : [];
   const items = [
     ...PG.map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods & Store' : p[1], 'Go to page', () => go(p[0])]),
-    ['Pages', clientLabel, 'External storefront & billing portal', () => go('client')],
+    ...(showClientArea ? [['Pages', clientLabel, 'External storefront & billing portal', () => go('client')]] : []),
     ['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')],
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
     ...S.servers.map(s => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => {
@@ -11296,7 +11534,7 @@ function openCreateServerModal() {
           <div class="row sb" style="margin-bottom:6px; flex-wrap:wrap; gap:6px;">
             <span class="mu" style="font-size:13px; font-weight:600;">Minecraft / Release Version (All Releases)</span>
             <div class="row" style="gap:4px; flex-wrap:wrap;">
-              ${['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.16.5', '1.12.2', '1.8.9'].map(v => `
+              ${['1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5', '1.12.2', '1.8.9'].map(v => `
                 <button type="button" class="btn sm ver-pill ${v === '1.21.4' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
               `).join('')}
             </div>
@@ -11305,7 +11543,7 @@ function openCreateServerModal() {
             <select id="cs-ver-sel" data-searchable="1" onchange="setCreateVersion(this.value)">
               ${initialVers.map(v => `<option value="${esc(v)}" ${v === '1.21.4' ? 'selected' : ''}>${esc(v)}</option>`).join('')}
             </select>
-            <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 26.3, 1.21.4, 1.12.2, 1.8.9, or custom" oninput="onCreateVersionInput(this.value)">
+            <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 1.21.4, 1.20.1, 1.16.5, 1.12.2, 1.8.9, or custom" oninput="onCreateVersionInput(this.value)">
           </div>
         </div>
 
@@ -11637,6 +11875,772 @@ async function setPrimaryPort(portId) {
   } catch (err) {
     toast(err.message || 'Failed to update primary port', 'bad');
   }
+}
+
+// --- Server Schedules Management ---
+async function loadServerSchedules(srvId = null, skipRender = false) {
+  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
+  if (!srv) return;
+  if (!S.loading) S.loading = {};
+  S.loading.schedules = true;
+  if (!skipRender && S.view === 'sc') R();
+  try {
+    const list = await api(srvApiPath(srv, '/schedules'));
+    S.serverSchedules = Array.isArray(list) ? list : [];
+  } catch (err) {
+    console.error('Failed to load server schedules:', err);
+    S.serverSchedules = [];
+  } finally {
+    S.loading.schedules = false;
+    if (!skipRender && S.view === 'sc') R();
+  }
+}
+
+function describeCron(expr) {
+  if (!expr) return 'Custom schedule';
+  const e = expr.trim();
+  if (e === '0 * * * *') return 'Hourly (at minute 0)';
+  if (e === '0 4 * * *') return 'Daily at 04:00 AM';
+  if (e === '0 0 * * *') return 'Daily at Midnight (00:00)';
+  if (e === '0 0 * * 0') return 'Weekly (Sundays at 00:00)';
+  if (e === '*/30 * * * *') return 'Every 30 minutes';
+  if (e === '*/15 * * * *') return 'Every 15 minutes';
+  if (e === '*/5 * * * *') return 'Every 5 minutes';
+  return 'Cron: ' + e;
+}
+
+function getScheduleActionBadge(action) {
+  if (action === 'command') return `<span class="chip" style="color: #38bdf8; border-color: rgba(56,189,248,0.3);">${ic('terminal', 11)} Command</span>`;
+  if (action === 'restart') return `<span class="chip" style="color: #f59e0b; border-color: rgba(245,158,11,0.3);">${ic('refresh', 11)} Restart</span>`;
+  if (action === 'backup') return `<span class="chip" style="color: #10b981; border-color: rgba(16,185,129,0.3);">${ic('archive', 11)} Backup</span>`;
+  if (action === 'stop') return `<span class="chip" style="color: #ef4444; border-color: rgba(239,68,68,0.3);">${ic('stop', 11)} Stop</span>`;
+  return `<span class="chip">${esc(action)}</span>`;
+}
+
+function openScheduleModal(schedId = null) {
+  const container = $('#modal-container');
+  if (!container) return;
+  const srv = curServer();
+  const existing = schedId && Array.isArray(S.serverSchedules)
+    ? S.serverSchedules.find(s => s.id === schedId)
+    : null;
+  const isEdit = Boolean(existing);
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding: 26px; max-width: 540px; max-height: 90vh; overflow-y: auto;">
+      <div class="row sb" style="margin-bottom: 14px;">
+        <h2 style="font-size: 20px; margin: 0; display: flex; align-items: center; gap: 8px;">
+          ${ic('clock', 18)} ${isEdit ? 'Edit Automated Schedule' : 'Create Automated Schedule'}
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p class="mu" style="font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
+        Define recurring automation rules for <b>${esc(srv?.name || 'this server')}</b> using standard 5-field cron syntax (Minute Hour Day-of-Month Month Day-of-Week).
+      </p>
+
+      <form onsubmit="submitScheduleModal(event, '${isEdit ? esc(existing.id) : ''}')">
+        <label class="f">
+          <span>Schedule Name</span>
+          <input type="text" id="sch-name" required value="${esc(existing?.name || '')}" placeholder="e.g. Daily 4 AM Restart, World Save Broadcast">
+        </label>
+
+        <div class="grid g2">
+          <label class="f">
+            <span>Action Type</span>
+            <select id="sch-action" onchange="onScheduleActionChange(this.value)">
+              <option value="command" ${(existing?.action || 'command') === 'command' ? 'selected' : ''}>Console Command</option>
+              <option value="restart" ${existing?.action === 'restart' ? 'selected' : ''}>Server Restart</option>
+              <option value="backup" ${existing?.action === 'backup' ? 'selected' : ''}>World Backup Archive</option>
+              <option value="stop" ${existing?.action === 'stop' ? 'selected' : ''}>Graceful Stop</option>
+            </select>
+          </label>
+
+          <label class="f">
+            <span>Cron Preset</span>
+            <select onchange="if(this.value)$('#sch-cron').value=this.value;">
+              <option value="">Select a preset...</option>
+              <option value="0 4 * * *">Daily at 04:00 AM</option>
+              <option value="0 0 * * *">Daily at Midnight (00:00)</option>
+              <option value="0 * * * *">Every Hour (Minute 0)</option>
+              <option value="*/30 * * * *">Every 30 Minutes</option>
+              <option value="*/15 * * * *">Every 15 Minutes</option>
+              <option value="0 0 * * 0">Weekly (Every Sunday)</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="f">
+          <span>Cron Expression (5 fields: min hour dom mon dow)</span>
+          <input type="text" id="sch-cron" required class="mono" value="${esc(existing?.cron_expr || '0 4 * * *')}" placeholder="0 4 * * *">
+        </label>
+
+        <div id="sch-payload-wrap" style="display: ${(existing?.action || 'command') === 'command' ? 'block' : 'none'};">
+          <label class="f">
+            <span>Console Command Payload</span>
+            <input type="text" id="sch-payload" value="${esc(existing?.payload || '')}" placeholder="e.g. say Server restarting in 5 minutes! or save-all">
+          </label>
+        </div>
+
+        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+          <label class="row sb" style="cursor: pointer;">
+            <div>
+              <b style="color: var(--tx); display: block;">Enable Schedule</b>
+              <span class="mu" style="font-size: 12px;">Active schedules are evaluated by the background cron worker every 30 seconds</span>
+            </div>
+            <span class="sw">
+              <input type="checkbox" id="sch-active" ${existing ? (existing.is_active ? 'checked' : '') : 'checked'}>
+              <i></i>
+            </span>
+          </label>
+        </div>
+
+        <div class="row sb" style="gap: 10px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="sch-submit-btn" class="btn pr">
+            ${ic('check', 14)} ${isEdit ? 'Save Changes' : 'Create Schedule'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+  setTimeout(() => $('#sch-name')?.focus(), 40);
+}
+
+function onScheduleActionChange(act) {
+  const wrap = $('#sch-payload-wrap');
+  if (wrap) wrap.style.display = (act === 'command') ? 'block' : 'none';
+}
+
+async function submitScheduleModal(e, schedId = '') {
+  e.preventDefault();
+  const srv = curServer();
+  if (!srv) return;
+  const btn = $('#sch-submit-btn');
+  if (btn) setBtnLoading(btn, true, schedId ? 'Saving...' : 'Creating...');
+
+  const payload = {
+    name: $('#sch-name')?.value.trim() || 'Schedule',
+    cron_expr: $('#sch-cron')?.value.trim() || '0 4 * * *',
+    action: $('#sch-action')?.value || 'command',
+    payload: $('#sch-payload')?.value.trim() || '',
+    is_active: $('#sch-active') ? $('#sch-active').checked : true
+  };
+
+  try {
+    const isEdit = Boolean(schedId);
+    await api(srvApiPath(srv, isEdit ? `/schedules/${encodeURIComponent(schedId)}` : '/schedules'), {
+      method: isEdit ? 'PUT' : 'POST',
+      body: JSON.stringify(payload)
+    });
+    closeModal();
+    toast(isEdit ? 'Schedule updated successfully' : 'Schedule created successfully', 'ok');
+    await loadServerSchedules(srv.id);
+  } catch (err) {
+    toast(err.message || 'Failed to save schedule', 'bad');
+    if (btn) setBtnLoading(btn, false);
+  }
+}
+
+async function toggleServerSchedule(schedId, active) {
+  const srv = curServer();
+  if (!srv) return;
+  try {
+    await api(srvApiPath(srv, `/schedules/${encodeURIComponent(schedId)}/toggle`), {
+      method: 'POST',
+      body: JSON.stringify({ is_active: Boolean(active) })
+    });
+    toast(active ? 'Schedule activated' : 'Schedule paused');
+    await loadServerSchedules(srv.id);
+  } catch (err) {
+    toast(err.message || 'Failed to toggle schedule', 'bad');
+    await loadServerSchedules(srv.id);
+  }
+}
+
+async function runScheduleNow(schedId) {
+  const srv = curServer();
+  if (!srv) return;
+  try {
+    toast('Executing schedule now...');
+    const res = await api(srvApiPath(srv, `/schedules/${encodeURIComponent(schedId)}/run`), { method: 'POST' });
+    toast(res.message || 'Schedule executed successfully', 'ok');
+    await loadServerSchedules(srv.id);
+  } catch (err) {
+    toast(err.message || 'Failed to execute schedule', 'bad');
+  }
+}
+
+async function deleteServerSchedule(schedId) {
+  const srv = curServer();
+  if (!srv) return;
+  const ok = await uiConfirm({
+    title: 'Delete Automated Schedule',
+    message: 'Are you sure you want to delete this automated schedule? This action cannot be undone.',
+    confirmText: 'Delete Schedule',
+    isDanger: true,
+    icon: 'trash'
+  });
+  if (!ok) return;
+
+  try {
+    await api(srvApiPath(srv, `/schedules/${encodeURIComponent(schedId)}`), { method: 'DELETE' });
+    toast('Schedule deleted', 'ok');
+    await loadServerSchedules(srv.id);
+  } catch (err) {
+    toast(err.message || 'Failed to delete schedule', 'bad');
+  }
+}
+
+// --- Server Subusers & Team Access ---
+const SUBUSER_PERMS = [
+  ['console.view', 'View Console', 'Access live server console and logs'],
+  ['console.command', 'Send Commands', 'Execute commands in the live console'],
+  ['server.power', 'Power Controls', 'Start, stop, restart, and kill server'],
+  ['files.view', 'Browse Files', 'Browse directories and view file contents'],
+  ['files.edit', 'Create & Edit Files', 'Upload, save edits, create files/folders'],
+  ['files.delete', 'Delete Files', 'Delete, rename, move, and extract archives'],
+  ['settings.view', 'View Settings', 'Inspect server settings and properties'],
+  ['settings.edit', 'Edit Settings', 'Modify MOTD, difficulty, rules & configs'],
+  ['database.manage', 'Databases', 'Create, delete, and view database credentials'],
+  ['backup.manage', 'Backups', 'Create, restore, download, and delete backups'],
+  ['subusers.manage', 'Manage Team', 'Invite, modify, and revoke subuser access'],
+  ['schedules.manage', 'Schedules', 'Create, toggle, and trigger cron schedules']
+];
+
+async function loadServerSubusers(srvId = null, skipRender = false) {
+  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
+  if (!srv) return;
+  try {
+    const list = await api(srvApiPath(srv, '/subusers'));
+    S.serverSubusers = Array.isArray(list) ? list : [];
+    if (!skipRender && S.view === 'set') {
+      const wrap = $('#subusers-list-wrap');
+      if (wrap) wrap.innerHTML = renderSubusersListHtml(srv);
+    }
+  } catch (err) {
+    console.error('Failed to load subusers:', err);
+    S.serverSubusers = [];
+  }
+}
+
+function renderSubusersListHtml(srv) {
+  const subusers = Array.isArray(S.serverSubusers) ? S.serverSubusers : [];
+  if (!subusers.length) {
+    return `<div class="card mu" style="text-align: center; padding: 24px 16px; background: rgba(255,255,255,0.01);">
+      <div style="font-size: 26px; margin-bottom: 6px;">👥</div>
+      <b style="color: var(--tx); display: block; margin-bottom: 4px;">No Subusers Assigned</b>
+      <span style="font-size: 12.5px;">Add teammates or moderators to grant them scoped server access without sharing your master credentials.</span>
+    </div>`;
+  }
+
+  return `<div class="tw">
+    <table>
+      <thead>
+        <tr>
+          <th>User</th>
+          <th>Email</th>
+          <th>Granted Permissions</th>
+          <th>Added</th>
+          <th style="text-align: right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${subusers.map(sub => {
+          const permsCount = Array.isArray(sub.permissions) ? sub.permissions.length : 0;
+          const permSummary = permsCount === SUBUSER_PERMS.length
+            ? '<span class="badge online">All Permissions (Admin)</span>'
+            : `<span class="chip">${permsCount} of ${SUBUSER_PERMS.length} allowed</span>`;
+          return `<tr>
+            <td>
+              <div class="row" style="gap: 8px; align-items: center;">
+                <span class="avb" style="width: 28px; height: 28px; border-radius: 6px; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; background: var(--bg);">${av(28)}</span>
+                <b style="color: var(--tx);">${esc(sub.username)}</b>
+              </div>
+            </td>
+            <td class="mu pv">${esc(sub.email)}</td>
+            <td>${permSummary}</td>
+            <td class="mu" style="font-size: 12px;">${formatFileDate(sub.created_at)}</td>
+            <td style="text-align: right;">
+              <div class="row" style="justify-content: flex-end; gap: 6px;">
+                <button type="button" class="btn sm" onclick="openSubuserModal('${esc(sub.id)}')">${ic('sliders', 12)} Edit</button>
+                <button type="button" class="btn sm dg" onclick="deleteServerSubuser('${esc(sub.id)}')">${ic('trash', 12)}</button>
+              </div>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function openSubuserModal(subuserId = null) {
+  const container = $('#modal-container');
+  if (!container) return;
+  const srv = curServer();
+  const existing = subuserId && Array.isArray(S.serverSubusers)
+    ? S.serverSubusers.find(s => s.id === subuserId)
+    : null;
+  const isEdit = Boolean(existing);
+  const curPerms = new Set(existing ? (existing.permissions || []) : ['console.view', 'files.view', 'settings.view']);
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding: 26px; max-width: 600px; max-height: 90vh; overflow-y: auto;">
+      <div class="row sb" style="margin-bottom: 14px;">
+        <h2 style="font-size: 20px; margin: 0; display: flex; align-items: center; gap: 8px;">
+          ${ic('user', 18)} ${isEdit ? `Edit Subuser: ${esc(existing.username)}` : 'Add Server Subuser'}
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p class="mu" style="font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
+        ${isEdit ? `Update RBAC permissions for <b>${esc(existing.username)}</b> on this server.` : `Invite an existing NeoPanel user by email or username to collaborate on <b>${esc(srv?.name || 'this server')}</b>.`}
+      </p>
+
+      <form onsubmit="submitSubuserModal(event, '${isEdit ? esc(existing.id) : ''}')">
+        ${!isEdit ? `
+          <label class="f">
+            <span>User Email or Username</span>
+            <input type="text" id="sub-ident" required placeholder="user@example.com or username">
+          </label>
+        ` : ''}
+
+        <div style="margin-bottom: 14px;">
+          <div class="row sb" style="margin-bottom: 6px;">
+            <span style="font-size: 13px; font-weight: 600; color: var(--tx);">Granted Permissions</span>
+            <div class="row" style="gap: 6px;">
+              <button type="button" class="btn sm" onclick="$$('.sub-perm-cb').forEach(cb=>cb.checked=true)">Select All</button>
+              <button type="button" class="btn sm" onclick="$$('.sub-perm-cb').forEach(cb=>cb.checked=false)">Deselect All</button>
+            </div>
+          </div>
+          <div class="subuser-perm-grid">
+            ${SUBUSER_PERMS.map(([key, label, desc]) => `
+              <label class="subuser-perm-item">
+                <input type="checkbox" class="sub-perm-cb" value="${esc(key)}" ${curPerms.has(key) ? 'checked' : ''}>
+                <div style="min-width: 0;">
+                  <b style="font-size: 12.5px; color: var(--tx); display: block;">${esc(label)}</b>
+                  <span class="mu" style="font-size: 11px; display: block; line-height: 1.3;">${esc(desc)}</span>
+                </div>
+              </label>
+            `).join('')}
+          </div>
+        </div>
+
+        <div class="row sb" style="gap: 10px; margin-top: 18px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="sub-submit-btn" class="btn pr">
+            ${ic('check', 14)} ${isEdit ? 'Save Permissions' : 'Grant Access'}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+  setTimeout(() => $('#sub-ident')?.focus(), 40);
+}
+
+async function submitSubuserModal(e, subuserId = '') {
+  e.preventDefault();
+  const srv = curServer();
+  if (!srv) return;
+  const btn = $('#sub-submit-btn');
+  if (btn) setBtnLoading(btn, true, subuserId ? 'Saving...' : 'Granting...');
+
+  const perms = Array.from($$('.sub-perm-cb:checked')).map(cb => cb.value);
+  const identifier = $('#sub-ident')?.value.trim() || '';
+
+  try {
+    const isEdit = Boolean(subuserId);
+    if (isEdit) {
+      await api(srvApiPath(srv, `/subusers/${encodeURIComponent(subuserId)}`), {
+        method: 'PUT',
+        body: JSON.stringify({ permissions: perms })
+      });
+      toast('Subuser permissions updated', 'ok');
+    } else {
+      await api(srvApiPath(srv, '/subusers'), {
+        method: 'POST',
+        body: JSON.stringify({ identifier, permissions: perms })
+      });
+      toast(`User "${identifier}" added as subuser`, 'ok');
+    }
+    closeModal();
+    await loadServerSubusers(srv.id);
+  } catch (err) {
+    toast(err.message || 'Failed to save subuser', 'bad');
+    if (btn) setBtnLoading(btn, false);
+  }
+}
+
+async function deleteServerSubuser(subuserId) {
+  const srv = curServer();
+  if (!srv) return;
+  const ok = await uiConfirm({
+    title: 'Revoke Subuser Access',
+    message: 'Are you sure you want to revoke this user\'s access to the server?',
+    confirmText: 'Revoke Access',
+    isDanger: true,
+    icon: 'trash'
+  });
+  if (!ok) return;
+
+  try {
+    await api(srvApiPath(srv, `/subusers/${encodeURIComponent(subuserId)}`), { method: 'DELETE' });
+    toast('Subuser access revoked', 'ok');
+    await loadServerSubusers(srv.id);
+  } catch (err) {
+    toast(err.message || 'Failed to revoke subuser', 'bad');
+  }
+}
+
+// --- Server Icon Management ---
+async function uploadServerIcon(srvId, file) {
+  if (!file) return;
+  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
+  if (!srv) return;
+
+  if (file.size > 2 * 1024 * 1024) {
+    toast('Image file too large (maximum 2 MB)', 'bad');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('icon', file);
+
+  try {
+    toast('Uploading server icon...');
+    const res = await api(srvApiPath(srv, '/icon'), {
+      method: 'POST',
+      body: formData
+    });
+    if (res && res.icon_url) {
+      srv.icon_url = res.icon_url;
+      const img = $('#set-srv-icon-img');
+      if (img) img.src = res.icon_url + '?t=' + Date.now();
+      toast('Server icon updated (server-icon.png)', 'ok');
+      R();
+    }
+  } catch (err) {
+    toast(err.message || 'Failed to upload icon', 'bad');
+  }
+}
+
+async function deleteServerIcon(srvId) {
+  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
+  if (!srv) return;
+  try {
+    await api(srvApiPath(srv, '/icon'), { method: 'DELETE' });
+    srv.icon_url = '';
+    const img = $('#set-srv-icon-img');
+    if (img) img.src = '/static/img/default-server-icon.png';
+    toast('Server icon removed', 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to delete icon', 'bad');
+  }
+}
+
+// --- Quick Config Editor Tool ---
+let _quickConfigsCache = null;
+
+async function openQuickConfigsModal(srvId) {
+  const container = $('#modal-container');
+  if (!container) return;
+  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
+  if (!srv) return;
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding: 26px; max-width: 640px; max-height: 90vh; overflow-y: auto;">
+      <div class="row sb" style="margin-bottom: 14px;">
+        <h2 style="font-size: 20px; margin: 0; display: flex; align-items: center; gap: 8px;">
+          ${ic('sliders', 18)} Quick Configs &amp; Optimization
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+      <div id="quick-cfg-body">${loaderHtml('Loading server configurations...')}</div>
+    </div>
+  </div>`;
+
+  try {
+    const data = await api(srvApiPath(srv, '/quick-configs'));
+    _quickConfigsCache = data || {};
+    renderQuickConfigsModalBody(srv);
+  } catch (err) {
+    const body = $('#quick-cfg-body');
+    if (body) body.innerHTML = `<div class="node-error-note">${esc(err.message || 'Failed to load configs')}</div>`;
+  }
+}
+
+function renderQuickConfigsModalBody(srv) {
+  const body = $('#quick-cfg-body');
+  if (!body || !_quickConfigsCache) return;
+  const cfg = _quickConfigsCache;
+
+  body.innerHTML = `
+    <p class="mu" style="font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
+      Directly adjust high-impact Minecraft game properties without manually parsing raw <code>server.properties</code> and <code>eula.txt</code>.
+    </p>
+
+    <!-- Quick Presets -->
+    <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+      <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 8px;">Performance Optimization Presets</div>
+      <div class="row" style="gap: 8px; flex-wrap: wrap;">
+        <button type="button" class="btn sm" onclick="applyQuickConfigPreset('perf')">⚡ Extreme Performance (6 View, 4 Sim)</button>
+        <button type="button" class="btn sm" onclick="applyQuickConfigPreset('balanced')">⚖️ Balanced (10 View, 8 Sim)</button>
+        <button type="button" class="btn sm" onclick="applyQuickConfigPreset('ultra')">🌟 Ultra Visual (24 View, 16 Sim)</button>
+      </div>
+    </div>
+
+    <form onsubmit="saveQuickConfigs(event, '${esc(srv.id)}')">
+      <div class="grid g2" style="margin-bottom: 14px;">
+        <label class="f" style="margin-bottom: 0;">
+          <span>View Distance (<b id="lbl-qc-view">${cfg.view_distance ?? 10}</b> chunks)</span>
+          <div class="quick-cfg-slider-row">
+            <input type="range" id="qc-view" min="2" max="32" value="${cfg.view_distance ?? 10}" oninput="$('#lbl-qc-view').textContent=this.value">
+            <span class="quick-cfg-val-badge">${cfg.view_distance ?? 10}</span>
+          </div>
+        </label>
+        <label class="f" style="margin-bottom: 0;">
+          <span>Simulation Distance (<b id="lbl-qc-sim">${cfg.simulation_distance ?? 10}</b> chunks)</span>
+          <div class="quick-cfg-slider-row">
+            <input type="range" id="qc-sim" min="2" max="32" value="${cfg.simulation_distance ?? 10}" oninput="$('#lbl-qc-sim').textContent=this.value">
+            <span class="quick-cfg-val-badge">${cfg.simulation_distance ?? 10}</span>
+          </div>
+        </label>
+      </div>
+
+      <div class="grid g2" style="margin-bottom: 14px;">
+        <label class="f" style="margin-bottom: 0;">
+          <span>Spawn Protection Radius (<b id="lbl-qc-spawn">${cfg.spawn_protection ?? 16}</b> blocks)</span>
+          <div class="quick-cfg-slider-row">
+            <input type="range" id="qc-spawn" min="0" max="64" value="${cfg.spawn_protection ?? 16}" oninput="$('#lbl-qc-spawn').textContent=this.value">
+            <span class="quick-cfg-val-badge">${cfg.spawn_protection ?? 16}</span>
+          </div>
+        </label>
+        <label class="f" style="margin-bottom: 0;">
+          <span>Server MOTD</span>
+          <input type="text" id="qc-motd" value="${esc(cfg.motd || '')}" placeholder="A Minecraft Server">
+        </label>
+      </div>
+
+      <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
+        <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 8px;">Gameplay &amp; Protection Toggles</div>
+        <div class="grid g2" style="gap: 10px;">
+          <label class="row sb" style="cursor: pointer;">
+            <span style="font-size: 13px; color: var(--tx);">Allow Player Flight</span>
+            <span class="sw"><input type="checkbox" id="qc-flight" ${cfg.allow_flight ? 'checked' : ''}><i></i></span>
+          </label>
+          <label class="row sb" style="cursor: pointer;">
+            <span style="font-size: 13px; color: var(--tx);">Player vs Player (PvP)</span>
+            <span class="sw"><input type="checkbox" id="qc-pvp" ${cfg.pvp ? 'checked' : ''}><i></i></span>
+          </label>
+          <label class="row sb" style="cursor: pointer;">
+            <span style="font-size: 13px; color: var(--tx);">Enforce Whitelist</span>
+            <span class="sw"><input type="checkbox" id="qc-whitelist" ${cfg.white_list ? 'checked' : ''}><i></i></span>
+          </label>
+          <label class="row sb" style="cursor: pointer;">
+            <span style="font-size: 13px; color: var(--tx);">Command Blocks</span>
+            <span class="sw"><input type="checkbox" id="qc-cmd" ${cfg.enable_command_block ? 'checked' : ''}><i></i></span>
+          </label>
+          <label class="row sb" style="cursor: pointer;">
+            <span style="font-size: 13px; color: var(--tx);">Mojang EULA Accepted (eula.txt)</span>
+            <span class="sw"><input type="checkbox" id="qc-eula" ${cfg.eula_accepted ? 'checked' : ''}><i></i></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="row sb" style="gap: 10px;">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="submit" id="qc-save-btn" class="btn pr">
+          ${ic('check', 14)} Apply &amp; Save Configs
+        </button>
+      </div>
+    </form>
+  `;
+}
+
+function applyQuickConfigPreset(preset) {
+  if (preset === 'perf') {
+    if ($('#qc-view')) { $('#qc-view').value = 6; $('#lbl-qc-view').textContent = 6; }
+    if ($('#qc-sim')) { $('#qc-sim').value = 4; $('#lbl-qc-sim').textContent = 4; }
+    if ($('#qc-spawn')) { $('#qc-spawn').value = 0; $('#lbl-qc-spawn').textContent = 0; }
+    toast('Applied Extreme Performance preset');
+  } else if (preset === 'balanced') {
+    if ($('#qc-view')) { $('#qc-view').value = 10; $('#lbl-qc-view').textContent = 10; }
+    if ($('#qc-sim')) { $('#qc-sim').value = 8; $('#lbl-qc-sim').textContent = 8; }
+    if ($('#qc-spawn')) { $('#qc-spawn').value = 16; $('#lbl-qc-spawn').textContent = 16; }
+    toast('Applied Balanced preset');
+  } else if (preset === 'ultra') {
+    if ($('#qc-view')) { $('#qc-view').value = 24; $('#lbl-qc-view').textContent = 24; }
+    if ($('#qc-sim')) { $('#qc-sim').value = 16; $('#lbl-qc-sim').textContent = 16; }
+    if ($('#qc-spawn')) { $('#qc-spawn').value = 16; $('#lbl-qc-spawn').textContent = 16; }
+    toast('Applied Ultra Visual preset');
+  }
+}
+
+async function saveQuickConfigs(e, srvId) {
+  e.preventDefault();
+  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
+  if (!srv) return;
+  const btn = $('#qc-save-btn');
+  if (btn) setBtnLoading(btn, true, 'Saving...');
+
+  const payload = {
+    view_distance: parseInt($('#qc-view')?.value, 10) || 10,
+    simulation_distance: parseInt($('#qc-sim')?.value, 10) || 10,
+    spawn_protection: parseInt($('#qc-spawn')?.value, 10) || 16,
+    motd: $('#qc-motd')?.value || '',
+    allow_flight: $('#qc-flight') ? $('#qc-flight').checked : false,
+    pvp: $('#qc-pvp') ? $('#qc-pvp').checked : true,
+    white_list: $('#qc-whitelist') ? $('#qc-whitelist').checked : false,
+    enable_command_block: $('#qc-cmd') ? $('#qc-cmd').checked : false,
+    eula_accepted: $('#qc-eula') ? $('#qc-eula').checked : true
+  };
+
+  try {
+    await api(srvApiPath(srv, '/quick-configs'), {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    closeModal();
+    toast('Quick configurations saved (server restart recommended)', 'ok');
+    if (S.view === 'set') loadProperties();
+  } catch (err) {
+    toast(err.message || 'Failed to save quick configs', 'bad');
+    if (btn) setBtnLoading(btn, false);
+  }
+}
+
+// --- Client Area Provisioning Integration Helpers ---
+function setClientCodeLang(lang) {
+  S.clientCodeLang = lang;
+  if (S.view === 'admin' && S.adminTab === 4) R();
+}
+
+function getClientProvisioningCode(lang = 'php') {
+  const panelUrl = window.location.origin;
+  if (lang === 'php') {
+    return `<?php
+// NeoPanel Automated Provisioning (WHMCS / Blesta / Custom Hook)
+$endpoint = "${panelUrl}/api/client-api/v1/provision";
+$apiKey = "YOUR_MASTER_NODE_TOKEN_OR_API_KEY";
+
+$payload = [
+    "client_email"      => $client["email"],      // e.g. "player@example.com"
+    "client_username"   => $client["username"],   // e.g. "notch"
+    "server_name"       => "Survival SMP",
+    "node_id"           => "local",               // Target node ID
+    "server_type"       => "paper",               // paper, purpur, fabric, etc.
+    "minecraft_version" => "1.21.4",
+    "memory_mb"         => 4096,                  // 4 GB RAM
+    "disk_mb"           => 10240,                 // 10 GB Disk
+    "cpu_limit_percent" => 200,                   // 2 CPU cores max
+    "auto_start"        => true
+];
+
+$ch = curl_init($endpoint);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    "Content-Type: application/json",
+    "X-API-Key: " . $apiKey
+]);
+
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+$result = json_decode($response, true);
+if ($httpCode === 201) {
+    // Created! Save $result["server"]["id"], $result["server"]["port"]
+    echo "Server created! Port: " . $result["server"]["port"];
+}
+`;
+  } else if (lang === 'node') {
+    return `// Node.js Provisioning Hook
+const fetch = require('node-fetch');
+
+async function provisionServer(clientOrder) {
+  const res = await fetch('${panelUrl}/api/client-api/v1/provision', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': process.env.NEOPANEL_API_KEY
+    },
+    body: JSON.stringify({
+      client_email: clientOrder.email,
+      client_username: clientOrder.username,
+      server_name: clientOrder.serverName || 'Minecraft Server',
+      node_id: clientOrder.nodeId || 'local',
+      server_type: 'paper',
+      minecraft_version: '1.21.4',
+      memory_mb: clientOrder.ramMB || 4096,
+      disk_mb: 10240,
+      auto_start: true
+    })
+  });
+  return await res.json();
+}`;
+  } else if (lang === 'python') {
+    return `# Python Provisioning Hook
+import requests
+
+def provision_minecraft_server(email, username, ram_mb=4096):
+    url = "${panelUrl}/api/client-api/v1/provision"
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": "YOUR_MASTER_NODE_TOKEN_OR_API_KEY"
+    }
+    data = {
+        "client_email": email,
+        "client_username": username,
+        "server_name": "Survival Server",
+        "node_id": "local",
+        "server_type": "paper",
+        "minecraft_version": "1.21.4",
+        "memory_mb": ram_mb,
+        "auto_start": True
+    }
+    resp = requests.post(url, json=data, headers=headers)
+    return resp.json()`;
+  }
+  return `curl -X POST "${panelUrl}/api/client-api/v1/provision" \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: YOUR_MASTER_NODE_TOKEN_OR_API_KEY" \\
+  -d '{
+    "client_email": "user@example.com",
+    "client_username": "player1",
+    "server_name": "SMP Server",
+    "node_id": "local",
+    "server_type": "paper",
+    "minecraft_version": "1.21.4",
+    "memory_mb": 4096,
+    "disk_mb": 10240,
+    "auto_start": true
+  }'`;
+}
+
+function copyClientProvisioningCode() {
+  const code = getClientProvisioningCode(S.clientCodeLang || 'php');
+  navigator.clipboard.writeText(code).then(() => {
+    toast('Provisioning code copied to clipboard!', 'ok');
+  }).catch(() => {
+    toast('Failed to copy code', 'bad');
+  });
+}
+
+function setUserTimezone(tz) {
+  if (!S.branding) S.branding = { ...DEFAULT_BRANDING };
+  S.branding.timezone = tz;
+  localStorage.setItem('neopanel_timezone', tz);
+  toast(`Timezone set to ${tz}`);
+  if (S.user?.role === 'admin') {
+    api('/api/branding', {
+      method: 'POST',
+      body: JSON.stringify(S.branding)
+    }).catch(() => {});
+  }
+  R();
 }
 
 // --- Server Deletion Management ---
@@ -13980,6 +14984,30 @@ window.onPropJavaChange = onPropJavaChange;
 window.onPropVersionSelectChange = onPropVersionSelectChange;
 window.onPropVersionInput = onPropVersionInput;
 window.setSettingsSaveStatus = setSettingsSaveStatus;
+window.loadServerSchedules = loadServerSchedules;
+window.describeCron = describeCron;
+window.getScheduleActionBadge = getScheduleActionBadge;
+window.openScheduleModal = openScheduleModal;
+window.onScheduleActionChange = onScheduleActionChange;
+window.submitScheduleModal = submitScheduleModal;
+window.toggleServerSchedule = toggleServerSchedule;
+window.runScheduleNow = runScheduleNow;
+window.deleteServerSchedule = deleteServerSchedule;
+window.loadServerSubusers = loadServerSubusers;
+window.renderSubusersListHtml = renderSubusersListHtml;
+window.openSubuserModal = openSubuserModal;
+window.submitSubuserModal = submitSubuserModal;
+window.deleteServerSubuser = deleteServerSubuser;
+window.uploadServerIcon = uploadServerIcon;
+window.deleteServerIcon = deleteServerIcon;
+window.openQuickConfigsModal = openQuickConfigsModal;
+window.renderQuickConfigsModalBody = renderQuickConfigsModalBody;
+window.applyQuickConfigPreset = applyQuickConfigPreset;
+window.saveQuickConfigs = saveQuickConfigs;
+window.setClientCodeLang = setClientCodeLang;
+window.getClientProvisioningCode = getClientProvisioningCode;
+window.copyClientProvisioningCode = copyClientProvisioningCode;
+window.setUserTimezone = setUserTimezone;
 
 // --- Custom Glassmorphic Selects System (Portaled to document.body to prevent clipping) ---
 function closeAllCustomSelects() {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -212,6 +214,28 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
+	}
+
+	user := getUserFromContext(r)
+	isAdmin := user != nil && user.Role == "admin"
+
+	// Enforce node-level restrictions for normal / subusers
+	if !isAdmin {
+		node, _ := h.db.GetNode(server.NodeID)
+		if node != nil {
+			if !node.AllowUserRAM && ((req.MemoryMaxMB > 0 && req.MemoryMaxMB != server.MemoryMaxMB) || (req.MemoryMinMB > 0 && req.MemoryMinMB != server.MemoryMinMB)) {
+				writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering server memory")
+				return
+			}
+			if !node.AllowUserPorts && (req.Port > 0 && req.Port != server.Port) {
+				writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering server network ports")
+				return
+			}
+			if !node.AllowUserJava && (req.JavaPath != "" && req.JavaPath != server.JavaPath) {
+				writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering Java runtime binary")
+				return
+			}
+		}
 	}
 
 	if strings.TrimSpace(req.Name) != "" {
@@ -525,4 +549,258 @@ func (h *ServerHandler) updateServerPropertiesPort(serverID string, port int) {
 		lines = append(lines, fmt.Sprintf("query.port=%d", port))
 	}
 	_ = os.WriteFile(propsPath, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// UploadServerIcon saves a custom server-icon.png for the server
+func (h *ServerHandler) UploadServerIcon(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	server, err := h.db.GetServer(serverID)
+	if err != nil || server == nil {
+		writeError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
+	if err := r.ParseMultipartForm(2 * 1024 * 1024); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid image upload (max 2MB)")
+		return
+	}
+
+	file, header, err := r.FormFile("icon")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Missing 'icon' form field")
+		return
+	}
+	defer file.Close()
+
+	workDir := h.manager.GetWorkingDir(serverID)
+	_ = os.MkdirAll(workDir, 0755)
+	destPath := filepath.Join(workDir, "server-icon.png")
+
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save icon file: "+err.Error())
+		return
+	}
+	defer destFile.Close()
+
+	if _, err := io.Copy(destFile, file); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to write icon: "+err.Error())
+		return
+	}
+
+	iconURL := fmt.Sprintf("/api/servers/%s/icon?t=%d", serverID, time.Now().Unix())
+	_ = h.db.UpdateServerIcon(serverID, iconURL)
+
+	logAudit(h.db, r, "server_icon_upload", fmt.Sprintf("Uploaded custom server-icon.png for %s (%s)", server.Name, header.Filename))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "success",
+		"icon_url": iconURL,
+	})
+}
+
+// GetServerIcon returns the server's server-icon.png
+func (h *ServerHandler) GetServerIcon(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	workDir := h.manager.GetWorkingDir(serverID)
+	iconPath := filepath.Join(workDir, "server-icon.png")
+
+	if fi, err := os.Stat(iconPath); err == nil && !fi.IsDir() {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		http.ServeFile(w, r, iconPath)
+		return
+	}
+
+	http.Redirect(w, r, "https://cdn.iconscout.com/icon/free/png-256/free-minecraft-logo-icon-download-in-svg-png-gif-file-formats--brand-social-media-pack-logos-icons-8149830.png", http.StatusTemporaryRedirect)
+}
+
+// DeleteServerIcon removes the custom icon
+func (h *ServerHandler) DeleteServerIcon(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	workDir := h.manager.GetWorkingDir(serverID)
+	_ = os.Remove(filepath.Join(workDir, "server-icon.png"))
+	_ = h.db.UpdateServerIcon(serverID, "")
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "success",
+	})
+}
+
+// GetQuickConfigs reads server.properties and eula.txt for easy web editing
+func (h *ServerHandler) GetQuickConfigs(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	workDir := h.manager.GetWorkingDir(serverID)
+	propsPath := filepath.Join(workDir, "server.properties")
+	eulaPath := filepath.Join(workDir, "eula.txt")
+
+	configs := map[string]interface{}{
+		"view_distance":       10,
+		"simulation_distance": 8,
+		"spawn_protection":    16,
+		"allow_flight":        false,
+		"pvp":                 true,
+		"difficulty":          "easy",
+		"gamemode":            "survival",
+		"whitelist":           false,
+		"command_blocks":      false,
+		"online_mode":         true,
+		"motd":                "A Minecraft Server",
+		"eula_accepted":       false,
+	}
+
+	if eulaData, err := os.ReadFile(eulaPath); err == nil {
+		if strings.Contains(strings.ToLower(string(eulaData)), "eula=true") {
+			configs["eula_accepted"] = true
+		}
+	}
+
+	if data, err := os.ReadFile(propsPath); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			k := strings.TrimSpace(parts[0])
+			v := strings.TrimSpace(parts[1])
+
+			switch k {
+			case "motd":
+				configs["motd"] = v
+			case "view-distance":
+				if iv, err := strconv.Atoi(v); err == nil {
+					configs["view_distance"] = iv
+				}
+			case "simulation-distance":
+				if iv, err := strconv.Atoi(v); err == nil {
+					configs["simulation_distance"] = iv
+				}
+			case "spawn-protection":
+				if iv, err := strconv.Atoi(v); err == nil {
+					configs["spawn_protection"] = iv
+				}
+			case "allow-flight":
+				configs["allow_flight"] = v == "true"
+			case "pvp":
+				configs["pvp"] = v == "true"
+			case "difficulty":
+				configs["difficulty"] = v
+			case "gamemode":
+				configs["gamemode"] = v
+			case "white-list":
+				configs["whitelist"] = v == "true"
+			case "enable-command-block":
+				configs["command_blocks"] = v == "true"
+			case "online-mode":
+				configs["online_mode"] = v == "true"
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, configs)
+}
+
+// UpdateQuickConfigs updates key server properties and applies optimization presets
+func (h *ServerHandler) UpdateQuickConfigs(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	workDir := h.manager.GetWorkingDir(serverID)
+	propsPath := filepath.Join(workDir, "server.properties")
+	eulaPath := filepath.Join(workDir, "eula.txt")
+
+	var req map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 1. EULA toggle
+	if val, ok := req["eula_accepted"]; ok {
+		if bVal, ok := val.(bool); ok && bVal {
+			_ = os.WriteFile(eulaPath, []byte("eula=true\n"), 0644)
+		} else {
+			_ = os.WriteFile(eulaPath, []byte("eula=false\n"), 0644)
+		}
+	}
+
+	// 2. Read existing server.properties lines
+	existing := make(map[string]string)
+	orderedKeys := []string{}
+	if data, err := os.ReadFile(propsPath); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			k := strings.TrimSpace(parts[0])
+			v := strings.TrimSpace(parts[1])
+			if _, exists := existing[k]; !exists {
+				orderedKeys = append(orderedKeys, k)
+			}
+			existing[k] = v
+		}
+	}
+
+	// Apply presets if specified
+	if preset, ok := req["preset"].(string); ok {
+		switch preset {
+		case "extreme-performance":
+			existing["view-distance"] = "4"
+			existing["simulation-distance"] = "3"
+			existing["spawn-protection"] = "0"
+			existing["network-compression-threshold"] = "256"
+		case "balanced":
+			existing["view-distance"] = "8"
+			existing["simulation-distance"] = "6"
+			existing["spawn-protection"] = "16"
+		case "ultra":
+			existing["view-distance"] = "16"
+			existing["simulation-distance"] = "12"
+			existing["spawn-protection"] = "16"
+		}
+	}
+
+	// Map incoming keys to Minecraft server.properties keys
+	keyMap := map[string]string{
+		"view_distance":       "view-distance",
+		"simulation_distance": "simulation-distance",
+		"spawn_protection":    "spawn-protection",
+		"allow_flight":        "allow-flight",
+		"pvp":                 "pvp",
+		"difficulty":          "difficulty",
+		"gamemode":            "gamemode",
+		"whitelist":           "white-list",
+		"command_blocks":      "enable-command-block",
+		"online_mode":         "online-mode",
+		"motd":                "motd",
+	}
+
+	for jsonKey, propKey := range keyMap {
+		if val, ok := req[jsonKey]; ok {
+			strVal := fmt.Sprintf("%v", val)
+			if _, exists := existing[propKey]; !exists {
+				orderedKeys = append(orderedKeys, propKey)
+			}
+			existing[propKey] = strVal
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Minecraft server properties\n# Modified by NeoPanel Quick Config Editor\n")
+	for _, k := range orderedKeys {
+		sb.WriteString(fmt.Sprintf("%s=%s\n", k, existing[k]))
+	}
+
+	_ = os.WriteFile(propsPath, []byte(sb.String()), 0644)
+
+	logAudit(h.db, r, "quick_config_update", fmt.Sprintf("Updated game configurations on server %s", serverID))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "Game configuration updated successfully",
+	})
 }
