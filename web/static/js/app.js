@@ -1245,8 +1245,8 @@ function srvh() {
       </div>
     </div>
     <div class="row" style="position:relative">
-      <button class="btn" onclick="toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
-      ${S.cmenu ? `<div class="cmenu" role="menu">
+      <button class="btn" onclick="event.stopPropagation(); toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
+      ${S.cmenu ? `<div class="cmenu" role="menu" onclick="event.stopPropagation()">
         ${CMDS.map(([label, cmd]) => `<button role="menuitem" onclick="execQuickCmd('${cmd}')">${label}</button>`).join('')}
         <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
         <button role="menuitem" style="color: #ef4444;" onclick="S.cmenu=false; openDeleteServerModal('${srv?.id}', '${esc(srv?.name || '')}');">${ic('trash', 13)} Delete Server</button>
@@ -5801,6 +5801,10 @@ function enhanceSelects(root = document) {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.cselect-wrap')) {
     closeAllCustomSelects();
+  }
+  if (S.cmenu && !e.target.closest('.cmenu')) {
+    S.cmenu = false;
+    R();
   }
 });
 
