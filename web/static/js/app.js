@@ -46,7 +46,8 @@ function ic(name, size = 18) {
     image: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>`,
     viewList: `<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>`,
     viewIcons: `<rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/>`,
-    viewTiles: `<rect x="3" y="4" width="18" height="6.5" rx="1.2"/><rect x="3" y="13.5" width="8" height="6.5" rx="1.2"/><rect x="13" y="13.5" width="8" height="6.5" rx="1.2"/>`
+    viewTiles: `<rect x="3" y="4" width="18" height="6.5" rx="1.2"/><rect x="3" y="13.5" width="8" height="6.5" rx="1.2"/><rect x="13" y="13.5" width="8" height="6.5" rx="1.2"/>`,
+    move: `<polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>`
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic" aria-hidden="true">${p[name] || p.terminal}</svg>`;
 }
@@ -331,6 +332,7 @@ window.S = {
     ['Broadcast voting reminder', '*/30 * * * *', false]
   ],
   props: {
+    _srvId: null,
     motd: 'A Minecraft Server',
     max: 20,
     diff: 'normal',
@@ -1855,6 +1857,524 @@ function formatCommandLine(cmd) {
   return `<div class="con-cmd-row"><span class="con-ts">[${ts}]</span><span class="con-cmd-badge">CMD</span><span class="con-cmd-prefix">&gt;</span><span class="con-cmd-text">${esc(cmd)}</span></div>`;
 }
 
+// --- Minecraft Legacy Color, Hex, Gradient & MiniMessage Renderer ---
+const MC_LEGACY_COLORS = {
+  '0': '#000000',
+  '1': '#0000aa',
+  '2': '#00aa00',
+  '3': '#00aaaa',
+  '4': '#aa0000',
+  '5': '#aa00aa',
+  '6': '#ffaa00',
+  '7': '#aaaaaa',
+  '8': '#555555',
+  '9': '#5555ff',
+  'a': '#55ff55',
+  'b': '#55ffff',
+  'c': '#ff5555',
+  'd': '#ff55ff',
+  'e': '#ffff55',
+  'f': '#ffffff'
+};
+
+const MC_NAMED_COLORS = {
+  black: '#000000',
+  dark_blue: '#0000aa',
+  dark_green: '#00aa00',
+  dark_aqua: '#00aaaa',
+  dark_red: '#aa0000',
+  dark_purple: '#aa00aa',
+  gold: '#ffaa00',
+  gray: '#aaaaaa',
+  grey: '#aaaaaa',
+  dark_gray: '#555555',
+  dark_grey: '#555555',
+  blue: '#5555ff',
+  green: '#55ff55',
+  aqua: '#55ffff',
+  red: '#ff5555',
+  light_purple: '#ff55ff',
+  yellow: '#ffff55',
+  white: '#ffffff'
+};
+
+function parseMcColorHex(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return null;
+  if (MC_NAMED_COLORS[s]) return MC_NAMED_COLORS[s];
+  const m6 = /^#([0-9a-f]{6})$/i.exec(s);
+  if (m6) return `#${m6[1].toLowerCase()}`;
+  const m3 = /^#([0-9a-f]{3})$/i.exec(s);
+  if (m3) {
+    const [r, g, b] = m3[1].toLowerCase().split('');
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return null;
+}
+
+function hexToRgbTuple(hex) {
+  const h = String(hex || '#ffffff').replace('#', '');
+  return [
+    parseInt(h.slice(0, 2), 16) || 0,
+    parseInt(h.slice(2, 4), 16) || 0,
+    parseInt(h.slice(4, 6), 16) || 0
+  ];
+}
+
+function lerpGradientHex(stopsRgb, t) {
+  if (!stopsRgb || stopsRgb.length === 0) return '#ffffff';
+  if (stopsRgb.length === 1) {
+    const [r, g, b] = stopsRgb[0];
+    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+  }
+  const clamped = Math.max(0, Math.min(1, t));
+  const scaled = clamped * (stopsRgb.length - 1);
+  const idx = Math.min(stopsRgb.length - 2, Math.floor(scaled));
+  const localT = scaled - idx;
+  const a = stopsRgb[idx];
+  const b = stopsRgb[idx + 1];
+  const r = Math.round(a[0] + (b[0] - a[0]) * localT);
+  const g = Math.round(a[1] + (b[1] - a[1]) * localT);
+  const bl = Math.round(a[2] + (b[2] - a[2]) * localT);
+  return `#${((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1)}`;
+}
+
+function hsvRainbowHex(t) {
+  const h = (((t % 1) + 1) % 1) * 6;
+  const i = Math.floor(h);
+  const f = h - i;
+  const q = 1 - f;
+  const [r, g, b] = [
+    [1, f, 0],
+    [q, 1, 0],
+    [0, 1, f],
+    [0, q, 1],
+    [f, 0, 1],
+    [1, 0, q]
+  ][i % 6];
+  const toHex = x => Math.round(x * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function splitMcGraphemes(str) {
+  if (!str) return [];
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    return Array.from(seg.segment(str), s => s.segment);
+  }
+  return Array.from(str);
+}
+
+function renderMinecraftTextHtml(raw, opts = {}) {
+  const allowNewlines = opts.allowNewlines !== false;
+  let src = String(raw == null ? '' : raw);
+  if (!src) return '';
+
+  // Normalize Java server.properties escapes (\u00A7, \n, \:, \=, \\)
+  src = src.replace(/\\(u[0-9a-fA-F]{4}|n|r|t|\\|:|=)/g, (full, escSeq) => {
+    if (escSeq === 'n') return '\n';
+    if (escSeq === 'r') return '';
+    if (escSeq === 't') return ' ';
+    if (escSeq === '\\') return '\\';
+    if (escSeq === ':' || escSeq === '=') return escSeq;
+    if (escSeq.startsWith('u')) {
+      const code = parseInt(escSeq.slice(1), 16);
+      return Number.isFinite(code) ? String.fromCharCode(code) : full;
+    }
+    return full;
+  });
+
+  if (!allowNewlines) {
+    src = src.replace(/\r?\n/g, ' ');
+  } else {
+    src = src.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  }
+
+  // Tokenize legacy, hex, Iridium {#RRGGBB>}, and MiniMessage tags safely
+  const tokens = [];
+  const pushText = (t) => {
+    if (!t) return;
+    if (tokens.length > 0 && tokens[tokens.length - 1].type === 'text') {
+      tokens[tokens.length - 1].text += t;
+    } else {
+      tokens.push({ type: 'text', text: t });
+    }
+  };
+
+  let pos = 0;
+  const n = src.length;
+  while (pos < n) {
+    const ch = src[pos];
+    if (ch === '\n') {
+      tokens.push({ type: 'newline' });
+      pos += 1;
+      continue;
+    }
+
+    if (ch === '§' || ch === '&') {
+      const slice = src.slice(pos);
+      const bxMatch = /^(?:§|&)x(?:(?:§|&)([0-9a-fA-F])){6}/i.exec(slice);
+      if (bxMatch) {
+        const hex = slice.slice(0, 14).replace(/[§&x]/gi, '');
+        if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+          tokens.push({ type: 'legacy_color', color: `#${hex.toLowerCase()}` });
+          pos += 14;
+          continue;
+        }
+      }
+      const hexMatch = /^(?:§|&)#([0-9a-fA-F]{6})/.exec(slice);
+      if (hexMatch) {
+        tokens.push({ type: 'legacy_color', color: `#${hexMatch[1].toLowerCase()}` });
+        pos += hexMatch[0].length;
+        continue;
+      }
+      const codeMatch = /^(?:§|&)([0-9a-fklmnor])/i.exec(slice);
+      if (codeMatch) {
+        const c = codeMatch[1].toLowerCase();
+        if (MC_LEGACY_COLORS[c]) {
+          tokens.push({ type: 'legacy_color', color: MC_LEGACY_COLORS[c] });
+        } else {
+          tokens.push({ type: 'legacy_fmt', code: c });
+        }
+        pos += 2;
+        continue;
+      }
+      pushText(ch);
+      pos += 1;
+      continue;
+    }
+
+    if (ch === '{') {
+      const irMatch = /^\{\#([0-9a-fA-F]{6})([><]?)\}/.exec(src.slice(pos));
+      if (irMatch) {
+        const hex = `#${irMatch[1].toLowerCase()}`;
+        if (irMatch[2] === '>') {
+          tokens.push({ type: 'iridium_open', hex });
+        } else if (irMatch[2] === '<') {
+          tokens.push({ type: 'iridium_close', hex });
+        } else {
+          tokens.push({ type: 'legacy_color', color: hex });
+        }
+        pos += irMatch[0].length;
+        continue;
+      }
+      pushText(ch);
+      pos += 1;
+      continue;
+    }
+
+    if (ch === '<') {
+      const mmMatch = /^<([!\/]?)([a-zA-Z0-9_#]+)(?::([^>]*))?>/.exec(src.slice(pos));
+      if (mmMatch) {
+        const prefix = mmMatch[1] || '';
+        const tagLower = (mmMatch[2] || '').toLowerCase();
+        const argStr = mmMatch[3] != null ? mmMatch[3] : '';
+        let consumed = true;
+
+        if (!prefix && (tagLower === 'br' || tagLower === 'newline') && !argStr) {
+          tokens.push({ type: allowNewlines ? 'newline' : 'text', ...(allowNewlines ? {} : { text: ' ' }) });
+        } else if ((tagLower === 'reset' || tagLower === 'r') && !prefix && !argStr) {
+          tokens.push({ type: 'mm_reset' });
+        } else if (tagLower === 'gradient') {
+          if (prefix === '/' && !argStr) {
+            tokens.push({ type: 'mm_close_grad', kind: 'gradient' });
+          } else if (!prefix && argStr) {
+            const parts = argStr.split(':').map(p => p.trim()).filter(Boolean);
+            let phase = 0;
+            if (parts.length > 2) {
+              const lastNum = Number(parts[parts.length - 1]);
+              if (Number.isFinite(lastNum) && /^[-+]?\d*\.?\d+$/.test(parts[parts.length - 1])) {
+                phase = lastNum;
+                parts.pop();
+              }
+            }
+            const stops = parts.map(parseMcColorHex).filter(Boolean);
+            if (stops.length >= 2) {
+              tokens.push({
+                type: 'mm_gradient',
+                stops: stops.map(hexToRgbTuple),
+                phase
+              });
+            } else if (stops.length === 1) {
+              tokens.push({ type: 'mm_color', color: stops[0] });
+            } else {
+              consumed = false;
+            }
+          } else {
+            consumed = false;
+          }
+        } else if (tagLower === 'rainbow') {
+          if (prefix === '/' && !argStr) {
+            tokens.push({ type: 'mm_close_grad', kind: 'rainbow' });
+          } else if (!prefix) {
+            let phase = 0;
+            let inverted = false;
+            if (argStr) {
+              let rawPhase = argStr.trim();
+              if (rawPhase.startsWith('!')) {
+                inverted = true;
+                rawPhase = rawPhase.slice(1);
+              }
+              if (rawPhase) {
+                const p = Number(rawPhase);
+                if (Number.isFinite(p)) phase = p;
+                else consumed = false;
+              }
+            }
+            if (consumed) {
+              tokens.push({ type: 'mm_rainbow', phase, inverted });
+            }
+          } else {
+            consumed = false;
+          }
+        } else if (tagLower === 'color' || tagLower === 'c' || tagLower === 'colour') {
+          if (prefix === '/' && !argStr) {
+            tokens.push({ type: 'mm_close_color' });
+          } else if (!prefix && argStr) {
+            const cHex = parseMcColorHex(argStr);
+            if (cHex) tokens.push({ type: 'mm_color', color: cHex });
+            else consumed = false;
+          } else {
+            consumed = false;
+          }
+        } else if (tagLower.startsWith('#') && !argStr) {
+          const cHex = parseMcColorHex(tagLower);
+          if (cHex) {
+            if (prefix === '/') tokens.push({ type: 'mm_close_color' });
+            else if (!prefix) tokens.push({ type: 'mm_color', color: cHex });
+            else consumed = false;
+          } else {
+            consumed = false;
+          }
+        } else if (MC_NAMED_COLORS[tagLower] && !argStr) {
+          if (prefix === '/' || prefix === '!') {
+            tokens.push({ type: 'mm_close_color' });
+          } else {
+            tokens.push({ type: 'mm_color', color: MC_NAMED_COLORS[tagLower] });
+          }
+        } else {
+          const fmtMap = {
+            bold: 'bold', b: 'bold',
+            italic: 'italic', i: 'italic', em: 'italic',
+            underlined: 'underline', underline: 'underline', u: 'underline',
+            strikethrough: 'strike', st: 'strike',
+            obfuscated: 'obf', obf: 'obf'
+          };
+          const prop = fmtMap[tagLower];
+          if (prop && !argStr) {
+            tokens.push({ type: 'mm_fmt', prop, val: !(prefix === '/' || prefix === '!') });
+          } else {
+            consumed = false;
+          }
+        }
+
+        if (consumed) {
+          pos += mmMatch[0].length;
+          continue;
+        }
+      }
+      pushText(ch);
+      pos += 1;
+      continue;
+    }
+
+    // Read contiguous plain characters quickly until next control starter
+    let next = pos + 1;
+    while (next < n) {
+      const c = src[next];
+      if (c === '\n' || c === '§' || c === '&' || c === '{' || c === '<') break;
+      next++;
+    }
+    pushText(src.slice(pos, next));
+    pos = next;
+  }
+
+  // Resolve Iridium {#c1>}...{#c2<} spans into gradient tokens when closed properly
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].type === 'iridium_open') {
+      let closeIdx = -1;
+      for (let j = i + 1; j < tokens.length; j++) {
+        if (tokens[j].type === 'iridium_close') {
+          closeIdx = j;
+          break;
+        }
+      }
+      if (closeIdx !== -1) {
+        tokens[i] = {
+          type: 'mm_gradient',
+          stops: [hexToRgbTuple(tokens[i].hex), hexToRgbTuple(tokens[closeIdx].hex)],
+          phase: 0
+        };
+        tokens[closeIdx] = { type: 'mm_close_grad', kind: 'gradient' };
+      } else {
+        tokens[i] = { type: 'legacy_color', color: tokens[i].hex };
+      }
+    } else if (tokens[i].type === 'iridium_close') {
+      tokens[i] = { type: 'legacy_color', color: tokens[i].hex };
+    }
+  }
+
+  // Measure visible grapheme span length for gradient / rainbow tags
+  function measureGradientSpan(startIdx) {
+    let total = 0;
+    for (let j = startIdx + 1; j < tokens.length; j++) {
+      const tk = tokens[j];
+      if (tk.type === 'mm_close_grad' || tk.type === 'mm_reset' || tk.type === 'mm_gradient' || tk.type === 'mm_rainbow') {
+        break;
+      }
+      if (tk.type === 'legacy_fmt' && tk.code === 'r') break;
+      if (tk.type === 'text') total += splitMcGraphemes(tk.text).length;
+    }
+    return total;
+  }
+
+  const state = {
+    color: null,
+    colorStack: [],
+    gradient: null,
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    obf: false
+  };
+
+  function resetAll() {
+    state.color = null;
+    state.colorStack = [];
+    state.gradient = null;
+    state.bold = false;
+    state.italic = false;
+    state.underline = false;
+    state.strike = false;
+    state.obf = false;
+  }
+
+  function buildStyleAttr(hexColor) {
+    const styles = [];
+    if (hexColor) styles.push(`color:${hexColor}`);
+    if (state.bold) styles.push('font-weight:800');
+    if (state.italic) styles.push('font-style:italic');
+    if (state.underline && state.strike) styles.push('text-decoration:underline line-through');
+    else if (state.underline) styles.push('text-decoration:underline');
+    else if (state.strike) styles.push('text-decoration:line-through');
+    return styles.join(';');
+  }
+
+  let html = '';
+  for (let i = 0; i < tokens.length; i++) {
+    const tk = tokens[i];
+    if (tk.type === 'newline') {
+      html += allowNewlines ? '<br>' : ' ';
+      continue;
+    }
+    if (tk.type === 'legacy_color') {
+      // Vanilla MC legacy color codes reset active formatting flags
+      state.gradient = null;
+      state.color = tk.color;
+      state.colorStack = [];
+      state.bold = false;
+      state.italic = false;
+      state.underline = false;
+      state.strike = false;
+      state.obf = false;
+      continue;
+    }
+    if (tk.type === 'legacy_fmt') {
+      if (tk.code === 'r') resetAll();
+      else if (tk.code === 'l') state.bold = true;
+      else if (tk.code === 'o') state.italic = true;
+      else if (tk.code === 'n') state.underline = true;
+      else if (tk.code === 'm') state.strike = true;
+      else if (tk.code === 'k') state.obf = true;
+      continue;
+    }
+    if (tk.type === 'mm_reset') {
+      resetAll();
+      continue;
+    }
+    if (tk.type === 'mm_fmt') {
+      state[tk.prop] = tk.val;
+      continue;
+    }
+    if (tk.type === 'mm_color') {
+      if (state.color) state.colorStack.push(state.color);
+      state.color = tk.color;
+      continue;
+    }
+    if (tk.type === 'mm_close_color') {
+      state.color = state.colorStack.length ? state.colorStack.pop() : null;
+      continue;
+    }
+    if (tk.type === 'mm_gradient') {
+      const len = Math.max(1, measureGradientSpan(i));
+      state.color = null;
+      state.colorStack = [];
+      state.gradient = {
+        mode: 'gradient',
+        stops: tk.stops,
+        phase: tk.phase || 0,
+        index: 0,
+        length: len
+      };
+      continue;
+    }
+    if (tk.type === 'mm_rainbow') {
+      const len = Math.max(1, measureGradientSpan(i));
+      state.color = null;
+      state.colorStack = [];
+      state.gradient = {
+        mode: 'rainbow',
+        phase: tk.phase || 0,
+        inverted: Boolean(tk.inverted),
+        index: 0,
+        length: len
+      };
+      continue;
+    }
+    if (tk.type === 'mm_close_grad') {
+      state.gradient = null;
+      continue;
+    }
+    if (tk.type === 'text') {
+      // If active gradient & not temporarily overridden by a solid MM color, color each grapheme
+      if (state.gradient && !state.color) {
+        const g = state.gradient;
+        const graphemes = splitMcGraphemes(tk.text);
+        for (const gr of graphemes) {
+          const baseT = g.length <= 1 ? 0 : g.index / (g.length - 1);
+          g.index++;
+          let hex;
+          if (g.mode === 'rainbow') {
+            const hueT = (g.inverted ? (1 - baseT) : baseT) + (g.phase / Math.max(1, g.length));
+            hex = hsvRainbowHex(hueT);
+          } else {
+            let t = baseT + g.phase;
+            if (g.phase !== 0) {
+              // Triangle fold keeps phase smooth across stops
+              t = Math.abs((((t % 2) + 2) % 2) - 1);
+            }
+            hex = lerpGradientHex(g.stops, t);
+          }
+          const stAttr = buildStyleAttr(hex);
+          const clsAttr = state.obf ? ' class="mc-obf"' : '';
+          html += `<span${clsAttr} style="${stAttr}">${esc(gr)}</span>`;
+        }
+      } else {
+        const stAttr = buildStyleAttr(state.color);
+        const clsAttr = state.obf ? ' class="mc-obf"' : '';
+        if (stAttr || clsAttr) {
+          html += `<span${clsAttr}${stAttr ? ` style="${stAttr}"` : ''}>${esc(tk.text)}</span>`;
+        } else {
+          html += esc(tk.text);
+        }
+      }
+    }
+  }
+
+  return `<span class="mc-formatted-text">${html}</span>`;
+}
+
 function formatLogLine(raw) {
   if (!raw) return '';
 
@@ -2939,11 +3459,14 @@ function srvh() {
   const nodeId = srv?.node_id || 'local';
   const nodeLabel = srv?.node_name || getNodeById(nodeId)?.name || (nodeId === 'local' ? 'Local Master Node' : nodeId);
   const heroUrl = getBrand('server_hero_url');
+  const rawTitle = (S.props && S.props._srvId === srv?.id && S.props.motd)
+    ? S.props.motd
+    : (srv?.motd || srv?.name || 'Minecraft Server');
 
   return `<div class="card srvh" style="background-image: url('${esc(heroUrl)}'), url('/img/banner.jpg');">
-    <div>
+    <div style="min-width:0; flex:1 1 320px;">
       <div class="row">
-        <h1>${esc(S.props.motd || srv?.name || 'Minecraft Server')}</h1>
+        <h1 id="srv-hero-title">${renderMinecraftTextHtml(rawTitle, { allowNewlines: true })}</h1>
         <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st] || 'Offline'}</span>
         ${((S.nodes && S.nodes.length > 1) || nodeId !== 'local') ? `<span class="chip srv-node-badge" title="Running on node ${esc(nodeLabel)}">${ic('network', 11)} ${esc(nodeLabel)}</span>` : ''}
         <span id="srv-halt-badge" class="badge halted" style="display:${st === 'offline' && S.startupHalted ? 'inline-flex' : 'none'};" title="Auto-restart stopped after 2 consecutive startup failures">Start Halted (2/2)</span>
@@ -3134,6 +3657,8 @@ const ACTIVITY_META_MAP = {
   file_upload: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Uploaded File' },
   file_download: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Downloaded File' },
   file_rename: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Renamed Item' },
+  file_move: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Moved Items' },
+  file_compress: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Created Archive' },
   file_unzip: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Extracted Archive' },
   plugin_install: { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: 'Installed Plugin' },
   plugin_delete: { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: 'Uninstalled Plugin' },
@@ -3993,12 +4518,14 @@ const V = {
 
     const renderFileCtxMenuHtml = (item, idx, isDir, itemPath) => `
       <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
-        ${!isDir ? `<button onclick="openFile('${esc(item.name)}'); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
-        ${!isDir ? `<button onclick="downloadFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
-        ${isArchiveFile(item.name) ? `<button onclick="unzipFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('archive', 14)} Extract</button>` : ''}
-        <button onclick="promptRenameFile('${esc(itemPath)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
-        <button onclick="copyFilePath('${esc(itemPath)}'); closeAllCtx();">${ic('copy', 14)} Copy Path</button>
-        <button class="dg" onclick="deleteFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
+        ${!isDir ? `<button data-name="${esc(item.name)}" onclick="openFile(this.dataset.name); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
+        ${!isDir ? `<button data-path="${esc(itemPath)}" onclick="downloadFileItem(this.dataset.path); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
+        ${isArchiveFile(item.name) ? `<button data-path="${esc(itemPath)}" onclick="unzipFileItem(this.dataset.path); closeAllCtx();">${ic('package', 14)} Extract</button>` : ''}
+        <button data-path="${esc(itemPath)}" onclick="openMoveFilesModal([this.dataset.path]); closeAllCtx();">${ic('move', 14)} Move</button>
+        <button data-path="${esc(itemPath)}" onclick="openCompressFilesModal([this.dataset.path]); closeAllCtx();">${ic('archive', 14)} Archive / Zip</button>
+        <button data-path="${esc(itemPath)}" onclick="promptRenameFile(this.dataset.path); closeAllCtx();">${ic('settings', 14)} Rename</button>
+        <button data-path="${esc(itemPath)}" onclick="copyFilePath(this.dataset.path); closeAllCtx();">${ic('copy', 14)} Copy Path</button>
+        <button class="dg" data-path="${esc(itemPath)}" onclick="deleteFileItem(this.dataset.path); closeAllCtx();">${ic('trash', 14)} Delete</button>
       </div>`;
 
     let filesContainerHtml = '';
@@ -4196,7 +4723,9 @@ const V = {
         <div class="bulk-action-bar">
           <span style="font-weight: 600; font-size: 13.5px; color: #fff;">${S.selectedFiles.size} item${S.selectedFiles.size > 1 ? 's' : ''} selected</span>
           <div class="row" style="gap: 8px;">
-            ${Array.from(S.selectedFiles).some(p => isArchiveFile(p)) ? `<button class="btn sm" onclick="unzipSelectedArchive()">${ic('archive', 14)} Extract</button>` : ''}
+            <button class="btn sm" onclick="openMoveFilesModal()">${ic('move', 14)} Move</button>
+            <button class="btn sm" onclick="openCompressFilesModal()">${ic('archive', 14)} Archive</button>
+            ${Array.from(S.selectedFiles).some(p => isArchiveFile(p)) ? `<button class="btn sm" onclick="unzipSelectedArchive()">${ic('package', 14)} Extract</button>` : ''}
             <button class="btn sm dg" onclick="deleteSelectedFiles()">${ic('trash', 14)} Delete Selected</button>
             <button class="btn sm" onclick="deselectAllFiles()">Deselect</button>
           </div>
@@ -4956,8 +5485,15 @@ const V = {
         <h2>Server Configuration</h2>
         <label class="f">
           <span>Server Message (MOTD)</span>
-          <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="S.props.motd=this.value;">
+          <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="onMotdInput(this.value)" placeholder="e.g. &lt;gradient:#00f5a0:#00d9f5&gt;&lt;bold&gt;My Server&lt;/bold&gt;&lt;/gradient&gt; or §bWelcome!">
         </label>
+        <div class="motd-preview-box">
+          <div class="row sb" style="margin-bottom:6px; gap:8px;">
+            <span class="mu" style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">Live MOTD Preview</span>
+            <span class="motd-hints mu">&amp;/&sect; &bull; &#38;#RRGGBB &bull; &lt;gradient:...&gt; &bull; &lt;rainbow&gt; &bull; \n</span>
+          </div>
+          <div id="motd-preview">${renderMinecraftTextHtml(p.motd, { allowNewlines: true })}</div>
+        </div>
         <div class="grid g2">
           <label class="f">
             <span>Server Game Port</span>
@@ -6309,6 +6845,7 @@ async function loadDashboard(skipRender = false, preferredRef = null) {
       const cur = curServer();
       saveActiveServerRef(cur);
       applyServerStatsSnapshot(cur, cur.stats, false);
+      syncPropsFromServer(cur, false);
       S.ver = cur.version || S.ver;
       S.core = (cur.type || 'paper').charAt(0).toUpperCase() + (cur.type || 'paper').slice(1);
       connectWs(cur.id, false, cur.node_id || 'local');
@@ -6726,6 +7263,9 @@ async function loadFileList(path = '', skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
+  if (path !== S.currentDir && S.selectedFiles) {
+    S.selectedFiles.clear();
+  }
   S.loading.files = true;
   if (!skipRender && S.view === 'fi') R();
   try {
@@ -6983,6 +7523,307 @@ async function unzipSelectedArchive() {
   }
 }
 
+function normalizeContainerDestPath(raw) {
+  let d = String(raw || '').trim().replace(/\\/g, '/');
+  d = d.replace(/^\/+home\/+container\/?/i, '');
+  d = d.replace(/^\/+|\/+$/g, '');
+  if (d === '.' || d === '~') d = '';
+  return d;
+}
+
+function setMoveModalDest(destVal) {
+  const inp = $('#move-dest-input');
+  if (inp) {
+    inp.value = normalizeContainerDestPath(destVal);
+    inp.focus();
+  }
+  const errEl = $('#move-modal-err');
+  if (errEl) errEl.style.display = 'none';
+}
+
+function openMoveFilesModal(pathsArg = null) {
+  const paths = (Array.isArray(pathsArg) && pathsArg.length)
+    ? pathsArg.map(p => String(p || '').trim()).filter(Boolean)
+    : Array.from(S.selectedFiles || []);
+  if (!paths.length) {
+    toast('Select one or more files or folders first', 'bad');
+    return;
+  }
+
+  const container = $('#modal-container');
+  if (!container) return;
+
+  S.moveModalState = { paths };
+  const selectedSet = new Set(paths);
+  const curDir = S.currentDir || '';
+  const parts = curDir.split('/').filter(Boolean);
+  const parentDir = parts.slice(0, -1).join('/');
+
+  const chips = [];
+  if (curDir) {
+    chips.push({ label: '/ (Root)', dest: '' });
+    if (parts.length > 1) {
+      chips.push({ label: `.. (/${parentDir})`, dest: parentDir });
+    }
+  }
+  (S.fileList || []).forEach(it => {
+    if (!it.is_dir) return;
+    const p = it.path || (curDir ? `${curDir}/${it.name}` : it.name);
+    if (!selectedSet.has(p)) {
+      chips.push({ label: `${it.name}/`, dest: p });
+    }
+  });
+
+  const maxPreview = 6;
+  const shown = paths.slice(0, maxPreview);
+  const extraCount = Math.max(0, paths.length - maxPreview);
+  const defaultDest = curDir ? (parentDir || '') : '';
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:560px; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:19px; margin:0; color:#fff; display:flex; align-items:center; gap:8px;">
+          ${ic('move', 18)} Move ${paths.length} Item${paths.length > 1 ? 's' : ''}
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <div class="move-item-chips">
+        ${shown.map(p => `<span class="chip mono">${esc(p.split('/').pop() || p)}</span>`).join('')}
+        ${extraCount > 0 ? `<span class="chip">+${extraCount} more</span>` : ''}
+      </div>
+
+      <form id="move-files-form" onsubmit="submitMoveFilesModal(event)">
+        <label class="f" style="margin-bottom:10px;">
+          <span>Destination Folder (relative to server root)</span>
+          <div class="move-path-input-wrap">
+            <span class="move-path-prefix mono">/home/container/</span>
+            <input type="text" id="move-dest-input" value="${esc(defaultDest)}" placeholder="e.g. plugins, backups/old, or leave blank for root" autocomplete="off" spellcheck="false" oninput="const e=$('#move-modal-err');if(e)e.style.display='none';">
+          </div>
+        </label>
+
+        ${chips.length > 0 ? `
+          <div style="margin-bottom:14px;">
+            <span class="mu" style="font-size:11.5px; display:block; margin-bottom:6px;">Quick destination folders:</span>
+            <div class="row" style="gap:6px; flex-wrap:wrap;">
+              ${chips.slice(0, 10).map(c => `<button type="button" class="dest-chip" data-dest="${esc(c.dest)}" onclick="setMoveModalDest(this.dataset.dest)">${ic('folder', 12)} ${esc(c.label)}</button>`).join('')}
+            </div>
+          </div>
+        ` : `<p class="mu" style="font-size:12px; margin-bottom:14px;">Type a folder name (missing folders are created automatically) or leave empty for <code>/home/container/</code>.</p>`}
+
+        <label class="row" style="cursor:pointer; gap:9px; font-size:13px; margin-bottom:14px;">
+          <input type="checkbox" id="move-overwrite">
+          <span>Overwrite existing files or folders if a conflict occurs</span>
+        </label>
+
+        <div id="move-modal-err" class="node-error-note" style="display:none; margin-bottom:14px;"></div>
+
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="move-submit-btn" class="btn pr">${ic('move', 14)} Move Here</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+  setTimeout(() => {
+    const inp = $('#move-dest-input');
+    if (inp) { inp.focus(); inp.select(); }
+  }, 30);
+}
+
+async function submitMoveFilesModal(e) {
+  e.preventDefault();
+  const srv = curServer();
+  const state = S.moveModalState;
+  if (!srv || !state?.paths?.length) return;
+
+  const btn = $('#move-submit-btn');
+  const errEl = $('#move-modal-err');
+  if (errEl) errEl.style.display = 'none';
+  if (btn) setBtnLoading(btn, true, 'Moving...');
+
+  const destination = normalizeContainerDestPath($('#move-dest-input')?.value || '');
+  const overwrite = Boolean($('#move-overwrite')?.checked);
+
+  try {
+    const res = await fetch(srvApiPath(srv, '/files/move'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(S.token ? { 'Authorization': `Bearer ${S.token}` } : {})
+      },
+      body: JSON.stringify({
+        paths: state.paths,
+        destination,
+        overwrite
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    S.moveModalState = null;
+    if (S.selectedFiles) S.selectedFiles.clear();
+    closeModal();
+    toast(data.message || `Moved ${state.paths.length} item(s)`, 'ok');
+    loadFileList(S.currentDir);
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message || 'Failed to move selected items';
+      errEl.style.display = 'block';
+    }
+    toast(err.message || 'Move failed', 'bad');
+  } finally {
+    const b = $('#move-submit-btn');
+    if (b) setBtnLoading(b, false);
+  }
+}
+
+function setCompressModalFormat(fmt) {
+  const hidden = $('#comp-format');
+  if (hidden) hidden.value = fmt;
+  document.querySelectorAll('.fmt-pill').forEach(el => {
+    el.classList.toggle('on', el.dataset.fmt === fmt);
+  });
+  const inp = $('#comp-filename');
+  if (inp) {
+    let base = inp.value.trim().replace(/\.(zip|tar\.gz|tgz)$/i, '') || 'archive';
+    inp.value = fmt === 'tar.gz' ? `${base}.tar.gz` : `${base}.zip`;
+  }
+}
+
+function openCompressFilesModal(pathsArg = null) {
+  const paths = (Array.isArray(pathsArg) && pathsArg.length)
+    ? pathsArg.map(p => String(p || '').trim()).filter(Boolean)
+    : Array.from(S.selectedFiles || []);
+  if (!paths.length) {
+    toast('Select one or more files or folders to archive', 'bad');
+    return;
+  }
+
+  const container = $('#modal-container');
+  if (!container) return;
+
+  const curDir = S.currentDir || '';
+  S.compressModalState = { paths, dir: curDir };
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+  let defaultBase = `archive-${stamp}`;
+  if (paths.length === 1) {
+    const singleName = (paths[0].split('/').pop() || 'archive').replace(/\.(zip|tar\.gz|tgz)$/i, '');
+    if (singleName) defaultBase = singleName;
+  }
+
+  const maxPreview = 6;
+  const shown = paths.slice(0, maxPreview);
+  const extraCount = Math.max(0, paths.length - maxPreview);
+  const folderLabel = curDir ? `/home/container/${curDir}/` : '/home/container/';
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:540px; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:19px; margin:0; color:#fff; display:flex; align-items:center; gap:8px;">
+          ${ic('archive', 18)} Create Archive (${paths.length} item${paths.length > 1 ? 's' : ''})
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <div class="move-item-chips">
+        ${shown.map(p => `<span class="chip mono">${esc(p.split('/').pop() || p)}</span>`).join('')}
+        ${extraCount > 0 ? `<span class="chip">+${extraCount} more</span>` : ''}
+      </div>
+
+      <form id="compress-files-form" onsubmit="submitCompressFilesModal(event)">
+        <input type="hidden" id="comp-format" value="zip">
+
+        <div class="f" style="margin-bottom:12px;">
+          <span>Archive Format</span>
+          <div class="fmt-pills">
+            <button type="button" class="fmt-pill on" data-fmt="zip" onclick="setCompressModalFormat('zip')">
+              <b>.zip</b>
+              <span class="mu">Universal Zip Archive</span>
+            </button>
+            <button type="button" class="fmt-pill" data-fmt="tar.gz" onclick="setCompressModalFormat('tar.gz')">
+              <b>.tar.gz</b>
+              <span class="mu">Pterodactyl Gzip Tarball</span>
+            </button>
+          </div>
+        </div>
+
+        <label class="f" style="margin-bottom:10px;">
+          <span>Archive Filename (saved in <code class="mono">${esc(folderLabel)}</code>)</span>
+          <input type="text" id="comp-filename" value="${esc(defaultBase)}.zip" required autocomplete="off" spellcheck="false" oninput="const e=$('#comp-modal-err');if(e)e.style.display='none';">
+        </label>
+
+        <div id="comp-modal-err" class="node-error-note" style="display:none; margin-bottom:14px;"></div>
+
+        <div class="row" style="justify-content:flex-end; gap:10px; margin-top:16px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="comp-submit-btn" class="btn pr">${ic('archive', 14)} Create Archive</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+  setTimeout(() => {
+    const inp = $('#comp-filename');
+    if (inp) { inp.focus(); inp.select(); }
+  }, 30);
+}
+
+async function submitCompressFilesModal(e) {
+  e.preventDefault();
+  const srv = curServer();
+  const state = S.compressModalState;
+  if (!srv || !state?.paths?.length) return;
+
+  const btn = $('#comp-submit-btn');
+  const errEl = $('#comp-modal-err');
+  if (errEl) errEl.style.display = 'none';
+  if (btn) setBtnLoading(btn, true, 'Archiving...');
+
+  const filename = $('#comp-filename')?.value.trim() || '';
+  const format = $('#comp-format')?.value || 'zip';
+
+  try {
+    const res = await fetch(srvApiPath(srv, '/files/compress'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(S.token ? { 'Authorization': `Bearer ${S.token}` } : {})
+      },
+      body: JSON.stringify({
+        paths: state.paths,
+        destination: state.dir || '',
+        filename,
+        format
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+
+    S.compressModalState = null;
+    if (S.selectedFiles) S.selectedFiles.clear();
+    closeModal();
+    toast(data.message || 'Archive created successfully!', 'ok');
+    loadFileList(S.currentDir);
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message || 'Failed to create archive';
+      errEl.style.display = 'block';
+    }
+    toast(err.message || 'Archive failed', 'bad');
+  } finally {
+    const b = $('#comp-submit-btn');
+    if (b) setBtnLoading(b, false);
+  }
+}
+
 async function promptRenameFile(oldPath) {
   const baseName = oldPath.split('/').pop();
   const newName = await uiPrompt({
@@ -7215,39 +8056,45 @@ function handleFileContextMenu(e, idx) {
 
   menu.innerHTML = `
     ${!isDir ? `
-      <button onclick="openFile('${esc(name)}'); closeFloatingCtx();">
+      <button data-name="${esc(name)}" onclick="openFile(this.dataset.name); closeFloatingCtx();">
         ${ic('edit', 14)} Edit File
       </button>
-      <button onclick="downloadFileItem('${esc(path)}'); closeFloatingCtx();">
+      <button data-path="${esc(path)}" onclick="downloadFileItem(this.dataset.path); closeFloatingCtx();">
         ${ic('download', 14)} Download
       </button>
       ${isArchive ? `
-        <button onclick="unzipFileItem('${esc(path)}'); closeFloatingCtx();">
-          ${ic('archive', 14)} Extract / Unzip
+        <button data-path="${esc(path)}" onclick="unzipFileItem(this.dataset.path); closeFloatingCtx();">
+          ${ic('package', 14)} Extract / Unzip
         </button>
       ` : ''}
     ` : `
-      <button onclick="browseFolder('${esc(name)}'); closeFloatingCtx();">
+      <button data-name="${esc(name)}" onclick="browseFolder(this.dataset.name); closeFloatingCtx();">
         ${ic('folder', 14)} Open Folder
       </button>
     `}
-    <button onclick="promptRenameFile('${esc(path)}'); closeFloatingCtx();">
+    <button data-path="${esc(path)}" onclick="openMoveFilesModal([this.dataset.path]); closeFloatingCtx();">
+      ${ic('move', 14)} Move
+    </button>
+    <button data-path="${esc(path)}" onclick="openCompressFilesModal([this.dataset.path]); closeFloatingCtx();">
+      ${ic('archive', 14)} Archive / Zip
+    </button>
+    <button data-path="${esc(path)}" onclick="promptRenameFile(this.dataset.path); closeFloatingCtx();">
       ${ic('settings', 14)} Rename
     </button>
-    <button onclick="copyFilePath('${esc(path)}'); closeFloatingCtx();">
+    <button data-path="${esc(path)}" onclick="copyFilePath(this.dataset.path); closeFloatingCtx();">
       ${ic('copy', 14)} Copy Path
     </button>
     <div class="floating-ctx-divider"></div>
-    <button class="dg" onclick="deleteFileItem('${esc(path)}'); closeFloatingCtx();">
+    <button class="dg" data-path="${esc(path)}" onclick="deleteFileItem(this.dataset.path); closeFloatingCtx();">
       ${ic('trash', 14)} Delete
     </button>
   `;
 
   const clientX = e?.clientX ?? (e?.touches?.[0]?.clientX ?? 100);
   const clientY = e?.clientY ?? (e?.touches?.[0]?.clientY ?? 150);
-  const menuWidth = 185;
+  const menuWidth = 190;
   const x = Math.max(10, Math.min(clientX, window.innerWidth - menuWidth - 10));
-  const y = Math.max(10, Math.min(clientY, window.innerHeight - 250));
+  const y = Math.max(10, Math.min(clientY, window.innerHeight - 315));
 
   menu.style.left = `${x}px`;
   menu.style.top = `${y}px`;
@@ -7823,12 +8670,40 @@ async function installSoftware(software, version, btnEl) {
   }
 }
 
+function syncPropsFromServer(srv, force = false) {
+  if (!srv) return;
+  if (force || S.props._srvId !== srv.id) {
+    S.props.motd = srv.motd || srv.name || 'A Minecraft Server';
+    S.props._srvId = srv.id;
+  } else if (srv.motd && (!S.props.motd || S.props.motd === 'A Minecraft Server' || S.props.motd === srv.name)) {
+    S.props.motd = srv.motd;
+  }
+}
+
+function onMotdInput(val) {
+  const srv = curServer();
+  S.props.motd = val;
+  if (srv) {
+    S.props._srvId = srv.id;
+    srv.motd = val;
+  }
+  const prev = $('#motd-preview');
+  if (prev) prev.innerHTML = renderMinecraftTextHtml(val, { allowNewlines: true });
+  const heroTitle = $('#srv-hero-title');
+  if (heroTitle) {
+    const rawTitle = val || srv?.name || 'Minecraft Server';
+    heroTitle.innerHTML = renderMinecraftTextHtml(rawTitle, { allowNewlines: true });
+  }
+}
+
 async function loadProperties(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   try {
     const props = await api(srvApiPath(srv, '/properties'));
-    S.props.motd = props['motd'] || S.props.motd;
+    S.props._srvId = srv.id;
+    S.props.motd = props['motd'] || srv.motd || srv.name || 'A Minecraft Server';
+    srv.motd = S.props.motd;
     S.props.max = parseInt(props['max-players'] || '20');
     S.props.diff = props['difficulty'] || S.props.diff;
     S.props.mode = props['gamemode'] || S.props.mode;
@@ -7888,6 +8763,8 @@ async function saveProperties() {
     srv.port = newPort;
     srv.memory_max = newRam;
     srv.memory_min = Math.min(1024, newRam);
+    srv.motd = S.props.motd;
+    S.props._srvId = srv.id;
     if (newJava) srv.java_path = newJava;
 
     toast('Server properties, RAM allocation & Java runtime saved! Restart server to apply.', 'ok');
@@ -8096,6 +8973,7 @@ function switchServer(index) {
   const nodeId = srv.node_id || 'local';
   saveActiveServerRef(srv);
   applyServerStatsSnapshot(srv, srv.stats, false);
+  syncPropsFromServer(srv, true);
   S.ver = srv.version || S.ver;
   S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
   if (S.activeServerId !== srv.id || (S.activeNodeId || 'local') !== nodeId) {
@@ -9858,6 +10736,14 @@ window.toggleCustomPropJava = toggleCustomPropJava;
 window.isArchiveFile = isArchiveFile;
 window.unzipFileItem = unzipFileItem;
 window.unzipSelectedArchive = unzipSelectedArchive;
+window.openMoveFilesModal = openMoveFilesModal;
+window.setMoveModalDest = setMoveModalDest;
+window.submitMoveFilesModal = submitMoveFilesModal;
+window.openCompressFilesModal = openCompressFilesModal;
+window.setCompressModalFormat = setCompressModalFormat;
+window.submitCompressFilesModal = submitCompressFilesModal;
+window.renderMinecraftTextHtml = renderMinecraftTextHtml;
+window.onMotdInput = onMotdInput;
 window.enhanceSelects = enhanceSelects;
 window.closeAllCustomSelects = closeAllCustomSelects;
 window.toggleFlyConsole = toggleFlyConsole;

@@ -235,6 +235,7 @@ func (h *NodeHandler) ListClusterServers(w http.ResponseWriter, r *http.Request)
 	type ClusterServerItem struct {
 		*database.Server
 		Stats    database.ServerStats `json:"stats"`
+		MOTD     string               `json:"motd,omitempty"`
 		NodeID   string               `json:"node_id"`
 		NodeName string               `json:"node_name"`
 		NodeFQDN string               `json:"node_fqdn"`
@@ -245,6 +246,7 @@ func (h *NodeHandler) ListClusterServers(w http.ResponseWriter, r *http.Request)
 		allServers = append(allServers, ClusterServerItem{
 			Server:   s,
 			Stats:    h.manager.GetStats(s),
+			MOTD:     readServerMOTD(h.manager.GetWorkingDir(s.ID)),
 			NodeID:   "local",
 			NodeName: "Local Master Node",
 			NodeFQDN: localFQDN,

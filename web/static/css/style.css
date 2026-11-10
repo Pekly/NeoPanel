@@ -1041,8 +1041,47 @@ h2 {
 }
 
 .srvh h1 {
-  font-size: 22px;
+  font-size: 21px;
+  line-height: 1.32;
+  font-weight: 500;
   color: #fff;
+  word-break: break-word;
+}
+
+.mc-formatted-text {
+  display: inline-block;
+  font-weight: 500;
+  line-height: 1.32;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.88);
+}
+
+@keyframes mcObf {
+  0%, 100% { opacity: 1; filter: blur(0px); }
+  50% { opacity: 0.45; filter: blur(1.4px); }
+}
+
+.mc-obf {
+  animation: mcObf 0.22s steps(2, end) infinite;
+}
+
+.motd-preview-box {
+  margin-top: 8px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(11, 15, 25, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  font-size: 14.5px;
+  line-height: 1.4;
+  min-height: 54px;
+  overflow-x: auto;
+}
+
+.motd-hints {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  opacity: 0.85;
 }
 
 .srvh .hst {
@@ -2293,6 +2332,8 @@ html[data-theme="light"] input[type="checkbox"]:not(.no-ccheck):not(:checked):no
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  flex-wrap: wrap;
   background: rgba(15, 20, 32, 0.95);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -2301,7 +2342,8 @@ html[data-theme="light"] input[type="checkbox"]:not(.no-ccheck):not(:checked):no
   padding: 10px 18px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  justify-content: center;
+  gap: 12px 16px;
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
   z-index: 80;
   animation: slideUp 0.18s ease-out;
@@ -4600,4 +4642,130 @@ html[data-theme="light"] .cselect-search-wrap {
 html[data-theme="light"] input.cselect-search {
   background: rgba(15, 23, 42, 0.04);
   color: #0f172a;
+}
+
+/* File Manager Move & Archive Modals */
+.move-item-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.move-path-input-wrap {
+  display: flex;
+  align-items: center;
+  background: var(--input-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+  overflow: hidden;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.move-path-input-wrap:focus-within {
+  border-color: var(--ac);
+  box-shadow: 0 0 0 3px var(--ac-glow);
+}
+
+.move-path-prefix {
+  padding: 9px 10px 9px 12px;
+  font-size: 12.5px;
+  color: var(--tx-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.move-path-input-wrap input {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dest-chip {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--tx);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-light);
+  border-radius: 7px;
+  transition: all 0.15s ease;
+}
+
+.dest-chip:hover {
+  border-color: var(--ac);
+  background: var(--ac-subtle);
+  color: #fff;
+}
+
+.fmt-pills {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.fmt-pill {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-light);
+  transition: all 0.15s ease;
+}
+
+.fmt-pill b {
+  font-size: 13.5px;
+  font-family: var(--font-mono);
+  color: var(--tx);
+}
+
+.fmt-pill span {
+  font-size: 11.5px;
+}
+
+.fmt-pill:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.fmt-pill.on {
+  border-color: var(--ac);
+  background: var(--ac-subtle);
+}
+
+html[data-theme="light"] .move-path-input-wrap {
+  background: rgba(15, 23, 42, 0.035);
+}
+
+html[data-theme="light"] .move-path-prefix {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+html[data-theme="light"] .dest-chip,
+html[data-theme="light"] .fmt-pill {
+  background: rgba(15, 23, 42, 0.04);
+  color: #0f172a;
+}
+
+html[data-theme="light"] .dest-chip:hover {
+  color: #0f172a;
+}
+
+html[data-theme="light"] .motd-preview-box .mu {
+  color: #94a3b8;
 }

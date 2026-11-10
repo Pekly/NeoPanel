@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -36,6 +37,31 @@ func NewServerHandler(cfg *config.Config, db *database.DB, manager *runner.Serve
 type ServerWithStats struct {
 	*database.Server
 	Stats database.ServerStats `json:"stats"`
+	MOTD  string               `json:"motd,omitempty"`
+}
+
+func readServerMOTD(workingDir string) string {
+	if strings.TrimSpace(workingDir) == "" {
+		return ""
+	}
+	f, err := os.Open(filepath.Join(workingDir, "server.properties"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) == "motd" {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
 }
 
 func (h *ServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +76,7 @@ func (h *ServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
 		result[i] = ServerWithStats{
 			Server: s,
 			Stats:  h.manager.GetStats(s),
+			MOTD:   readServerMOTD(h.manager.GetWorkingDir(s.ID)),
 		}
 	}
 
@@ -67,6 +94,7 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ServerWithStats{
 		Server: server,
 		Stats:  h.manager.GetStats(server),
+		MOTD:   readServerMOTD(h.manager.GetWorkingDir(server.ID)),
 	})
 }
 
@@ -168,6 +196,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, ServerWithStats{
 		Server: server,
 		Stats:  h.manager.GetStats(server),
+		MOTD:   readServerMOTD(workingDir),
 	})
 }
 
