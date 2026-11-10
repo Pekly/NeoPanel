@@ -684,4 +684,3 @@ func (h *DatabaseHandler) Export(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unsupported export format; use format=db or format=sql"})
 }
-

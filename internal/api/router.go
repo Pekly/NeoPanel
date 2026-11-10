@@ -212,7 +212,9 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/nodes/{id}/test", r.requireAuth(r.nodes.TestNodeByID))
 	r.mux.HandleFunc("PUT /api/nodes/{id}", r.requireAuth(r.nodes.UpdateNode))
 	r.mux.HandleFunc("DELETE /api/nodes/{id}", r.requireAuth(r.nodes.DeleteNode))
-	r.mux.HandleFunc("/api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.nodes.Proxy))
+	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
+		r.mux.HandleFunc(method+" /api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.nodes.Proxy))
+	}
 	r.mux.HandleFunc("GET /api/nodes/{id}/ws/{serverId}", r.nodes.ProxyWS)
 
 	// Embedded Static & SPA routes
