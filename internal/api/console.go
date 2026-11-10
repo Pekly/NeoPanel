@@ -5,13 +5,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/Pekly/NeoPanel/internal/runner"
+	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
+	ReadBufferSize:  4096,
+	WriteBufferSize: 16384,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for dev/reverse proxy flexibility
+		return true // Allow all origins for dev/reverse proxy flexibility (Cloudflare, Nginx, Caddy)
 	},
 }
 
@@ -28,8 +30,21 @@ func NewConsoleHandler(auth *AuthHandler, manager *runner.ServerManager) *Consol
 }
 
 type WSMessage struct {
-	Event string `json:"event"` // "log", "command", "stats"
+	Event string `json:"event"` // "log", "command", "stats", "ping", "pong"
 	Data  string `json:"data"`
+}
+
+type WSStatsPayload struct {
+	Event       string  `json:"event"`
+	ServerID    string  `json:"server_id"`
+	Status      string  `json:"status"`
+	CPUPercent  float64 `json:"cpu_percent"`
+	MemoryMB    int64   `json:"memory_mb"`
+	MemoryMaxMB int     `json:"memory_max_mb"`
+	DiskMB      int64   `json:"disk_mb"`
+	UptimeSec   int64   `json:"uptime_sec"`
+	NetInKiB    float64 `json:"net_in_kib"`
+	NetOutKiB   float64 `json:"net_out_kib"`
 }
 
 func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -60,14 +75,20 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 	}
 	defer conn.Close()
 
-	// Send recent logs first in a structured history batch
-	history := h.manager.GetLogs(serverID)
-	if historyData, err := json.Marshal(history); err == nil {
-		msg, _ := json.Marshal(WSMessage{Event: "history", Data: string(historyData)})
-		_ = conn.WriteMessage(websocket.TextMessage, msg)
-	}
+	const (
+		writeWait  = 10 * time.Second
+		pongWait   = 65 * time.Second
+		pingPeriod = 20 * time.Second
+	)
 
-	// Subscribe to live log stream
+	conn.SetReadLimit(65536)
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	// Subscribe to live log stream FIRST so no lines between GetLogs and Subscribe are missed
 	logCh, unsubscribe, err := h.manager.Subscribe(serverID)
 	if err != nil {
 		_ = conn.WriteJSON(WSMessage{Event: "log", Data: "\x1b[31m[NeoPanel] Failed to subscribe to console: " + err.Error() + "\x1b[0m"})
@@ -75,38 +96,126 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 	}
 	defer unsubscribe()
 
-	// Channel to signal close
-	closeCh := make(chan struct{})
+	// Send initial history logs + immediate initial stats snapshot before starting writer loop
+	history := h.manager.GetLogs(serverID)
+	if historyData, err := json.Marshal(history); err == nil {
+		msg, _ := json.Marshal(WSMessage{Event: "history", Data: string(historyData)})
+		_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+		if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			return
+		}
+	}
 
-	// Goroutine to send logs from logCh to WebSocket
+	if st, ok := h.manager.GetStatsByID(serverID); ok {
+		payload := WSStatsPayload{
+			Event:       "stats",
+			ServerID:    st.ServerID,
+			Status:      st.Status,
+			CPUPercent:  st.CPUUsage,
+			MemoryMB:    st.MemoryMB,
+			MemoryMaxMB: st.MemoryMaxMB,
+			DiskMB:      st.DiskMB,
+			UptimeSec:   st.UptimeSec,
+			NetInKiB:    st.NetInKiB,
+			NetOutKiB:   st.NetOutKiB,
+		}
+		if b, err := json.Marshal(payload); err == nil {
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
+				return
+			}
+		}
+	}
+
+	doneCh := make(chan struct{})
+	pongReplyCh := make(chan struct{}, 4)
+
+	// Single dedicated writer goroutine (guarantees gorilla/websocket concurrency safety)
 	go func() {
-		defer close(closeCh)
+		statsTicker := time.NewTicker(1 * time.Second)
+		pingTicker := time.NewTicker(pingPeriod)
+		defer statsTicker.Stop()
+		defer pingTicker.Stop()
+
 		for {
 			select {
+			case <-doneCh:
+				return
+
 			case line, ok := <-logCh:
 				if !ok {
+					_ = conn.Close()
 					return
 				}
 				msg, _ := json.Marshal(WSMessage{Event: "log", Data: line})
-				_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
 				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+					_ = conn.Close()
+					return
+				}
+
+			case <-statsTicker.C:
+				st, ok := h.manager.GetStatsByID(serverID)
+				if !ok {
+					continue
+				}
+				payload := WSStatsPayload{
+					Event:       "stats",
+					ServerID:    st.ServerID,
+					Status:      st.Status,
+					CPUPercent:  st.CPUUsage,
+					MemoryMB:    st.MemoryMB,
+					MemoryMaxMB: st.MemoryMaxMB,
+					DiskMB:      st.DiskMB,
+					UptimeSec:   st.UptimeSec,
+					NetInKiB:    st.NetInKiB,
+					NetOutKiB:   st.NetOutKiB,
+				}
+				b, _ := json.Marshal(payload)
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
+					_ = conn.Close()
+					return
+				}
+
+			case <-pongReplyCh:
+				b, _ := json.Marshal(WSMessage{Event: "pong"})
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
+					_ = conn.Close()
+					return
+				}
+
+			case <-pingTicker.C:
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					_ = conn.Close()
 					return
 				}
 			}
 		}
 	}()
 
-	// Read commands from WebSocket client
+	// Reader loop: handles incoming console commands and client heartbeats
+	defer close(doneCh)
 	for {
 		_, msgBytes, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 
 		var incoming WSMessage
-		if err := json.Unmarshal(msgBytes, &incoming); err == nil && incoming.Event == "command" {
-			_ = h.manager.SendCommand(serverID, incoming.Data)
+		if err := json.Unmarshal(msgBytes, &incoming); err == nil {
+			switch incoming.Event {
+			case "command":
+				_ = h.manager.SendCommand(serverID, incoming.Data)
+			case "ping":
+				select {
+				case pongReplyCh <- struct{}{}:
+				default:
+				}
+			}
 		}
 	}
 }
-

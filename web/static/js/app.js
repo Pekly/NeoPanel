@@ -57,6 +57,10 @@ window.S = {
   view: 'dash',              // active view: dash, con, set, act, fi, db, bk, sc, net, sub, stp, pl, plug, store, ver, all, admin, acc
   status: 'offline',         // online, offline, starting, stopping
   start: Date.now(),
+  uptimeSec: 0,
+  diskMB: 0,
+  memUsedMB: 0,
+  memMaxMB: 2048,
   cpu: Array.from({ length: 40 }, () => 0),
   ram: Array.from({ length: 40 }, () => 0),
   ni: Array.from({ length: 40 }, () => 0),
@@ -138,6 +142,10 @@ window.S = {
   },
   activeWs: null,
   activeServerId: null,
+  wsState: 'disconnected',
+  wsAttempts: 0,
+  wsReconnectTimer: null,
+  wsPingTimer: null,
   pollTimer: null
 };
 
@@ -398,10 +406,77 @@ function getServerMaxRamMB(srv) {
   return 2048;
 }
 
-function up() {
-  if (S.status !== 'online') return 'Not running';
-  const s = Math.max(0, Math.floor((Date.now() - S.start) / 1000));
+function formatDiskMB(mb) {
+  const val = Number(mb) || 0;
+  if (val <= 0) return '0 MB';
+  if (val >= 1024) return `${(val / 1024).toFixed(2)} GiB`;
+  return `${Math.round(val)} MB`;
+}
+
+function formatUptime(sec) {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${s % 60}s`;
+}
+
+function up() {
+  if (S.status !== 'online' && S.status !== 'starting') return 'Not running';
+  return formatUptime(S.uptimeSec);
+}
+
+function normalizeServerStatus(rawStatus) {
+  const st = String(rawStatus || 'offline').toLowerCase();
+  if (st === 'online' || st === 'running') return 'online';
+  if (st === 'starting' || st === 'stopping') return st;
+  return 'offline';
+}
+
+function applyServerStatsSnapshot(srv, stats, pushSeries = false) {
+  if (!stats) return;
+  const normStatus = normalizeServerStatus(stats.status);
+  S.status = normStatus;
+  S.uptimeSec = Math.max(0, Number(stats.uptime_sec) || 0);
+  S.start = Date.now() - S.uptimeSec * 1000;
+  S.diskMB = Math.max(0, Number(stats.disk_mb) || 0);
+
+  const cpuVal = Math.max(0, Math.min(100, Number(stats.cpu_percent ?? stats.cpu_usage) || 0));
+  const memMB = Math.max(0, Number(stats.memory_mb) || 0);
+  const maxMemMB = Math.max(1, Number(stats.memory_max_mb) || getServerMaxRamMB(srv));
+  const ramPct = Math.max(0, Math.min(100, (memMB / maxMemMB) * 100));
+  const netIn = Math.max(0, Number(stats.net_in_kib) || 0);
+  const netOut = Math.max(0, Number(stats.net_out_kib) || 0);
+
+  S.memUsedMB = memMB;
+  S.memMaxMB = maxMemMB;
+
+  if (pushSeries) {
+    S.cpu.push(cpuVal);
+    S.cpu.shift();
+    S.ram.push(ramPct);
+    S.ram.shift();
+    S.ni.push(netIn);
+    S.ni.shift();
+    S.no.push(netOut);
+    S.no.shift();
+  } else {
+    S.cpu[S.cpu.length - 1] = cpuVal;
+    S.ram[S.ram.length - 1] = ramPct;
+    S.ni[S.ni.length - 1] = netIn;
+    S.no[S.no.length - 1] = netOut;
+  }
+
+  if (srv) {
+    srv.stats = {
+      ...(srv.stats || {}),
+      status: normStatus,
+      cpu_usage: cpuVal,
+      memory_mb: memMB,
+      memory_max_mb: maxMemMB,
+      disk_mb: S.diskMB,
+      uptime_sec: S.uptimeSec,
+      net_in_kib: netIn,
+      net_out_kib: netOut
+    };
+  }
 }
 
 // --- Sparklines SVGs ---
@@ -720,6 +795,26 @@ function updateHeaderBadge() {
   badge.innerHTML = `<i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[S.status] || 'Offline'}`;
 }
 
+function updateWsLivePill() {
+  const pill = $('#ws-live-pill');
+  if (!pill) return;
+  if (S.wsState === 'connected') {
+    pill.className = 'con-live-pill live';
+    pill.innerHTML = '<i></i>Live';
+  } else if (S.wsState === 'reconnecting' || S.wsState === 'connecting') {
+    pill.className = 'con-live-pill warn';
+    pill.innerHTML = '<i></i>Reconnecting...';
+  } else {
+    pill.className = 'con-live-pill';
+    pill.innerHTML = '<i></i>Offline';
+  }
+}
+
+function updateConBufferCount() {
+  const el = $('#con-buf-count');
+  if (el) el.textContent = `${S.log.length} lines`;
+}
+
 function addLog(line) {
   if (!line) return;
   const html = formatLogLine(line);
@@ -732,23 +827,47 @@ function addLog(line) {
 
   S.log.push(html);
   if (S.log.length > 800) S.log.shift();
-  if (S.view === 'con') paintLog();
+
+  if (S.view === 'con') {
+    const l = $('#log');
+    if (l) {
+      const atBottom = l.scrollHeight - l.scrollTop - l.clientHeight < 90;
+      const row = document.createElement('div');
+      row.className = 'con-line';
+      row.innerHTML = html;
+      l.appendChild(row);
+      while (l.children.length > 800) {
+        l.removeChild(l.firstChild);
+      }
+      updateConBufferCount();
+      if (atBottom) l.scrollTop = l.scrollHeight;
+    }
+  }
 }
 
 function paintLog() {
   const l = $('#log');
   if (!l) return;
-  l.innerHTML = S.log.join('\n');
+  l.innerHTML = S.log.map(line => `<div class="con-line">${line}</div>`).join('');
+  updateConBufferCount();
   l.scrollTop = l.scrollHeight;
 }
 
-// --- WebSocket Connection ---
-function connectWs(serverId) {
-  if (!serverId) return;
+// --- WebSocket Connection (Auto-Reconnect + Cloudflare Keepalive Heartbeat) ---
+function connectWs(serverId, isReconnect = false) {
+  if (!serverId || !S.token) return;
+
+  clearTimeout(S.wsReconnectTimer);
+  S.wsReconnectTimer = null;
 
   // If already connected or connecting to this server, do not recreate WebSocket
   if (S.activeWs && S.activeServerId === serverId && (S.activeWs.readyState === WebSocket.OPEN || S.activeWs.readyState === WebSocket.CONNECTING)) {
     return;
+  }
+
+  if (S.wsPingTimer) {
+    clearInterval(S.wsPingTimer);
+    S.wsPingTimer = null;
   }
 
   if (S.activeWs) {
@@ -761,6 +880,8 @@ function connectWs(serverId) {
   }
 
   S.activeServerId = serverId;
+  S.wsState = isReconnect ? 'reconnecting' : 'connecting';
+  updateWsLivePill();
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${encodeURIComponent(S.token)}`;
@@ -769,13 +890,31 @@ function connectWs(serverId) {
     const ws = new WebSocket(wsUrl);
     S.activeWs = ws;
 
+    ws.onopen = () => {
+      if (S.activeWs !== ws) return;
+      S.wsState = 'connected';
+      S.wsAttempts = 0;
+      updateWsLivePill();
+
+      clearInterval(S.wsPingTimer);
+      S.wsPingTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          try {
+            ws.send(JSON.stringify({ event: 'ping' }));
+          } catch (e) {}
+        }
+      }, 25000);
+    };
+
     ws.onmessage = e => {
       if (!e.data) return;
       try {
         const text = e.data.trim();
         if (text.startsWith('{')) {
           const msg = JSON.parse(text);
-          if (msg.event === 'history') {
+          if (msg.event === 'pong') {
+            return;
+          } else if (msg.event === 'history') {
             try {
               const list = JSON.parse(msg.data);
               if (Array.isArray(list)) {
@@ -789,26 +928,17 @@ function connectWs(serverId) {
             addLog(msg.data);
             return;
           } else if (msg.event === 'stats' || msg.type === 'stats') {
-            const c = Math.max(0, Math.min(100, msg.cpu_percent || 0));
-            S.cpu.push(c);
-            S.cpu.shift();
-
-            const mem = msg.memory_bytes || 0;
-            const maxMemMB = getServerMaxRamMB(curServer());
-            const maxMemBytes = maxMemMB * 1024 * 1024;
-            const r = Math.max(0, Math.min(100, (mem / maxMemBytes) * 100));
-            S.ram.push(r);
-            S.ram.shift();
-
-            S.ni.push(Math.max(2, Math.min(480, S.ni.at(-1) + (Math.random() - 0.45) * 40)));
-            S.ni.shift();
-            S.no.push(Math.max(2, Math.min(480, S.no.at(-1) + (Math.random() - 0.45) * 30)));
-            S.no.shift();
-
+            const prevStatus = S.status;
+            applyServerStatsSnapshot(curServer(), msg, true);
+            if (S.status !== prevStatus) {
+              updateInputState();
+              updateHeaderBadge();
+            }
             liveCon();
+            if (S.view === 'dash') updateDashLiveStats();
             return;
           } else if (msg.event === 'status' || msg.type === 'status') {
-            S.status = msg.data || S.status;
+            S.status = normalizeServerStatus(msg.data || S.status);
             updateInputState();
             updateHeaderBadge();
             return;
@@ -819,13 +949,56 @@ function connectWs(serverId) {
       addLog(e.data);
     };
 
+    ws.onerror = () => {
+      try { ws.close(); } catch (e) {}
+    };
+
     ws.onclose = () => {
+      if (S.wsPingTimer) {
+        clearInterval(S.wsPingTimer);
+        S.wsPingTimer = null;
+      }
       if (S.activeWs === ws) {
         S.activeWs = null;
       }
+      if (S.token && S.activeServerId === serverId) {
+        S.wsState = 'reconnecting';
+        updateWsLivePill();
+        const delay = Math.min(1000 * Math.pow(1.5, S.wsAttempts), 8000);
+        S.wsAttempts++;
+        S.wsReconnectTimer = setTimeout(() => {
+          connectWs(serverId, true);
+        }, delay);
+      }
     };
-  } catch (e) {}
+  } catch (e) {
+    S.wsState = 'reconnecting';
+    updateWsLivePill();
+  }
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && S.token && S.activeServerId) {
+    if (!S.activeWs || S.activeWs.readyState === WebSocket.CLOSED) {
+      connectWs(S.activeServerId, true);
+    }
+  }
+});
+
+window.addEventListener('online', () => {
+  if (S.token && S.activeServerId && (!S.activeWs || S.activeWs.readyState === WebSocket.CLOSED)) {
+    connectWs(S.activeServerId, true);
+  }
+});
+
+// Local 1-second uptime ticker fallback so uptime advances smoothly between WS ticks
+setInterval(() => {
+  if ((S.status === 'online' || S.status === 'starting') && (!S.activeWs || S.activeWs.readyState !== WebSocket.OPEN)) {
+    S.uptimeSec = (Number(S.uptimeSec) || 0) + 1;
+    if (S.view === 'con') liveCon();
+    else if (S.view === 'dash') updateDashLiveStats();
+  }
+}, 1000);
 
 // --- Power Actions ---
 async function power(action) {
@@ -857,10 +1030,15 @@ async function power(action) {
       method: 'POST',
       body: JSON.stringify({ action })
     });
-    S.status = res.status || (action === 'start' ? 'online' : 'offline');
-    if (S.status === 'online') S.start = Date.now();
+    if (res && res.current) {
+      applyServerStatsSnapshot(srv, res.current, false);
+    } else {
+      const fallback = (action === 'start' || action === 'restart') ? 'starting' : 'offline';
+      S.status = normalizeServerStatus(fallback);
+    }
     updateInputState();
     updateHeaderBadge();
+    liveCon();
     toast(`Server ${action} command sent`, 'ok');
   } catch (err) {
     S.status = 'offline';
@@ -916,7 +1094,7 @@ async function refreshServerStatus() {
   if (!srv) return;
   try {
     const data = await api(`/api/servers/${srv.id}`);
-    S.status = data.stats?.status || data.status || 'offline';
+    applyServerStatsSnapshot(srv, data.stats, false);
     S.ver = data.version || S.ver;
     S.core = (data.type || 'paper').charAt(0).toUpperCase() + (data.type || 'paper').slice(1);
     updateInputState();
@@ -1001,20 +1179,21 @@ function srvh() {
   const srv = curServer();
   const st = S.status;
   const on = st === 'online';
-  const c = on ? S.cpu.at(-1) : 0;
-  const maxRamMB = getServerMaxRamMB(srv);
-  const m = on ? (S.ram.at(-1) / 100) * maxRamMB : 0;
+  const active = on || st === 'starting';
+  const c = active ? (S.cpu.at(-1) || 0) : 0;
+  const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
+  const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
   const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
 
   return `<div class="card srvh">
     <div>
       <div class="row">
         <h1>${esc(S.props.motd || srv?.name || 'Minecraft Server')}</h1>
-        <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st]}</span>
+        <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st] || 'Offline'}</span>
       </div>
       <div id="hst" class="row hst">
         <span class="mono mu pv">${hostAddr}</span>
-        <span class="mono mu">CPU ${c.toFixed(0)}%</span>
+        <span class="mono mu">CPU ${c.toFixed(1)}%</span>
         <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
       </div>
     </div>
@@ -1027,7 +1206,7 @@ function srvh() {
       </div>` : ''}
       <button class="btn pr" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
-      <button class="btn stop" onclick="power('stop')" ${on ? '' : 'disabled'}>Stop</button>
+      <button class="btn stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
       <button class="btn dg" onclick="power('kill')">Kill</button>
     </div>
   </div>`;
@@ -1046,10 +1225,12 @@ function execQuickCmd(cmd) {
 
 function statsHtml() {
   const srv = curServer();
-  const on = S.status === 'online';
-  const c = on ? S.cpu.at(-1) : 0;
-  const maxRamMB = getServerMaxRamMB(srv);
-  const m = on ? (S.ram.at(-1) / 100) * maxRamMB : 0;
+  const active = S.status === 'online' || S.status === 'starting';
+  const c = active ? (S.cpu.at(-1) || 0) : 0;
+  const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
+  const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
+  const netIn = active ? (S.ni.at(-1) || 0) : 0;
+  const netOut = active ? (S.no.at(-1) || 0) : 0;
   const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
 
   const row = (i, l, v, s) => `<div class="srow">
@@ -1064,27 +1245,29 @@ function statsHtml() {
     row(ic('clock', 16), 'Uptime', up()) +
     row(ic('cpu', 16), 'CPU load', `${c.toFixed(1)}%`, '/ 100%') +
     row(ic('layers', 16), 'Memory', `${m.toFixed(0)} MiB`, `/ ${(maxRamMB / 1024).toFixed(1)} GiB`) +
-    row(ic('database', 16), 'Disk', '1.82 GiB', '/ 20 GiB') +
-    row('↓', 'Network (inbound)', `${(on ? S.ni.at(-1) : 0).toFixed(1)} KiB`) +
-    row('↑', 'Network (outbound)', `${(on ? S.no.at(-1) : 0).toFixed(1)} KiB`);
+    row(ic('database', 16), 'Disk', formatDiskMB(S.diskMB)) +
+    row('↓', 'Network (inbound)', `${netIn.toFixed(1)} KiB/s`) +
+    row('↑', 'Network (outbound)', `${netOut.toFixed(1)} KiB/s`);
 }
 
 function chartsHtml() {
   const srv = curServer();
-  const on = S.status === 'online';
-  const maxRamGB = (getServerMaxRamMB(srv) / 1024).toFixed(1);
+  const active = S.status === 'online' || S.status === 'starting';
+  const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
+  const maxRamGB = (maxRamMB / 1024).toFixed(1);
   const z = a => a.map(() => 0);
+  const netPeak = Math.max(10, ...S.ni, ...S.no);
   return `<div class="card ch">
-    <div class="row sb"><span class="mu">CPU load</span><span class="mu mono">100%</span></div>
-    ${spark(on ? S.cpu : z(S.cpu), 100)}
+    <div class="row sb"><span class="mu">CPU load</span><span class="mu mono">${active ? (S.cpu.at(-1) || 0).toFixed(1) + '%' : '100%'}</span></div>
+    ${spark(active ? S.cpu : z(S.cpu), 100)}
   </div>
   <div class="card ch">
-    <div class="row sb"><span class="mu">Memory</span><span class="mu mono">${maxRamGB} GiB</span></div>
-    ${spark(on ? S.ram : z(S.ram), 100)}
+    <div class="row sb"><span class="mu">Memory</span><span class="mu mono">${active ? `${(S.memUsedMB || 0).toFixed(0)} MiB / ${maxRamGB} GiB` : `${maxRamGB} GiB`}</span></div>
+    ${spark(active ? S.ram : z(S.ram), 100)}
   </div>
   <div class="card ch">
     <div class="row sb"><span class="mu">Network I/O</span><span class="mu"><span style="color:var(--ac)">in</span> <span style="color:#f0b429">out</span></span></div>
-    ${lines(on ? [S.ni, S.no] : [z(S.ni), z(S.no)], 500)}
+    ${lines(active ? [S.ni, S.no] : [z(S.ni), z(S.no)], netPeak)}
   </div>`;
 }
 
@@ -1096,30 +1279,107 @@ function liveCon() {
   if (chr) chr.innerHTML = chartsHtml();
   if (hst) {
     const srv = curServer();
-    const on = S.status === 'online';
-    const c = on ? S.cpu.at(-1) : 0;
-    const maxRamMB = getServerMaxRamMB(srv);
-    const m = on ? (S.ram.at(-1) / 100) * maxRamMB : 0;
+    const active = S.status === 'online' || S.status === 'starting';
+    const c = active ? (S.cpu.at(-1) || 0) : 0;
+    const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
+    const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
     const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
-    hst.innerHTML = `<span class="mono mu pv">${hostAddr}</span><span class="mono mu">CPU ${c.toFixed(0)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
+    hst.innerHTML = `<span class="mono mu pv">${hostAddr}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
   }
+}
+
+function updateDashLiveStats() {
+  if (S.view !== 'dash') return;
+  let runningCount = 0;
+  let totalRamAllocatedMB = 0;
+  let totalRamUsedMB = 0;
+  let totalDiskMB = 0;
+
+  for (let i = 0; i < S.servers.length; i++) {
+    const s = S.servers[i];
+    const st = i === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
+    const isRun = st === 'online' || st === 'starting';
+    if (isRun) runningCount++;
+
+    const maxRam = getServerMaxRamMB(s);
+    const cVal = isRun ? (i === S.cs ? (S.cpu.at(-1) || 0) : (Number(s.stats?.cpu_usage) || 0)) : 0;
+    const mVal = isRun ? (i === S.cs ? (S.memUsedMB || 0) : (Number(s.stats?.memory_mb) || 0)) : 0;
+    const dVal = i === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0);
+    const upVal = i === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
+
+    totalRamAllocatedMB += maxRam;
+    totalRamUsedMB += mVal;
+    totalDiskMB += dVal;
+
+    const card = document.getElementById(`dash-srv-${s.id}`);
+    if (!card) continue;
+    const badge = card.querySelector('[data-role="badge"]');
+    if (badge) {
+      badge.className = `badge ${isRun ? 'online' : 'offline'}`;
+      badge.innerHTML = `<i class="dot"></i>${isRun ? 'Running' : 'Offline'}${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upVal)}</span>` : ''}`;
+    }
+    const cpuValEl = card.querySelector('[data-role="cpu-val"]');
+    const cpuBarEl = card.querySelector('[data-role="cpu-bar"]');
+    if (cpuValEl) cpuValEl.textContent = `${cVal.toFixed(1)}%`;
+    if (cpuBarEl) cpuBarEl.style.width = `${Math.min(100, cVal)}%`;
+
+    const memValEl = card.querySelector('[data-role="mem-val"]');
+    const memBarEl = card.querySelector('[data-role="mem-bar"]');
+    if (memValEl) memValEl.textContent = `${Math.round(mVal)} MB`;
+    if (memBarEl) memBarEl.style.width = `${Math.min(100, (mVal / (maxRam || 1)) * 100)}%`;
+
+    const diskValEl = card.querySelector('[data-role="disk-val"]');
+    const diskBarEl = card.querySelector('[data-role="disk-bar"]');
+    if (diskValEl) diskValEl.textContent = formatDiskMB(dVal);
+    if (diskBarEl) diskBarEl.style.width = `${Math.min(100, (dVal / 20480) * 100)}%`;
+  }
+
+  const totalCount = S.servers.length;
+  const runSummary = $('#dash-running-summary');
+  if (runSummary) runSummary.innerHTML = `${runningCount} &bull; ${totalCount} running`;
+
+  const allocMemVal = $('#dash-alloc-mem-val');
+  const allocMemBar = $('#dash-alloc-mem-bar');
+  const totalAllocGB = (totalRamAllocatedMB / 1024).toFixed(1);
+  const usedGB = (totalRamUsedMB / 1024).toFixed(2);
+  if (allocMemVal) allocMemVal.textContent = `${usedGB} of ${totalAllocGB} GB`;
+  if (allocMemBar) allocMemBar.style.width = `${Math.min(100, (totalRamUsedMB / (totalRamAllocatedMB || 1)) * 100)}%`;
+
+  const allocDiskVal = $('#dash-alloc-disk-val');
+  const allocDiskBar = $('#dash-alloc-disk-bar');
+  if (allocDiskVal) allocDiskVal.textContent = `${formatDiskMB(totalDiskMB)} used`;
+  if (allocDiskBar) allocDiskBar.style.width = `${Math.min(100, (totalDiskMB / Math.max(20480, totalCount * 10240)) * 100)}%`;
+
+  const allocRunVal = $('#dash-alloc-run-val');
+  const allocRunBar = $('#dash-alloc-run-bar');
+  if (allocRunVal) allocRunVal.textContent = `${runningCount} of ${totalCount}`;
+  if (allocRunBar) allocRunBar.style.width = `${Math.min(100, (runningCount / (totalCount || 1)) * 100)}%`;
 }
 
 // --- Views Implementation (V) ---
 const V = {
   dash() {
-    const srv = curServer();
-    const runningCount = S.servers.filter(s => (s.stats?.status || s.status) === 'running' || (s.stats?.status || s.status) === 'online').length;
+    const runningCount = S.servers.filter((s, i) => {
+      const st = i === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
+      return st === 'online' || st === 'starting';
+    }).length;
     const totalCount = S.servers.length;
     const totalRamAllocatedMB = S.servers.reduce((sum, s) => sum + getServerMaxRamMB(s), 0);
     const totalRamAllocatedGB = (totalRamAllocatedMB / 1024).toFixed(1);
-    const totalRamUsedGB = S.status === 'online' ? ((S.ram.at(-1) / 100) * (totalRamAllocatedMB / 1024)).toFixed(1) : '0.0';
+    const totalRamUsedMB = S.servers.reduce((sum, s, i) => {
+      const st = i === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
+      if (st !== 'online' && st !== 'starting') return sum;
+      return sum + (i === S.cs ? (S.memUsedMB || Number(s.stats?.memory_mb) || 0) : (Number(s.stats?.memory_mb) || 0));
+    }, 0);
+    const totalRamUsedGB = (totalRamUsedMB / 1024).toFixed(2);
+    const totalDiskMB = S.servers.reduce((sum, s, i) => sum + (i === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0)), 0);
+    const diskQuotaMB = Math.max(20480, totalCount * 10240);
 
     return `
     <div class="row sb" style="margin-bottom: 24px; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
       <div>
-        <h1 style="font-size: 26px; font-weight: 800; color: #fff; margin-bottom: 4px; letter-spacing: -0.02em;">Servers</h1>
-        <span class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} &bull; ${totalCount} running</span>
+        <h1 style="font-size: 26px; font-weight: 800; color: var(--tx); margin-bottom: 4px; letter-spacing: -0.02em;">Servers</h1>
+        <span id="dash-running-summary" class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} &bull; ${totalCount} running</span>
       </div>
       <div class="row" style="gap: 10px; flex-wrap: wrap;">
         <div style="position: relative;">
@@ -1140,28 +1400,31 @@ const V = {
       <!-- Left Column: Server Cards Grid -->
       <div id="srv-card-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
         ${S.servers.map((s, i) => {
-          const isRun = (s.stats?.status || s.status) === 'running' || (s.stats?.status || s.status) === 'online' || (i === S.cs && S.status === 'online');
+          const st = i === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
+          const isRun = st === 'online' || st === 'starting';
           const maxRam = getServerMaxRamMB(s);
-          const cVal = isRun ? (i === S.cs ? S.cpu.at(-1) : 2) : 0;
-          const mVal = isRun ? (i === S.cs ? ((S.ram.at(-1) / 100) * maxRam).toFixed(0) : Math.round(maxRam * 0.4)) : 0;
+          const cVal = isRun ? (i === S.cs ? (S.cpu.at(-1) || 0) : (Number(s.stats?.cpu_usage) || 0)) : 0;
+          const mVal = isRun ? (i === S.cs ? (S.memUsedMB || Number(s.stats?.memory_mb) || 0) : (Number(s.stats?.memory_mb) || 0)) : 0;
+          const dVal = i === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0);
+          const upSec = i === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
           const host = `${window.location.hostname}:${s.port || 25565}`;
           const coreLabel = (s.type || 'paper').charAt(0).toUpperCase() + (s.type || 'paper').slice(1);
 
           return `
-          <div class="sift-server-card" onclick="switchServer(${i}); go('con');" data-name="${esc(s.name)}" data-addr="${host}">
+          <div id="dash-srv-${s.id}" class="sift-server-card" onclick="switchServer(${i}); go('con');" data-name="${esc(s.name)}" data-addr="${host}">
             <div class="srv-card-banner" style="background-image: url('/img/banner.jpg');">
               <span class="srv-card-badge">Minecraft - ${esc(coreLabel)}</span>
               <div class="srv-card-actions">
-                <span class="srv-card-action-btn" onclick="event.stopPropagation(); refreshServerStatus();" title="Refresh status">↻</span>
+                <span class="srv-card-action-btn" onclick="event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">↻</span>
                 <span class="srv-card-action-btn danger" onclick="event.stopPropagation(); openDeleteServerModal('${s.id}', '${esc(s.name)}');" title="Delete Server">${ic('trash', 13)}</span>
               </div>
             </div>
             <div class="srv-card-body">
               <div class="srv-card-title-row">
                 <span class="srv-card-title">${esc(s.name || 'Minecraft Server')}</span>
-                <span class="badge ${isRun ? 'online' : 'offline'}">
+                <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}">
                   <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
-                  ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${up()}</span>` : ''}
+                  ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
                 </span>
               </div>
               <div class="srv-card-addr">${host}</div>
@@ -1169,23 +1432,23 @@ const V = {
                 <div class="srv-meter">
                   <div class="srv-meter-head">
                     <span>CPU</span>
-                    <span class="srv-meter-val">${cVal.toFixed(0)}%</span>
+                    <span data-role="cpu-val" class="srv-meter-val">${cVal.toFixed(1)}%</span>
                   </div>
-                  <div class="meter-bar"><i style="width:${Math.min(100, cVal)}%"></i></div>
+                  <div class="meter-bar"><i data-role="cpu-bar" style="width:${Math.min(100, cVal)}%"></i></div>
                 </div>
                 <div class="srv-meter">
                   <div class="srv-meter-head">
                     <span>Memory</span>
-                    <span class="srv-meter-val">${mVal} MB</span>
+                    <span data-role="mem-val" class="srv-meter-val">${Math.round(mVal)} MB</span>
                   </div>
-                  <div class="meter-bar"><i style="width:${Math.min(100, (mVal / (maxRam || 1)) * 100)}%"></i></div>
+                  <div class="meter-bar"><i data-role="mem-bar" style="width:${Math.min(100, (mVal / (maxRam || 1)) * 100)}%"></i></div>
                 </div>
                 <div class="srv-meter">
                   <div class="srv-meter-head">
                     <span>Disk</span>
-                    <span class="srv-meter-val">222 MB</span>
+                    <span data-role="disk-val" class="srv-meter-val">${formatDiskMB(dVal)}</span>
                   </div>
-                  <div class="meter-bar"><i style="width:14%"></i></div>
+                  <div class="meter-bar"><i data-role="disk-bar" style="width:${Math.min(100, (dVal / 20480) * 100)}%"></i></div>
                 </div>
               </div>
             </div>
@@ -1206,7 +1469,7 @@ const V = {
         <!-- Recent Activity Card -->
         <div class="card" style="padding: 18px;">
           <div class="row sb" style="margin-bottom: 14px;">
-            <h2 style="font-size: 15px; font-weight: 700; color: #fff;">Recent activity</h2>
+            <h2 style="font-size: 15px; font-weight: 700; color: var(--tx);">Recent activity</h2>
             <a href="#act" onclick="go('act')" class="mu" style="font-size: 12px; text-decoration: none;">View all</a>
           </div>
           <div style="display: flex; flex-direction: column; gap: 12px;">
@@ -1214,22 +1477,22 @@ const V = {
               <div style="display: flex; gap: 8px;">
                 <span class="mu" style="color: var(--tx-dim);">&rarr;</span>
                 <div>
-                  <div style="font-weight: 600; color: #fff;">Signed in</div>
+                  <div style="font-weight: 600; color: var(--tx);">Signed in</div>
                   <div class="mu mono" style="font-size: 11.5px;">${esc(S.acct.un || 'admin')} &bull; ${window.location.hostname}</div>
                 </div>
               </div>
-              <span class="mu" style="font-size: 12px;">12m</span>
+              <span class="mu" style="font-size: 12px;">Now</span>
             </div>
             ${S.servers.length ? `
               <div style="display: flex; align-items: flex-start; justify-content: space-between; font-size: 13px;">
                 <div style="display: flex; gap: 8px;">
                   <span class="mu" style="color: var(--tx-dim);">&rarr;</span>
                   <div>
-                    <div style="font-weight: 600; color: #fff;">Server registered</div>
+                    <div style="font-weight: 600; color: var(--tx);">Server registered</div>
                     <div class="mu" style="font-size: 11.5px;">${esc(S.servers[0].name)} &bull; ${esc(S.servers[0].type || 'paper')}</div>
                   </div>
                 </div>
-                <span class="mu" style="font-size: 12px;">2h</span>
+                <span class="mu" style="font-size: 12px;">Active</span>
               </div>
             ` : ''}
           </div>
@@ -1237,28 +1500,28 @@ const V = {
 
         <!-- Your Allocation Card -->
         <div class="card" style="padding: 18px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 14px;">Your allocation</h2>
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 14px;">Your allocation</h2>
           <div style="display: flex; flex-direction: column; gap: 14px;">
             <div>
               <div class="row sb" style="font-size: 12px; margin-bottom: 5px;">
                 <span class="mu">Memory</span>
-                <span class="mono" style="font-weight: 600; color: #fff;">${totalRamUsedGB} of ${totalRamAllocatedGB} GB</span>
+                <span id="dash-alloc-mem-val" class="mono" style="font-weight: 600; color: var(--tx);">${totalRamUsedGB} of ${totalRamAllocatedGB} GB</span>
               </div>
-              <div class="meter-bar"><i style="width: ${Math.min(100, (parseFloat(totalRamUsedGB) / (parseFloat(totalRamAllocatedGB) || 1)) * 100)}%;"></i></div>
+              <div class="meter-bar"><i id="dash-alloc-mem-bar" style="width: ${Math.min(100, (totalRamUsedMB / (totalRamAllocatedMB || 1)) * 100)}%;"></i></div>
             </div>
             <div>
               <div class="row sb" style="font-size: 12px; margin-bottom: 5px;">
                 <span class="mu">Disk</span>
-                <span class="mono" style="font-weight: 600; color: #fff;">0.2 of 10 GB</span>
+                <span id="dash-alloc-disk-val" class="mono" style="font-weight: 600; color: var(--tx);">${formatDiskMB(totalDiskMB)} used</span>
               </div>
-              <div class="meter-bar"><i style="width: 12%;"></i></div>
+              <div class="meter-bar"><i id="dash-alloc-disk-bar" style="width: ${Math.min(100, (totalDiskMB / diskQuotaMB) * 100)}%;"></i></div>
             </div>
             <div>
               <div class="row sb" style="font-size: 12px; margin-bottom: 5px;">
                 <span class="mu">Running</span>
-                <span class="mono" style="font-weight: 600; color: #fff;">${runningCount} of ${totalCount}</span>
+                <span id="dash-alloc-run-val" class="mono" style="font-weight: 600; color: var(--tx);">${runningCount} of ${totalCount}</span>
               </div>
-              <div class="meter-bar"><i style="width: ${Math.min(100, (runningCount / (totalCount || 1)) * 100)}%;"></i></div>
+              <div class="meter-bar"><i id="dash-alloc-run-bar" style="width: ${Math.min(100, (runningCount / (totalCount || 1)) * 100)}%;"></i></div>
             </div>
           </div>
         </div>
@@ -1271,9 +1534,12 @@ const V = {
     <div class="cgrid">
       <div class="cwrap">
         <div class="con-top-bar">
-          <div class="row" style="gap:6px;">
+          <div class="row" style="gap:8px;">
             ${ic('terminal', 14)}
-            <span>Console Stream &bull; Buffer: ${S.log.length} lines</span>
+            <span>Console Stream</span>
+            <span id="ws-live-pill" class="con-live-pill"><i></i>Connecting...</span>
+            <span class="mu">&bull;</span>
+            <span id="con-buf-count">${S.log.length} lines</span>
           </div>
           <button class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');">Clear</button>
         </div>
@@ -1878,17 +2144,17 @@ const V = {
     return `${srvh()}
     <div style="margin-top: 18px;">
       <!-- Top Grid: Startup Command & Docker Image / Java -->
-      <div style="display: grid; grid-template-columns: 1fr 340px; gap: 16px; margin-bottom: 24px;">
+      <div class="stp-top-grid">
         <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Active Startup Command</h2>
-          <div class="mono" style="background: var(--con-bg); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); color: #fff; font-size: 12.5px; line-height: 1.6; word-break: break-all;">
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 12px;">Active Startup Command</h2>
+          <div class="mono" style="background: var(--con-bg); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.6; word-break: break-all;">
             ${esc(javaCmd)} -Xms${memMin}M -Xmx${memMax}M ${esc(jvmFlags)} -jar ${esc(jarName)} nogui
           </div>
           <span class="mu" style="font-size: 12px; margin-top: 8px; display: block;">This command is dynamically constructed from your selected Java binary, memory allocation, and JVM arguments.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Java Runtime Environment</h2>
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 12px;">Java Runtime Environment</h2>
           <select id="stp-java" onchange="toggleCustomJavaInput(this.value)" style="margin-bottom: 8px;">
             <option value="21" ${curJava === '21' || curJava === 'java' || !curJava ? 'selected' : ''}>Java 21 (Modern 1.20.5+ / Recommended)</option>
             <option value="17" ${curJava === '17' ? 'selected' : ''}>Java 17 (Legacy 1.18 - 1.20.4)</option>
@@ -1904,23 +2170,23 @@ const V = {
       </div>
 
       <!-- Variables Section -->
-      <h2 style="font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 16px;">Runtime Variables &amp; Parameters</h2>
+      <h2 style="font-size: 18px; font-weight: 700; color: var(--tx); margin-bottom: 16px;">Runtime Variables &amp; Parameters</h2>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px;">
         <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MINECRAFT VERSION</div>
+          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MINECRAFT VERSION</div>
           <input type="text" id="stp-ver" value="${esc(srv?.version || 'latest')}" style="margin-bottom: 8px; font-weight: 600;">
           <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The release or snapshot version of Minecraft running in this container.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">SERVER JAR FILE</div>
+          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">SERVER JAR FILE</div>
           <input type="text" id="stp-jar" value="${esc(srv?.jar_file || 'server.jar')}" style="margin-bottom: 8px; font-weight: 600;">
           <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The name of the server executable JAR inside the container directory.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MAX RAM ALLOCATION</div>
+          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MAX RAM ALLOCATION</div>
           <select id="stp-ram" style="margin-bottom: 8px; font-weight: 600;">
             <option value="1024" ${memMax === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
             <option value="2048" ${memMax === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
@@ -1933,7 +2199,7 @@ const V = {
         </div>
 
         <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">CUSTOM JVM FLAGS (JAVA_ARGS)</div>
+          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">CUSTOM JVM FLAGS (JAVA_ARGS)</div>
           <input type="text" id="stp-args" value="${esc(srv?.java_args || '-XX:+UseG1GC')}" style="margin-bottom: 8px; font-weight: 500;">
           <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Additional JVM options passed directly to the Java process on start.</span>
         </div>
@@ -2100,10 +2366,10 @@ const V = {
         <tbody>
           ${S.acct.act.length ? S.acct.act.map(r => `
             <tr>
-              <td><b>${esc(r[0] || r.action)}</b></td>
+              <td><b>${esc(r.details || r.action || r[0] || 'Event')}</b></td>
               <td>${esc(r[1] || S.acct.un)}</td>
-              <td class="mono pv">${esc(r[2] || r.ip || '127.0.0.1')}</td>
-              <td class="mu">${esc(r[3] || 'Recently')}</td>
+              <td class="mono pv">${esc(r.ip_address || r.ip || r[2] || '127.0.0.1')}</td>
+              <td class="mu">${esc(r.created_at ? formatFileDate(r.created_at) : (r[3] || 'Recently'))}</td>
             </tr>
           `).join('') : `
             <tr><td>Started server instance</td><td>${esc(S.acct.un)}</td><td class="mono pv">127.0.0.1</td><td class="mu">Just now</td></tr>
@@ -2314,7 +2580,7 @@ const V = {
       content = `
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px;">
-            <h2 style="margin:0; color:#fff;">Global Daemon Audit Log</h2>
+            <h2 style="margin:0; color:var(--tx);">Global Daemon Audit Log</h2>
             <button class="btn sm" onclick="loadAccountData(); toast('Logs refreshed');">${ic('refresh', 12)} Refresh</button>
           </div>
           <table>
@@ -2322,10 +2588,10 @@ const V = {
             <tbody>
               ${S.acct.act.length ? S.acct.act.map(r => `
                 <tr>
-                  <td><b>${esc(r[0] || r.action)}</b></td>
+                  <td><b>${esc(r.details || r.action || r[0] || 'Event')}</b></td>
                   <td>${esc(r[1] || S.acct.un)}</td>
-                  <td class="mono pv">${esc(r[2] || r.ip || '127.0.0.1')}</td>
-                  <td class="mu">${esc(r[3] || 'Recently')}</td>
+                  <td class="mono pv">${esc(r.ip_address || r.ip || r[2] || '127.0.0.1')}</td>
+                  <td class="mu">${esc(r.created_at ? formatFileDate(r.created_at) : (r[3] || 'Recently'))}</td>
                 </tr>
               `).join('') : `
                 <tr><td>Daemon Started (systemd)</td><td>root</td><td class="mono pv">127.0.0.1</td><td class="mu">System boot</td></tr>
@@ -2430,7 +2696,7 @@ const V = {
               <tr>
                 <td><b>${esc(k.name || k[0])}</b></td>
                 <td class="mono">${esc(k.fingerprint || k[1])}</td>
-                <td class="mu">${esc(k.created_at || k[2])}</td>
+                <td class="mu">${esc(k.created_at ? formatFileDate(k.created_at) : (k[2] || 'Recently'))}</td>
                 <td style="text-align:right">
                   <button class="btn sm dg" onclick="deleteSSHKey('${k.id || i}')">${ic('trash', 14)} Delete</button>
                 </td>
@@ -2456,13 +2722,13 @@ const V = {
       </div>
       <div class="card tw" style="margin-top:14px">
         <table>
-          <thead><tr><th>Description</th><th>Key Prefix</th><th>Last Used</th><th style="text-align:right">Action</th></tr></thead>
+          <thead><tr><th>Description</th><th>Key Prefix</th><th>Created</th><th style="text-align:right">Action</th></tr></thead>
           <tbody>
             ${a.api.length ? a.api.map((k, i) => `
               <tr>
-                <td><b>${esc(k.description || k[0])}</b></td>
-                <td class="mono">${esc(k.prefix || k[1])}</td>
-                <td class="mu">${esc(k.last_used || k[2] || 'Never')}</td>
+                <td><b>${esc(k.name || k.description || k[0])}</b></td>
+                <td class="mono">${esc(k.key_prefix || k.prefix || k[1])}</td>
+                <td class="mu">${esc(k.created_at ? formatFileDate(k.created_at) : (k.last_used || k[2] || 'Never'))}</td>
                 <td style="text-align:right">
                   <button class="btn sm dg" onclick="deleteAPIKey('${k.id || i}')">${ic('trash', 14)} Revoke</button>
                 </td>
@@ -2478,9 +2744,9 @@ const V = {
           <tbody>
             ${a.act.length ? a.act.map(r => `
               <tr>
-                <td><b>${esc(r[0] || r.action)}</b></td>
-                <td class="mono pv">${esc(r[1] || r.ip || '127.0.0.1')}</td>
-                <td class="mu">${esc(r[2] || 'Recent')}</td>
+                <td><b>${esc(r.details || r.action || r[0] || 'Event')}</b></td>
+                <td class="mono pv">${esc(r.ip_address || r.ip || r[1] || '127.0.0.1')}</td>
+                <td class="mu">${esc(r.created_at ? formatFileDate(r.created_at) : (r[2] || 'Recent'))}</td>
               </tr>
             `).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:24px;">No recorded security events.</td></tr>'}
           </tbody>
@@ -2503,7 +2769,7 @@ const V = {
           ${ic('user', 22)}
         </div>
         <div>
-          <h1 style="font-size: 24px; font-weight: 800; color: #fff; margin: 0; letter-spacing: -0.01em;">Account Settings</h1>
+          <h1 style="font-size: 24px; font-weight: 800; color: var(--tx); margin: 0; letter-spacing: -0.01em;">Account Settings</h1>
         </div>
       </div>
       <button class="btn dg sm" onclick="logout()">Log Out</button>
@@ -2678,6 +2944,8 @@ window.R = function() {
     if (S.view === 'con') {
       paintLog();
       bindConsoleInput();
+      updateInputState();
+      updateWsLivePill();
     } else if (S.view === 'fi') {
       bindEditorTabKey();
     }
@@ -2737,9 +3005,9 @@ async function loadDashboard() {
     const srvs = await api('/api/servers');
     S.servers = srvs || [];
     if (S.servers.length > 0) {
+      if (S.cs >= S.servers.length) S.cs = 0;
       const cur = curServer();
-      const st = cur.stats?.status || cur.status || 'offline';
-      S.status = (st === 'running' || st === 'online') ? 'online' : 'offline';
+      applyServerStatsSnapshot(cur, cur.stats, false);
       S.ver = cur.version || S.ver;
       S.core = (cur.type || 'paper').charAt(0).toUpperCase() + (cur.type || 'paper').slice(1);
       connectWs(cur.id);
@@ -3705,11 +3973,12 @@ async function loadSFTPDetails() {
 // --- Account Management ---
 async function loadAccountData() {
   try {
+    const savedProf = JSON.parse(localStorage.getItem('neopanel_profile') || '{}');
     const prof = await api('/api/account/profile');
-    S.acct.un = prof.username || S.acct.un;
-    S.acct.em = prof.email || S.acct.em;
-    S.acct.fn = prof.first_name || 'Admin';
-    S.acct.ln = prof.last_name || '';
+    S.acct.un = savedProf.un || prof.username || S.acct.un;
+    S.acct.em = savedProf.em || prof.email || S.acct.em;
+    S.acct.fn = savedProf.fn || prof.first_name || 'Admin';
+    S.acct.ln = savedProf.ln !== undefined ? savedProf.ln : (prof.last_name || '');
     S.acct.h = await computeGravatarHash(S.acct.em);
 
     if (S.acct.tab === 2) {
@@ -3724,16 +3993,24 @@ async function loadAccountData() {
 }
 
 async function updateAccountProfile() {
-  const fn = $('#afn')?.value;
-  const ln = $('#aln')?.value;
-  const em = $('#aem')?.value;
+  const fn = $('#afn')?.value?.trim();
+  const ln = $('#aln')?.value?.trim() ?? '';
+  const un = $('#aun')?.value?.trim();
+  const em = $('#aem')?.value?.trim();
   if (fn) S.acct.fn = fn;
-  if (ln) S.acct.ln = ln;
+  S.acct.ln = ln;
+  if (un) S.acct.un = un;
   if (em) {
     S.acct.em = em;
     S.acct.h = await computeGravatarHash(em);
   }
-  toast('Profile information saved!');
+  localStorage.setItem('neopanel_profile', JSON.stringify({
+    fn: S.acct.fn,
+    ln: S.acct.ln,
+    un: S.acct.un,
+    em: S.acct.em
+  }));
+  toast('Profile information saved!', 'ok');
   R();
 }
 
@@ -3789,10 +4066,10 @@ async function createAPIKey() {
   try {
     const res = await api('/api/account/api-keys', {
       method: 'POST',
-      body: JSON.stringify({ description: desc })
+      body: JSON.stringify({ name: desc })
     });
-    S.acct.newkey = res.key || res.token || 'neo_key_demo';
-    toast('API Key generated successfully');
+    S.acct.newkey = res.token || res.key || '';
+    toast('API Key generated successfully', 'ok');
     loadAccountData();
   } catch (e) {}
 }
@@ -3812,11 +4089,18 @@ function setAppearanceMode(mode) {
   const d = document.documentElement;
   d.classList.toggle('oled', mode === 'Oled');
   if (mode === 'Auto') {
-    delete d.dataset.theme;
+    const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+    d.dataset.theme = prefersLight ? 'light' : 'dark';
   } else {
     d.dataset.theme = mode === 'Light' ? 'light' : 'dark';
   }
   R();
+}
+
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (S.acct.mode === 'Auto') setAppearanceMode('Auto');
+  });
 }
 
 function toggleCompact(val) {
@@ -3846,8 +4130,7 @@ function switchServer(index) {
   S.cs = index;
   const srv = S.servers[index];
   if (!srv) return;
-  const st = srv.stats?.status || srv.status || 'offline';
-  S.status = (st === 'running' || st === 'online') ? 'online' : 'offline';
+  applyServerStatsSnapshot(srv, srv.stats, false);
   S.ver = srv.version || S.ver;
   S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
   if (S.activeServerId !== srv.id) {
@@ -4453,12 +4736,22 @@ async function executeDeleteServer(srvId) {
   }
 
   try {
-    if (S.ws) {
+    clearTimeout(S.wsReconnectTimer);
+    S.wsReconnectTimer = null;
+    if (S.wsPingTimer) {
+      clearInterval(S.wsPingTimer);
+      S.wsPingTimer = null;
+    }
+    if (S.activeServerId === srvId) S.activeServerId = null;
+    if (S.activeWs) {
       try {
-        S.ws.onclose = null;
-        S.ws.close();
+        S.activeWs.onopen = null;
+        S.activeWs.onmessage = null;
+        S.activeWs.onerror = null;
+        S.activeWs.onclose = null;
+        S.activeWs.close();
       } catch (e) {}
-      S.ws = null;
+      S.activeWs = null;
     }
 
     await api(`/api/servers/${srvId}`, { method: 'DELETE' });
@@ -4591,7 +4884,7 @@ async function submitReinstall(e, srvId) {
       S.ver = version;
       S.core = software.charAt(0).toUpperCase() + software.slice(1);
     }
-    await checkServer();
+    await refreshServerStatus();
     if (S.view === 'fi') loadFileList(S.currentDir);
     R();
   } catch (err) {
@@ -4744,6 +5037,11 @@ function saveAdminDaemonSettings(e) {
 
 // --- Auth Flow & Setup Screen ---
 async function checkAuth() {
+  const savedMode = localStorage.getItem('neopanel_mode');
+  if (savedMode) setAppearanceMode(savedMode);
+  if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
+  if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
+
   try {
     const status = await (await fetch('/api/auth/status')).json();
     if (status.needs_setup) {
@@ -4757,15 +5055,13 @@ async function checkAuth() {
     }
 
     const user = await api('/api/auth/me');
+    const savedProf = JSON.parse(localStorage.getItem('neopanel_profile') || '{}');
     S.user = user;
-    S.acct.un = user.username || S.acct.un;
-    S.acct.em = user.email || S.acct.em;
+    S.acct.un = savedProf.un || user.username || S.acct.un;
+    S.acct.em = savedProf.em || user.email || S.acct.em;
+    if (savedProf.fn) S.acct.fn = savedProf.fn;
+    if (savedProf.ln !== undefined) S.acct.ln = savedProf.ln;
     S.acct.h = await computeGravatarHash(S.acct.em);
-
-    const savedMode = localStorage.getItem('neopanel_mode');
-    if (savedMode) setAppearanceMode(savedMode);
-    if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
-    if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
 
     await loadDashboard();
 
@@ -4775,11 +5071,14 @@ async function checkAuth() {
       go(hash);
     }
   } catch (e) {
+    S.token = '';
+    localStorage.removeItem('neopanel_token');
     showLoginScreen();
   }
 }
 
 function showSetupScreen() {
+  $('#login')?.remove();
   const d = document.createElement('div');
   d.id = 'login';
   d.className = 'login';
@@ -4789,17 +5088,21 @@ function showSetupScreen() {
     <h1 class="lt">Create Admin Master Account</h1>
     <label class="lf">
       ${ic('user', 16)}
-      <input id="su-name" type="text" placeholder="Username" autocomplete="username">
+      <input id="su-name" type="text" placeholder="Username" autocomplete="username" onkeydown="if(event.key==='Enter')submitSetup()">
     </label>
     <label class="lf">
-      ${ic('settings', 16)}
-      <input id="su-pw" type="password" placeholder="Master Password" autocomplete="new-password">
+      ${ic('lock', 16)}
+      <input id="su-pw" type="password" placeholder="Master Password" autocomplete="new-password" onkeydown="if(event.key==='Enter')submitSetup()">
+      <button class="eye" type="button" onclick="const p=$('#su-pw'); p.type=p.type==='password'?'text':'password';" aria-label="Toggle password visibility">
+        ${ic('eye', 16)}
+      </button>
     </label>
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitSetup()">Initialize &amp; Launch</button>
     <div class="lsm foot">&copy; 2026 NeoPanel &bull; Ultra-Lightweight</div>
   </div>`;
   document.body.appendChild(d);
+  $('#su-name')?.focus();
 }
 
 async function submitSetup() {
@@ -4848,10 +5151,10 @@ function showLoginScreen() {
       <input id="lu" type="text" placeholder="Username or email" autocomplete="username" onkeydown="if(event.key==='Enter')submitLogin()">
     </label>
     <label class="lf">
-      ${ic('settings', 16)}
+      ${ic('lock', 16)}
       <input id="lp" type="password" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitLogin()">
       <button class="eye" type="button" onclick="const p=$('#lp'); p.type=p.type==='password'?'text':'password';" aria-label="Toggle password visibility">
-        ${ic('activity', 16)}
+        ${ic('eye', 16)}
       </button>
     </label>
     <div class="lerr" id="lerr" role="alert"></div>
@@ -4895,11 +5198,26 @@ async function submitLogin() {
 
 function logout() {
   S.token = '';
+  S.activeServerId = null;
+  S.wsState = 'disconnected';
   localStorage.removeItem('neopanel_token');
+  clearTimeout(S.wsReconnectTimer);
+  S.wsReconnectTimer = null;
+  if (S.wsPingTimer) {
+    clearInterval(S.wsPingTimer);
+    S.wsPingTimer = null;
+  }
   if (S.activeWs) {
-    try { S.activeWs.close(); } catch (e) {}
+    try {
+      S.activeWs.onopen = null;
+      S.activeWs.onmessage = null;
+      S.activeWs.onerror = null;
+      S.activeWs.onclose = null;
+      S.activeWs.close();
+    } catch (e) {}
     S.activeWs = null;
   }
+  $('#login')?.remove();
   showLoginScreen();
 }
 
@@ -4949,6 +5267,10 @@ window.handleCreateServer = handleCreateServer;
 window.submitSetup = submitSetup;
 window.submitLogin = submitLogin;
 window.logout = logout;
+window.loadDashboard = loadDashboard;
+window.updateDashLiveStats = updateDashLiveStats;
+window.refreshServerStatus = refreshServerStatus;
+window.paintLog = paintLog;
 window.renderVersionRows = renderVersionRows;
 window.loadAccountData = loadAccountData;
 window.loadPlayersData = loadPlayersData;

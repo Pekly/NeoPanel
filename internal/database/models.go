@@ -28,12 +28,15 @@ type Server struct {
 }
 
 type ServerStats struct {
-	ServerID  string  `json:"server_id"`
-	Status    string  `json:"status"` // "offline", "starting", "online", "stopping"
-	CPUUsage  float64 `json:"cpu_usage"`
-	MemoryMB  int64   `json:"memory_mb"`
-	DiskMB    int64   `json:"disk_mb"`
-	UptimeSec int64   `json:"uptime_sec"`
+	ServerID    string  `json:"server_id"`
+	Status      string  `json:"status"` // "offline", "starting", "online", "stopping"
+	CPUUsage    float64 `json:"cpu_usage"`
+	MemoryMB    int64   `json:"memory_mb"`
+	MemoryMaxMB int     `json:"memory_max_mb"`
+	DiskMB      int64   `json:"disk_mb"`
+	UptimeSec   int64   `json:"uptime_sec"`
+	NetInKiB    float64 `json:"net_in_kib"`
+	NetOutKiB   float64 `json:"net_out_kib"`
 }
 
 type SSHKey struct {

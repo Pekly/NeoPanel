@@ -40,10 +40,13 @@ func (m *ServerManager) GetInstance(serverID string) (*ProcessInstance, bool) {
 }
 
 func (m *ServerManager) UpdateInstanceServer(srv *database.Server) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if inst, ok := m.instances[srv.ID]; ok {
+	m.mu.RLock()
+	inst, ok := m.instances[srv.ID]
+	m.mu.RUnlock()
+	if ok {
+		inst.mu.Lock()
 		inst.server = srv
+		inst.mu.Unlock()
 	}
 }
 
@@ -53,7 +56,9 @@ func (m *ServerManager) getOrCreateInstance(srv *database.Server) *ProcessInstan
 
 	if inst, ok := m.instances[srv.ID]; ok {
 		// Update server config reference in case it changed
+		inst.mu.Lock()
 		inst.server = srv
+		inst.mu.Unlock()
 		return inst
 	}
 
@@ -159,16 +164,33 @@ func (m *ServerManager) GetStats(srv *database.Server) database.ServerStats {
 	if !ok {
 		workingDir := filepath.Join(m.baseDir, srv.ID)
 		return database.ServerStats{
-			ServerID:  srv.ID,
-			Status:    "offline",
-			CPUUsage:  0,
-			MemoryMB:  0,
-			DiskMB:    calculateDirSizeMB(workingDir),
-			UptimeSec: 0,
+			ServerID:    srv.ID,
+			Status:      "offline",
+			CPUUsage:    0,
+			MemoryMB:    0,
+			MemoryMaxMB: srv.MemoryMaxMB,
+			DiskMB:      calculateDirSizeMB(workingDir),
+			UptimeSec:   0,
 		}
 	}
 
 	return inst.GetStats()
+}
+
+func (m *ServerManager) GetStatsByID(serverID string) (database.ServerStats, bool) {
+	m.mu.RLock()
+	inst, ok := m.instances[serverID]
+	m.mu.RUnlock()
+
+	if ok {
+		return inst.GetStats(), true
+	}
+
+	srv, err := m.db.GetServer(serverID)
+	if err != nil {
+		return database.ServerStats{}, false
+	}
+	return m.GetStats(srv), true
 }
 
 func (m *ServerManager) ShutdownAll() {

@@ -17,18 +17,21 @@ import (
 const maxLogBuffer = 1000
 
 type ProcessInstance struct {
-	mu           sync.RWMutex
-	server       *database.Server
-	workingDir   string
-	cmd          *exec.Cmd
-	stdin        io.WriteCloser
-	status       string
-	startedAt    time.Time
-	metrics      *ProcessMetrics
-	logBuffer    []string
-	subscribers  map[chan string]struct{}
-	stopExpected bool
-	onExit       func(srvID string, unexpected bool)
+	mu            sync.RWMutex
+	server        *database.Server
+	workingDir    string
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	status        string
+	startedAt     time.Time
+	metrics       *ProcessMetrics
+	logBuffer     []string
+	subscribers   map[chan string]struct{}
+	stopExpected  bool
+	onExit        func(srvID string, unexpected bool)
+	cachedDiskMB  int64
+	lastDiskCheck time.Time
+	diskScanning  bool
 }
 
 func NewProcessInstance(server *database.Server, workingDir string, onExit func(string, bool)) *ProcessInstance {
@@ -50,26 +53,64 @@ func (p *ProcessInstance) GetStatus() string {
 
 func (p *ProcessInstance) GetStats() database.ServerStats {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
+	srvID := p.server.ID
+	memMax := p.server.MemoryMaxMB
+	status := p.status
+	startedAt := p.startedAt
+	metrics := p.metrics
+	diskMB := p.cachedDiskMB
+	needsDiskScan := !p.diskScanning && (p.lastDiskCheck.IsZero() || time.Since(p.lastDiskCheck) > 20*time.Second)
+	workDir := p.workingDir
+	p.mu.RUnlock()
 
 	stats := database.ServerStats{
-		ServerID: p.server.ID,
-		Status:   p.status,
+		ServerID:    srvID,
+		Status:      status,
+		MemoryMaxMB: memMax,
+		DiskMB:      diskMB,
 	}
 
-	if p.status == "online" || p.status == "starting" {
-		stats.UptimeSec = int64(time.Since(p.startedAt).Seconds())
-		if p.metrics != nil {
-			cpu, mem, err := p.metrics.ReadStats()
-			if err == nil {
-				stats.CPUUsage = cpu
-				stats.MemoryMB = mem
+	if (status == "online" || status == "starting") && !startedAt.IsZero() {
+		stats.UptimeSec = int64(time.Since(startedAt).Seconds())
+		if metrics != nil {
+			if snap, err := metrics.ReadStats(); err == nil {
+				stats.CPUUsage = snap.CPUPercent
+				stats.MemoryMB = snap.MemoryMB
+				stats.NetInKiB = snap.NetInKiB
+				stats.NetOutKiB = snap.NetOutKiB
 			}
 		}
 	}
 
-	// Calculate disk usage of workingDir
-	stats.DiskMB = calculateDirSizeMB(p.workingDir)
+	if needsDiskScan {
+		p.mu.Lock()
+		if !p.diskScanning {
+			p.diskScanning = true
+			firstScan := diskMB == 0 && p.lastDiskCheck.IsZero()
+			p.mu.Unlock()
+			if firstScan {
+				// First synchronous read before caching asynchronously thereafter
+				size := calculateDirSizeMB(workDir)
+				p.mu.Lock()
+				p.cachedDiskMB = size
+				p.lastDiskCheck = time.Now()
+				p.diskScanning = false
+				p.mu.Unlock()
+				stats.DiskMB = size
+			} else {
+				go func() {
+					size := calculateDirSizeMB(workDir)
+					p.mu.Lock()
+					p.cachedDiskMB = size
+					p.lastDiskCheck = time.Now()
+					p.diskScanning = false
+					p.mu.Unlock()
+				}()
+			}
+		} else {
+			p.mu.Unlock()
+		}
+	}
 
 	return stats
 }
@@ -259,12 +300,14 @@ func (p *ProcessInstance) Start() error {
 
 func (p *ProcessInstance) streamOutput(r io.Reader) {
 	scanner := bufio.NewScanner(r)
+	// Support very large single-line outputs (up to 1MB) without dropping stream
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Detect when Minecraft finishes startup
+		// Detect when Minecraft / Proxy finishes startup
 		p.mu.Lock()
-		if p.status == "starting" && (strings.Contains(line, "Done (") || strings.Contains(line, "For help, type \"help\"")) {
+		if p.status == "starting" && (strings.Contains(line, "Done (") || strings.Contains(line, "For help, type \"help\"") || strings.Contains(line, "Listening on /")) {
 			p.status = "online"
 		}
 		p.mu.Unlock()
@@ -452,14 +495,16 @@ func (p *ProcessInstance) Subscribe() (chan string, func()) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	ch := make(chan string, 100)
+	ch := make(chan string, 512)
 	p.subscribers[ch] = struct{}{}
 
 	unsubscribe := func() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		delete(p.subscribers, ch)
-		close(ch)
+		if _, ok := p.subscribers[ch]; ok {
+			delete(p.subscribers, ch)
+			close(ch)
+		}
 	}
 
 	return ch, unsubscribe

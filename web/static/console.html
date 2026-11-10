@@ -138,6 +138,7 @@
     let ws = null;
     let reconnectAttempts = 0;
     let reconnectTimeout = null;
+    let pingInterval = null;
 
     function showToast(msg, type = 'success') {
       const container = document.getElementById('toast-container');
@@ -219,18 +220,36 @@
         reconnectAttempts = 0;
         updateConnStatus('connected', 'Connected');
         consoleMgr.appendLine('\x1b[32m[NeoPanel] Connected to server stream.\x1b[0m');
+        clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ event: 'ping' })); } catch (e) {}
+          }
+        }, 25000);
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.event === 'log') {
+          if (msg.event === 'pong') {
+            return;
+          } else if (msg.event === 'history') {
+            const list = JSON.parse(msg.data);
+            if (Array.isArray(list)) {
+              consoleMgr.clear();
+              list.forEach(line => consoleMgr.appendLine(line));
+            }
+          } else if (msg.event === 'log') {
             consoleMgr.appendLine(msg.data);
+          } else if (msg.event === 'stats' && msg.status) {
+            updateServerBadge(msg.status === 'online' ? 'running' : msg.status);
           }
         } catch (e) {}
       };
 
       ws.onclose = () => {
+        clearInterval(pingInterval);
+        pingInterval = null;
         updateConnStatus('reconnecting', 'Disconnected');
         scheduleReconnect();
       };
