@@ -43,32 +43,62 @@ type ModrinthVersion struct {
 	} `json:"files"`
 }
 
-// SearchModrinthPlugins queries the Modrinth API for Minecraft plugins with optional loader, version, and sort filters
-func SearchModrinthPlugins(query string, limit int, loader string, mcVersion string, sortBy string) (*ModrinthSearchResult, error) {
+// IsModdedSoftware returns true when the given server software runs JVM mods (mods/) instead of Bukkit/Proxy plugins (plugins/).
+func IsModdedSoftware(software string) bool {
+	switch strings.ToLower(strings.TrimSpace(software)) {
+	case "fabric", "forge", "neoforge":
+		return true
+	default:
+		return false
+	}
+}
+
+// SearchModrinthPlugins queries the Modrinth API for Minecraft plugins or mods with optional loader, version, sort, and project_type filters.
+func SearchModrinthPlugins(query string, limit int, loader string, mcVersion string, sortBy string, projectType ...string) (*ModrinthSearchResult, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 
 	var facetGroups []string
 	loaderLow := strings.ToLower(strings.TrimSpace(loader))
-	switch loaderLow {
-	case "":
+	reqType := ""
+	if len(projectType) > 0 {
+		pt := strings.ToLower(strings.TrimSpace(projectType[0]))
+		if pt == "mod" || pt == "mods" {
+			reqType = "mod"
+		} else if pt == "plugin" || pt == "plugins" {
+			reqType = "plugin"
+		}
+	}
+	if reqType == "" {
+		if IsModdedSoftware(loaderLow) {
+			reqType = "mod"
+		} else {
+			reqType = "plugin"
+		}
+	}
+
+	if reqType == "mod" {
+		facetGroups = append(facetGroups, `["project_type:mod"]`)
+		if loaderLow != "" && loaderLow != "any" && loaderLow != "all" {
+			if loaderLow == "fabric" || loaderLow == "forge" || loaderLow == "neoforge" || loaderLow == "quilt" {
+				facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+			}
+		}
+	} else {
 		facetGroups = append(facetGroups, `["project_type:plugin"]`)
-	case "paper", "purpur":
-		facetGroups = append(facetGroups, `["project_type:plugin"]`)
-		facetGroups = append(facetGroups, `["categories:paper","categories:spigot","categories:bukkit"]`)
-	case "spigot", "bukkit":
-		facetGroups = append(facetGroups, `["project_type:plugin"]`)
-		facetGroups = append(facetGroups, `["categories:spigot","categories:bukkit"]`)
-	case "velocity", "waterfall", "bungeecord":
-		facetGroups = append(facetGroups, `["project_type:plugin"]`)
-		facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
-	case "fabric", "neoforge", "forge":
-		facetGroups = append(facetGroups, `["project_type:plugin","project_type:mod"]`)
-		facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
-	default:
-		facetGroups = append(facetGroups, `["project_type:plugin"]`)
-		facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+		switch loaderLow {
+		case "", "any", "all", "vanilla", "custom":
+			// All plugins
+		case "paper", "purpur", "leaf", "leafmc", "folia":
+			facetGroups = append(facetGroups, `["categories:paper","categories:spigot","categories:bukkit"]`)
+		case "spigot", "bukkit":
+			facetGroups = append(facetGroups, `["categories:spigot","categories:bukkit"]`)
+		case "velocity", "waterfall", "bungeecord":
+			facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+		default:
+			facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+		}
 	}
 
 	verTrim := strings.TrimSpace(mcVersion)
@@ -130,11 +160,11 @@ func DownloadModrinthPlugin(projectIDOrSlug string, destPluginsDir string, prefe
 		return "", fmt.Errorf("no versions found for plugin %s", projectIDOrSlug)
 	}
 
-	// Find the best version matching loader (paper, spigot, purpur, or fabric)
+	// Find the best version matching loader (paper, spigot, purpur, leaf, folia, fabric, forge, neoforge, velocity, etc.)
 	var chosenVersion *ModrinthVersion
-	loaderTarget := strings.ToLower(preferredLoader)
-	if loaderTarget == "purpur" {
-		loaderTarget = "paper" // Purpur supports paper/spigot/bukkit plugins
+	loaderTarget := strings.ToLower(strings.TrimSpace(preferredLoader))
+	if loaderTarget == "purpur" || loaderTarget == "leaf" || loaderTarget == "leafmc" || loaderTarget == "folia" {
+		loaderTarget = "paper"
 	}
 
 	for i := range versions {
@@ -144,7 +174,8 @@ func DownloadModrinthPlugin(projectIDOrSlug string, destPluginsDir string, prefe
 		}
 		for _, l := range v.Loaders {
 			lLow := strings.ToLower(l)
-			if lLow == loaderTarget || (loaderTarget == "paper" && (lLow == "spigot" || lLow == "bukkit")) {
+			if lLow == loaderTarget ||
+				(loaderTarget == "paper" && (lLow == "spigot" || lLow == "bukkit" || lLow == "purpur")) {
 				chosenVersion = v
 				break
 			}

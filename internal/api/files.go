@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -79,6 +80,14 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			Modified: info.ModTime(),
 		})
 	}
+
+	// Default order: folders first, then files alphabetically (case-insensitive)
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].IsDir != files[j].IsDir {
+			return files[i].IsDir
+		}
+		return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
+	})
 
 	writeJSON(w, http.StatusOK, files)
 }

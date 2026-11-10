@@ -7,11 +7,35 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Pekly/NeoPanel/internal/database"
+)
+
+type OnlinePlayer struct {
+	Name     string    `json:"name"`
+	UUID     string    `json:"uuid,omitempty"`
+	IP       string    `json:"ip,omitempty"`
+	JoinedAt time.Time `json:"joined_at,omitempty"`
+}
+
+var (
+	ansiEscapeRe      = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]")
+	rePlayerUUID      = regexp.MustCompile(`(?i)UUID of player ([A-Za-z0-9_.]{1,20}) is ([0-9a-fA-F-]{32,36})`)
+	rePlayerLogin     = regexp.MustCompile(`([A-Za-z0-9_.]{1,20})\[/([0-9a-fA-F.:]+):\d+\]\s+logged in with entity id`)
+	rePlayerJoined    = regexp.MustCompile(`(?:^|\]:\s+)([A-Za-z0-9_.]{1,20})\s+joined the game\b`)
+	rePlayerLeft      = regexp.MustCompile(`(?:^|\]:\s+)([A-Za-z0-9_.]{1,20})\s+left the game\b`)
+	rePlayerLost      = regexp.MustCompile(`(?:^|\]:\s+)([A-Za-z0-9_.]{1,20})\s+lost connection:`)
+	reVelocityJoin    = regexp.MustCompile(`\[connected player\]\s+([A-Za-z0-9_.]{1,20})\s+\(/([0-9a-fA-F.:]+):\d+\)\s+has connected`)
+	reVelocityLeave   = regexp.MustCompile(`\[connected player\]\s+([A-Za-z0-9_.]{1,20})(?:\s+\([^)]*\))?(?::\s*disconnected|\s+has disconnected)`)
+	reBungeeJoin      = regexp.MustCompile(`(?:^|\s)\[([A-Za-z0-9_.]{1,20})(?:\|([0-9a-fA-F.:]+)(?::\d+)?)?\]\s+->\s+UpstreamBridge has connected`)
+	reBungeeLeave     = regexp.MustCompile(`(?:^|\s)\[([A-Za-z0-9_.]{1,20})(?:\|[^\]]+)?\]\s+(?:<->|->)?\s*(?:UpstreamBridge|DownstreamBridge)\s+(?:has )?disconnected`)
+	reVanillaListLine = regexp.MustCompile(`(?:^|\]:\s+)There are (\d+) of a max of \d+ players online:(.*)$`)
 )
 
 const (
@@ -32,6 +56,8 @@ type ProcessInstance struct {
 	metrics        *ProcessMetrics
 	logBuffer      []string
 	subscribers    map[chan string]struct{}
+	onlinePlayers  map[string]*OnlinePlayer
+	uuidCache      map[string]string
 	stopExpected   bool
 	reachedOnline  bool
 	timedOut       bool
@@ -55,6 +81,8 @@ func NewProcessInstance(server *database.Server, workingDir string, startupTimeo
 		status:         "offline",
 		logBuffer:      make([]string, 0, maxLogBuffer),
 		subscribers:    make(map[chan string]struct{}),
+		onlinePlayers:  make(map[string]*OnlinePlayer),
+		uuidCache:      make(map[string]string),
 		startupTimeout: startupTimeout,
 		onReady:        onReady,
 		onExit:         onExit,
@@ -159,6 +187,8 @@ func (p *ProcessInstance) Start() error {
 	p.stopExpected = false
 	p.reachedOnline = false
 	p.timedOut = false
+	p.onlinePlayers = make(map[string]*OnlinePlayer)
+	p.uuidCache = make(map[string]string)
 	p.runID++
 	currentRunID := p.runID
 	srv := *p.server
@@ -183,9 +213,9 @@ func (p *ProcessInstance) Start() error {
 		p.broadcast(fmt.Sprintf("\x1b[31mThe specified Java binary does not exist or is not executable on this host:\x1b[0m"))
 		p.broadcast(fmt.Sprintf("  \x1b[33;1mPath:  %s\x1b[0m", javaBinary))
 		p.broadcast(fmt.Sprintf("  \x1b[33;1mLabel: %s\x1b[0m", javaLabel))
-		p.broadcast("\x1b[36m👉 Solution: Open Server -> Startup and choose or install a Java runtime (Java 25, 21, 17, or 8), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
+		p.broadcast("\x1b[36m👉 Solution: Open Server -> Settings and choose or install a Java runtime (Java 25, 21, 17, or 8), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		return fmt.Errorf("Java binary '%s' (%s) was not found. Please install it or verify your Java settings in Startup", javaBinary, javaLabel)
+		return fmt.Errorf("Java binary '%s' (%s) was not found. Please install it or verify your Java settings in Settings", javaBinary, javaLabel)
 	}
 
 	jarPath := filepath.Join(p.workingDir, srv.JarFile)
@@ -370,6 +400,7 @@ func (p *ProcessInstance) Start() error {
 		p.status = "offline"
 		p.cmd = nil
 		p.stdin = nil
+		p.onlinePlayers = make(map[string]*OnlinePlayer)
 		expected := p.stopExpected
 		reached := p.reachedOnline
 		timedOut := p.timedOut
@@ -417,6 +448,7 @@ func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 		}
 		p.mu.Unlock()
 
+		p.trackPlayerLine(line, runID)
 		p.broadcast(line)
 		if readyCallback != nil {
 			readyCallback(readySrvID)
@@ -425,6 +457,207 @@ func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 		// Real-time runtime diagnostic detectors
 		p.detectRuntimeDiagnostics(line)
 	}
+}
+
+func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
+	clean := strings.TrimSpace(ansiEscapeRe.ReplaceAllString(rawLine, ""))
+	if clean == "" {
+		return
+	}
+
+	if m := rePlayerUUID.FindStringSubmatch(clean); len(m) == 3 {
+		name := strings.TrimSpace(m[1])
+		uuid := strings.TrimSpace(m[2])
+		low := strings.ToLower(name)
+		p.mu.Lock()
+		if p.runID == runID {
+			if p.uuidCache == nil {
+				p.uuidCache = make(map[string]string)
+			}
+			p.uuidCache[low] = uuid
+			if existing, ok := p.onlinePlayers[low]; ok {
+				existing.UUID = uuid
+			}
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := rePlayerLogin.FindStringSubmatch(clean); len(m) == 3 {
+		name := strings.TrimSpace(m[1])
+		ip := strings.TrimSpace(m[2])
+		low := strings.ToLower(name)
+		p.mu.Lock()
+		if p.runID == runID {
+			if p.onlinePlayers == nil {
+				p.onlinePlayers = make(map[string]*OnlinePlayer)
+			}
+			p.onlinePlayers[low] = &OnlinePlayer{
+				Name:     name,
+				UUID:     p.uuidCache[low],
+				IP:       ip,
+				JoinedAt: time.Now().UTC(),
+			}
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := reVelocityJoin.FindStringSubmatch(clean); len(m) == 3 {
+		name := strings.TrimSpace(m[1])
+		ip := strings.TrimSpace(m[2])
+		low := strings.ToLower(name)
+		p.mu.Lock()
+		if p.runID == runID {
+			if p.onlinePlayers == nil {
+				p.onlinePlayers = make(map[string]*OnlinePlayer)
+			}
+			p.onlinePlayers[low] = &OnlinePlayer{
+				Name:     name,
+				UUID:     p.uuidCache[low],
+				IP:       ip,
+				JoinedAt: time.Now().UTC(),
+			}
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := reBungeeJoin.FindStringSubmatch(clean); len(m) >= 2 {
+		name := strings.TrimSpace(m[1])
+		ip := ""
+		if len(m) > 2 {
+			ip = strings.TrimSpace(m[2])
+		}
+		low := strings.ToLower(name)
+		p.mu.Lock()
+		if p.runID == runID {
+			if p.onlinePlayers == nil {
+				p.onlinePlayers = make(map[string]*OnlinePlayer)
+			}
+			p.onlinePlayers[low] = &OnlinePlayer{
+				Name:     name,
+				UUID:     p.uuidCache[low],
+				IP:       ip,
+				JoinedAt: time.Now().UTC(),
+			}
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := rePlayerJoined.FindStringSubmatch(clean); len(m) == 2 {
+		name := strings.TrimSpace(m[1])
+		low := strings.ToLower(name)
+		p.mu.Lock()
+		if p.runID == runID {
+			if p.onlinePlayers == nil {
+				p.onlinePlayers = make(map[string]*OnlinePlayer)
+			}
+			if _, exists := p.onlinePlayers[low]; !exists {
+				p.onlinePlayers[low] = &OnlinePlayer{
+					Name:     name,
+					UUID:     p.uuidCache[low],
+					JoinedAt: time.Now().UTC(),
+				}
+			}
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := rePlayerLeft.FindStringSubmatch(clean); len(m) == 2 {
+		low := strings.ToLower(strings.TrimSpace(m[1]))
+		p.mu.Lock()
+		if p.runID == runID && p.onlinePlayers != nil {
+			delete(p.onlinePlayers, low)
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := rePlayerLost.FindStringSubmatch(clean); len(m) == 2 {
+		low := strings.ToLower(strings.TrimSpace(m[1]))
+		p.mu.Lock()
+		if p.runID == runID && p.onlinePlayers != nil {
+			delete(p.onlinePlayers, low)
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := reVelocityLeave.FindStringSubmatch(clean); len(m) == 2 {
+		low := strings.ToLower(strings.TrimSpace(m[1]))
+		p.mu.Lock()
+		if p.runID == runID && p.onlinePlayers != nil {
+			delete(p.onlinePlayers, low)
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := reBungeeLeave.FindStringSubmatch(clean); len(m) == 2 {
+		low := strings.ToLower(strings.TrimSpace(m[1]))
+		p.mu.Lock()
+		if p.runID == runID && p.onlinePlayers != nil {
+			delete(p.onlinePlayers, low)
+		}
+		p.mu.Unlock()
+		return
+	}
+
+	if m := reVanillaListLine.FindStringSubmatch(clean); len(m) == 3 {
+		cnt, _ := strconv.Atoi(m[1])
+		rawNames := strings.TrimSpace(m[2])
+		p.mu.Lock()
+		if p.runID == runID {
+			if cnt == 0 || rawNames == "" {
+				p.onlinePlayers = make(map[string]*OnlinePlayer)
+			} else {
+				nextMap := make(map[string]*OnlinePlayer)
+				for _, part := range strings.Split(rawNames, ",") {
+					nm := strings.TrimSpace(part)
+					if idx := strings.IndexAny(nm, " (["); idx > 0 {
+						nm = strings.TrimSpace(nm[:idx])
+					}
+					if nm == "" {
+						continue
+					}
+					low := strings.ToLower(nm)
+					if prev, ok := p.onlinePlayers[low]; ok {
+						nextMap[low] = prev
+					} else {
+						nextMap[low] = &OnlinePlayer{
+							Name:     nm,
+							UUID:     p.uuidCache[low],
+							JoinedAt: time.Now().UTC(),
+						}
+					}
+				}
+				p.onlinePlayers = nextMap
+			}
+		}
+		p.mu.Unlock()
+	}
+}
+
+func (p *ProcessInstance) GetOnlinePlayers() []OnlinePlayer {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if len(p.onlinePlayers) == 0 {
+		return []OnlinePlayer{}
+	}
+	res := make([]OnlinePlayer, 0, len(p.onlinePlayers))
+	for _, pl := range p.onlinePlayers {
+		res = append(res, *pl)
+	}
+	sort.Slice(res, func(i, j int) bool {
+		if !res[i].JoinedAt.Equal(res[j].JoinedAt) {
+			return res[i].JoinedAt.Before(res[j].JoinedAt)
+		}
+		return strings.ToLower(res[i].Name) < strings.ToLower(res[j].Name)
+	})
+	return res
 }
 
 func (p *ProcessInstance) detectRuntimeDiagnostics(line string) {
@@ -439,7 +672,7 @@ func (p *ProcessInstance) detectRuntimeDiagnostics(line string) {
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] JAVA VERSION MISMATCH DETECTED!\x1b[0m")
 		p.broadcast("\x1b[31mYour Minecraft server JAR was compiled for a newer Java runtime than the one currently selected.\x1b[0m")
-		p.broadcast("\x1b[33;1m👉 Quick Fix: Go to Server -> Startup, change Java Runtime to Java 25 or Java 21, then restart.\x1b[0m")
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Go to Server -> Settings, change Java Runtime to Java 25 or Java 21, then restart.\x1b[0m")
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		return
 	}
@@ -474,7 +707,7 @@ func (p *ProcessInstance) detectRuntimeDiagnostics(line string) {
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] OUT OF MEMORY (RAM ALLOCATION FAILED)!\x1b[0m")
 		p.broadcast(fmt.Sprintf("\x1b[31mThe host machine cannot allocate the configured %d MB of RAM to Java.\x1b[0m", p.server.MemoryMaxMB))
-		p.broadcast("\x1b[33;1m👉 Quick Fix: Lower your RAM allocation in Settings -> Startup, or create a swap file on the host.\x1b[0m")
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Lower your RAM allocation in Server -> Settings, or create a swap file on the host.\x1b[0m")
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		return
 	}

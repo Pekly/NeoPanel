@@ -182,8 +182,8 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 				continue
 			}
 
-			// Keep plugins?
-			if req.PreservePlugins && lower == "plugins" {
+			// Keep plugins or mods?
+			if req.PreservePlugins && (lower == "plugins" || lower == "mods") {
 				continue
 			}
 

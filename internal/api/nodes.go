@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -100,8 +101,12 @@ func (h *NodeHandler) resolveLocalFQDN(reqHost string) string {
 		}
 	}
 	host := strings.TrimSpace(reqHost)
-	if idx := strings.Index(host, ":"); idx > 0 {
-		host = host[:idx]
+	if host != "" {
+		if hPart, _, err := net.SplitHostPort(host); err == nil {
+			host = hPart
+		} else {
+			host = strings.Trim(host, "[]")
+		}
 	}
 	if host == "" {
 		return "127.0.0.1"

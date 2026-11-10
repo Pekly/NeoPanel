@@ -38,13 +38,14 @@ func (h *PluginHandler) Search(w http.ResponseWriter, r *http.Request) {
 	loader := r.URL.Query().Get("loader")
 	version := r.URL.Query().Get("version")
 	sortBy := r.URL.Query().Get("sort")
+	projType := r.URL.Query().Get("type")
 	limitStr := r.URL.Query().Get("limit")
 	limit := 24
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		limit = l
 	}
 
-	res, err := downloader.SearchModrinthPlugins(q, limit, loader, version, sortBy)
+	res, err := downloader.SearchModrinthPlugins(q, limit, loader, version, sortBy, projType)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -61,9 +62,12 @@ func (h *PluginHandler) ListInstalled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMod := downloader.IsModdedSoftware(srv.Type)
 	folderName := "plugins"
-	if strings.ToLower(srv.Type) == "fabric" {
+	kind := "plugin"
+	if isMod {
 		folderName = "mods"
+		kind = "mod"
 	}
 
 	pluginsDir := filepath.Join(h.manager.GetWorkingDir(serverID), folderName)
@@ -71,7 +75,7 @@ func (h *PluginHandler) ListInstalled(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(pluginsDir)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read plugins directory"})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to read %s directory", folderName)})
 		return
 	}
 
@@ -94,6 +98,7 @@ func (h *PluginHandler) ListInstalled(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"folder":  folderName,
+		"kind":    kind,
 		"plugins": list,
 	})
 }
@@ -124,13 +129,20 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 		slug = strings.TrimSpace(req.ID)
 	}
 	if slug == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid plugin slug is required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid project slug is required"})
 		return
 	}
 
+	isMod := downloader.IsModdedSoftware(srv.Type)
 	folderName := "plugins"
-	if strings.ToLower(srv.Type) == "fabric" {
+	kind := "plugin"
+	noun := "Plugin"
+	auditEvent := "plugin_install"
+	if isMod {
 		folderName = "mods"
+		kind = "mod"
+		noun = "Mod"
+		auditEvent = "mod_install"
 	}
 	pluginsDir := filepath.Join(h.manager.GetWorkingDir(serverID), folderName)
 
@@ -140,11 +152,13 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logAudit(h.db, r, "plugin_install", fmt.Sprintf("Installed plugin '%s' (%s) on %s (%s)", filename, slug, srv.Name, serverID))
+	logAudit(h.db, r, auditEvent, fmt.Sprintf("Installed %s '%s' (%s) on %s (%s)", kind, filename, slug, srv.Name, serverID))
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"message":  "Plugin installed successfully",
+		"message":  noun + " installed successfully",
 		"filename": filename,
+		"folder":   folderName,
+		"kind":     kind,
 	})
 }
 
@@ -162,18 +176,29 @@ func (h *PluginHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isMod := downloader.IsModdedSoftware(srv.Type)
 	folderName := "plugins"
-	if strings.ToLower(srv.Type) == "fabric" {
+	kind := "plugin"
+	noun := "Plugin"
+	auditEvent := "plugin_delete"
+	if isMod {
 		folderName = "mods"
+		kind = "mod"
+		noun = "Mod"
+		auditEvent = "mod_delete"
 	}
 
 	filePath := filepath.Join(h.manager.GetWorkingDir(serverID), folderName, filename)
 	if err := os.Remove(filePath); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to remove plugin: " + err.Error()})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to remove %s: %s", kind, err.Error())})
 		return
 	}
 
-	logAudit(h.db, r, "plugin_delete", fmt.Sprintf("Uninstalled plugin '%s' from %s (%s)", filename, srv.Name, serverID))
+	logAudit(h.db, r, auditEvent, fmt.Sprintf("Uninstalled %s '%s' from %s (%s)", kind, filename, srv.Name, serverID))
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Plugin removed successfully"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"message": noun + " removed successfully",
+		"folder":  folderName,
+		"kind":    kind,
+	})
 }

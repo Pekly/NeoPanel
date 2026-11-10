@@ -306,6 +306,26 @@ func (m *ServerManager) Restart(srv *database.Server) error {
 	return m.Start(srv)
 }
 
+func (m *ServerManager) GetStatus(serverID string) string {
+	m.mu.RLock()
+	inst, ok := m.instances[serverID]
+	m.mu.RUnlock()
+	if !ok || inst == nil {
+		return "offline"
+	}
+	return inst.GetStatus()
+}
+
+func (m *ServerManager) GetOnlinePlayers(serverID string) []OnlinePlayer {
+	m.mu.RLock()
+	inst, ok := m.instances[serverID]
+	m.mu.RUnlock()
+	if !ok || inst == nil {
+		return []OnlinePlayer{}
+	}
+	return inst.GetOnlinePlayers()
+}
+
 func (m *ServerManager) SendCommand(serverID, cmd string) error {
 	m.mu.RLock()
 	inst, ok := m.instances[serverID]

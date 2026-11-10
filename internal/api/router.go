@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -34,6 +37,7 @@ type Router struct {
 	mods           *ModsHandler
 	databases      *DatabaseHandler
 	nodes          *NodeHandler
+	subdomains     *SubdomainHandler
 	embeddedStatic fs.FS
 }
 
@@ -51,6 +55,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	modsHandler := NewModsHandler(db, cfg)
 	databaseHandler := NewDatabaseHandler(cfg, db)
 	nodeHandler := NewNodeHandler(cfg, db, authHandler, manager)
+	subdomainHandler := NewSubdomainHandler(db, nodeHandler)
 
 	r := &Router{
 		mux:            http.NewServeMux(),
@@ -68,6 +73,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		mods:           modsHandler,
 		databases:      databaseHandler,
 		nodes:          nodeHandler,
+		subdomains:     subdomainHandler,
 		embeddedStatic: embeddedStatic,
 	}
 
@@ -162,6 +168,11 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/databases/{dbId}/query", r.requireAuth(r.databases.Query))
 	r.mux.HandleFunc("GET /api/servers/{id}/databases/{dbId}/export", r.requireAuth(r.databases.Export))
 
+	// Subdomain & DNS/SRV management routes
+	r.mux.HandleFunc("GET /api/servers/{id}/subdomain", r.requireAuth(r.subdomains.GetSubdomain))
+	r.mux.HandleFunc("PUT /api/servers/{id}/subdomain", r.requireAuth(r.subdomains.UpdateSubdomain))
+	r.mux.HandleFunc("POST /api/servers/{id}/subdomain/verify", r.requireAuth(r.subdomains.VerifySubdomainDNS))
+
 	// SFTP details endpoint
 	r.mux.HandleFunc("GET /api/servers/{id}/sftp", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		serverID := getURLParam(req, "id")
@@ -176,13 +187,31 @@ func (r *Router) registerRoutes(db *database.DB) {
 			username = userClaims.Username
 		}
 		host := r.nodes.resolveLocalFQDN(req.Host)
+		portStr := fmt.Sprintf("%d", r.cfg.SFTP.Port)
+		sftpUser := fmt.Sprintf("%s.%s", username, srv.ID)
+		listening := false
+		if r.cfg.SFTP.Enabled && r.cfg.SFTP.Port > 0 {
+			if conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", portStr), 250*time.Millisecond); dialErr == nil {
+				listening = true
+				_ = conn.Close()
+			}
+		}
+		launchURI := (&url.URL{
+			Scheme: "sftp",
+			User:   url.User(sftpUser),
+			Host:   net.JoinHostPort(host, portStr),
+			Path:   "/",
+		}).String()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"enabled":     r.cfg.SFTP.Enabled,
-			"port":        r.cfg.SFTP.Port,
-			"host":        host,
-			"username":    fmt.Sprintf("%s.%s", username, srv.ID),
-			"server_id":   srv.ID,
-			"server_name": srv.Name,
+			"enabled":       r.cfg.SFTP.Enabled,
+			"listening":     listening,
+			"port":          r.cfg.SFTP.Port,
+			"host":          host,
+			"username":      sftpUser,
+			"launch_uri":    launchURI,
+			"password_hint": "Use your NeoPanel account password (or add an SSH Public Key in Account Settings).",
+			"server_id":     srv.ID,
+			"server_name":   srv.Name,
 		})
 	}))
 

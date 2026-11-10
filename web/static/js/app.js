@@ -86,6 +86,424 @@ function fileListIconHtml(item, extraCls = '', iconSize = 15) {
   return `<span class="fi-badge${cls}" title="File">${ic('file', iconSize)}</span>`;
 }
 
+// --- Server Software Icons & Helpers ---
+function isModdedEngine(type) {
+  const k = String(type || '').toLowerCase().trim();
+  return k === 'fabric' || k === 'forge' || k === 'neoforge';
+}
+
+function engineMeta(type) {
+  const raw = String(type || 'paper').toLowerCase().trim();
+  const key = raw === 'leafmc' ? 'leaf' : raw;
+  const map = {
+    paper: { key: 'paper', label: 'Paper', color: '#3b82f6' },
+    purpur: { key: 'purpur', label: 'Purpur', color: '#a855f7' },
+    leaf: { key: 'leaf', label: 'Leaf', color: '#22c55e' },
+    folia: { key: 'folia', label: 'Folia', color: '#10b981' },
+    fabric: { key: 'fabric', label: 'Fabric', color: '#e2b98b' },
+    forge: { key: 'forge', label: 'Forge', color: '#f59e0b' },
+    neoforge: { key: 'neoforge', label: 'NeoForge', color: '#fb923c' },
+    vanilla: { key: 'vanilla', label: 'Vanilla', color: '#4ade80' },
+    velocity: { key: 'velocity', label: 'Velocity', color: '#06b6d4' },
+    waterfall: { key: 'waterfall', label: 'Waterfall', color: '#38bdf8' },
+    bungeecord: { key: 'bungeecord', label: 'BungeeCord', color: '#818cf8' },
+    custom: { key: 'custom', label: 'Custom', color: '#94a3b8' }
+  };
+  return map[key] || { key: key || 'custom', label: raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Paper', color: '#94a3b8' };
+}
+
+function engineIcon(type, size = 16, withBg = false) {
+  const m = engineMeta(type);
+  const paths = {
+    paper: `<path d="M21 3L3 11l7 3 3 7 8-18z" fill="currentColor" fill-opacity="0.16"/><path d="M21 3L10 14"/>`,
+    purpur: `<polygon points="12 2 20 7 20 17 12 22 4 17 4 7 12 2" fill="currentColor" fill-opacity="0.18"/><path d="M12 22V12m0 0L20 7M12 12L4 7"/>`,
+    leaf: `<path d="M19 4C11 4 5 9 5 17c0 1.2.2 2.2.5 3C13 20 19 14 19 4z" fill="currentColor" fill-opacity="0.18"/><path d="M5 20c3-4 7-8 12-11"/>`,
+    folia: `<path d="M12 3c4 0 8 3 8 8-4 0-8-3-8-8z" fill="currentColor" fill-opacity="0.18"/><path d="M4 13c0-4 3-8 8-8 0 4-3 8-8 8z" fill="currentColor" fill-opacity="0.14"/><path d="M12 21c-4 0-8-3-8-8 4 0 8 3 8 8z" fill="currentColor" fill-opacity="0.18"/><path d="M20 11c0 4-3 8-8 8 0-4 3-8 8-8z" fill="currentColor" fill-opacity="0.14"/>`,
+    fabric: `<rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor" fill-opacity="0.15"/><path d="M4 10h16M4 15h16M10 4v16M15 4v16"/>`,
+    forge: `<path d="M4 8h16v3c0 2.5-2 4-5 4h-6c-3 0-5-1.5-5-4V8z" fill="currentColor" fill-opacity="0.18"/><path d="M8 15v5h8v-5M2 8h20"/>`,
+    neoforge: `<path d="M12 3l8 4v6c0 4.5-3.4 7.7-8 9-4.6-1.3-8-4.5-8-9V7l8-4z" fill="currentColor" fill-opacity="0.18"/><path d="M8 9h8l-2 4h-4L8 9zm2 4v5h4v-5"/>`,
+    vanilla: `<polygon points="12 3 21 8 21 16 12 21 3 16 3 8 12 3" fill="currentColor" fill-opacity="0.18"/><path d="M3 8l9 5 9-5M12 13v8"/>`,
+    velocity: `<path d="M4 6l8 6-8 6M12 6l8 6-8 6"/>`,
+    waterfall: `<path d="M6 4v12a4 4 0 0 0 4 4M12 4v10a4 4 0 0 0 4 4M18 4v16"/>`,
+    bungeecord: `<circle cx="6" cy="12" r="3" fill="currentColor" fill-opacity="0.2"/><circle cx="18" cy="6" r="3" fill="currentColor" fill-opacity="0.2"/><circle cx="18" cy="18" r="3" fill="currentColor" fill-opacity="0.2"/><path d="M8.7 10.6l6.6-3.2M8.7 13.4l6.6 3.2"/>`,
+    custom: `<circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.4-6.4l-2.1 2.1M7.7 16.3l-2.1 2.1m0-12.8l2.1 2.1m8.6 8.6l2.1 2.1"/>`
+  };
+  const svg = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${m.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic eng-ic" aria-hidden="true">${paths[m.key] || paths.custom}</svg>`;
+  if (!withBg) return svg;
+  const wrapCls = size >= 22 ? 'lg' : (size <= 14 ? 'sm' : '');
+  return `<span class="eng-ico-wrap ${wrapCls}" title="${esc(m.label)}">${svg}</span>`;
+}
+
+function onPlayerHeadError(imgEl, fallbackUrl) {
+  if (!imgEl) return;
+  if (!imgEl.dataset.fallbackTried && fallbackUrl) {
+    imgEl.dataset.fallbackTried = '1';
+    imgEl.src = fallbackUrl;
+    return;
+  }
+  imgEl.style.display = 'none';
+  const fb = imgEl.parentElement?.querySelector('.head-fallback');
+  if (fb) fb.style.display = 'inline-flex';
+}
+
+// --- SFTP Helpers (One-Click Launch, FileZilla Export & Password Guidance) ---
+function getSftpDetails(srv) {
+  const s = srv || curServer();
+  const rawHost = (S.sftp?.host || srvHost(s) || window.location.hostname || '127.0.0.1').trim();
+  const bracketedHost = rawHost.includes(':') && !rawHost.startsWith('[') ? `[${rawHost}]` : rawHost;
+  const port = Number(S.sftp?.port || S.adminDaemonCfg?.sftpPort || S.brandingDaemon?.sftp_port || 2022) || 2022;
+  const username = S.sftp?.username || `${S.acct.un || 'admin'}.${s ? s.id : 'srv-1'}`;
+  const launchUri = S.sftp?.launch_uri || `sftp://${encodeURIComponent(username)}@${bracketedHost}:${port}/`;
+  const isRemote = Boolean(s?.node_id && s.node_id !== 'local');
+  return {
+    host: rawHost,
+    bracketedHost,
+    port,
+    username,
+    launchUri,
+    isRemote,
+    enabled: S.sftp ? S.sftp.enabled !== false : true,
+    listening: S.sftp ? Boolean(S.sftp.listening) : null,
+    serverId: s?.id || 'srv-1',
+    serverName: s?.name || 'Minecraft Server'
+  };
+}
+
+function launchSftpClient() {
+  const d = getSftpDetails(curServer());
+  try {
+    const a = document.createElement('a');
+    a.href = d.launchUri;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch (e) {
+    window.location.href = d.launchUri;
+  }
+  const passMsg = d.isRemote
+    ? 'Use the remote node token or your panel password when prompted.'
+    : 'Use your NeoPanel account login password (or SSH key) when prompted.';
+  toast(`Launching SFTP (${d.host}:${d.port}). ${passMsg}`);
+}
+
+function downloadFileZillaProfile() {
+  const d = getSftpDetails(curServer());
+  const xmlEsc = v => String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  const siteName = `NeoPanel - ${d.serverName}`;
+  const comment = d.isRemote
+    ? 'Remote Node SFTP: enter the remote node token or local account password on connect.'
+    : 'SFTP Password: enter your NeoPanel account login password on connect.';
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<FileZilla3 version="3.67.0" platform="*">
+  <Servers>
+    <Server>
+      <Host>${xmlEsc(d.host)}</Host>
+      <Port>${d.port}</Port>
+      <Protocol>1</Protocol>
+      <Type>0</Type>
+      <User>${xmlEsc(d.username)}</User>
+      <Logontype>2</Logontype>
+      <TimezoneOffset>0</TimezoneOffset>
+      <PasvMode>MODE_DEFAULT</PasvMode>
+      <MaximumMultipleConnections>0</MaximumMultipleConnections>
+      <EncodingType>Auto</EncodingType>
+      <BypassProxy>0</BypassProxy>
+      <Name>${xmlEsc(siteName)}</Name>
+      <Comments>${xmlEsc(comment)}</Comments>
+      <SyncBrowsing>0</SyncBrowsing>
+      <DirectoryComparison>0</DirectoryComparison>
+    </Server>
+  </Servers>
+</FileZilla3>
+`;
+  const blob = new Blob([xml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `neopanel-sftp-${shortServerId(d.serverId)}.xml`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('Downloaded FileZilla SFTP profile (.xml). Use File -> Import in FileZilla.', 'ok');
+}
+
+function renderSftpCardHtml(srv, compact = false) {
+  const d = getSftpDetails(srv);
+  const statusPill = d.listening === true
+    ? `<span class="sftp-status-pill live"><i class="dot" style="width:7px;height:7px;border-radius:50%;background:currentColor;"></i>Listening :${d.port}</span>`
+    : d.listening === false
+      ? `<span class="sftp-status-pill down">Port :${d.port} Offline</span>`
+      : `<span class="sftp-status-pill">Port :${d.port}</span>`;
+
+  return `<div class="card" style="padding: ${compact ? '18px 20px' : '22px'};">
+    <div class="row sb" style="margin-bottom: 8px; gap: 10px; flex-wrap: wrap;">
+      <h2 style="font-size: 16px; margin: 0; color: var(--tx); display:flex; align-items:center; gap:8px;">
+        ${ic('lock', 15)} SFTP Management Endpoint
+      </h2>
+      ${statusPill}
+    </div>
+    <p class="mu" style="font-size: 13px; margin-bottom: 12px;">Pure-Go jailed SFTP daemon for WinSCP, FileZilla, Cyberduck, or OpenSSH.</p>
+    <div class="mono" style="background: rgba(0, 0, 0, 0.36); border: 1px solid var(--border); padding: 11px 14px; border-radius: 8px; font-size: 12.5px; line-height: 1.8; margin-bottom: 12px; overflow-wrap: anywhere;">
+      <div class="row sb" style="gap: 8px;">
+        <span><span class="mu">Connection:</span> <b style="color: var(--tx);">sftp://${esc(d.host)}:${d.port}</b></span>
+        <button type="button" class="btn-ico" data-val="sftp://${esc(d.host)}:${d.port}" onclick="copyDbText(this.dataset.val, 'SFTP Address')" title="Copy Host:Port">${ic('copy', 12)}</button>
+      </div>
+      <div class="row sb" style="gap: 8px;">
+        <span><span class="mu">Username:</span> <b style="color: var(--tx);">${esc(d.username)}</b></span>
+        <button type="button" class="btn-ico" data-val="${esc(d.username)}" onclick="copyDbText(this.dataset.val, 'SFTP Username')" title="Copy Username">${ic('copy', 12)}</button>
+      </div>
+    </div>
+    <div class="sftp-pass-callout" style="margin-bottom: 14px;">
+      <b>SFTP Password:</b> Use your <b>NeoPanel account password</b> (or add an SSH Public Key in Account Settings).${d.isRemote ? ' Remote cluster nodes also accept their <code>node_token</code> (<code>sudo neopanel node-token</code>).' : ''}
+    </div>
+    <div class="row" style="gap: 8px; flex-wrap: wrap;">
+      <button type="button" class="btn pr sm" onclick="launchSftpClient()">${ic('external', 13)} Launch SFTP Client</button>
+      <button type="button" class="btn sm" onclick="downloadFileZillaProfile()">${ic('download', 13)} FileZilla XML</button>
+      <button type="button" class="btn sm" data-uri="${esc(d.launchUri)}" onclick="copyDbText(this.dataset.uri, 'SFTP URI')">${ic('copy', 13)} Copy SFTP URI</button>
+    </div>
+  </div>`;
+}
+
+// --- File Manager Sorting Helpers (Folders ALWAYS First) ---
+function getFileExtension(name, isDir = false) {
+  if (isDir) return '';
+  const s = String(name || '').trim();
+  const idx = s.lastIndexOf('.');
+  return idx > 0 ? s.slice(idx + 1).toLowerCase() : '';
+}
+
+function sortFileItems(list, sortCfg = S.fileSort) {
+  const arr = Array.isArray(list) ? [...list] : [];
+  const by = ['name', 'ext', 'size', 'modified'].includes(sortCfg?.by) ? sortCfg.by : 'name';
+  const mult = sortCfg?.dir === 'desc' ? -1 : 1;
+
+  arr.sort((a, b) => {
+    const aDir = Boolean(a?.is_dir);
+    const bDir = Boolean(b?.is_dir);
+    if (aDir !== bDir) return aDir ? -1 : 1;
+
+    const aName = String(a?.name || '');
+    const bName = String(b?.name || '');
+
+    let cmp = 0;
+    if (by === 'size') {
+      if (!aDir && !bDir) {
+        cmp = (Number(a?.size) || 0) - (Number(b?.size) || 0);
+      }
+      if (cmp === 0) cmp = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+    } else if (by === 'ext') {
+      if (!aDir && !bDir) {
+        cmp = getFileExtension(aName, false).localeCompare(getFileExtension(bName, false), undefined, { sensitivity: 'base' });
+      }
+      if (cmp === 0) cmp = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+    } else if (by === 'modified') {
+      const aTs = Date.parse(a?.modified || '') || 0;
+      const bTs = Date.parse(b?.modified || '') || 0;
+      cmp = aTs - bTs;
+      if (cmp === 0) cmp = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+    } else {
+      cmp = aName.localeCompare(bName, undefined, { numeric: true, sensitivity: 'base' });
+    }
+    return cmp * mult;
+  });
+
+  return arr;
+}
+
+function setFileSort(by, dir = null) {
+  const validBy = ['name', 'ext', 'size', 'modified'].includes(by) ? by : 'name';
+  const curBy = S.fileSort?.by || 'name';
+  const curDir = S.fileSort?.dir === 'desc' ? 'desc' : 'asc';
+  const nextDir = (dir === 'asc' || dir === 'desc')
+    ? dir
+    : (curBy === validBy ? (curDir === 'asc' ? 'desc' : 'asc') : 'asc');
+
+  S.fileSort = { by: validBy, dir: nextDir };
+  try {
+    localStorage.setItem('neopanel_file_sort', JSON.stringify(S.fileSort));
+  } catch (e) {}
+  R();
+}
+
+// --- Subdomain & DNS/SRV Helpers ---
+function computeSubdomainDraft(data, srv) {
+  const cfg = data?.config || {};
+  return {
+    enabled: Boolean(cfg.enabled),
+    label: cfg.label || '',
+    base_domain: cfg.base_domain || data?.default_base_domain || '',
+    target_host: cfg.target_host || data?.default_target || srvHost(srv) || ''
+  };
+}
+
+function getSubdomainPreviewFqdn(draft) {
+  const lbl = String(draft?.label || '').trim().replace(/^\.+|\.+$/g, '').toLowerCase();
+  const base = String(draft?.base_domain || '').trim().replace(/^\.+|\.+$/g, '').toLowerCase();
+  if (lbl && base) return `${lbl}.${base}`;
+  if (base) return base;
+  return lbl ? `${lbl}.yourdomain.com` : 'play.yourdomain.com';
+}
+
+function onSubdomainFieldChange() {
+  const draft = S.subdomainDraft || {};
+  const enabledEl = $('#sub-enabled');
+  const labelEl = $('#sub-label');
+  const baseEl = $('#sub-base');
+  const targetEl = $('#sub-target');
+  if (enabledEl) draft.enabled = Boolean(enabledEl.checked);
+  if (labelEl) draft.label = labelEl.value.trim().toLowerCase();
+  if (baseEl) draft.base_domain = baseEl.value.trim().toLowerCase();
+  if (targetEl) draft.target_host = targetEl.value.trim();
+  S.subdomainDraft = draft;
+
+  const fqdn = getSubdomainPreviewFqdn(draft);
+  const port = Number(S.subdomainData?.server_port || curServer()?.port || 25565);
+  const fullAddr = port === 25565 ? fqdn : `${fqdn} (SRV -> :${port})`;
+  const prevEl = $('#sub-fqdn-preview');
+  if (prevEl) prevEl.textContent = fullAddr;
+  const copyBtn = $('#sub-copy-fqdn-btn');
+  if (copyBtn) copyBtn.dataset.val = fqdn;
+}
+
+async function loadSubdomainData(skipRender = false) {
+  const srv = curServer();
+  if (!srv) return;
+  S.subdomainLoading = true;
+  if (!skipRender && S.view === 'sub' && !S.subdomainData) R();
+  try {
+    const data = await api(srvApiPath(srv, '/subdomain'));
+    S.subdomainData = data;
+    S.subdomainDraft = computeSubdomainDraft(data, srv);
+  } catch (e) {
+    if (!S.subdomainDraft) S.subdomainDraft = computeSubdomainDraft(null, srv);
+  } finally {
+    S.subdomainLoading = false;
+    if (!skipRender && S.view === 'sub') R();
+  }
+}
+
+async function saveSubdomainConfig(btnEl) {
+  const srv = curServer();
+  if (!srv) return;
+  onSubdomainFieldChange();
+  const draft = S.subdomainDraft || {};
+  const fqdn = (draft.label && draft.base_domain)
+    ? `${draft.label}.${draft.base_domain}`
+    : (draft.base_domain || '');
+  if (btnEl) setBtnLoading(btnEl, true, 'Saving...');
+  try {
+    const res = await api(srvApiPath(srv, '/subdomain'), {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: Boolean(draft.enabled),
+        label: draft.label || '',
+        base_domain: draft.base_domain || '',
+        fqdn,
+        target_host: draft.target_host || ''
+      })
+    });
+    S.subdomainData = res;
+    S.subdomainDraft = computeSubdomainDraft(res, srv);
+    toast(res?.message || 'Subdomain configuration saved!', 'ok');
+    R();
+  } catch (e) {
+    toast(e.message || 'Failed to save subdomain settings', 'bad');
+  } finally {
+    if (btnEl && document.body.contains(btnEl)) setBtnLoading(btnEl, false);
+  }
+}
+
+async function verifySubdomainDNS(btnEl) {
+  const srv = curServer();
+  if (!srv) return;
+  onSubdomainFieldChange();
+  const draft = S.subdomainDraft || {};
+  const fqdn = (draft.label && draft.base_domain)
+    ? `${draft.label}.${draft.base_domain}`
+    : (draft.base_domain || '');
+  if (!fqdn) {
+    toast('Enter a subdomain label and base domain first.', 'bad');
+    return;
+  }
+  S.subdomainVerifying = true;
+  if (btnEl) setBtnLoading(btnEl, true, 'Checking DNS...');
+  try {
+    const res = await api(srvApiPath(srv, '/subdomain/verify'), {
+      method: 'POST',
+      body: JSON.stringify({
+        fqdn,
+        target_host: draft.target_host || ''
+      })
+    });
+    S.subdomainVerify = res;
+    toast(res?.status === 'verified' ? 'DNS records verified!' : 'DNS check completed', res?.status === 'verified' ? 'ok' : '');
+    R();
+  } catch (e) {
+    toast(e.message || 'DNS verification failed', 'bad');
+  } finally {
+    S.subdomainVerifying = false;
+    if (btnEl && document.body.contains(btnEl)) setBtnLoading(btnEl, false);
+  }
+}
+
+async function syncPlayersList(btnEl) {
+  const srv = curServer();
+  if (!srv) return;
+  if (btnEl) setBtnLoading(btnEl, true, 'Syncing...');
+  try {
+    await api(srvApiPath(srv, '/players/action'), {
+      method: 'POST',
+      body: JSON.stringify({ action: 'sync', player: '' })
+    });
+    toast('Requested /list from server console...');
+    await new Promise(r => setTimeout(r, 350));
+    await loadPlayersData();
+  } catch (e) {
+    toast(e.message || 'Server must be online to sync online players', 'bad');
+  } finally {
+    if (btnEl && document.body.contains(btnEl)) setBtnLoading(btnEl, false);
+  }
+}
+
+// --- Unified Settings Helpers (Identity + Live Startup Command) ---
+function onServerIdentityInput() {
+  const srv = curServer();
+  const nameVal = $('#set-srv-name')?.value ?? '';
+  const descVal = $('#set-srv-desc')?.value ?? '';
+  S.editSrvName = nameVal;
+  S.editSrvDesc = descVal;
+
+  const heroName = $('#srv-hero-name');
+  if (heroName) heroName.textContent = nameVal.trim() || srv?.name || 'Minecraft Server';
+  const heroDesc = $('#srv-hero-desc');
+  if (heroDesc) {
+    heroDesc.textContent = descVal.trim();
+    heroDesc.style.display = descVal.trim() ? 'block' : 'none';
+  }
+}
+
+function updateSettingsCmdPreview() {
+  const el = $('#set-cmd-preview');
+  if (!el) return;
+  const srv = curServer();
+  let javaVal = $('#prop-java')?.value || resolveJavaSelectValue(srv?.java_path || '', srv?.version, srv?.type);
+  let javaCmd = `java (OpenJDK ${javaVal})`;
+  if (javaVal === 'custom') {
+    javaCmd = $('#prop-java-custom')?.value?.trim() || srv?.java_path || 'java';
+  }
+  const memMax = parseInt($('#prop-ram')?.value, 10) || getServerMaxRamMB(srv) || 2048;
+  const memMin = Math.min(1024, memMax);
+  const jar = $('#prop-jar')?.value?.trim() || srv?.jar_file || 'server.jar';
+  const args = $('#prop-args')?.value?.trim() || srv?.java_args || '-XX:+UseG1GC';
+  el.textContent = `${javaCmd} -Xms${memMin}M -Xmx${memMax}M ${args} -jar ${jar} nogui`;
+}
+
 // --- Selectors & Shortcuts ---
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
@@ -235,7 +653,7 @@ const BRAND_PRESETS = [
 window.S = {
   token: localStorage.getItem('neopanel_token') || '',
   user: null,
-  view: 'dash',              // active view: dash, con, set, act, fi, db, bk, sc, net, sub, stp, pl, plug, ver, admin, acc
+  view: 'dash',              // active view: dash, con, set, act, fi, db, bk, sc, net, sub, pl, plug, ver, admin, acc
   loading: {
     dash: true,
     files: false,
@@ -311,8 +729,25 @@ window.S = {
   ftab: 'server.properties',
   currentDir: '',
   fileList: [],
+  sortedFileList: null,
+  fileSort: (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('neopanel_file_sort') || 'null');
+      if (saved && ['name', 'ext', 'size', 'modified'].includes(saved.by)) {
+        return { by: saved.by, dir: saved.dir === 'desc' ? 'desc' : 'asc' };
+      }
+    } catch (e) {}
+    return { by: 'name', dir: 'asc' };
+  })(),
   selectedFiles: new Set(),
   fileMenuOpen: null,
+  subdomainData: null,
+  subdomainDraft: null,
+  subdomainLoading: false,
+  subdomainVerify: null,
+  subdomainVerifying: false,
+  editSrvName: '',
+  editSrvDesc: '',
   adminTab: 0,
   adminUsers: [],
   nodes: [],
@@ -351,6 +786,8 @@ window.S = {
     autoRestartPolicy: true
   })),
   players: [],
+  playersMax: 20,
+  playersOnlineCount: 0,
   bans: [],
   wl: [],
   ops: [],
@@ -539,7 +976,7 @@ const VIEW_TO_SLUG = {
   sc: 'schedules',
   net: 'network',
   sub: 'subdomain',
-  stp: 'startup',
+  stp: 'settings',
   pl: 'players',
   plug: 'plugins',
   ver: 'versions',
@@ -551,10 +988,13 @@ const VIEW_TO_SLUG = {
 
 const SLUG_TO_VIEW = Object.fromEntries(
   Object.entries(VIEW_TO_SLUG)
-    .filter(([k, slug]) => slug && k !== 'notfound')
+    .filter(([k, slug]) => slug && k !== 'notfound' && k !== 'stp')
     .map(([k, slug]) => [slug, k])
 );
 SLUG_TO_VIEW.store = 'plug';
+SLUG_TO_VIEW.mods = 'plug';
+SLUG_TO_VIEW.startup = 'set';
+SLUG_TO_VIEW.stp = 'set';
 SLUG_TO_VIEW.servers = 'dash';
 
 const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods'];
@@ -608,7 +1048,9 @@ function serverRouteUrl(nodeId, srvId, view = 'con', opts = {}) {
   let path;
   if (target === 'plug') {
     const tab = opts.plugTab || S.plugTab || 'browse';
-    path = `/server/${encodeURIComponent(shortId)}/plugins/${tab === 'installed' ? 'installed' : 'store'}`;
+    const cur = resolveServerByParam(srvId, nid) || curServer();
+    const plugSlug = isModdedEngine(cur?.type || S.core) ? 'mods' : 'plugins';
+    path = `/server/${encodeURIComponent(shortId)}/${plugSlug}/${tab === 'installed' ? 'installed' : 'store'}`;
   } else {
     const slug = VIEW_TO_SLUG[target] || 'console';
     path = `/server/${encodeURIComponent(shortId)}/${slug}`;
@@ -712,13 +1154,13 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
     const rawP1 = decodeURIComponent(parts[1] || '');
     const p2Lower = (parts[2] || '').toLowerCase();
     const isShortTwoSeg = parts.length === 2;
-    const isShortWithKnownSlug = parts.length >= 3 && (SLUG_TO_VIEW[p2Lower] || p2Lower === 'plugins');
+    const isShortWithKnownSlug = parts.length >= 3 && (SLUG_TO_VIEW[p2Lower] || p2Lower === 'plugins' || p2Lower === 'mods');
 
     if (isShortTwoSeg || isShortWithKnownSlug) {
       const serverId = rawP1;
       const slug = (parts[2] || 'console').toLowerCase();
       const extra = (parts[3] || '').toLowerCase();
-      if (slug === 'plugins') {
+      if (slug === 'plugins' || slug === 'mods') {
         if (parts.length > 4 || (extra && !['store', 'installed'].includes(extra))) {
           return { view: 'notfound', notFoundPath: cleanPath, safeMode };
         }
@@ -738,7 +1180,7 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
         view: mappedView,
         nodeId: nodeParam,
         serverId,
-        canonicalRedirect: isShortTwoSeg || rawP1 !== shortServerId(rawP1),
+        canonicalRedirect: isShortTwoSeg || rawP1 !== shortServerId(rawP1) || slug === 'startup',
         safeMode
       };
     }
@@ -749,7 +1191,7 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
       const serverId = decodeURIComponent(parts[2] || '');
       const slug = (parts[3] || 'console').toLowerCase();
       const extra = (parts[4] || '').toLowerCase();
-      if (slug === 'plugins') {
+      if (slug === 'plugins' || slug === 'mods') {
         if (parts.length > 5 || (extra && !['store', 'installed'].includes(extra))) {
           return { view: 'notfound', notFoundPath: cleanPath, safeMode };
         }
@@ -779,10 +1221,11 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
 }
 
 function getViewDisplayLabel(view) {
+  const isMod = isModdedEngine(curServer()?.type || S.core);
   const map = {
     dash: 'Servers Overview',
     con: 'Server Console',
-    set: 'Server Settings',
+    set: 'Settings & Startup',
     act: 'Activity Log',
     fi: 'File Manager',
     db: 'Databases',
@@ -790,9 +1233,9 @@ function getViewDisplayLabel(view) {
     sc: 'Schedules',
     net: 'Network Allocations',
     sub: 'Subdomains',
-    stp: 'Startup Settings',
+    stp: 'Settings & Startup',
     pl: 'Players',
-    plug: 'Plugins & Store',
+    plug: isMod ? 'Mods & Store' : 'Plugins & Store',
     ver: 'Software & Versions',
     admin: 'Admin Area',
     acc: 'Account Settings',
@@ -815,7 +1258,7 @@ function syncActiveServerState(srv) {
   applyServerStatsSnapshot(srv, srv.stats, false);
   syncPropsFromServer(srv, changed);
   S.ver = srv.version || S.ver;
-  S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
+  S.core = engineMeta(srv.type || 'paper').label;
 
   if (changed) {
     S.log = [];
@@ -824,11 +1267,26 @@ function syncActiveServerState(srv) {
     S.dbRevealIds = new Set();
     S.sqlStudio = null;
     S.fileList = [];
+    S.sortedFileList = null;
     S.currentDir = '';
     S.editingFile = null;
     S.selectedFiles = new Set();
     S.bk = [];
     S.plugins = [];
+    S.lastModrinthHits = null;
+    S.plugLoader = '';
+    S.plugVer = '';
+    S.players = [];
+    S.wl = [];
+    S.bans = [];
+    S.ops = [];
+    S.playersMax = 20;
+    S.playersOnlineCount = 0;
+    S.subdomainData = null;
+    S.subdomainDraft = null;
+    S.subdomainVerify = null;
+    S.editSrvName = srv.name || '';
+    S.editSrvDesc = srv.description || '';
     S.sftp = null;
     S.cpu = Array.from({ length: 40 }, () => 0);
     S.ram = Array.from({ length: 40 }, () => 0);
@@ -1478,9 +1936,14 @@ function onChartMouseLeave(kind) {
 }
 
 function head(name) {
+  const raw = String(name || 'Steve').trim() || 'Steve';
+  const encName = encodeURIComponent(raw);
   let h = 0;
-  for (const c of String(name || 'Player')) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return `<span class="head" style="background:hsl(${h} 45% 48%);box-shadow:inset 0 -9px 0 hsl(${h} 35% 30%)"></span>`;
+  for (const c of raw) h = (h * 31 + c.charCodeAt(0)) % 360;
+  const initial = raw.charAt(0).toUpperCase();
+  const primaryUrl = `https://api.mcheads.org/head/${encName}/64`;
+  const fallbackUrl = `https://mc-heads.net/avatar/${encName}/64`;
+  return `<span class="head-wrap" title="${esc(raw)}"><img class="head" src="${primaryUrl}" alt="${esc(raw)}" loading="lazy" data-fallback="${fallbackUrl}" onerror="onPlayerHeadError(this, this.dataset.fallback)"><span class="head-fallback" style="background:hsl(${h} 45% 42%);">${esc(initial)}</span></span>`;
 }
 
 function loaderHtml(label = 'Loading...') {
@@ -3204,7 +3667,7 @@ function renderFlyConsole() {
         <div class="con fly-con-logs" id="fly-log" role="log" aria-live="polite"></div>
         <div class="cin fly-con-input">
           <span>&raquo;</span>
-          <input id="fly-cmd" autocomplete="off" spellcheck="false" placeholder="Type a command..." aria-label="Quick console command">
+          <input id="fly-cmd" type="text" class="con-cmd-input" autocomplete="off" spellcheck="false" placeholder="Type a command..." aria-label="Quick console command">
           <button type="button" id="fly-send-btn" class="btn sm pr fly-send-btn" onclick="runFlyCmd()">Send</button>
         </div>
       </div>
@@ -3381,12 +3844,19 @@ window.addEventListener('online', () => {
   }
 });
 
-// Local 1-second uptime ticker fallback so uptime advances smoothly between WS ticks
+// Local 1-second uptime ticker fallback + 5-second live players poll when viewing Online Players
+let _panelTickCount = 0;
 setInterval(() => {
+  _panelTickCount = (_panelTickCount + 1) % 60;
   if ((S.status === 'online' || S.status === 'starting') && (!S.activeWs || S.activeWs.readyState !== WebSocket.OPEN)) {
     S.uptimeSec = (Number(S.uptimeSec) || 0) + 1;
     if (S.view === 'con') liveCon();
     else if (S.view === 'dash') updateDashLiveStats();
+  }
+  if (_panelTickCount % 5 === 0 && S.view === 'pl' && S.ptab === 'online' && S.token && !$('#login')) {
+    loadPlayersData(true).then(() => {
+      if (S.view === 'pl' && S.ptab === 'online') R();
+    }).catch(() => {});
   }
 }, 1000);
 
@@ -3556,7 +4026,7 @@ async function runCmd(cmd) {
 // --- Categorized Navigation (PG) with Vector SVGs ---
 const PG = [
   ['con', 'Console', 'terminal', 'General'],
-  ['set', 'Settings', 'settings', 'General'],
+  ['set', 'Settings & Startup', 'settings', 'General'],
   ['act', 'Activity', 'activity', 'General'],
   ['fi', 'Files', 'files', 'Management'],
   ['db', 'Databases', 'database', 'Management'],
@@ -3564,7 +4034,6 @@ const PG = [
   ['sc', 'Schedules', 'clock', 'Management'],
   ['net', 'Network', 'network', 'Management'],
   ['sub', 'Subdomain', 'link', 'Management'],
-  ['stp', 'Startup', 'play', 'Management'],
   ['pl', 'Players', 'users', 'Management'],
   ['plug', 'Plugins & Store', 'puzzle', 'Minecraft'],
   ['ver', 'Software & Versions', 'cpu', 'Minecraft']
@@ -3710,14 +4179,14 @@ function refreshOpenVersionSelects() {
     plugSel.innerHTML = `<option value="" ${!curVal ? 'selected' : ''}>Version: Any</option>` + list.map(v => `<option value="${esc(v)}" ${curVal === v ? 'selected' : ''}>${esc(v)}</option>`).join('');
     if (typeof plugSel._cselectRebuild === 'function') plugSel._cselectRebuild();
   }
-  const stpSel = $('#stp-ver-sel');
-  if (stpSel) {
+  const propVerSel = $('#prop-ver-sel');
+  if (propVerSel) {
     const srv = curServer();
-    const curVal = $('#stp-ver')?.value?.trim() || srv?.version || '1.21.4';
+    const curVal = $('#prop-ver')?.value?.trim() || srv?.version || '1.21.4';
     const vers = getAllMcVersions(srv?.type || S.core || '');
     const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
-    stpSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
-    if (typeof stpSel._cselectRebuild === 'function') stpSel._cselectRebuild();
+    propVerSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    if (typeof propVerSel._cselectRebuild === 'function') propVerSel._cselectRebuild();
   }
   if (S.view === 'ver' && $('#vres')) {
     renderVersionRows();
@@ -3843,7 +4312,7 @@ function refreshJavaUIStrips(nodeId = null) {
   });
 
   const csNodeVal = $('#cs-node')?.value || defaultNid;
-  for (const [id, nid] of [['stp-java', curServer()?.node_id || defaultNid], ['prop-java', curServer()?.node_id || defaultNid], ['cs-java', csNodeVal]]) {
+  for (const [id, nid] of [['prop-java', curServer()?.node_id || defaultNid], ['cs-java', csNodeVal]]) {
     const sel = document.getElementById(id);
     if (!sel) continue;
     const statusMap = getPremadeJavaStatusMap(nid);
@@ -3932,22 +4401,36 @@ function srvh() {
   const nodeId = srv?.node_id || 'local';
   const nodeLabel = srv?.node_name || getNodeById(nodeId)?.name || (nodeId === 'local' ? 'Local Master Node' : nodeId);
   const heroUrl = getBrand('server_hero_url');
-  const rawTitle = (S.props && S.props._srvId === srv?.id && S.props.motd)
+  const srvType = srv?.type || S.core || 'paper';
+  const eng = engineMeta(srvType);
+  const panelName = (S.activeServerId === srv?.id && typeof S.editSrvName === 'string' && S.editSrvName.trim())
+    ? S.editSrvName.trim()
+    : (srv?.name || 'Minecraft Server');
+  const panelDesc = (S.activeServerId === srv?.id && typeof S.editSrvDesc === 'string')
+    ? S.editSrvDesc.trim()
+    : String(srv?.description || '').trim();
+  const rawMotd = (S.props && S.props._srvId === srv?.id && S.props.motd)
     ? S.props.motd
-    : (srv?.motd || srv?.name || 'Minecraft Server');
+    : (srv?.motd || '');
 
-  return `<div class="card srvh" style="background-image: url('${esc(heroUrl)}'), url('/img/banner.jpg');">
-    <div style="min-width:0; flex:1 1 320px;">
-      <div class="row">
-        <h1 id="srv-hero-title">${renderMinecraftTextHtml(rawTitle, { allowNewlines: true })}</h1>
+  return `<div class="card srvh">
+    <div class="srvh-bg" style="background-image: url('${esc(heroUrl)}'), url('/img/banner.jpg');" aria-hidden="true"></div>
+    <div class="srvh-main">
+      <div class="srv-hero-meta">
+        <h1 id="srv-hero-name">${esc(panelName)}</h1>
         <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st] || 'Offline'}</span>
         ${((S.nodes && S.nodes.length > 1) || nodeId !== 'local') ? `<span class="chip srv-node-badge" title="Running on node ${esc(nodeLabel)}">${ic('network', 11)} ${esc(nodeLabel)}</span>` : ''}
         <span id="srv-halt-badge" class="badge halted" style="display:${st === 'offline' && S.startupHalted ? 'inline-flex' : 'none'};" title="Auto-restart stopped after 2 consecutive startup failures">Start Halted (2/2)</span>
       </div>
-      <div id="hst" class="row hst">
-        <span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span>
-        <span class="mono mu">CPU ${c.toFixed(1)}%</span>
-        <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
+      <div id="srv-hero-title" class="srv-hero-sub" style="display:${rawMotd ? 'block' : 'none'};">${rawMotd ? renderMinecraftTextHtml(rawMotd, { allowNewlines: true }) : ''}</div>
+      <div id="srv-hero-desc" class="srv-hero-sub" style="display:${panelDesc ? 'block' : 'none'};">${esc(panelDesc)}</div>
+      <div class="row" style="gap: 10px 14px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
+        <span class="eng-pill" title="Server Software Engine">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
+        <div id="hst" class="row hst" style="margin-top: 0;">
+          <span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span>
+          <span class="mono mu">CPU ${c.toFixed(1)}%</span>
+          <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
+        </div>
       </div>
     </div>
     <div class="row" style="position:relative">
@@ -4166,6 +4649,8 @@ const ACTIVITY_META_MAP = {
   file_unzip: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Extracted Archive' },
   plugin_install: { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: 'Installed Plugin' },
   plugin_delete: { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: 'Uninstalled Plugin' },
+  mod_install: { category: 'plugins', badgeLabel: 'Mods', cls: 'act-cat-plugins', title: 'Installed Mod' },
+  mod_delete: { category: 'plugins', badgeLabel: 'Mods', cls: 'act-cat-plugins', title: 'Uninstalled Mod' },
   software_install: { category: 'software', badgeLabel: 'Software', cls: 'act-cat-software', title: 'Installed Engine JAR' },
   properties_save: { category: 'software', badgeLabel: 'Config', cls: 'act-cat-software', title: 'Saved server.properties' },
   backup_create: { category: 'backups', badgeLabel: 'Backups', cls: 'act-cat-backups', title: 'Created Backup' },
@@ -4174,6 +4659,7 @@ const ACTIVITY_META_MAP = {
   port_add: { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: 'Assigned Port' },
   port_delete: { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: 'Removed Port' },
   port_primary: { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: 'Changed Primary Port' },
+  subdomain_update: { category: 'network', badgeLabel: 'DNS', cls: 'act-cat-network', title: 'Updated Subdomain' },
   player_op: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Granted Operator' },
   player_deop: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Revoked Operator' },
   player_kick: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Kicked Player' },
@@ -4212,10 +4698,10 @@ const ACTIVITY_CATEGORIES = [
   ['files', 'Files'],
   ['databases', 'Databases'],
   ['nodes', 'Cluster Nodes'],
-  ['plugins', 'Plugins'],
+  ['plugins', 'Plugins & Mods'],
   ['software', 'Software & Config'],
   ['backups', 'Backups'],
-  ['network', 'Network & Ports'],
+  ['network', 'Network & DNS'],
   ['players', 'Players'],
   ['security', 'Security & Auth'],
   ['admin', 'Admin & System']
@@ -4228,9 +4714,9 @@ function getActivityMeta(action) {
   if (key.startsWith('file_')) return { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: key.replace(/_/g, ' ') };
   if (key.startsWith('db_')) return { category: 'databases', badgeLabel: 'Database', cls: 'act-cat-databases', title: key.replace(/_/g, ' ') };
   if (key.startsWith('node_')) return { category: 'nodes', badgeLabel: 'Nodes', cls: 'act-cat-nodes', title: key.replace(/_/g, ' ') };
-  if (key.startsWith('plugin_')) return { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('plugin_') || key.startsWith('mod_')) return { category: 'plugins', badgeLabel: key.startsWith('mod_') ? 'Mods' : 'Plugins', cls: 'act-cat-plugins', title: key.replace(/_/g, ' ') };
   if (key.startsWith('backup_')) return { category: 'backups', badgeLabel: 'Backups', cls: 'act-cat-backups', title: key.replace(/_/g, ' ') };
-  if (key.startsWith('port_')) return { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('port_') || key.startsWith('subdomain_')) return { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: key.replace(/_/g, ' ') };
   if (key.startsWith('player_')) return { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: key.replace(/_/g, ' ') };
   if (key.startsWith('auth_') || key.includes('key') || key.includes('password')) {
     return { category: 'security', badgeLabel: 'Security', cls: 'act-cat-security', title: key.replace(/_/g, ' ') };
@@ -4676,7 +5162,8 @@ const V = {
           const dVal = origIdx === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0);
           const upSec = origIdx === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
           const host = `${srvHost(s)}:${s.port || 25565}`;
-          const coreLabel = (s.type || 'paper').charAt(0).toUpperCase() + (s.type || 'paper').slice(1);
+          const coreLabel = engineMeta(s.type || 'paper').label;
+          const engBadgeIcon = engineIcon(s.type || 'paper', 12);
           const srvUrl = serverRouteUrl(nid, s.id, 'con');
 
           if (dashVm === 'list') {
@@ -4694,7 +5181,7 @@ const V = {
                   </div>
                   <div class="row" style="gap: 8px; margin-top: 4px; flex-wrap: wrap;">
                     <span class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</span>
-                    <span class="chip" style="font-size: 11px;">${esc(coreLabel)} ${esc(s.version || '')}</span>
+                    <span class="chip" style="font-size: 11px; display:inline-flex; align-items:center; gap:5px;">${engBadgeIcon} ${esc(coreLabel)} ${esc(s.version || '')}</span>
                     ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
                   </div>
                 </div>
@@ -4724,7 +5211,7 @@ const V = {
           <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card ${dashVm === 'icons' ? 'vm-dash-icon' : ''}" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
             <div class="srv-card-banner" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
               <div class="srv-card-badges-left">
-                <span class="srv-card-badge">${dashVm === 'icons' ? esc(coreLabel) : `Minecraft - ${esc(coreLabel)}`}</span>
+                <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:5px;">${engBadgeIcon} ${dashVm === 'icons' ? esc(coreLabel) : `Minecraft - ${esc(coreLabel)}`}</span>
                 ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
               </div>
               <div class="srv-card-actions">
@@ -4839,7 +5326,7 @@ const V = {
         <div class="con" id="log" role="log" aria-live="polite"></div>
         <div class="cin">
           <span>&raquo;</span>
-          <input id="cmd" autocomplete="off" spellcheck="false" placeholder="Type a command..." aria-label="Console command">
+          <input id="cmd" type="text" class="con-cmd-input" autocomplete="off" spellcheck="false" placeholder="Type a command..." aria-label="Console command">
         </div>
       </div>
       <div class="card stc" id="stc">${statsHtml()}</div>
@@ -4852,54 +5339,64 @@ const V = {
   pl() {
     const t = S.ptab;
     const vm = getViewMode('pl', 'list');
+    const maxPl = Number(S.playersMax || S.props?.max || 20) || 20;
+    const onlineCnt = Math.max(S.players.length, Number(S.playersOnlineCount) || 0);
     let body = '';
 
     if (t === 'online') {
       if (S.loading?.players) {
         body = `<div class="card">${loaderHtml('Loading player lists...')}</div>`;
       } else if (!S.players.length) {
-        body = `<div class="card mu" style="text-align:center;padding:24px;">No players currently online. Start the server to accept connections.</div>`;
+        const slpHint = onlineCnt > 0
+          ? `<div style="font-weight:600; color:var(--tx); margin-bottom:6px;">${onlineCnt} player${onlineCnt === 1 ? '' : 's'} connected (SLP reported ${onlineCnt}/${maxPl})</div><div>Click <b>Sync (/list)</b> above to query exact online player names from the server console.</div>`
+          : 'No players currently online. Connected players appear automatically from server logs and SLP pings.';
+        body = `<div class="card mu" style="text-align:center;padding:26px;">${slpHint}</div>`;
       } else if (vm === 'icons' || vm === 'tiles') {
         body = `<div class="${vm === 'icons' ? 'vm-icons-grid' : 'vm-tiles-grid'}">
-          ${S.players.map(p => `
+          ${S.players.map(p => {
+            const pName = p.n || p.name || 'Player';
+            const pingLabel = p.ping ? `${p.ping} ms` : 'Online';
+            return `
             <div class="${vm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
               <div class="${vm === 'icons' ? 'vm-plug-icon-center' : 'vm-item-head'}">
                 <div class="row" style="gap: 8px; min-width: 0; ${vm === 'icons' ? 'flex-direction: column;' : ''}">
-                  ${head(p.n)}
-                  <b class="vm-item-title">${esc(p.n)}</b>
+                  ${head(pName)}
+                  <b class="vm-item-title">${esc(pName)}</b>
                 </div>
-                ${p.op ? '<span class="badge online">OP</span>' : `<span class="chip">${p.ping || 32} ms</span>`}
+                ${p.op ? '<span class="badge online">OP</span>' : `<span class="chip">${esc(pingLabel)}</span>`}
               </div>
-              <div class="mu mono" style="font-size: 11.5px;">${esc(p.t || 'Just now')} &bull; <span class="pv">${esc(p.ip || '127.0.0.1')}</span></div>
+              <div class="mu mono" style="font-size: 11.5px;">${esc(p.t || 'Online')} &bull; <span class="pv">${esc(p.ip || '—')}</span></div>
               <div class="vm-item-foot">
-                <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(p.n)}')">${p.op ? 'Deop' : 'Op'}</button>
+                <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(pName)}')">${p.op ? 'Deop' : 'Op'}</button>
                 <div class="row" style="gap: 6px;">
-                  <button class="btn sm" onclick="playerAction('kick', '${esc(p.n)}')">Kick</button>
-                  <button class="btn sm dg" onclick="playerAction('ban', '${esc(p.n)}')">Ban</button>
+                  <button class="btn sm" onclick="playerAction('kick', '${esc(pName)}')">Kick</button>
+                  <button class="btn sm dg" onclick="playerAction('ban', '${esc(pName)}')">Ban</button>
                 </div>
               </div>
-            </div>
-          `).join('')}
+            </div>`;
+          }).join('')}
         </div>`;
       } else {
         body = `<div class="card tw"><table>
           <thead><tr><th>Player</th><th>Ping</th><th>Playtime</th><th>IP</th><th style="text-align:right">Actions</th></tr></thead>
           <tbody>
-            ${S.players.map(p => `
+            ${S.players.map(p => {
+              const pName = p.n || p.name || 'Player';
+              return `
               <tr>
-                <td>${head(p.n)}<b>${esc(p.n)}</b> ${p.op ? '<span class="badge" style="margin-left:6px;">Operator</span>' : ''}</td>
-                <td class="mono">${p.ping || 32} ms</td>
-                <td>${p.t || 'Just now'}</td>
-                <td class="mono pv">${p.ip || '127.0.0.1'}</td>
+                <td>${head(pName)}<b>${esc(pName)}</b> ${p.op ? '<span class="badge" style="margin-left:6px;">Operator</span>' : ''}</td>
+                <td class="mono">${p.ping ? `${p.ping} ms` : '—'}</td>
+                <td>${esc(p.t || 'Online')}</td>
+                <td class="mono pv">${esc(p.ip || '—')}</td>
                 <td style="text-align:right">
                   <div class="row" style="justify-content:flex-end">
-                    <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(p.n)}')">${p.op ? 'Deop' : 'Op'}</button>
-                    <button class="btn sm" onclick="playerAction('kick', '${esc(p.n)}')">Kick</button>
-                    <button class="btn sm dg" onclick="playerAction('ban', '${esc(p.n)}')">Ban</button>
+                    <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(pName)}')">${p.op ? 'Deop' : 'Op'}</button>
+                    <button class="btn sm" onclick="playerAction('kick', '${esc(pName)}')">Kick</button>
+                    <button class="btn sm dg" onclick="playerAction('ban', '${esc(pName)}')">Ban</button>
                   </div>
                 </td>
-              </tr>
-            `).join('')}
+              </tr>`;
+            }).join('')}
           </tbody>
         </table></div>`;
       }
@@ -4991,12 +5488,18 @@ const V = {
 
     return `${srvh()}
     <div class="row sb" style="margin-top:14px; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
-      <div class="tabs" style="margin:0;">
-        ${[['online', 'Online Players'], ['wl', 'Whitelist'], ['ban', 'Banned Players']].map(([k, l]) => `
-          <button class="btn ${t === k ? 'on' : ''}" onclick="S.ptab='${k}'; R(); loadPlayersData();">${l}</button>
-        `).join('')}
+      <div class="row" style="gap:10px; flex-wrap:wrap; align-items:center;">
+        <div class="tabs" style="margin:0;">
+          ${[['online', `Online Players (${onlineCnt})`], ['wl', `Whitelist (${S.wl.length})`], ['ban', `Banned Players (${S.bans.length})`]].map(([k, l]) => `
+            <button class="btn ${t === k ? 'on' : ''}" onclick="S.ptab='${k}'; R(); loadPlayersData();">${l}</button>
+          `).join('')}
+        </div>
+        <span class="badge ${onlineCnt > 0 ? 'online' : 'offline'}"><i class="dot"></i>${onlineCnt} / ${maxPl} Online</span>
       </div>
-      ${renderViewModeToggle('pl', 'list')}
+      <div class="row" style="gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn sm" onclick="syncPlayersList(this)" title="Query live /list from console and refresh SLP">${ic('refresh', 13)} Sync (/list)</button>
+        ${renderViewModeToggle('pl', 'list')}
+      </div>
     </div>
     ${body}`;
   },
@@ -5022,7 +5525,12 @@ const V = {
 
     const pathParts = (S.currentDir || '').split('/').filter(Boolean);
     const isSubdir = pathParts.length > 0;
-    const allSelected = S.fileList.length > 0 && S.fileList.every(i => S.selectedFiles.has(i.path || i.name));
+    const sortedFiles = sortFileItems(S.fileList, S.fileSort);
+    S.sortedFileList = sortedFiles;
+    const sortBy = S.fileSort?.by || 'name';
+    const sortDir = S.fileSort?.dir === 'desc' ? 'desc' : 'asc';
+    const sortArrow = col => sortBy === col ? `<span class="file-sort-arrow">${sortDir === 'asc' ? '&#9650;' : '&#9660;'}</span>` : '';
+    const allSelected = sortedFiles.length > 0 && sortedFiles.every(i => S.selectedFiles.has(i.path || i.name));
     const vm = getViewMode('files', 'list');
 
     const renderFileCtxMenuHtml = (item, idx, isDir, itemPath) => `
@@ -5048,9 +5556,18 @@ const V = {
                 <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" ${allSelected ? 'checked' : ''} aria-label="Select all files">
               </th>
               <th style="width: 40px; padding: 12px 4px;"></th>
-              <th style="padding: 12px 10px; text-align: left;">Name</th>
-              <th style="width: 140px; padding: 12px 10px; text-align: left;">Size</th>
-              <th style="width: 180px; padding: 12px 10px; text-align: left;">Modified</th>
+              <th style="padding: 12px 10px; text-align: left;">
+                <button type="button" class="file-th-btn ${sortBy === 'name' ? 'active' : ''}" onclick="setFileSort('name')">Name ${sortArrow('name')}</button>
+              </th>
+              <th style="width: 90px; padding: 12px 10px; text-align: left;">
+                <button type="button" class="file-th-btn ${sortBy === 'ext' ? 'active' : ''}" onclick="setFileSort('ext')">Ext ${sortArrow('ext')}</button>
+              </th>
+              <th style="width: 130px; padding: 12px 10px; text-align: left;">
+                <button type="button" class="file-th-btn ${sortBy === 'size' ? 'active' : ''}" onclick="setFileSort('size')">Size ${sortArrow('size')}</button>
+              </th>
+              <th style="width: 170px; padding: 12px 10px; text-align: left;">
+                <button type="button" class="file-th-btn ${sortBy === 'modified' ? 'active' : ''}" onclick="setFileSort('modified')">Modified ${sortArrow('modified')}</button>
+              </th>
               <th style="width: 50px; padding: 12px 18px 12px 10px; text-align: right;"></th>
             </tr>
           </thead>
@@ -5059,12 +5576,13 @@ const V = {
               <tr onclick="browseFolder('..')">
                 <td style="padding-left: 18px;"></td>
                 <td style="width: 40px; padding: 8px 4px;"><span class="fi-badge up" title="Parent folder">${ic('folderUp', 15)}</span></td>
-                <td colspan="4" style="font-weight: 600; color: var(--tx);">.. (Parent folder)</td>
+                <td colspan="5" style="font-weight: 600; color: var(--tx);">.. (Parent folder)</td>
               </tr>
             ` : ''}
-            ${S.fileList.map((item, idx) => {
+            ${sortedFiles.map((item, idx) => {
               const isDir = item.is_dir;
               const icon = fileListIconHtml(item);
+              const extLabel = isDir ? 'Folder' : (getFileExtension(item.name, false) ? `.${getFileExtension(item.name, false)}` : '—');
               const sizeStr = formatFileSize(item.size, isDir);
               const dateStr = formatFileDate(item.modified);
               const itemPath = item.path || item.name;
@@ -5081,30 +5599,31 @@ const V = {
                 </td>
                 <td style="width: 40px; padding: 8px 4px;">${icon}</td>
                 <td style="font-weight: 500; color: var(--tx);">${esc(item.name)}</td>
-                <td class="mu mono" style="font-size: 12.5px; width: 140px;">${sizeStr}</td>
-                <td class="mu mono" style="font-size: 12.5px; width: 180px;">${dateStr}</td>
+                <td class="mu mono" style="font-size: 12px; width: 90px;">${esc(extLabel)}</td>
+                <td class="mu mono" style="font-size: 12.5px; width: 130px;">${sizeStr}</td>
+                <td class="mu mono" style="font-size: 12.5px; width: 170px;">${dateStr}</td>
                 <td style="width: 50px; text-align: right; padding-right: 18px; position: relative;" onclick="event.stopPropagation();">
                   <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
                   ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
                 </td>
               </tr>`;
             }).join('')}
-            ${S.loading?.files ? `<tr><td colspan="6">${loaderHtml('Loading directory contents...')}</td></tr>` : !S.fileList.length && !isSubdir ? '<tr><td colspan="6" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
+            ${S.loading?.files ? `<tr><td colspan="7">${loaderHtml('Loading directory contents...')}</td></tr>` : !sortedFiles.length && !isSubdir ? '<tr><td colspan="7" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
           </tbody>
         </table>
       </div>`;
     } else if (vm === 'icons') {
       filesContainerHtml = `
       <div class="card" style="padding: 16px;">
-        ${S.fileList.length > 0 ? `
+        ${sortedFiles.length > 0 ? `
           <div class="row sb" style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
             <label class="row" style="gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--tx-muted);">
               <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" ${allSelected ? 'checked' : ''} aria-label="Select all files">
-              <span>Select all (${S.fileList.length})</span>
+              <span>Select all (${sortedFiles.length})</span>
             </label>
             <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
           </div>` : ''}
-        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!S.fileList.length && !isSubdir)
+        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!sortedFiles.length && !isSubdir)
           ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
           : `<div class="vm-icons-grid">
             ${isSubdir ? `
@@ -5116,7 +5635,7 @@ const V = {
                   <div class="vm-file-meta">Go up</div>
                 </div>
               </div>` : ''}
-            ${S.fileList.map((item, idx) => {
+            ${sortedFiles.map((item, idx) => {
               const isDir = item.is_dir;
               const sizeStr = isDir ? 'Folder' : formatFileSize(item.size, false);
               const itemPath = item.path || item.name;
@@ -5146,15 +5665,15 @@ const V = {
     } else {
       filesContainerHtml = `
       <div class="card" style="padding: 16px;">
-        ${S.fileList.length > 0 ? `
+        ${sortedFiles.length > 0 ? `
           <div class="row sb" style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
             <label class="row" style="gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--tx-muted);">
               <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" ${allSelected ? 'checked' : ''} aria-label="Select all files">
-              <span>Select all (${S.fileList.length})</span>
+              <span>Select all (${sortedFiles.length})</span>
             </label>
             <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
           </div>` : ''}
-        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!S.fileList.length && !isSubdir)
+        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!sortedFiles.length && !isSubdir)
           ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
           : `<div class="vm-tiles-grid">
             ${isSubdir ? `
@@ -5167,7 +5686,7 @@ const V = {
                   </div>
                 </div>
               </div>` : ''}
-            ${S.fileList.map((item, idx) => {
+            ${sortedFiles.map((item, idx) => {
               const isDir = item.is_dir;
               const sizeStr = isDir ? 'Folder' : formatFileSize(item.size, false);
               const dateStr = formatFileDate(item.modified);
@@ -5213,11 +5732,20 @@ const V = {
           }).join('')}
         </div>
 
-        <!-- Search, View Mode & Action Buttons -->
+        <!-- Search, Sort, View Mode & Action Buttons -->
         <div class="row" style="gap: 10px; flex-wrap: wrap;">
           <div style="position: relative;">
-            <input type="text" id="fi-filter" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 200px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
+            <input type="text" id="fi-filter" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 190px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
             <kbd style="position: absolute; right: 10px; top: 9px; font-size: 11px; color: var(--tx-muted); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;">/</kbd>
+          </div>
+          <div class="file-sort-bar">
+            <select id="fi-sort-by" style="width: auto; min-width: 132px; height: 36px; font-size: 12.5px;" onchange="setFileSort(this.value, S.fileSort?.dir || 'asc')">
+              <option value="name" ${sortBy === 'name' ? 'selected' : ''}>Sort: Name</option>
+              <option value="ext" ${sortBy === 'ext' ? 'selected' : ''}>Sort: Extension</option>
+              <option value="size" ${sortBy === 'size' ? 'selected' : ''}>Sort: Size</option>
+              <option value="modified" ${sortBy === 'modified' ? 'selected' : ''}>Sort: Modified</option>
+            </select>
+            <button type="button" class="btn sm" onclick="setFileSort(S.fileSort?.by || 'name', S.fileSort?.dir === 'desc' ? 'asc' : 'desc')" style="height: 36px; padding: 0 11px;" title="Toggle ascending / descending order (folders always stay first)">${sortDir === 'asc' ? '&uarr; Asc' : '&darr; Desc'}</button>
           </div>
           ${renderViewModeToggle('files', 'list')}
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
@@ -5234,31 +5762,37 @@ const V = {
   },
 
   plug() {
+    const srv = curServer();
+    const engSlug = String(srv?.type || S.core || 'paper').toLowerCase().trim();
+    const isMod = isModdedEngine(engSlug);
+    const nounSing = isMod ? 'Mod' : 'Plugin';
+    const nounPlur = isMod ? 'Mods' : 'Plugins';
+    const nounLow = isMod ? 'mod' : 'plugin';
+    const nounsLow = isMod ? 'mods' : 'plugins';
     const isBrowse = (S.plugTab || 'browse') === 'browse';
-    const isFabric = String(S.core || '').toLowerCase() === 'fabric';
-    const targetFolder = isFabric ? 'mods/' : 'plugins/';
+    const targetFolder = isMod ? 'mods/' : 'plugins/';
     const instFilter = (S.plugFilter || '').toLowerCase();
     const filteredInstalled = S.plugins
       .map((p, i) => ({ p, i }))
       .filter(({ p }) => !instFilter || String(p[0] || '').toLowerCase().includes(instFilter));
     const storeVm = getViewMode('plug_store', 'list');
     const instVm = getViewMode('plug_inst', 'list');
-    const storeVersions = getAllMcVersions(S.plugLoader || '');
+    const storeVersions = getAllMcVersions(S.plugLoader || (isMod ? engSlug : ''));
     const verChoices = (S.plugVer && !storeVersions.includes(S.plugVer)) ? [S.plugVer, ...storeVersions] : storeVersions;
 
     const storeGridClass = storeVm === 'icons' ? 'vm-icons-grid wide' : (storeVm === 'tiles' ? 'vm-tiles-grid' : '');
     const storeGridStyle = storeVm === 'list' ? 'display: flex; flex-direction: column; gap: 10px;' : '';
     const storeBodyHtml = Array.isArray(S.lastModrinthHits)
       ? renderModrinthHitsHtml(S.lastModrinthHits)
-      : loaderHtml('Loading top plugins from Modrinth...');
+      : loaderHtml(`Loading top ${nounsLow} from Modrinth...`);
 
     let installedBodyHtml = '';
     if (S.loading?.plugins) {
-      installedBodyHtml = `<div class="card">${loaderHtml('Loading installed plugins...')}</div>`;
+      installedBodyHtml = `<div class="card">${loaderHtml(`Loading installed ${nounsLow}...`)}</div>`;
     } else if (!filteredInstalled.length) {
       installedBodyHtml = `<div class="card" style="padding: 32px; text-align: center;">
-        <div class="mu" style="margin-bottom: 12px;">${S.plugins.length ? 'No installed plugins match your filter.' : 'No plugins installed yet in ' + targetFolder + '.'}</div>
-        ${!S.plugins.length ? `<button class="btn pr sm" onclick="setPlugTab('browse')">${ic('store', 14)} Browse Modrinth Plugins</button>` : ''}
+        <div class="mu" style="margin-bottom: 12px;">${S.plugins.length ? `No installed ${nounsLow} match your filter.` : `No ${nounsLow} installed yet in ${targetFolder}.`}</div>
+        ${!S.plugins.length ? `<button class="btn pr sm" onclick="setPlugTab('browse')">${ic('store', 14)} Browse Modrinth ${nounPlur}</button>` : ''}
       </div>`;
     } else if (instVm === 'icons') {
       installedBodyHtml = `<div class="vm-icons-grid wide">
@@ -5270,7 +5804,7 @@ const V = {
               <div class="mu mono" style="font-size: 11.5px;">${esc(p[1] || 'installed')}${p[3] ? ` &bull; ${esc(formatFileDate(p[3]))}` : ''}</div>
             </div>
             <div class="vm-item-foot">
-              <label class="sw" title="Toggle plugin state">
+              <label class="sw" title="Toggle ${nounLow} state">
                 <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
                 <i></i>
               </label>
@@ -5291,7 +5825,7 @@ const V = {
                   <div class="mu mono" style="font-size: 11.5px; margin-top: 2px;">${esc(p[1] || 'installed')}${p[3] ? ` &bull; ${esc(formatFileDate(p[3]))}` : ''}</div>
                 </div>
               </div>
-              <label class="sw" title="Toggle plugin state">
+              <label class="sw" title="Toggle ${nounLow} state">
                 <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
                 <i></i>
               </label>
@@ -5319,7 +5853,7 @@ const V = {
               </div>
             </div>
             <div class="row" style="gap: 12px; flex-shrink: 0;">
-              <label class="sw" title="Toggle plugin state">
+              <label class="sw" title="Toggle ${nounLow} state">
                 <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
                 <i></i>
               </label>
@@ -5336,9 +5870,9 @@ const V = {
       <!-- Top Title and Tabs Bar -->
       <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 14px;">
         <div>
-          <h1 style="font-size: 24px; font-weight: 800; color: var(--tx); margin: 0;">Plugins &amp; Store</h1>
+          <h1 style="font-size: 24px; font-weight: 800; color: var(--tx); margin: 0;">${nounPlur} &amp; Store</h1>
           <div class="mu" style="font-size: 12.5px; margin-top: 3px;">
-            Browse and install Modrinth plugins directly into <span class="mono">${targetFolder}</span>
+            Browse and install Modrinth ${nounsLow} directly into <span class="mono">${targetFolder}</span>
           </div>
         </div>
         <div class="row" style="gap: 8px; flex-wrap: wrap;">
@@ -5355,23 +5889,31 @@ const V = {
         <!-- Browse Modrinth Filter & Search Bar -->
         <div class="row" style="gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
           <div style="position: relative; flex: 1; min-width: 240px;">
-            <input type="text" id="store-search" placeholder="Search plugins on Modrinth (e.g. EssentialsX, LuckPerms, WorldEdit)..." value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 40px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
+            <input type="text" id="store-search" placeholder="${isMod ? 'Search mods on Modrinth (e.g. Lithium, FerriteCore, Simple Voice Chat)...' : 'Search plugins on Modrinth (e.g. EssentialsX, LuckPerms, WorldEdit)...'}" value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 40px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
             <span style="position: absolute; left: 12px; top: 11px; color: var(--tx-muted);">${ic('search', 16)}</span>
           </div>
 
-          <select style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugLoader=this.value; refreshOpenVersionSelects(); searchModrinth();">
-            <option value="" ${!S.plugLoader ? 'selected' : ''}>Software: Any</option>
-            <option value="paper" ${S.plugLoader === 'paper' ? 'selected' : ''}>Paper</option>
-            <option value="purpur" ${S.plugLoader === 'purpur' ? 'selected' : ''}>Purpur</option>
-            <option value="spigot" ${S.plugLoader === 'spigot' ? 'selected' : ''}>Spigot</option>
-            <option value="bukkit" ${S.plugLoader === 'bukkit' ? 'selected' : ''}>Bukkit</option>
-            <option value="folia" ${S.plugLoader === 'folia' ? 'selected' : ''}>Folia</option>
-            <option value="velocity" ${S.plugLoader === 'velocity' ? 'selected' : ''}>Velocity</option>
-            <option value="waterfall" ${S.plugLoader === 'waterfall' ? 'selected' : ''}>Waterfall</option>
-            <option value="bungeecord" ${S.plugLoader === 'bungeecord' ? 'selected' : ''}>BungeeCord</option>
-            <option value="fabric" ${S.plugLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
-            <option value="neoforge" ${S.plugLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
-            <option value="forge" ${S.plugLoader === 'forge' ? 'selected' : ''}>Forge</option>
+          <select style="width: auto; min-width: 155px; height: 40px; font-size: 13px;" onchange="S.plugLoader=this.value; refreshOpenVersionSelects(); searchModrinth();">
+            <option value="" ${!S.plugLoader ? 'selected' : ''}>Loader: Auto (${isMod ? engineMeta(engSlug).label : 'All'})</option>
+            ${isMod ? `
+              <option value="fabric" ${S.plugLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
+              <option value="neoforge" ${S.plugLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
+              <option value="forge" ${S.plugLoader === 'forge' ? 'selected' : ''}>Forge</option>
+              <option value="paper" ${S.plugLoader === 'paper' ? 'selected' : ''}>Paper</option>
+              <option value="purpur" ${S.plugLoader === 'purpur' ? 'selected' : ''}>Purpur</option>
+            ` : `
+              <option value="paper" ${S.plugLoader === 'paper' ? 'selected' : ''}>Paper</option>
+              <option value="purpur" ${S.plugLoader === 'purpur' ? 'selected' : ''}>Purpur</option>
+              <option value="spigot" ${S.plugLoader === 'spigot' ? 'selected' : ''}>Spigot</option>
+              <option value="bukkit" ${S.plugLoader === 'bukkit' ? 'selected' : ''}>Bukkit</option>
+              <option value="folia" ${S.plugLoader === 'folia' ? 'selected' : ''}>Folia</option>
+              <option value="velocity" ${S.plugLoader === 'velocity' ? 'selected' : ''}>Velocity</option>
+              <option value="waterfall" ${S.plugLoader === 'waterfall' ? 'selected' : ''}>Waterfall</option>
+              <option value="bungeecord" ${S.plugLoader === 'bungeecord' ? 'selected' : ''}>BungeeCord</option>
+              <option value="fabric" ${S.plugLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
+              <option value="neoforge" ${S.plugLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
+              <option value="forge" ${S.plugLoader === 'forge' ? 'selected' : ''}>Forge</option>
+            `}
           </select>
 
           <select id="plug-ver-sel" data-searchable="1" style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugVer=this.value; searchModrinth();">
@@ -5392,19 +5934,19 @@ const V = {
         <div class="row sb" style="margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
           <label class="row" style="gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--tx-muted);">
             <input type="checkbox" id="plug-confirm-toggle" ${S.skipPlugConfirm ? 'checked' : ''} onchange="setPlugSkipConfirm(this.checked)">
-            <span>Install plugins immediately without confirmation prompt</span>
+            <span>Install ${nounsLow} immediately without confirmation prompt</span>
           </label>
-          <span class="mu" style="font-size: 11.5px;">Direct Modrinth install into <code class="mono">${targetFolder}</code></span>
+          <span class="mu" style="font-size: 11.5px;">Direct Modrinth ${nounSing.toLowerCase()} install into <code class="mono">${targetFolder}</code></span>
         </div>
 
         <div id="store-grid" class="${storeGridClass}" style="${storeGridStyle}">
           ${storeBodyHtml}
         </div>
       ` : `
-        <!-- Installed Plugins Filter & List -->
+        <!-- Installed ${nounPlur} Filter & List -->
         <div class="row sb" style="gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
           <div style="position: relative; flex: 1; min-width: 240px; max-width: 420px;">
-            <input type="text" placeholder="Filter installed plugins..." value="${esc(S.plugFilter || '')}" oninput="S.plugFilter=this.value; R();" style="height: 38px; font-size: 13.5px; padding-left: 36px; border-radius: 10px;">
+            <input type="text" placeholder="Filter installed ${nounsLow}..." value="${esc(S.plugFilter || '')}" oninput="S.plugFilter=this.value; R();" style="height: 38px; font-size: 13.5px; padding-left: 36px; border-radius: 10px;">
             <span style="position: absolute; left: 11px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
           </div>
           <div class="row" style="gap: 8px; flex-wrap: wrap;">
@@ -5427,10 +5969,13 @@ const V = {
     return `${srvh()}
     <div class="card hero" style="margin-top:14px">
       <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 12px;">
-        <div>
-          <span class="mu">Currently Running</span>
-          <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
-          <span class="mu">Java 25, 21, 17 &amp; 8 supported &bull; Direct installer for all server engines &amp; Minecraft versions</span>
+        <div class="row" style="gap: 14px; align-items: center;">
+          ${engineIcon(S.core || srv?.type || 'paper', 24, true)}
+          <div>
+            <span class="mu">Currently Running</span>
+            <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
+            <span class="mu">Java 25, 21, 17 &amp; 8 supported &bull; Direct installer for all server engines &amp; Minecraft versions</span>
+          </div>
         </div>
         <button class="btn pr" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">
           ${ic('refresh', 14)} Reinstall Server (mcjarfiles.com)
@@ -5442,8 +5987,11 @@ const V = {
     <div class="grid g4">
       ${CORES.map(([name, desc]) => `
         <button class="card sel ${sel === name ? 'on' : ''}" onclick="S.sel='${name}'; R();">
-          <div class="row sb" style="width:100%">
-            <b>${name}</b>
+          <div class="engine-card-head" style="width:100%;">
+            <span class="engine-card-title">
+              ${engineIcon(name, 16, true)}
+              <b>${name}</b>
+            </span>
             ${S.core === name ? '<span class="badge online" style="font-size:10px;padding:2px 6px;"><i class="dot"></i>Active</span>' : ''}
           </div>
           <span class="mu" style="font-size:12px;">${desc}</span>
@@ -5644,19 +6192,7 @@ const V = {
 
       <!-- Secondary Row: SFTP Access & Common Ports -->
       <div class="grid g2" style="gap: 20px;">
-        <div class="card" style="padding: 22px;">
-          <h2 style="font-size: 16px; margin-bottom: 8px; color: #fff;">SFTP Management Endpoint</h2>
-          <p class="mu" style="font-size: 13px; margin-bottom: 14px;">Pure-Go jailed SFTP daemon running natively in NeoPanel for secure file management.</p>
-          <div class="mono" style="background: rgba(0, 0, 0, 0.4); border: 1px solid var(--border); padding: 12px 14px; border-radius: 8px; font-size: 12.5px; line-height: 1.8; margin-bottom: 14px;">
-            <div><span class="mu">Host:</span> <b style="color: #fff;">${host}</b></div>
-            <div><span class="mu">Port:</span> <b style="color: #fff;">${sftpPort}</b></div>
-            <div><span class="mu">Username:</span> <b style="color: #fff;">${sftpUser}</b></div>
-          </div>
-          ${srv.node_id && srv.node_id !== 'local' ? `<div class="mu" style="font-size: 11.5px; margin-bottom: 12px; line-height: 1.45;">Remote cluster node SFTP password: use that node's <code>node_token</code> (<code>sudo neopanel node-token</code>) or a local user password.</div>` : ''}
-          <button class="btn sm" onclick="copyDbText('sftp://${sftpUser}@${host}:${sftpPort}', 'SFTP URI')">
-            Copy SFTP URI
-          </button>
-        </div>
+        ${renderSftpCardHtml(srv)}
 
         <div class="card" style="padding: 22px;">
           <h2 style="font-size: 16px; margin-bottom: 8px; color: #fff;">Common Plugin Ports</h2>
@@ -5837,104 +6373,143 @@ const V = {
   },
 
   sub() {
+    const srv = curServer();
+    const data = S.subdomainData;
+    const draft = S.subdomainDraft || computeSubdomainDraft(data, srv);
+    const port = Number(data?.server_port || srv?.port || 25565);
+    const fqdn = getSubdomainPreviewFqdn(draft);
+    const fullDisplay = port === 25565 ? fqdn : `${fqdn} (SRV -> :${port})`;
+    const targetVal = draft.target_host || data?.default_target || srvHost(srv) || '';
+    const rawRecords = Array.isArray(data?.records) ? data.records : [];
+    const srvRecordHost = fqdn.startsWith('play.') || !draft.base_domain
+      ? `_minecraft._tcp.${fqdn}`
+      : `_minecraft._tcp.${draft.label || 'play'}.${draft.base_domain}`;
+    const displayRecords = rawRecords.length ? rawRecords : [
+      { type: (/^\d{1,3}(\.\d{1,3}){3}$/.test(targetVal) ? 'A' : (targetVal.includes(':') ? 'AAAA' : 'CNAME')), name: draft.label || 'play', full_name: fqdn, value: targetVal || 'YOUR_NODE_IP', ttl: 300, note: 'Points your custom address to this NeoPanel node.' },
+      { type: 'SRV', name: `_minecraft._tcp.${draft.label || 'play'}`, full_name: srvRecordHost, value: `0 5 ${port} ${fqdn}`, ttl: 300, note: `Routes Minecraft Java clients automatically to port ${port}.` }
+    ];
+    const verify = S.subdomainVerify;
+
     return `${srvh()}
-    <div class="card" style="margin-top:14px">
-      <h2>Custom Domain &amp; Subdomain</h2>
-      <label class="f">
-        <span>Choose a custom subdomain or root domain</span>
-        <div class="row">
-          <input type="text" id="sub-domain" value="proxy" style="max-width:240px">
-          <span class="mu">.mnvibes.org</span>
+    <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 16px;">
+      <div class="card" style="padding: 20px;">
+        <div class="row sb" style="margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h2 style="margin: 0 0 4px; font-size: 18px; color: var(--tx);">Custom Domain &amp; SRV Manager</h2>
+            <div class="mu" style="font-size: 12.5px;">Bind a vanity Minecraft address (<code>play.yourdomain.com</code>) with automatic SRV port mapping &amp; live DNS verification.</div>
+          </div>
+          <label class="row" style="gap: 10px; cursor: pointer;">
+            <span style="font-size: 12.5px; font-weight: 600; color: var(--tx);">Custom Domain Active</span>
+            <span class="sw">
+              <input type="checkbox" id="sub-enabled" ${draft.enabled ? 'checked' : ''} onchange="onSubdomainFieldChange()">
+              <i></i>
+            </span>
+          </label>
         </div>
-      </label>
-      <button class="btn pr" onclick="toast('Domain mapping saved successfully')">Save Subdomain</button>
+
+        ${S.subdomainLoading && !data ? loaderHtml('Loading subdomain & DNS records...') : `
+          <div class="dns-preview-banner" style="margin-bottom: 16px;">
+            <div style="min-width: 0; flex: 1;">
+              <div class="mu" style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">Player Connect Address</div>
+              <div id="sub-fqdn-preview" class="dns-fqdn-big">${esc(fullDisplay)}</div>
+            </div>
+            <div class="row" style="gap: 8px; flex-wrap: wrap;">
+              <span class="badge ${draft.enabled ? 'online' : 'offline'}"><i class="dot"></i>${draft.enabled ? 'Enabled' : 'Disabled'}</span>
+              <button type="button" id="sub-copy-fqdn-btn" class="btn sm" data-val="${esc(fqdn)}" onclick="copyDbText(this.dataset.val, 'Subdomain Address')">${ic('copy', 12)} Copy Address</button>
+            </div>
+          </div>
+
+          <div class="grid g3" style="gap: 12px; margin-bottom: 14px;">
+            <label class="f" style="margin-bottom: 0;">
+              <span>Subdomain Label</span>
+              <input type="text" id="sub-label" value="${esc(draft.label || '')}" placeholder="e.g. play, smp, skyblock" oninput="onSubdomainFieldChange()">
+            </label>
+            <label class="f" style="margin-bottom: 0;">
+              <span>Base Domain</span>
+              <input type="text" id="sub-base" value="${esc(draft.base_domain || '')}" placeholder="e.g. yourdomain.com" oninput="onSubdomainFieldChange()">
+            </label>
+            <label class="f" style="margin-bottom: 0;">
+              <span>Target Node IP / FQDN</span>
+              <input type="text" id="sub-target" value="${esc(targetVal)}" placeholder="e.g. 203.0.113.10 or node.example.com" oninput="onSubdomainFieldChange()">
+            </label>
+          </div>
+
+          <div class="row" style="gap: 10px; flex-wrap: wrap;">
+            <button type="button" class="btn pr" onclick="saveSubdomainConfig(this)">${ic('download', 14)} Save Subdomain</button>
+            <button type="button" class="btn" onclick="verifySubdomainDNS(this)" ${S.subdomainVerifying ? 'disabled' : ''}>${ic('check', 14)} ${S.subdomainVerifying ? 'Checking DNS...' : 'Verify Live DNS'}</button>
+          </div>
+        `}
+      </div>
+
+      ${verify ? `
+        <div class="dns-verify-box ${esc(verify.status || 'pending')}">
+          <div class="row sb" style="margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+            <b style="color: var(--tx); display: inline-flex; align-items: center; gap: 7px;">
+              ${verify.status === 'verified' ? ic('check', 15) : ic('alert', 15)}
+              DNS Check for <span class="mono">${esc(verify.fqdn || fqdn)}</span>
+            </b>
+            <span class="badge ${verify.status === 'verified' ? 'online' : (verify.status === 'partial' ? 'starting' : 'offline')}">
+              <i class="dot"></i>${verify.status === 'verified' ? 'Verified' : (verify.status === 'partial' ? 'Partial Match' : 'Not Propagated Yet')}
+            </span>
+          </div>
+          <div style="color: var(--tx);">${esc(verify.summary || '')}</div>
+          <div class="row" style="gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 12px;">
+            <span class="chip mono">A/Host: ${verify.a_records?.length ? esc(verify.a_records.join(', ')) : (verify.cname ? esc(verify.cname) : 'None')}</span>
+            <span class="chip mono">SRV: ${verify.srv_records?.length ? verify.srv_records.map(r => `${r.target}:${r.port}`).join(', ') : 'None detected'}</span>
+          </div>
+          ${Array.isArray(verify.warnings) && verify.warnings.length ? `
+            <div class="mu" style="font-size: 12px; margin-top: 8px;">
+              ${verify.warnings.map(w => `<div>&bull; ${esc(w)}</div>`).join('')}
+            </div>` : ''}
+        </div>
+      ` : ''}
+
+      <div class="card tw">
+        <div class="row sb" style="margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h2 style="margin: 0 0 3px; font-size: 16px; color: var(--tx);">Required DNS &amp; SRV Records</h2>
+            <div class="mu" style="font-size: 12.5px;">Add these records at your DNS registrar (Cloudflare, Namecheap, Route53, Porkbun) so players connect without typing port <code class="mono">:${port}</code>.</div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Name / Host</th>
+              <th>Target / Value</th>
+              <th>TTL</th>
+              <th style="text-align: right;">Copy</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${displayRecords.map(rec => `
+              <tr>
+                <td><span class="chip mono" style="font-weight: 700;">${esc(rec.type)}</span></td>
+                <td>
+                  <div class="mono" style="font-weight: 600; color: var(--tx);">${esc(rec.name || rec.full_name)}</div>
+                  ${rec.full_name && rec.full_name !== rec.name ? `<div class="mu mono" style="font-size: 11px;">${esc(rec.full_name)}</div>` : ''}
+                </td>
+                <td>
+                  <span class="dns-val-chip mono" style="font-size: 12px;">${esc(rec.value)}</span>
+                  ${rec.note ? `<div class="mu" style="font-size: 11.5px; margin-top: 3px;">${esc(rec.note)}</div>` : ''}
+                </td>
+                <td class="mono mu">${esc(rec.ttl || 300)}s</td>
+                <td style="text-align: right;">
+                  <button type="button" class="btn sm" data-val="${esc(rec.value)}" onclick="copyDbText(this.dataset.val, '${esc(rec.type)} Value')">${ic('copy', 12)} Copy</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <div class="cf-proxy-warn" style="margin-top: 14px;">
+          <b>Cloudflare Tip:</b> Set your Minecraft <code>A</code> / <code>CNAME</code> proxy status to <b>DNS Only (grey cloud)</b>. Orange-cloud HTTP proxying blocks Minecraft Java TCP traffic!
+        </div>
+      </div>
     </div>`;
   },
 
   stp() {
-    const srv = curServer();
-    const rawJava = srv?.java_path || '';
-    const curJava = resolveJavaSelectValue(rawJava, srv?.version, srv?.type);
-    const isCustom = curJava === 'custom';
-    const memMin = srv?.memory_min || Math.min(1024, srv?.memory_max || 2048);
-    const memMax = srv?.memory_max || 2048;
-    const jvmFlags = srv?.java_args || '-XX:+UseG1GC';
-    const jarName = srv?.jar_file || 'server.jar';
-    const javaCmd = isCustom ? (rawJava || 'java') : `java (OpenJDK ${curJava})`;
-
-    return `${srvh()}
-    <div style="margin-top: 18px;">
-      <!-- Top Grid: Startup Command & Docker Image / Java -->
-      <div class="stp-top-grid">
-        <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 12px;">Active Startup Command</h2>
-          <div class="mono" style="background: var(--con-bg); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.6; word-break: break-all;">
-            ${esc(javaCmd)} -Xms${memMin}M -Xmx${memMax}M ${esc(jvmFlags)} -jar ${esc(jarName)} nogui
-          </div>
-          <span class="mu" style="font-size: 12px; margin-top: 8px; display: block;">This command is dynamically constructed from your selected Java binary, memory allocation, and JVM arguments. Auto-restart automatically times out after 2 failed startup attempts.</span>
-        </div>
-
-        <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 12px;">Java Runtime Environment</h2>
-          <select id="stp-java" onchange="toggleCustomJavaInput(this.value)" style="margin-bottom: 8px;">
-            ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type, srv?.node_id || 'local')}
-          </select>
-          <div id="stp-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
-            <input type="text" id="stp-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;">
-          </div>
-          ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Select which premade Java runtime executes your server JAR (Java 25, 21, 17, or 8).</span>
-        </div>
-      </div>
-
-      <!-- Variables Section -->
-      <h2 style="font-size: 18px; font-weight: 700; color: var(--tx); margin-bottom: 16px;">Runtime Variables &amp; Parameters</h2>
-
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px;">
-        <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MINECRAFT VERSION</div>
-          <div style="display: grid; grid-template-columns: minmax(135px, 165px) 1fr; gap: 8px; margin-bottom: 8px;">
-            <select id="stp-ver-sel" data-searchable="1" onchange="const inp=$('#stp-ver'); if(inp) inp.value=this.value;">
-              ${(() => {
-                const curV = srv?.version || '1.21.4';
-                const allV = getAllMcVersions(srv?.type || S.core || '');
-                const list = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
-                return list.map(v => `<option value="${esc(v)}" ${v === curV ? 'selected' : ''}>${esc(v)}</option>`).join('');
-              })()}
-            </select>
-            <input type="text" id="stp-ver" value="${esc(srv?.version || '1.21.4')}" style="font-weight: 600;" oninput="const sel=$('#stp-ver-sel'); if(sel && Array.from(sel.options).some(o=>o.value===this.value)){ sel.value=this.value; if(sel._cselectRebuild) sel._cselectRebuild(); }">
-          </div>
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Pick any Minecraft release from the searchable list or enter a custom version/snapshot tag.</span>
-        </div>
-
-        <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">SERVER JAR FILE</div>
-          <input type="text" id="stp-jar" value="${esc(srv?.jar_file || 'server.jar')}" style="margin-bottom: 8px; font-weight: 600;">
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The name of the server executable JAR inside the container directory.</span>
-        </div>
-
-        <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MAX RAM ALLOCATION</div>
-          <select id="stp-ram" style="margin-bottom: 8px; font-weight: 600;">
-            <option value="1024" ${memMax === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
-            <option value="2048" ${memMax === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
-            <option value="4096" ${memMax === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
-            <option value="6144" ${memMax === 6144 ? 'selected' : ''}>6 GB (6144 MB)</option>
-            <option value="8192" ${memMax === 8192 ? 'selected' : ''}>8 GB (8192 MB)</option>
-            <option value="16384" ${memMax === 16384 ? 'selected' : ''}>16 GB (16384 MB)</option>
-          </select>
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Adjust the maximum heap memory (-Xmx) given to this Minecraft server.</span>
-        </div>
-
-        <div class="card" style="padding: 20px;">
-          <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">CUSTOM JVM FLAGS (JAVA_ARGS)</div>
-          <input type="text" id="stp-args" value="${esc(srv?.java_args || '-XX:+UseG1GC')}" style="margin-bottom: 8px; font-weight: 500;">
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Additional JVM options passed directly to the Java process on start.</span>
-        </div>
-      </div>
-
-      <button class="btn pr" onclick="saveStartupSettings()" style="padding: 10px 24px;">${ic('download', 14)} Save &amp; Apply Startup Variables</button>
-    </div>`;
+    return V.set();
   },
 
   client() {
@@ -6110,111 +6685,185 @@ const V = {
       </span>
     </label>`;
 
+    const rawJava = srv?.java_path || '';
+    const curJava = resolveJavaSelectValue(rawJava, srv?.version, srv?.type);
+    const isCustom = curJava === 'custom';
     const curMem = getServerMaxRamMB(srv);
+    const memMin = srv?.memory_min || Math.min(1024, curMem);
+    const jvmFlags = srv?.java_args || '-XX:+UseG1GC';
+    const jarName = srv?.jar_file || 'server.jar';
+    const javaCmd = isCustom ? (rawJava || 'java') : `java (OpenJDK ${curJava})`;
+    const editName = (S.activeServerId === srv?.id && S.editSrvName !== '') ? S.editSrvName : (srv?.name || '');
+    const editDesc = (S.activeServerId === srv?.id && typeof S.editSrvDesc === 'string') ? S.editSrvDesc : (srv?.description || '');
+    const curV = srv?.version || '1.21.4';
+    const allV = getAllMcVersions(srv?.type || S.core || '');
+    const verList = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
 
     return `${srvh()}
-    <div class="grid g2" style="margin-top:14px">
-      <div class="card">
-        <h2>Server Configuration</h2>
-        <label class="f">
-          <span>Server Message (MOTD)</span>
-          <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="onMotdInput(this.value)" placeholder="e.g. &lt;gradient:#00f5a0:#00d9f5&gt;&lt;bold&gt;My Server&lt;/bold&gt;&lt;/gradient&gt; or §bWelcome!">
-        </label>
-        <div class="motd-preview-box">
-          <div class="row sb" style="margin-bottom:6px; gap:8px;">
-            <span class="mu" style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">Live MOTD Preview</span>
-            <span class="motd-hints mu">&amp;/&sect; &bull; &#38;#RRGGBB &bull; &lt;gradient:...&gt; &bull; &lt;rainbow&gt; &bull; \n</span>
+    <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 16px;">
+      <!-- Top Row: Panel Identity & Active Startup Command / Java Runtime -->
+      <div class="stp-top-grid">
+        <div class="card" style="padding: 20px;">
+          <h2 style="font-size: 16px; margin-bottom: 12px;">Server Identity &amp; Startup Command</h2>
+          <div class="grid g2" style="gap: 10px; margin-bottom: 12px;">
+            <label class="f" style="margin-bottom: 0;">
+              <span>Server Panel Name</span>
+              <input type="text" id="set-srv-name" value="${esc(editName)}" placeholder="e.g. Survival SMP" oninput="onServerIdentityInput()">
+            </label>
+            <label class="f" style="margin-bottom: 0;">
+              <span>Description / Tagline</span>
+              <input type="text" id="set-srv-desc" value="${esc(editDesc)}" placeholder="Optional short panel note" oninput="onServerIdentityInput()">
+            </label>
           </div>
-          <div id="motd-preview">${renderMinecraftTextHtml(p.motd, { allowNewlines: true })}</div>
+          <div class="mu" style="font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;">Active Startup Command</div>
+          <div id="set-cmd-preview" class="mono" style="background: var(--con-bg); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.55; word-break: break-all;">${esc(javaCmd)} -Xms${memMin}M -Xmx${curMem}M ${esc(jvmFlags)} -jar ${esc(jarName)} nogui</div>
+          <span class="mu" style="font-size: 11.5px; margin-top: 8px; display: block;">Auto-restart automatically times out after 2 consecutive startup failures.</span>
         </div>
-        <div class="grid g2">
-          <label class="f">
-            <span>Server Game Port</span>
-            <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}">
+
+        <div class="card" style="padding: 20px;">
+          <h2 style="font-size: 16px; margin-bottom: 12px;">Java Runtime Environment</h2>
+          <label class="f" style="margin-bottom: 8px;">
+            <span>Java Runtime Version</span>
+            <select id="prop-java" onchange="toggleCustomPropJava(this.value); updateSettingsCmdPreview();">
+              ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type, srv?.node_id || 'local')}
+            </select>
           </label>
+          <div id="prop-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
+            <input type="text" id="prop-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;" oninput="updateSettingsCmdPreview()">
+          </div>
+          ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Choose Java 25, 21, 17, 8, or a custom JVM binary path for this server.</span>
+        </div>
+      </div>
+
+      <!-- Main Unified Configuration & Startup Grid -->
+      <div class="grid g2">
+        <div class="card">
+          <h2>Server Properties (<code>server.properties</code>)</h2>
           <label class="f">
-            <span>Max Players</span>
-            <input type="number" min="1" max="1000" id="prop-max" value="${p.max}" oninput="S.props.max=+this.value||1;">
+            <span>Server Message (MOTD)</span>
+            <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="onMotdInput(this.value)" placeholder="e.g. &lt;gradient:#00f5a0:#00d9f5&gt;&lt;bold&gt;My Server&lt;/bold&gt;&lt;/gradient&gt; or §bWelcome!">
           </label>
+          <div class="motd-preview-box">
+            <div class="row sb" style="margin-bottom:6px; gap:8px;">
+              <span class="mu" style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px;">Live MOTD Preview</span>
+              <span class="motd-hints mu">&amp;/&sect; &bull; &#38;#RRGGBB &bull; &lt;gradient:...&gt; &bull; &lt;rainbow&gt; &bull; \n</span>
+            </div>
+            <div id="motd-preview">${renderMinecraftTextHtml(p.motd, { allowNewlines: true })}</div>
+          </div>
+          <div class="grid g2">
+            <label class="f">
+              <span>Server Game Port</span>
+              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}">
+            </label>
+            <label class="f">
+              <span>Max Players</span>
+              <input type="number" min="1" max="1000" id="prop-max" value="${p.max}" oninput="S.props.max=+this.value||1;">
+            </label>
+          </div>
+          <div class="grid g2">
+            <label class="f">
+              <span>Game Difficulty</span>
+              <select id="prop-diff" onchange="S.props.diff=this.value">${o(p.diff, ['peaceful', 'easy', 'normal', 'hard'])}</select>
+            </label>
+            <label class="f">
+              <span>Default Gamemode</span>
+              <select id="prop-mode" onchange="S.props.mode=this.value">${o(p.mode, ['survival', 'creative', 'adventure'])}</select>
+            </label>
+          </div>
+          <h3 style="font-size: 14px; font-weight: 700; margin: 14px 0 6px; color: var(--tx);">Game Rules &amp; Protection</h3>
+          ${sw('pvp', 'Player versus Player (PvP)')}
+          ${sw('wl', 'Enforce Whitelist')}
+          ${sw('cmd', 'Enable Command Blocks')}
         </div>
-        <label class="f">
-          <span>Game Difficulty</span>
-          <select id="prop-diff" onchange="S.props.diff=this.value">${o(p.diff, ['peaceful', 'easy', 'normal', 'hard'])}</select>
-        </label>
-        <label class="f">
-          <span>Default Gamemode</span>
-          <select id="prop-mode" onchange="S.props.mode=this.value">${o(p.mode, ['survival', 'creative', 'adventure'])}</select>
-        </label>
+
+        <div class="card">
+          <h2>Startup Variables &amp; Allocation</h2>
+          <div class="grid g2">
+            <label class="f">
+              <span>Allocated Memory (-Xmx)</span>
+              <select id="prop-ram" onchange="updateSettingsCmdPreview()">
+                <option value="1024" ${curMem === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
+                <option value="2048" ${curMem === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
+                <option value="4096" ${curMem === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
+                <option value="6144" ${curMem === 6144 ? 'selected' : ''}>6 GB (6144 MB)</option>
+                <option value="8192" ${curMem === 8192 ? 'selected' : ''}>8 GB (8192 MB)</option>
+                <option value="16384" ${curMem === 16384 ? 'selected' : ''}>16 GB (16384 MB)</option>
+              </select>
+            </label>
+            <label class="f">
+              <span>Server Executable JAR</span>
+              <input type="text" id="prop-jar" value="${esc(jarName)}" placeholder="server.jar" oninput="updateSettingsCmdPreview()">
+            </label>
+          </div>
+          <div class="f" style="margin-bottom: 12px;">
+            <span style="display:block; margin-bottom:6px; font-size:12.5px; color:var(--tx-muted); font-weight:600;">Minecraft / Release Version</span>
+            <div style="display: grid; grid-template-columns: minmax(135px, 165px) 1fr; gap: 8px;">
+              <select id="prop-ver-sel" data-searchable="1" onchange="const inp=$('#prop-ver'); if(inp) inp.value=this.value;">
+                ${verList.map(v => `<option value="${esc(v)}" ${v === curV ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+              </select>
+              <input type="text" id="prop-ver" value="${esc(curV)}" style="font-weight: 600;" oninput="const sel=$('#prop-ver-sel'); if(sel && Array.from(sel.options).some(o=>o.value===this.value)){ sel.value=this.value; if(sel._cselectRebuild) sel._cselectRebuild(); }">
+            </div>
+          </div>
+          <label class="f">
+            <span>Custom JVM Flags (JAVA_ARGS)</span>
+            <input type="text" id="prop-args" value="${esc(jvmFlags)}" placeholder="-XX:+UseG1GC" oninput="updateSettingsCmdPreview()">
+          </label>
+          <label class="row sb" style="padding: 10px 0; border-top: 1px solid var(--ln); border-bottom: 1px solid var(--ln); margin-bottom: 14px;">
+            <div>
+              <span style="display:block; font-weight: 600; color: var(--tx);">Auto-Restart Crashed Server</span>
+              <span class="mu" style="font-size: 11.5px;">Halts automatically after 2 consecutive startup failures</span>
+            </div>
+            <span class="sw">
+              <input type="checkbox" id="prop-autorestart" ${srv?.auto_restart !== false ? 'checked' : ''}>
+              <i></i>
+            </span>
+          </label>
+          <div class="row" style="gap: 10px; flex-wrap: wrap;">
+            <button type="button" class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save All Settings</button>
+            <button type="button" class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
+          </div>
+        </div>
       </div>
 
-      <div class="card">
-        <h2>Game Rules &amp; Protection</h2>
-        ${sw('pvp', 'Player versus Player (PvP)')}
-        ${sw('wl', 'Enforce Whitelist')}
-        ${sw('cmd', 'Enable Command Blocks')}
+      <!-- Quick SFTP Access -->
+      ${renderSftpCardHtml(srv, true)}
 
-        <h2 style="margin-top:20px">Memory &amp; Resources</h2>
-        <label class="f">
-          <span>Allocated Memory</span>
-          <select id="prop-ram">
-            <option value="1024" ${curMem === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
-            <option value="2048" ${curMem === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
-            <option value="4096" ${curMem === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
-            <option value="8192" ${curMem === 8192 ? 'selected' : ''}>8 GB (8192 MB)</option>
-            <option value="16384" ${curMem === 16384 ? 'selected' : ''}>16 GB (16384 MB)</option>
-          </select>
-        </label>
-        <label class="f" style="margin-top: 10px;">
-          <span>Java Runtime Version</span>
-          <select id="prop-java" onchange="toggleCustomPropJava(this.value)">
-            ${renderJavaSelectOptions(srv?.java_path || '', true, srv?.version, srv?.type, srv?.node_id || 'local')}
-          </select>
-        </label>
-        <div id="prop-custom-wrap" style="${isStandardJavaChoice(srv?.java_path) ? 'display: none;' : ''} margin-top: 6px;">
-          <input type="text" id="prop-java-custom" value="${esc(!isStandardJavaChoice(srv?.java_path) ? srv?.java_path : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;">
-        </div>
-        ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
-        <div class="row" style="margin-top:14px;">
-          <button class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save Properties</button>
-          <button class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
+      <!-- Reinstall Server Section -->
+      <div class="card" style="border: 1px solid var(--border-light); padding: 22px;">
+        <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <h2 style="font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; color: var(--tx);">
+              ${ic('refresh', 16)} Reinstall Server Instance
+            </h2>
+            <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
+              Re-download and deploy a fresh Minecraft server binary (Paper, Purpur, Leaf, Folia, Fabric, Forge, NeoForge, Vanilla, Velocity) via <b>mcjarfiles.com</b> API. You can choose to preserve world data, configs, and plugins/mods.
+            </p>
+          </div>
+          <button class="btn" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
+            ${ic('refresh', 14)} Reinstall Server
+          </button>
         </div>
       </div>
-    </div>
 
-    <!-- Reinstall Server Section -->
-    <div class="card" style="margin-top: 20px; border: 1px solid var(--border-light); padding: 22px;">
-      <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
-        <div>
-          <h2 style="font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; color: #fff;">
-            ${ic('refresh', 16)} Reinstall Server Instance
-          </h2>
-          <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
-            Re-download and deploy a fresh Minecraft server binary (Paper, Purpur, Leaf, Folia, Fabric, Vanilla, Velocity) via <b>mcjarfiles.com</b> API. You can choose to preserve world data, configs, and plugins.
-          </p>
+      <!-- Danger Zone: Delete Server -->
+      <div class="card" style="border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.05); padding: 22px;">
+        <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
+          <div>
+            <h2 style="color: #ef4444; font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px;">
+              ${ic('trash', 16)} Danger Zone: Delete Server Instance
+            </h2>
+            <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
+              Permanently destroy this Minecraft server instance (<b>${esc(srv?.name || '')}</b>). All files, worlds, player data, plugins/mods, configs, and allocated ports will be erased. This action cannot be reversed.
+            </p>
+          </div>
+          <button class="btn dg" data-srv-id="${esc(srv?.id || '')}" data-srv-name="${esc(srv?.name || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
+            ${ic('trash', 14)} Delete Server
+          </button>
         </div>
-        <button class="btn" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
-          ${ic('refresh', 14)} Reinstall Server
-        </button>
       </div>
-    </div>
-
-    <!-- Danger Zone: Delete Server -->
-    <div class="card" style="margin-top: 20px; border: 1px solid rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.05); padding: 22px;">
-      <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
-        <div>
-          <h2 style="color: #ef4444; font-size: 16px; margin: 0 0 6px; display: flex; align-items: center; gap: 8px;">
-            ${ic('trash', 16)} Danger Zone: Delete Server Instance
-          </h2>
-          <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
-            Permanently destroy this Minecraft server instance (<b>${esc(srv?.name || '')}</b>). All files, worlds, player data, plugins, configs, and allocated ports will be erased. This action cannot be reversed.
-          </p>
-        </div>
-        <button class="btn dg" data-srv-id="${esc(srv?.id || '')}" data-srv-name="${esc(srv?.name || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
-          ${ic('trash', 14)} Delete Server
-        </button>
-      </div>
-    </div>
-    <div class="np-slot-container" data-np-slot="settings:bottom" style="margin-top: 16px;"></div>`;
+      <div class="np-slot-container" data-np-slot="settings:bottom"></div>
+    </div>`;
   },
 
   act() {
@@ -6533,7 +7182,7 @@ const V = {
                   <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${esc(s.id)})</span></td>
                   <td><span class="chip srv-node-badge">${esc(nodeName)}</span></td>
                   <td class="mono">${s.port}</td>
-                  <td><span class="chip">${esc(s.type)} ${esc(s.version)}</span></td>
+                  <td><span class="chip" style="display:inline-flex; align-items:center; gap:5px;">${engineIcon(s.type || 'paper', 12)} ${esc(engineMeta(s.type || 'paper').label)} ${esc(s.version)}</span></td>
                   <td class="mono">${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</td>
                   <td><span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span></td>
                   <td style="text-align:right">
@@ -6564,7 +7213,7 @@ const V = {
                 </div>
                 <div class="row" style="gap:6px; flex-wrap:wrap;">
                   <span class="chip srv-node-badge">${esc(nodeName)}</span>
-                  <span class="chip">${esc(s.type)} ${esc(s.version)}</span>
+                  <span class="chip" style="display:inline-flex; align-items:center; gap:5px;">${engineIcon(s.type || 'paper', 12)} ${esc(engineMeta(s.type || 'paper').label)} ${esc(s.version)}</span>
                 </div>
                 <div class="vm-item-foot">
                   <a href="${esc(srvUrl)}" class="btn sm pr" style="text-decoration:none;" onclick="return handleServerCardClick(event, ${idx}, 'con')">Manage</a>
@@ -7197,7 +7846,7 @@ function versionRowsHtml() {
           : `<button class="btn sm pr" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)">Install ${esc(sel)} ${esc(item.v)}</button>`;
       if (vm === 'icons') {
         return `<div class="vm-icon-card">
-          <div class="vm-item-head"><b class="mono">${esc(item.v)}</b><span class="chip">${esc(sel)}</span></div>
+          <div class="vm-item-head"><b class="mono">${esc(item.v)}</b><span class="chip" style="display:inline-flex;align-items:center;gap:5px;">${engineIcon(sel, 12)} ${esc(sel)}</span></div>
           <div class="vm-item-sub">${esc(item.n)} &bull; Java ${esc(item.j)}</div>
           <div class="vm-item-foot">${actionBtn}</div>
         </div>`;
@@ -7206,7 +7855,7 @@ function versionRowsHtml() {
         return `<div class="vm-tile-card">
           <div class="vm-item-head">
             <div><b class="mono" style="font-size:15px;">${esc(item.v)}</b><div class="mu" style="font-size:12px;margin-top:2px;">${esc(item.n)}</div></div>
-            <span class="chip">${esc(sel)}</span>
+            <span class="chip" style="display:inline-flex;align-items:center;gap:5px;">${engineIcon(sel, 12)} ${esc(sel)}</span>
           </div>
           <div class="vm-item-foot"><span class="mono mu" style="font-size:12px;">Java ${esc(item.j)}</span>${actionBtn}</div>
         </div>`;
@@ -7215,7 +7864,7 @@ function versionRowsHtml() {
         <td class="mono"><b>${esc(item.v)}</b></td>
         <td><span class="chip">${esc(item.n)}</span></td>
         <td class="mono">Java ${esc(item.j)}</td>
-        <td><span class="chip">${esc(sel)}</span></td>
+        <td><span class="chip" style="display:inline-flex;align-items:center;gap:5px;">${engineIcon(sel, 12)} ${esc(sel)}</span></td>
         <td style="text-align:right">${actionBtn}</td>
       </tr>`;
     }).join('');
@@ -7273,7 +7922,7 @@ function versionRowsHtml() {
             <div class="row" style="gap:6px;"><b class="mono" style="font-size:15px;">${esc(item.v)}</b>${tagHtml}</div>
             <div class="mu" style="font-size:12px; margin-top:3px;">${esc(item.n)} (${esc(item.y)})</div>
           </div>
-          <span class="chip">${esc(sel)}</span>
+          <span class="chip" style="display:inline-flex;align-items:center;gap:5px;">${engineIcon(sel, 12)} ${esc(sel)}</span>
         </div>
         <div class="vm-item-foot">
           <span class="mono mu" style="font-size:12px;">Java ${esc(javaVer)}</span>
@@ -7288,7 +7937,7 @@ function versionRowsHtml() {
       </td>
       <td><span class="chip">${esc(item.n)} (${esc(item.y)})</span></td>
       <td class="mono">Java ${esc(javaVer)}</td>
-      <td><span class="chip">${esc(sel)}</span></td>
+      <td><span class="chip" style="display:inline-flex;align-items:center;gap:5px;">${engineIcon(sel, 12)} ${esc(sel)}</span></td>
       <td style="text-align:right">${actionBtn}</td>
     </tr>`;
   }).join('');
@@ -7397,17 +8046,21 @@ function navHtml() {
     &larr; All servers
   </a>
 
-  ${PG.map(([key, label, iconName, grp]) => {
-    const header = grp !== group ? `<div class="ng">${grp}</div>` : '';
-    group = grp;
-    const active = S.view === key ? 'on' : '';
-    const href = routeUrl(key);
-    return `${header}
+  ${(() => {
+    const isModSrv = isModdedEngine(curServer()?.type || S.core);
+    return PG.map(([key, label, iconName, grp]) => {
+      const header = grp !== group ? `<div class="ng">${grp}</div>` : '';
+      group = grp;
+      const active = S.view === key ? 'on' : '';
+      const href = routeUrl(key);
+      const displayLabel = (key === 'plug' && isModSrv) ? 'Mods &amp; Store' : label;
+      return `${header}
     <a class="nav-item ${active}" href="${esc(href)}" onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
       ${ic(iconName, 16)}
-      <span>${label}</span>
+      <span>${displayLabel}</span>
     </a>`;
-  }).join('')}
+    }).join('');
+  })()}
 
   ${renderModSidebarItemsHtml('server')}
   <div class="np-slot-container" data-np-slot="nav:bottom"></div>
@@ -7434,6 +8087,12 @@ function normalizeRoute(view) {
   if (view === 'store') {
     S.plugTab = 'browse';
     return 'plug';
+  }
+  if (view === 'mods') {
+    return 'plug';
+  }
+  if (view === 'stp' || view === 'startup') {
+    return 'set';
   }
   if (view === 'all') {
     return 'ver';
@@ -7564,14 +8223,17 @@ async function loadInitialRouteData(view) {
     if ((S.plugTab || 'browse') === 'browse') jobs.push(searchModrinth(true));
   }
   else if (view === 'bk') jobs.push(loadBackupsList(true));
-  else if (view === 'set') {
+  else if (view === 'set' || view === 'stp') {
     jobs.push(loadProperties(true));
+    jobs.push(loadVersionsCatalog());
+    jobs.push(loadSFTPDetails(true));
     jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
   }
-  else if (view === 'stp' || view === 'ver') {
+  else if (view === 'ver') {
     jobs.push(loadVersionsCatalog());
     jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
   }
+  else if (view === 'sub') jobs.push(loadSubdomainData(true));
   else if (view === 'net') {
     jobs.push(loadSFTPDetails(true));
     jobs.push(loadServerPorts(true));
@@ -7593,8 +8255,14 @@ window.onEnterView = function(view) {
     if ((S.plugTab || 'browse') === 'browse') searchModrinth();
   }
   else if (view === 'bk') loadBackupsList();
-  else if (view === 'set') { loadProperties(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
-  else if (view === 'stp' || view === 'ver') { loadVersionsCatalog(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
+  else if (view === 'set' || view === 'stp') {
+    loadProperties();
+    loadVersionsCatalog();
+    loadSFTPDetails();
+    loadJavaRuntimes(false, curServer()?.node_id || 'local');
+  }
+  else if (view === 'ver') { loadVersionsCatalog(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
+  else if (view === 'sub') loadSubdomainData();
   else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
   else if (view === 'act') loadActivityLog();
   else if (view === 'admin') loadAdminData();
@@ -7979,16 +8647,31 @@ async function loadPlayersData(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
-  const hasCached = (S.wl && S.wl.length > 0) || (S.bans && S.bans.length > 0) || (S.ops && S.ops.length > 0);
+  const hasCached = (S.players && S.players.length > 0) || (S.wl && S.wl.length > 0) || (S.bans && S.bans.length > 0) || (S.ops && S.ops.length > 0);
   if (!hasCached) {
     S.loading.players = true;
     if (!skipRender && S.view === 'pl') R();
   }
   try {
     const data = await api(srvApiPath(srv, '/players'));
-    S.wl = data.whitelist || [];
-    S.bans = data.bans || [];
-    S.ops = data.ops || [];
+    const rawOnline = Array.isArray(data?.online) ? data.online : [];
+    S.players = rawOnline.map(p => ({
+      ...p,
+      n: p?.name || p?.n || 'Player',
+      name: p?.name || p?.n || 'Player',
+      t: p?.playtime || p?.t || 'Online',
+      ip: p?.ip || '',
+      ping: p?.ping || '',
+      uuid: p?.uuid || '',
+      op: Boolean(p?.op)
+    }));
+    S.playersMax = Number(data?.max_players) || S.props?.max || 20;
+    S.playersOnlineCount = (data?.online_count !== undefined && data?.online_count !== null)
+      ? Number(data.online_count)
+      : S.players.length;
+    S.wl = data?.whitelist || [];
+    S.bans = data?.bans || [];
+    S.ops = data?.ops || [];
   } catch (e) {} finally {
     S.loading.players = false;
     if (!skipRender && S.view === 'pl') R();
@@ -8160,11 +8843,11 @@ function filterFileList(q) {
 
 function toggleFileCtx(e, idx) {
   if (e) e.stopPropagation();
-  const all = $$('.file-ctx-menu');
-  all.forEach((m, i) => {
-    if (i !== idx) m.style.display = 'none';
+  const targetId = `fctx-${idx}`;
+  $$('.file-ctx-menu').forEach(m => {
+    if (m.id !== targetId) m.style.display = 'none';
   });
-  const m = $(`#fctx-${idx}`);
+  const m = $(`#${targetId}`);
   if (m) {
     m.style.display = m.style.display === 'block' ? 'none' : 'block';
   }
@@ -8186,7 +8869,7 @@ function setPlugTab(tab) {
 }
 
 function toggleCustomJavaInput(val) {
-  const wrap = $('#stp-custom-wrap');
+  const wrap = $('#stp-custom-wrap') || $('#prop-custom-wrap');
   if (wrap) wrap.style.display = (val === 'custom') ? 'block' : 'none';
 }
 
@@ -8196,6 +8879,9 @@ function toggleCustomPropJava(val) {
 }
 
 async function saveStartupSettings() {
+  if (!$('#stp-java')) {
+    return saveProperties();
+  }
   const srv = curServer();
   if (!srv) return;
 
@@ -8777,14 +9463,15 @@ function renderFileBulkBarHtml() {
 function syncSelectAllCheckbox() {
   const chk = $('#chk-all-files');
   if (!chk) return;
-  if (!S.fileList || !S.fileList.length) {
+  const list = (Array.isArray(S.sortedFileList) && S.sortedFileList.length) ? S.sortedFileList : (S.fileList || []);
+  if (!list.length) {
     chk.checked = false;
     chk.indeterminate = false;
     return;
   }
-  const selectedCount = S.fileList.filter(i => S.selectedFiles.has(i.path || i.name)).length;
-  chk.checked = selectedCount === S.fileList.length;
-  chk.indeterminate = selectedCount > 0 && selectedCount < S.fileList.length;
+  const selectedCount = list.filter(i => S.selectedFiles.has(i.path || i.name)).length;
+  chk.checked = selectedCount === list.length;
+  chk.indeterminate = selectedCount > 0 && selectedCount < list.length;
 }
 
 function syncFileSelectionUI() {
@@ -8819,8 +9506,9 @@ function toggleFileSelect(path, checked) {
 }
 
 function toggleSelectAllFiles(checked) {
+  const list = (Array.isArray(S.sortedFileList) && S.sortedFileList.length) ? S.sortedFileList : (S.fileList || []);
   if (checked) {
-    S.fileList.forEach(item => {
+    list.forEach(item => {
       S.selectedFiles.add(item.path || item.name);
     });
   } else {
@@ -8901,7 +9589,8 @@ function handleFileContextMenu(e, idx) {
     e.preventDefault();
     e.stopPropagation();
   }
-  const item = S.fileList[idx];
+  const list = (Array.isArray(S.sortedFileList) && S.sortedFileList.length) ? S.sortedFileList : (S.fileList || []);
+  const item = list[idx];
   if (!item) return;
 
   const menu = $('#floating-ctx');
@@ -9116,10 +9805,13 @@ async function loadPluginsList(skipRender = false) {
 async function deletePlugin(name) {
   const srv = curServer();
   if (!srv || !name) return;
+  const isMod = isModdedEngine(srv.type || S.core);
+  const noun = isMod ? 'Mod' : 'Plugin';
+  const nounLow = isMod ? 'mod' : 'plugin';
   const ok = await uiConfirm({
-    title: 'Remove Plugin',
-    message: `Are you sure you want to delete <b>${esc(name)}</b> from <b>${esc(srv.name)}</b>? Restart the server afterward to unload the plugin.`,
-    confirmText: 'Remove Plugin',
+    title: `Remove ${noun}`,
+    message: `Are you sure you want to delete <b>${esc(name)}</b> from <b>${esc(srv.name)}</b>? Restart the server afterward to unload the ${nounLow}.`,
+    confirmText: `Remove ${noun}`,
     cancelText: 'Cancel',
     isDanger: true,
     icon: 'trash'
@@ -9128,7 +9820,7 @@ async function deletePlugin(name) {
 
   try {
     await api(srvApiPath(srv, `/plugins?filename=${encodeURIComponent(name)}`), { method: 'DELETE' });
-    toast(`Removed plugin ${name}`);
+    toast(`Removed ${nounLow} ${name}`);
     loadPluginsList();
   } catch (e) {}
 }
@@ -9147,8 +9839,9 @@ function searchModrinthDebounced() {
 function renderModrinthHitsHtml(hits) {
   const list = Array.isArray(hits) ? hits : [];
   const storeVm = getViewMode('plug_store', 'list');
+  const isMod = isModdedEngine(curServer()?.type || S.core);
   if (!list.length) {
-    return '<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">No matching plugins found on Modrinth.</div>';
+    return `<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">No matching ${isMod ? 'mods' : 'plugins'} found on Modrinth.</div>`;
   }
   return list.map(hit => {
     const titleLow = String(hit.title || '').toLowerCase();
@@ -9232,17 +9925,21 @@ function renderModrinthHitsHtml(hits) {
 }
 
 async function searchModrinth(skipDomWrite = false) {
+  const srv = curServer();
+  const isMod = isModdedEngine(srv?.type || S.core);
+  const engSlug = engineMeta(srv?.type || S.core).key;
   const grid = $('#store-grid');
   if (!skipDomWrite && grid) {
-    grid.innerHTML = loaderHtml('Searching Modrinth plugins...');
+    grid.innerHTML = loaderHtml(`Searching Modrinth ${isMod ? 'mods' : 'plugins'}...`);
   }
   const q = S.q || '';
-  const loader = S.plugLoader || '';
+  const loader = S.plugLoader || (isMod ? (engSlug === 'leaf' ? '' : engSlug) : '');
   const ver = S.plugVer || '';
   const sort = S.plugSort || 'relevance';
   try {
     const params = new URLSearchParams({
       query: q,
+      type: isMod ? 'mod' : 'plugin',
       loader,
       version: ver,
       sort,
@@ -9276,7 +9973,10 @@ async function installPlugin(projectSlug, title, btnEl) {
   if (!srv || !projectSlug) return;
   if (S.installingPlugins && S.installingPlugins.has(projectSlug)) return;
 
-  const targetFolder = String(S.core || '').toLowerCase() === 'fabric' ? 'mods/' : 'plugins/';
+  const isMod = isModdedEngine(srv.type || S.core);
+  const noun = isMod ? 'Mod' : 'Plugin';
+  const nounLow = isMod ? 'mod' : 'plugin';
+  const targetFolder = isMod ? 'mods/' : 'plugins/';
   let skipConfirm = false;
   try {
     skipConfirm = Boolean(S.skipPlugConfirm || localStorage.getItem('neopanel_skip_plug_confirm') === 'true');
@@ -9287,12 +9987,12 @@ async function installPlugin(projectSlug, title, btnEl) {
   if (!skipConfirm) {
     window.__plugSkipPending = false;
     const ok = await uiConfirm({
-      title: 'Install Plugin from Modrinth',
+      title: `Install ${noun} from Modrinth`,
       message: `
         <div>Download and install <b>${esc(title || projectSlug)}</b> into <code>${targetFolder}</code> on <b>${esc(srv.name)}</b>?</div>
         <label class="row" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); gap: 9px; cursor: pointer; font-size: 13px; color: var(--tx-muted);">
           <input type="checkbox" id="plug-skip-confirm-chk" onchange="window.__plugSkipPending=this.checked">
-          <span>Don't ask again &mdash; install future plugins immediately without confirmation</span>
+          <span>Don't ask again &mdash; install future ${nounLow}s immediately without confirmation</span>
         </label>
       `,
       confirmText: 'Download & Install',
@@ -9305,7 +10005,7 @@ async function installPlugin(projectSlug, title, btnEl) {
     if (!ok) return;
     if (wantSkip) {
       setPlugSkipConfirm(true);
-      toast('Plugin install confirmation disabled — installs are now instant');
+      toast(`${noun} install confirmation disabled — installs are now instant`);
     }
   }
 
@@ -9583,8 +10283,14 @@ function onMotdInput(val) {
   if (prev) prev.innerHTML = renderMinecraftTextHtml(val, { allowNewlines: true });
   const heroTitle = $('#srv-hero-title');
   if (heroTitle) {
-    const rawTitle = val || srv?.name || 'Minecraft Server';
-    heroTitle.innerHTML = renderMinecraftTextHtml(rawTitle, { allowNewlines: true });
+    const trimmed = String(val || '').trim();
+    if (!trimmed) {
+      heroTitle.style.display = 'none';
+      heroTitle.innerHTML = '';
+    } else {
+      heroTitle.style.display = 'block';
+      heroTitle.innerHTML = renderMinecraftTextHtml(trimmed, { allowNewlines: true });
+    }
   }
 }
 
@@ -9609,6 +10315,13 @@ async function loadProperties(skipRender = false) {
 async function saveProperties() {
   const srv = curServer();
   if (!srv) return;
+  const newName = ($('#set-srv-name')?.value ?? srv.name ?? '').trim() || srv.name || 'Minecraft Server';
+  const newDesc = ($('#set-srv-desc')?.value ?? srv.description ?? '').trim();
+  const newVer = ($('#prop-ver')?.value ?? srv.version ?? '1.21.4').trim() || srv.version || '1.21.4';
+  const newJar = ($('#prop-jar')?.value ?? srv.jar_file ?? 'server.jar').trim() || srv.jar_file || 'server.jar';
+  const newArgs = ($('#prop-args')?.value ?? srv.java_args ?? '-XX:+UseG1GC').trim() || srv.java_args || '-XX:+UseG1GC';
+  const autoRestartEl = $('#prop-autorestart');
+  const newAutoRestart = autoRestartEl ? Boolean(autoRestartEl.checked) : (srv.auto_restart !== false);
   const newPort = parseInt($('#prop-port')?.value) || srv.port || 25565;
   const newRam = parseInt($('#prop-ram')?.value) || getServerMaxRamMB(srv);
   let newJava = $('#prop-java')?.value;
@@ -9634,32 +10347,41 @@ async function saveProperties() {
       body: JSON.stringify(payload)
     });
 
-    // 2. Persist port, memory, and java runtime to SQLite DB and process runner
+    // 2. Persist identity, port, memory, java runtime & startup flags to SQLite DB and process runner
     await api(srvApiPath(srv, ''), {
       method: 'PUT',
       body: JSON.stringify({
-        name: srv.name,
-        description: srv.description,
+        name: newName,
+        description: newDesc,
         type: srv.type,
-        version: srv.version,
-        jar_file: srv.jar_file,
+        version: newVer,
+        jar_file: newJar,
         port: newPort,
         memory_min: Math.min(1024, newRam),
         memory_max: newRam,
         java_path: newJava || srv.java_path,
-        java_args: srv.java_args,
-        auto_restart: srv.auto_restart
+        java_args: newArgs,
+        auto_restart: newAutoRestart
       })
     });
 
+    srv.name = newName;
+    srv.description = newDesc;
+    srv.version = newVer;
+    srv.jar_file = newJar;
+    srv.java_args = newArgs;
+    srv.auto_restart = newAutoRestart;
     srv.port = newPort;
     srv.memory_max = newRam;
     srv.memory_min = Math.min(1024, newRam);
     srv.motd = S.props.motd;
+    S.ver = newVer;
+    S.editSrvName = newName;
+    S.editSrvDesc = newDesc;
     S.props._srvId = srv.id;
     if (newJava) srv.java_path = newJava;
 
-    toast('Server properties, RAM allocation & Java runtime saved! Restart server to apply.', 'ok');
+    toast('Server settings, identity & startup configuration saved!', 'ok');
     R();
   } catch (e) {
     toast(e.message || 'Failed to save server settings', 'bad');
@@ -9886,12 +10608,13 @@ function switchServer(index) {
 // --- Command Palette (Ctrl + K) ---
 function paletteItems() {
   const q = (S.pq || '').toLowerCase();
+  const isModSrv = isModdedEngine(curServer()?.type || S.core);
   const clientLabel = (getBrand('client_area_label') || 'Client Area').trim() || 'Client Area';
   const modCmds = Array.isArray(window.NP?._paletteCommands)
     ? window.NP._paletteCommands.map(c => [c.group || 'Extensions', c.label || 'Extension Action', c.subtitle || 'Mod command', () => c.action && c.action()])
     : [];
   const items = [
-    ...PG.map(p => ['Pages', p[1], 'Go to page', () => go(p[0])]),
+    ...PG.map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods & Store' : p[1], 'Go to page', () => go(p[0])]),
     ['Pages', clientLabel, 'External storefront & billing portal', () => go('client')],
     ['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')],
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
@@ -10163,13 +10886,14 @@ function openCreateServerModal() {
         <!-- Category: Game Server vs Network Proxy (All 11 Engines) -->
         <div style="margin-bottom:14px;">
           <span class="mu" style="display:block; margin-bottom:6px; font-size:13px; font-weight:600;">Engine / Flavor</span>
-          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap:8px;">
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap:8px;">
             ${CORES.map(([label, desc]) => {
               const slug = label.toLowerCase();
               return `
-              <button type="button" class="card engine-card sel ${slug === 'paper' ? 'on' : ''}" data-engine="${esc(slug)}" onclick="setCreateEngine('${esc(slug)}')" style="padding:9px 8px; text-align:center;">
-                <b>${esc(label)}</b>
-                <span class="mu" style="font-size:10.5px; display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(desc)}">${esc(desc)}</span>
+              <button type="button" class="card engine-card sel ${slug === 'paper' ? 'on' : ''}" data-engine="${esc(slug)}" onclick="setCreateEngine('${esc(slug)}')" style="padding:10px 8px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:5px; min-width:0;">
+                ${engineIcon(slug, 18, true)}
+                <b style="font-size:13px;">${esc(label)}</b>
+                <span class="mu" style="font-size:10.5px; display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(desc)}">${esc(desc)}</span>
               </button>`;
             }).join('')}
           </div>
@@ -10654,6 +11378,8 @@ function setReinstallVersion(ver) {
 }
 
 function onReinstallEngineChange(sw) {
+  const iconEl = $('#reinst-eng-icon');
+  if (iconEl) iconEl.innerHTML = engineIcon(sw, 18, true);
   const sel = $('#reinst-ver-sel');
   const inp = $('#reinst-version');
   const curV = inp?.value?.trim() || '1.21.4';
@@ -10705,7 +11431,10 @@ function openReinstallModal(srvId, nodeId = null) {
 
       <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
         <label class="f" style="margin-bottom:12px;">
-          <span>Minecraft Engine / Server Software</span>
+          <span style="display:flex; align-items:center; gap:8px;">
+            <span id="reinst-eng-icon">${engineIcon(curType, 18, true)}</span>
+            <span>Minecraft Engine / Server Software</span>
+          </span>
           <select id="reinst-software" style="height:38px;" onchange="onReinstallEngineChange(this.value)">
             <option value="paper" ${curType === 'paper' ? 'selected' : ''}>Paper (High performance, Bukkit/Spigot plugins)</option>
             <option value="purpur" ${curType === 'purpur' ? 'selected' : ''}>Purpur (Ultra-configurable Paper fork)</option>
@@ -12394,7 +13123,7 @@ async function checkAuth() {
     if (!['notfound', 'maintenance'].includes(S.view)) {
       await loadInitialRouteData(S.view);
     }
-    if (!['plug', 'stp', 'ver', 'notfound', 'maintenance'].includes(S.view)) {
+    if (!['plug', 'set', 'ver', 'notfound', 'maintenance'].includes(S.view)) {
       loadVersionsCatalog();
     }
 
@@ -12834,6 +13563,26 @@ window.setReinstallVersion = setReinstallVersion;
 window.syncReinstallSelectFromInput = syncReinstallSelectFromInput;
 window.refreshOpenVersionSelects = refreshOpenVersionSelects;
 window.renderModrinthHitsHtml = renderModrinthHitsHtml;
+window.isModdedEngine = isModdedEngine;
+window.engineMeta = engineMeta;
+window.engineIcon = engineIcon;
+window.onPlayerHeadError = onPlayerHeadError;
+window.getSftpDetails = getSftpDetails;
+window.launchSftpClient = launchSftpClient;
+window.downloadFileZillaProfile = downloadFileZillaProfile;
+window.renderSftpCardHtml = renderSftpCardHtml;
+window.getFileExtension = getFileExtension;
+window.sortFileItems = sortFileItems;
+window.setFileSort = setFileSort;
+window.computeSubdomainDraft = computeSubdomainDraft;
+window.getSubdomainPreviewFqdn = getSubdomainPreviewFqdn;
+window.onSubdomainFieldChange = onSubdomainFieldChange;
+window.loadSubdomainData = loadSubdomainData;
+window.saveSubdomainConfig = saveSubdomainConfig;
+window.verifySubdomainDNS = verifySubdomainDNS;
+window.syncPlayersList = syncPlayersList;
+window.onServerIdentityInput = onServerIdentityInput;
+window.updateSettingsCmdPreview = updateSettingsCmdPreview;
 
 // --- Custom Glassmorphic Selects System (Portaled to document.body to prevent clipping) ---
 function closeAllCustomSelects() {
