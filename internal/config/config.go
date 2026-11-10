@@ -24,7 +24,7 @@ type ServerConfig struct {
 	Host              string `yaml:"host"`
 	Port              int    `yaml:"port"`
 	Mode              string `yaml:"mode"` // "standalone" or "behind_proxy"
-	Role              string `yaml:"role"` // "panel" (full web UI + API) or "node" (headless agent API only)
+	Role              string `yaml:"role"` // "panel" (Master Panel + Daemon) or "node" (Cluster Node Daemon)
 	StartupTimeoutSec int    `yaml:"startup_timeout_seconds"`
 }
 
@@ -49,7 +49,7 @@ type TurnstileConfig struct {
 type SecurityConfig struct {
 	JWTSecret       string          `yaml:"jwt_secret"`
 	TokenExpiration int             `yaml:"token_expiration_hours"` // in hours (default 72)
-	NodeToken       string          `yaml:"node_token"`             // headless daemon API token (neo_node_...)
+	NodeToken       string          `yaml:"node_token"`             // cluster node authentication token (neo_node_...)
 	Turnstile       TurnstileConfig `yaml:"turnstile"`
 }
 

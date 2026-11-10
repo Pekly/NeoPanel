@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/Pekly/NeoPanel/internal/config"
@@ -137,7 +137,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/servers/{id}/players", r.requireAuth(r.players.GetPlayers))
 	r.mux.HandleFunc("POST /api/servers/{id}/players/action", r.requireAuth(r.players.Action))
 
-	// Software and Properties routes
+	// Software, Minecraft Versions & Properties routes
+	r.mux.HandleFunc("GET /api/versions", r.requireAuth(HandleGetMinecraftVersions))
 	r.mux.HandleFunc("POST /api/servers/{id}/software", r.requireAuth(r.software.ChangeSoftware))
 	r.mux.HandleFunc("POST /api/servers/{id}/reinstall", r.requireAuth(r.software.ReinstallServer))
 	r.mux.HandleFunc("GET /api/servers/{id}/properties", r.requireAuth(r.software.GetProperties))
@@ -217,16 +218,34 @@ func (r *Router) registerRoutes(db *database.DB) {
 	}
 	r.mux.HandleFunc("GET /api/nodes/{id}/ws/{serverId}", r.nodes.ProxyWS)
 
-	// Embedded Static & SPA routes (disabled in headless node builds or role: node)
+	// Embedded Static & Multi-Page Panel routes (active in panel mode; omitted in node daemons)
 	if r.embeddedStatic != nil && !(r.cfg != nil && r.cfg.IsNode()) {
 		fileServer := http.FileServer(http.FS(r.embeddedStatic))
+		assetExts := map[string]bool{
+			".css": true, ".js": true, ".map": true, ".svg": true,
+			".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+			".webp": true, ".ico": true, ".woff": true, ".woff2": true,
+			".ttf": true, ".json": true, ".txt": true, ".xml": true,
+		}
 		r.mux.HandleFunc("GET /", func(w http.ResponseWriter, req *http.Request) {
-			path := req.URL.Path
-			// If request is not an API call and doesn't have an extension, serve index.html (SPA routing)
-			if !strings.HasPrefix(path, "/api/") {
-				if path == "/" || !strings.Contains(filepath.Base(path), ".") {
-					req.URL.Path = "/"
-				}
+			reqPath := req.URL.Path
+			if strings.HasPrefix(reqPath, "/api/") {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "API endpoint not found"})
+				return
+			}
+			clean := strings.TrimPrefix(path.Clean("/"+reqPath), "/")
+			if clean == "" || clean == "." {
+				req.URL.Path = "/"
+				fileServer.ServeHTTP(w, req)
+				return
+			}
+			if info, err := fs.Stat(r.embeddedStatic, clean); err == nil && !info.IsDir() {
+				fileServer.ServeHTTP(w, req)
+				return
+			}
+			ext := strings.ToLower(path.Ext(clean))
+			if !assetExts[ext] {
+				req.URL.Path = "/"
 			}
 			fileServer.ServeHTTP(w, req)
 		})
@@ -240,7 +259,6 @@ func (r *Router) registerRoutes(db *database.DB) {
 				"service": "neopanel",
 				"role":    "node",
 				"status":  "online",
-				"web_ui":  false,
 				"version": "1.0.0",
 			})
 		})

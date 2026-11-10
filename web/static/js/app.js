@@ -43,40 +43,44 @@ function ic(name, size = 18) {
     folderUp: `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 10 12 16"/><polyline points="9 13 12 10 15 13"/>`,
     package: `<line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>`,
     fileText: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>`,
-    image: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>`
+    image: `<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>`,
+    viewList: `<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>`,
+    viewIcons: `<rect x="3" y="3" width="7" height="7" rx="1.2"/><rect x="14" y="3" width="7" height="7" rx="1.2"/><rect x="3" y="14" width="7" height="7" rx="1.2"/><rect x="14" y="14" width="7" height="7" rx="1.2"/>`,
+    viewTiles: `<rect x="3" y="4" width="18" height="6.5" rx="1.2"/><rect x="3" y="13.5" width="8" height="6.5" rx="1.2"/><rect x="13" y="13.5" width="8" height="6.5" rx="1.2"/>`
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic" aria-hidden="true">${p[name] || p.terminal}</svg>`;
 }
 
-function fileListIconHtml(item) {
-  if (!item) return `<span class="fi-badge">${ic('file', 15)}</span>`;
+function fileListIconHtml(item, extraCls = '', iconSize = 15) {
+  const cls = extraCls ? ` ${extraCls}` : '';
+  if (!item) return `<span class="fi-badge${cls}">${ic('file', iconSize)}</span>`;
   if (item.is_dir) {
-    return `<span class="fi-badge dir" title="Folder">${ic('folder', 15)}</span>`;
+    return `<span class="fi-badge dir${cls}" title="Folder">${ic('folder', iconSize)}</span>`;
   }
   const name = String(item.name || '').toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop() : '';
   if (ext === 'jar') {
-    return `<span class="fi-badge jar" title="Java Archive (.jar)">${ic('package', 15)}</span>`;
+    return `<span class="fi-badge jar${cls}" title="Java Archive (.jar)">${ic('package', iconSize)}</span>`;
   }
   if (['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz'].includes(ext)) {
-    return `<span class="fi-badge arc" title="Compressed Archive">${ic('archive', 15)}</span>`;
+    return `<span class="fi-badge arc${cls}" title="Compressed Archive">${ic('archive', iconSize)}</span>`;
   }
   if (['yml', 'yaml', 'json', 'toml', 'properties', 'conf', 'cfg', 'ini', 'xml'].includes(ext)) {
-    return `<span class="fi-badge cfg" title="Configuration File">${ic('code', 15)}</span>`;
+    return `<span class="fi-badge cfg${cls}" title="Configuration File">${ic('code', iconSize)}</span>`;
   }
   if (['sh', 'bat', 'cmd', 'ps1', 'js', 'ts', 'py', 'go'].includes(ext)) {
-    return `<span class="fi-badge scr" title="Script File">${ic('terminal', 15)}</span>`;
+    return `<span class="fi-badge scr${cls}" title="Script File">${ic('terminal', iconSize)}</span>`;
   }
   if (['log', 'txt', 'md'].includes(ext)) {
-    return `<span class="fi-badge doc" title="Text / Log File">${ic('fileText', 15)}</span>`;
+    return `<span class="fi-badge doc${cls}" title="Text / Log File">${ic('fileText', iconSize)}</span>`;
   }
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(ext)) {
-    return `<span class="fi-badge img" title="Image File">${ic('image', 15)}</span>`;
+    return `<span class="fi-badge img${cls}" title="Image File">${ic('image', iconSize)}</span>`;
   }
   if (['db', 'sqlite', 'sqlite3', 'sql'].includes(ext)) {
-    return `<span class="fi-badge db" title="Database File">${ic('database', 15)}</span>`;
+    return `<span class="fi-badge db${cls}" title="Database File">${ic('database', iconSize)}</span>`;
   }
-  return `<span class="fi-badge" title="File">${ic('file', 15)}</span>`;
+  return `<span class="fi-badge${cls}" title="File">${ic('file', iconSize)}</span>`;
 }
 
 // --- Selectors & Shortcuts ---
@@ -228,6 +232,12 @@ window.S = {
     activity: false,
     databases: false
   },
+  versionsCatalog: (() => {
+    try { return JSON.parse(sessionStorage.getItem('neopanel_versions_catalog') || 'null'); } catch (e) { return null; }
+  })(),
+  viewModes: {},
+  lastModrinthHits: null,
+  navigating: false,
   flyConOpen: false,
   flyConTall: false,
   nodePairOpen: false,
@@ -402,6 +412,282 @@ function toast(msg, type = 'info') {
   t.classList.add('s');
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.remove('s'), 2600);
+}
+
+// --- Top Progress Bar & View Mode Switcher ---
+let _progressTimer = null;
+function startPageProgress(initialPct = 24) {
+  const bar = $('#np-top-progress');
+  if (!bar) return;
+  clearTimeout(_progressTimer);
+  bar.classList.remove('done');
+  bar.classList.add('active');
+  bar.style.width = `${Math.max(10, Math.min(90, initialPct))}%`;
+}
+
+function setPageProgress(pct) {
+  const bar = $('#np-top-progress');
+  if (!bar) return;
+  bar.classList.remove('done');
+  bar.classList.add('active');
+  bar.style.width = `${Math.max(12, Math.min(94, pct))}%`;
+}
+
+function finishPageProgress() {
+  const bar = $('#np-top-progress');
+  if (!bar) return;
+  clearTimeout(_progressTimer);
+  bar.classList.add('active');
+  bar.classList.add('done');
+  bar.style.width = '100%';
+  _progressTimer = setTimeout(() => {
+    bar.classList.remove('active', 'done');
+    bar.style.width = '0';
+  }, 280);
+}
+
+function getViewMode(scope, fallback = 'list') {
+  if (!S.viewModes) S.viewModes = {};
+  if (S.viewModes[scope]) return S.viewModes[scope];
+  try {
+    const saved = localStorage.getItem(`neopanel_vm_${scope}`);
+    if (saved === 'list' || saved === 'icons' || saved === 'tiles') {
+      S.viewModes[scope] = saved;
+      return saved;
+    }
+  } catch (e) {}
+  return fallback;
+}
+
+function setViewMode(scope, mode) {
+  if (!['list', 'icons', 'tiles'].includes(mode)) return;
+  if (!S.viewModes) S.viewModes = {};
+  S.viewModes[scope] = mode;
+  try { localStorage.setItem(`neopanel_vm_${scope}`, mode); } catch (e) {}
+  R();
+  if (scope === 'plug_store' && S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
+    const grid = $('#store-grid');
+    if (grid) {
+      if (Array.isArray(S.lastModrinthHits)) {
+        grid.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
+      } else {
+        searchModrinth();
+      }
+    }
+  }
+}
+
+function renderViewModeToggle(scope, fallback = 'list') {
+  const cur = getViewMode(scope, fallback);
+  const opts = [
+    ['list', 'viewList', 'List'],
+    ['icons', 'viewIcons', 'Icons'],
+    ['tiles', 'viewTiles', 'Tiles']
+  ];
+  return `<div class="vm-toggle" role="group" aria-label="View layout">
+    ${opts.map(([m, icon, lbl]) => `
+      <button type="button" class="vm-btn ${cur === m ? 'on' : ''}" onclick="setViewMode('${esc(scope)}', '${m}')" title="${lbl} view" aria-pressed="${cur === m}">
+        ${ic(icon, 13)}
+        <span>${lbl}</span>
+      </button>
+    `).join('')}
+  </div>`;
+}
+
+// --- Clean Multi-Page Routing Helpers ---
+const VIEW_TO_SLUG = {
+  dash: '',
+  con: 'console',
+  set: 'settings',
+  act: 'activity',
+  fi: 'files',
+  db: 'databases',
+  bk: 'backups',
+  sc: 'schedules',
+  net: 'network',
+  sub: 'subdomain',
+  stp: 'startup',
+  pl: 'players',
+  plug: 'plugins',
+  ver: 'versions',
+  admin: 'admin',
+  acc: 'account',
+  bill: 'billing'
+};
+
+const SLUG_TO_VIEW = Object.fromEntries(
+  Object.entries(VIEW_TO_SLUG).filter(([, slug]) => slug).map(([k, slug]) => [slug, k])
+);
+SLUG_TO_VIEW.store = 'plug';
+SLUG_TO_VIEW.servers = 'dash';
+
+const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit'];
+const ACC_TAB_SLUGS = ['general', 'security', 'ssh', 'api', 'activity'];
+
+function saveActiveServerRef(srv) {
+  if (!srv || !srv.id) return;
+  try {
+    localStorage.setItem('neopanel_active_srv', JSON.stringify({
+      id: srv.id,
+      nodeId: srv.node_id || 'local'
+    }));
+  } catch (e) {}
+}
+
+function getSavedActiveServerRef() {
+  try {
+    return JSON.parse(localStorage.getItem('neopanel_active_srv') || 'null');
+  } catch (e) {
+    return null;
+  }
+}
+
+function serverRouteUrl(nodeId, srvId, view = 'con', opts = {}) {
+  const nid = nodeId || 'local';
+  const target = normalizeRoute(view);
+  if (target === 'plug') {
+    const tab = opts.plugTab || S.plugTab || 'browse';
+    return `/server/${encodeURIComponent(nid)}/${encodeURIComponent(srvId)}/plugins/${tab === 'installed' ? 'installed' : 'store'}`;
+  }
+  const slug = VIEW_TO_SLUG[target] || 'console';
+  return `/server/${encodeURIComponent(nid)}/${encodeURIComponent(srvId)}/${slug}`;
+}
+
+function routeUrl(view, opts = {}) {
+  const target = normalizeRoute(view);
+  if (target === 'dash') return '/';
+  if (target === 'bill') return '/billing';
+  if (target === 'admin') {
+    const t = opts.adminTab !== undefined ? opts.adminTab : (S.adminTab || 0);
+    const slug = ADMIN_TAB_SLUGS[t] || 'health';
+    return t === 0 ? '/admin' : `/admin/${slug}`;
+  }
+  if (target === 'acc') {
+    const t = opts.acctTab !== undefined ? opts.acctTab : (S.acct?.tab || 0);
+    const slug = ACC_TAB_SLUGS[t] || 'general';
+    return t === 0 ? '/account' : `/account/${slug}`;
+  }
+  if (target === 'act' && (opts.global || (!opts.srv && !window.location.pathname.startsWith('/server/') && S.view === 'dash'))) {
+    return '/activity';
+  }
+  const srv = opts.srv || curServer();
+  if (!srv || !srv.id) {
+    return target === 'act' ? '/activity' : '/';
+  }
+  return serverRouteUrl(srv.node_id || 'local', srv.id, target, opts);
+}
+
+function parseCurrentRoute(pathname = window.location.pathname, hashStr = window.location.hash) {
+  const cleanPath = String(pathname || '/').replace(/\/+$/, '') || '/';
+  const rawHash = String(hashStr || '').replace(/^#/, '').trim();
+
+  if (cleanPath === '/' || cleanPath === '/index.html') {
+    if (rawHash) {
+      const hView = normalizeRoute(rawHash);
+      if (hView && (V[hView] || ['admin', 'acc', 'dash', 'act', 'bill'].includes(hView))) {
+        return { view: hView, plugTab: rawHash === 'store' ? 'browse' : undefined, legacyHash: true };
+      }
+    }
+    return { view: 'dash' };
+  }
+  if (cleanPath === '/servers') return { view: 'dash' };
+  if (cleanPath === '/activity') return { view: 'act', global: true };
+  if (cleanPath === '/billing') return { view: 'bill' };
+
+  if (cleanPath === '/admin' || cleanPath.startsWith('/admin/')) {
+    const sub = cleanPath.split('/')[2] || 'health';
+    const idx = ADMIN_TAB_SLUGS.indexOf(sub);
+    return { view: 'admin', adminTab: idx >= 0 ? idx : 0 };
+  }
+  if (cleanPath === '/account' || cleanPath.startsWith('/account/')) {
+    const sub = cleanPath.split('/')[2] || 'general';
+    const idx = ACC_TAB_SLUGS.indexOf(sub);
+    return { view: 'acc', acctTab: idx >= 0 ? idx : 0 };
+  }
+  if (cleanPath.startsWith('/server/')) {
+    const parts = cleanPath.split('/').filter(Boolean);
+    const nodeId = decodeURIComponent(parts[1] || 'local');
+    const serverId = decodeURIComponent(parts[2] || '');
+    const slug = (parts[3] || 'console').toLowerCase();
+    const extra = (parts[4] || '').toLowerCase();
+    if (slug === 'plugins') {
+      return {
+        view: 'plug',
+        nodeId,
+        serverId,
+        plugTab: extra === 'installed' ? 'installed' : 'browse'
+      };
+    }
+    const mappedView = SLUG_TO_VIEW[slug] || 'con';
+    return { view: mappedView, nodeId, serverId };
+  }
+  return { view: 'dash' };
+}
+
+function getViewDisplayLabel(view) {
+  const map = {
+    dash: 'Servers Overview',
+    con: 'Server Console',
+    set: 'Server Settings',
+    act: 'Activity Log',
+    fi: 'File Manager',
+    db: 'Databases',
+    bk: 'Backups',
+    sc: 'Schedules',
+    net: 'Network Allocations',
+    sub: 'Subdomains',
+    stp: 'Startup Settings',
+    pl: 'Players',
+    plug: 'Plugins & Store',
+    ver: 'Software & Versions',
+    admin: 'Admin Area',
+    acc: 'Account Settings',
+    bill: 'Billing & Resources'
+  };
+  return map[view] || 'NeoPanel';
+}
+
+function navigateToUrl(url, label = 'Page') {
+  if (!url) return;
+  closeAllCtx();
+  closeFloatingCtx();
+  closeAllCustomSelects();
+  S.cmenu = false;
+  S.navigating = true;
+  startPageProgress(32);
+  const main = $('#main');
+  if (main) {
+    main.innerHTML = `<div class="np-page-loader" role="status" aria-live="polite">
+      <div class="np-spinner"></div>
+      <span>Loading ${esc(label)}...</span>
+    </div>`;
+  }
+  window.location.assign(url);
+}
+
+function handleNavClick(e, view, opts = {}) {
+  if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0)) {
+    return true;
+  }
+  if (e) e.preventDefault();
+  const target = normalizeRoute(view);
+  if (opts.srv) saveActiveServerRef(opts.srv);
+  else if (curServer()) saveActiveServerRef(curServer());
+  if (target === 'plug' && view === 'store') opts.plugTab = 'browse';
+  navigateToUrl(routeUrl(target, opts), getViewDisplayLabel(target));
+  return false;
+}
+
+function handleServerCardClick(e, index, targetView = 'con') {
+  if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0)) {
+    return true;
+  }
+  if (e) e.preventDefault();
+  const srv = S.servers[index];
+  if (!srv) return false;
+  saveActiveServerRef(srv);
+  navigateToUrl(serverRouteUrl(srv.node_id || 'local', srv.id, targetView), srv.name || 'Server Console');
+  return false;
 }
 
 // --- Custom Modal Dialog System (Replacing browser default alert, confirm, prompt) ---
@@ -996,11 +1282,11 @@ function copyDbText(val, label = 'Value') {
   }
 }
 
-async function loadDatabases(silent = false) {
+async function loadDatabases(silent = false, skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
-  if (!silent) {
+  if (!silent && !skipRender) {
     S.loading.databases = true;
     if (S.view === 'db') R();
   }
@@ -1012,7 +1298,7 @@ async function loadDatabases(silent = false) {
     S.databases = [];
   } finally {
     S.loading.databases = false;
-    if (S.view === 'db') R();
+    if (!skipRender && S.view === 'db') R();
   }
 }
 
@@ -2301,9 +2587,12 @@ const CMDS = [
 const CORES = [
   ['Paper', 'High performance, plugin friendly'],
   ['Purpur', 'Paper fork with extreme configurability'],
+  ['Leaf', 'Hyper-optimized Paper fork for large SMPs'],
+  ['Folia', 'Multi-threaded regionised Paper fork'],
   ['Fabric', 'Lightweight modular mod loader'],
+  ['Forge', 'Classic modding platform (legacy & modern)'],
+  ['NeoForge', 'Modern community forge modding engine'],
   ['Vanilla', 'Standard Mojang vanilla server'],
-  ['NeoForge', 'Modern forge modding engine'],
   ['Velocity', 'Modern high-throughput proxy'],
   ['Waterfall', 'PaperMC BungeeCord proxy fork'],
   ['BungeeCord', 'Classic multi-server proxy']
@@ -2312,17 +2601,153 @@ const CORES = [
 const FAM = [
   ['26.3', 'Wilderness Bound', '2026', ['26.3']],
   ['26.2', 'Chaos Cubed', '2026', ['26.2']],
-  ['26.1', 'Tiny Takeover', '2026', ['26.1', '26.1.1', '26.1.2']],
-  ['1.21', 'Tricky Trials & drops', '2024 to 2025', ['1.21', '1.21.1', '1.21.2', '1.21.3', '1.21.4']],
-  ['1.20', 'Trails and Tales', '2023', ['1.20', '1.20.1', '1.20.2', '1.20.4', '1.20.6']],
-  ['1.19', 'The Wild Update', '2022', ['1.19', '1.19.2', '1.19.4']],
-  ['1.18', 'Caves and Cliffs, part 2', '2021', ['1.18', '1.18.1', '1.18.2']],
-  ['1.17', 'Caves and Cliffs, part 1', '2021', ['1.17', '1.17.1']],
-  ['1.16', 'Nether Update', '2020', ['1.16.5', '1.16.4', '1.16.1']],
-  ['1.12', 'World of Color', '2017', ['1.12.2', '1.12.1']]
+  ['26.1', 'Tiny Takeover', '2026', ['26.1.2', '26.1.1', '26.1']],
+  ['1.21', 'Tricky Trials & Drops', '2024–2025', ['1.21.11', '1.21.10', '1.21.9', '1.21.8', '1.21.7', '1.21.6', '1.21.5', '1.21.4', '1.21.3', '1.21.2', '1.21.1', '1.21']],
+  ['1.20', 'Trails & Tales', '2023–2024', ['1.20.6', '1.20.5', '1.20.4', '1.20.3', '1.20.2', '1.20.1', '1.20']],
+  ['1.19', 'The Wild Update', '2022–2023', ['1.19.4', '1.19.3', '1.19.2', '1.19.1', '1.19']],
+  ['1.18', 'Caves & Cliffs: Part II', '2021–2022', ['1.18.2', '1.18.1', '1.18']],
+  ['1.17', 'Caves & Cliffs: Part I', '2021', ['1.17.1', '1.17']],
+  ['1.16', 'Nether Update', '2020–2021', ['1.16.5', '1.16.4', '1.16.3', '1.16.2', '1.16.1', '1.16']],
+  ['1.15', 'Buzzy Bees', '2019–2020', ['1.15.2', '1.15.1', '1.15']],
+  ['1.14', 'Village & Pillage', '2019', ['1.14.4', '1.14.3', '1.14.2', '1.14.1', '1.14']],
+  ['1.13', 'Update Aquatic', '2018', ['1.13.2', '1.13.1', '1.13']],
+  ['1.12', 'World of Color', '2017', ['1.12.2', '1.12.1', '1.12']],
+  ['1.11', 'Exploration Update', '2016–2017', ['1.11.2', '1.11.1', '1.11']],
+  ['1.10', 'Frostburn Update', '2016', ['1.10.2', '1.10.1', '1.10']],
+  ['1.9', 'Combat Update', '2016', ['1.9.4', '1.9.3', '1.9.2', '1.9.1', '1.9']],
+  ['1.8', 'Bountiful Update', '2014–2015', ['1.8.9', '1.8.8', '1.8.7', '1.8.6', '1.8.5', '1.8.4', '1.8.3', '1.8.2', '1.8.1', '1.8']],
+  ['1.7', 'Update that Changed the World', '2013–2014', ['1.7.10', '1.7.9', '1.7.8', '1.7.7', '1.7.6', '1.7.5', '1.7.4', '1.7.2']],
+  ['1.0', 'Early Releases (1.0 – 1.6)', '2011–2013', ['1.6.4', '1.6.2', '1.6.1', '1.5.2', '1.5.1', '1.5', '1.4.7', '1.4.6', '1.4.5', '1.4.4', '1.4.2', '1.3.2', '1.3.1', '1.2.5', '1.2.4', '1.2.3', '1.2.2', '1.2.1', '1.1', '1.0']]
 ];
 
 const ALL_VERS = FAM.flatMap(f => f[3].map(v => ({ v, f: f[0], n: f[1], y: f[2] })));
+const FALLBACK_ALL_MC = ALL_VERS.map(item => item.v);
+const FAM_META_MAP = Object.fromEntries(FAM.map(f => [f[0], { n: f[1], y: f[2] }]));
+
+function compareMcVersionsDesc(a, b) {
+  const sa = String(a || '').trim();
+  const sb = String(b || '').trim();
+  if (sa === sb) return 0;
+  if (sa.toLowerCase() === 'latest') return -1;
+  if (sb.toLowerCase() === 'latest') return 1;
+  const parse = s => {
+    const core = s.split(/[-+]/)[0];
+    return core.split('.').map(x => parseInt(x, 10) || 0);
+  };
+  const pa = parse(sa);
+  const pb = parse(sb);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da !== db) return db - da;
+  }
+  return sb.localeCompare(sa);
+}
+
+function getFamilyMetaForVersion(v) {
+  const str = String(v || '').trim();
+  const parts = str.split(/[-+]/)[0].split('.');
+  const famKey = parts.length >= 2 && Number(parts[0]) === 1
+    ? (Number(parts[1]) <= 6 ? '1.0' : `1.${parts[1]}`)
+    : (parts.length >= 2 && Number(parts[0]) >= 26 ? `${parts[0]}.${parts[1]}` : parts[0]);
+  const meta = FAM_META_MAP[famKey];
+  if (meta) return { f: famKey, n: meta.n, y: meta.y };
+  return { f: famKey || 'Other', n: Number(parts[0]) >= 26 ? 'Modern Release' : 'Minecraft Release', y: Number(parts[0]) >= 26 ? '2026+' : 'Release' };
+}
+
+function getAllMcVersions(engine = '') {
+  const eng = String(engine || '').toLowerCase().trim();
+  const cat = S.versionsCatalog;
+  if (eng === 'velocity') {
+    const base = ['3.4.0-SNAPSHOT', '3.3.0-SNAPSHOT', '3.2.0-SNAPSHOT', '3.1.1'];
+    const live = Array.isArray(cat?.by_engine?.velocity) ? cat.by_engine.velocity : [];
+    return Array.from(new Set([...live, ...base]));
+  }
+  if (eng === 'waterfall') {
+    const base = ['1.20', '1.19', '1.18', '1.17', '1.16', '1.15', '1.14', '1.13', '1.12'];
+    const live = Array.isArray(cat?.by_engine?.waterfall) ? cat.by_engine.waterfall : [];
+    return Array.from(new Set([...live, ...base])).sort(compareMcVersionsDesc);
+  }
+  const merged = new Set(FALLBACK_ALL_MC);
+  if (Array.isArray(cat?.all_mc)) {
+    for (const v of cat.all_mc) if (v) merged.add(String(v));
+  }
+  if (eng && Array.isArray(cat?.by_engine?.[eng])) {
+    for (const v of cat.by_engine[eng]) if (v) merged.add(String(v));
+  }
+  const sorted = Array.from(merged).sort(compareMcVersionsDesc);
+  if (eng === 'bungeecord') {
+    return ['latest', ...sorted.filter(v => v !== 'latest')];
+  }
+  return sorted;
+}
+
+function getMergedVersionItems(engine = '') {
+  return getAllMcVersions(engine).map(v => {
+    const m = getFamilyMetaForVersion(v);
+    return { v, f: m.f, n: m.n, y: m.y };
+  });
+}
+
+function refreshOpenVersionSelects() {
+  const engineCS = $('#cs-type')?.value || 'paper';
+  const csSel = $('#cs-ver-sel');
+  if (csSel) {
+    const curVal = $('#cs-ver')?.value?.trim() || csSel.value || '1.21.4';
+    const vers = getAllMcVersions(engineCS);
+    const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
+    csSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    if (typeof csSel._cselectRebuild === 'function') csSel._cselectRebuild();
+  }
+  const reinstSel = $('#reinst-ver-sel');
+  if (reinstSel) {
+    const engR = $('#reinst-software')?.value || 'paper';
+    const curVal = $('#reinst-version')?.value?.trim() || reinstSel.value || '1.21.4';
+    const vers = getAllMcVersions(engR);
+    const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
+    reinstSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    if (typeof reinstSel._cselectRebuild === 'function') reinstSel._cselectRebuild();
+  }
+  const plugSel = $('#plug-ver-sel');
+  if (plugSel) {
+    const curVal = S.plugVer || '';
+    const vers = getAllMcVersions(S.plugLoader || '');
+    const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
+    plugSel.innerHTML = `<option value="" ${!curVal ? 'selected' : ''}>Version: Any</option>` + list.map(v => `<option value="${esc(v)}" ${curVal === v ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    if (typeof plugSel._cselectRebuild === 'function') plugSel._cselectRebuild();
+  }
+  const stpSel = $('#stp-ver-sel');
+  if (stpSel) {
+    const srv = curServer();
+    const curVal = $('#stp-ver')?.value?.trim() || srv?.version || '1.21.4';
+    const vers = getAllMcVersions(srv?.type || S.core || '');
+    const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
+    stpSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    if (typeof stpSel._cselectRebuild === 'function') stpSel._cselectRebuild();
+  }
+  if (S.view === 'ver' && $('#vres')) {
+    renderVersionRows();
+  }
+}
+
+async function loadVersionsCatalog(force = false) {
+  if (!S.token) return S.versionsCatalog;
+  if (!force && S.versionsCatalog && Array.isArray(S.versionsCatalog.all_mc) && S.versionsCatalog.all_mc.length > 0) {
+    return S.versionsCatalog;
+  }
+  try {
+    const res = await api('/api/versions');
+    if (res && (Array.isArray(res.all_mc) || res.by_engine)) {
+      S.versionsCatalog = res;
+      try { sessionStorage.setItem('neopanel_versions_catalog', JSON.stringify(res)); } catch (e) {}
+      refreshOpenVersionSelects();
+      return res;
+    }
+  } catch (e) {}
+  return S.versionsCatalog;
+}
+
 const CATS = ['All', 'Admin', 'Protection', 'Performance', 'Network', 'Building', 'Utility', 'API', 'Map'];
 
 const PREMADE_JAVA_VERSIONS = [
@@ -2441,7 +2866,7 @@ function refreshJavaUIStrips(nodeId = null) {
   }
 }
 
-async function loadJavaRuntimes(force = false, nodeId = null) {
+async function loadJavaRuntimes(force = false, nodeId = null, skipRender = false) {
   if (!S.token) return null;
   const nid = nodeId || curServer()?.node_id || 'local';
   if (!S.javaRuntimesMap) S.javaRuntimesMap = {};
@@ -2456,7 +2881,7 @@ async function loadJavaRuntimes(force = false, nodeId = null) {
       S.javaRuntimesMap[nid] = data;
       if (nid === 'local') S.javaRuntimes = data;
       refreshJavaUIStrips(nid);
-      if (S.view === 'admin' && (S.adminTab || 0) === 0) R();
+      if (!skipRender && S.view === 'admin' && (S.adminTab || 0) === 0) R();
     }
     return data;
   } catch (e) {
@@ -3012,11 +3437,11 @@ function renderActivityLogSection(opts = {}) {
   `;
 }
 
-async function loadActivityLog(limit = S.actFilter?.limit || 200) {
+async function loadActivityLog(limit = S.actFilter?.limit || 200, skipRender = false) {
   if (!S.token) return;
   if (!S.loading) S.loading = {};
   S.loading.activity = true;
-  if ($('#act-tbody') && (!S.acct.act || S.acct.act.length === 0)) {
+  if (!skipRender && $('#act-tbody') && (!S.acct.act || S.acct.act.length === 0)) {
     renderActivityRows();
   }
   try {
@@ -3024,13 +3449,15 @@ async function loadActivityLog(limit = S.actFilter?.limit || 200) {
     S.acct.act = Array.isArray(logs) ? logs : [];
   } catch (e) {} finally {
     S.loading.activity = false;
-    if ($('#act-tbody')) {
-      renderActivityRows();
-    } else if ($('#dash-recent-activity')) {
-      const box = $('#dash-recent-activity');
-      if (box) box.innerHTML = renderDashRecentActivityHtml();
-    } else if (S.view === 'act' || (S.view === 'admin' && S.adminTab === 5) || (S.view === 'acc' && S.acct.tab === 4)) {
-      R();
+    if (!skipRender) {
+      if ($('#act-tbody')) {
+        renderActivityRows();
+      } else if ($('#dash-recent-activity')) {
+        const box = $('#dash-recent-activity');
+        if (box) box.innerHTML = renderDashRecentActivityHtml();
+      } else if (S.view === 'act' || (S.view === 'admin' && S.adminTab === 5) || (S.view === 'acc' && S.acct.tab === 4)) {
+        R();
+      }
     }
   }
 }
@@ -3147,6 +3574,9 @@ const V = {
       ? indexedServers
       : indexedServers.filter(({ s }) => (s.node_id || 'local') === activeNodeFilter);
     const coverUrl = getBrand('card_cover_url');
+    const dashVm = getViewMode('dash', 'tiles');
+    const gridCls = dashVm === 'list' ? 'vm-dash-list' : (dashVm === 'icons' ? 'vm-dash-icons' : '');
+    const gridStyle = dashVm === 'tiles' ? 'display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;' : '';
 
     return `
     <div class="row sb" style="margin-bottom: 20px; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
@@ -3159,7 +3589,8 @@ const V = {
           <input type="text" id="srv-filter" placeholder="Filter by name or address" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
         </div>
-        ${S.user?.role === 'admin' ? `<button class="btn" onclick="S.adminTab=1; go('admin');" style="height: 36px; padding: 0 14px; font-size: 13px;">${ic('network', 14)} Nodes (${Math.max(1, nodesList.length)})</button>` : ''}
+        ${renderViewModeToggle('dash', 'tiles')}
+        ${S.user?.role === 'admin' ? `<a href="/admin/nodes" class="btn" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="height: 36px; padding: 0 14px; font-size: 13px; text-decoration: none;">${ic('network', 14)} Nodes (${Math.max(1, nodesList.length)})</a>` : ''}
         <button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
           ${ic('plus', 14)} Create server
         </button>
@@ -3187,13 +3618,13 @@ const V = {
     ${errEntries.length > 0 ? `
       <div class="node-error-note" style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
         <span><b>Cluster Sync Warning:</b> ${errEntries.map(([nid, msg]) => `${esc(getNodeById(nid)?.name || nid)} (${esc(msg)})`).join(' &bull; ')}</span>
-        ${S.user?.role === 'admin' ? `<button type="button" class="btn sm" onclick="S.adminTab=1; go('admin');">Inspect Nodes</button>` : ''}
+        ${S.user?.role === 'admin' ? `<a href="/admin/nodes" class="btn sm" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="text-decoration: none;">Inspect Nodes</a>` : ''}
       </div>
     ` : ''}
 
     <div class="dash-grid">
       <!-- Left Column: Server Cards Grid -->
-      <div id="srv-card-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
+      <div id="srv-card-grid" class="${gridCls}" style="${gridStyle}">
         ${S.loading?.dash && S.servers.length === 0 ? [1, 2, 3].map(() => `
           <div class="np-skeleton-card">
             <div class="np-skeleton" style="height: 120px; border-radius: 0;"></div>
@@ -3215,17 +3646,59 @@ const V = {
           const upSec = origIdx === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
           const host = `${srvHost(s)}:${s.port || 25565}`;
           const coreLabel = (s.type || 'paper').charAt(0).toUpperCase() + (s.type || 'paper').slice(1);
+          const srvUrl = serverRouteUrl(nid, s.id, 'con');
+
+          if (dashVm === 'list') {
+            return `
+            <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
+              <div class="vm-dash-row-main">
+                <div class="srv-row-thumb" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');"></div>
+                <div style="min-width: 0; flex: 1;">
+                  <div class="row" style="gap: 8px; flex-wrap: wrap;">
+                    <span class="srv-card-title">${esc(s.name || 'Minecraft Server')}</span>
+                    <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}">
+                      <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
+                      ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
+                    </span>
+                  </div>
+                  <div class="row" style="gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+                    <span class="srv-card-addr">${esc(host)}</span>
+                    <span class="chip" style="font-size: 11px;">${esc(coreLabel)} ${esc(s.version || '')}</span>
+                    ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
+                  </div>
+                </div>
+              </div>
+              <div class="vm-dash-row-meters">
+                <div class="srv-meter">
+                  <div class="srv-meter-head"><span>CPU</span><span data-role="cpu-val" class="srv-meter-val">${cVal.toFixed(1)}%</span></div>
+                  <div class="meter-bar"><i data-role="cpu-bar" style="width:${Math.min(100, cVal)}%"></i></div>
+                </div>
+                <div class="srv-meter">
+                  <div class="srv-meter-head"><span>RAM</span><span data-role="mem-val" class="srv-meter-val">${Math.round(mVal)} MB</span></div>
+                  <div class="meter-bar"><i data-role="mem-bar" style="width:${Math.min(100, (mVal / (maxRam || 1)) * 100)}%"></i></div>
+                </div>
+                <div class="srv-meter">
+                  <div class="srv-meter-head"><span>Disk</span><span data-role="disk-val" class="srv-meter-val">${formatDiskMB(dVal)}</span></div>
+                  <div class="meter-bar"><i data-role="disk-bar" style="width:${Math.min(100, (dVal / 20480) * 100)}%"></i></div>
+                </div>
+              </div>
+              <div class="vm-dash-row-actions">
+                <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
+                <span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>
+              </div>
+            </a>`;
+          }
 
           return `
-          <div id="dash-srv-${nid}-${s.id}" class="sift-server-card" onclick="switchServer(${origIdx}); go('con');" data-name="${esc(s.name)}" data-addr="${esc(host)}">
+          <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card ${dashVm === 'icons' ? 'vm-dash-icon' : ''}" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
             <div class="srv-card-banner" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
               <div class="srv-card-badges-left">
-                <span class="srv-card-badge">Minecraft - ${esc(coreLabel)}</span>
+                <span class="srv-card-badge">${dashVm === 'icons' ? esc(coreLabel) : `Minecraft - ${esc(coreLabel)}`}</span>
                 ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
               </div>
               <div class="srv-card-actions">
-                <span class="srv-card-action-btn" onclick="event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
-                <span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>
+                <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
+                <span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>
               </div>
             </div>
             <div class="srv-card-body">
@@ -3233,7 +3706,7 @@ const V = {
                 <span class="srv-card-title">${esc(s.name || 'Minecraft Server')}</span>
                 <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}">
                   <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
-                  ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
+                  ${isRun && dashVm !== 'icons' ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
                 </span>
               </div>
               <div class="srv-card-addr">${esc(host)}</div>
@@ -3261,11 +3734,11 @@ const V = {
                 </div>
               </div>
             </div>
-          </div>`;
+          </a>`;
         }).join('')}
 
         <!-- Dashed Create Server Card -->
-        <div class="create-server-dashed-card" onclick="openCreateServerModal()">
+        <div class="create-server-dashed-card ${dashVm === 'list' ? 'compact' : ''}" onclick="openCreateServerModal()">
           <div class="create-icon-bubble">
             ${ic('plus', 18)}
           </div>
@@ -3279,7 +3752,7 @@ const V = {
         <div class="card" style="padding: 18px;">
           <div class="row sb" style="margin-bottom: 14px;">
             <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin: 0;">Recent activity</h2>
-            <a href="#act" onclick="go('act')" class="mu" style="font-size: 12px; text-decoration: none;">View all</a>
+            <a href="/activity" onclick="return handleNavClick(event, 'act', { global: true })" class="mu" style="font-size: 12px; text-decoration: none;">View all</a>
           </div>
           <div id="dash-recent-activity">
             ${renderDashRecentActivityHtml()}
@@ -3344,74 +3817,154 @@ const V = {
 
   pl() {
     const t = S.ptab;
+    const vm = getViewMode('pl', 'list');
     let body = '';
 
     if (t === 'online') {
-      body = `<table>
-        <thead><tr><th>Player</th><th>Ping</th><th>Playtime</th><th>IP</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>
-          ${S.loading?.players ? `<tr><td colspan="5">${loaderHtml('Loading player lists...')}</td></tr>` : S.players.length ? S.players.map((p, i) => `
-            <tr>
-              <td>${head(p.n)}<b>${esc(p.n)}</b> ${p.op ? '<span class="badge" style="margin-left:6px;">Operator</span>' : ''}</td>
-              <td class="mono">${p.ping || 32} ms</td>
-              <td>${p.t || 'Just now'}</td>
-              <td class="mono pv">${p.ip || '127.0.0.1'}</td>
-              <td style="text-align:right">
-                <div class="row" style="justify-content:flex-end">
-                  <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(p.n)}')">${p.op ? 'Deop' : 'Op'}</button>
+      if (S.loading?.players) {
+        body = `<div class="card">${loaderHtml('Loading player lists...')}</div>`;
+      } else if (!S.players.length) {
+        body = `<div class="card mu" style="text-align:center;padding:24px;">No players currently online. Start the server to accept connections.</div>`;
+      } else if (vm === 'icons' || vm === 'tiles') {
+        body = `<div class="${vm === 'icons' ? 'vm-icons-grid' : 'vm-tiles-grid'}">
+          ${S.players.map(p => `
+            <div class="${vm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
+              <div class="${vm === 'icons' ? 'vm-plug-icon-center' : 'vm-item-head'}">
+                <div class="row" style="gap: 8px; min-width: 0; ${vm === 'icons' ? 'flex-direction: column;' : ''}">
+                  ${head(p.n)}
+                  <b class="vm-item-title">${esc(p.n)}</b>
+                </div>
+                ${p.op ? '<span class="badge online">OP</span>' : `<span class="chip">${p.ping || 32} ms</span>`}
+              </div>
+              <div class="mu mono" style="font-size: 11.5px;">${esc(p.t || 'Just now')} &bull; <span class="pv">${esc(p.ip || '127.0.0.1')}</span></div>
+              <div class="vm-item-foot">
+                <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(p.n)}')">${p.op ? 'Deop' : 'Op'}</button>
+                <div class="row" style="gap: 6px;">
                   <button class="btn sm" onclick="playerAction('kick', '${esc(p.n)}')">Kick</button>
                   <button class="btn sm dg" onclick="playerAction('ban', '${esc(p.n)}')">Ban</button>
                 </div>
-              </td>
-            </tr>
-          `).join('') : '<tr><td colspan="5" class="mu" style="text-align:center;padding:24px;">No players currently online. Start the server to accept connections.</td></tr>'}
-        </tbody>
-      </table>`;
+              </div>
+            </div>
+          `).join('')}
+        </div>`;
+      } else {
+        body = `<div class="card tw"><table>
+          <thead><tr><th>Player</th><th>Ping</th><th>Playtime</th><th>IP</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.players.map(p => `
+              <tr>
+                <td>${head(p.n)}<b>${esc(p.n)}</b> ${p.op ? '<span class="badge" style="margin-left:6px;">Operator</span>' : ''}</td>
+                <td class="mono">${p.ping || 32} ms</td>
+                <td>${p.t || 'Just now'}</td>
+                <td class="mono pv">${p.ip || '127.0.0.1'}</td>
+                <td style="text-align:right">
+                  <div class="row" style="justify-content:flex-end">
+                    <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(p.n)}')">${p.op ? 'Deop' : 'Op'}</button>
+                    <button class="btn sm" onclick="playerAction('kick', '${esc(p.n)}')">Kick</button>
+                    <button class="btn sm dg" onclick="playerAction('ban', '${esc(p.n)}')">Ban</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table></div>`;
+      }
     } else if (t === 'wl') {
-      body = `<div class="row" style="margin-bottom:14px">
-        <input type="text" id="wn" placeholder="Add Minecraft username to whitelist" style="max-width:280px">
-        <button class="btn pr" onclick="addWhitelistPlayer()">Add to whitelist</button>
-      </div>
-      <table>
-        <thead><tr><th>Player</th><th>UUID</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>
-          ${S.wl.length ? S.wl.map(p => {
+      const wlBar = `<div class="card" style="padding: 14px 18px; margin-bottom: 12px;">
+        <div class="row">
+          <input type="text" id="wn" placeholder="Add Minecraft username to whitelist" style="max-width:280px">
+          <button class="btn pr" onclick="addWhitelistPlayer()">Add to whitelist</button>
+        </div>
+      </div>`;
+      if (!S.wl.length) {
+        body = `${wlBar}<div class="card mu" style="text-align:center;padding:24px;">No players on whitelist.</div>`;
+      } else if (vm === 'icons' || vm === 'tiles') {
+        body = `${wlBar}<div class="${vm === 'icons' ? 'vm-icons-grid' : 'vm-tiles-grid'}">
+          ${S.wl.map(p => {
             const name = typeof p === 'string' ? p : p.name;
             const uuid = typeof p === 'object' ? p.uuid : '';
-            return `<tr>
-              <td>${head(name)}<b>${esc(name)}</b></td>
-              <td class="mono mu">${uuid || '—'}</td>
-              <td style="text-align:right">
+            return `<div class="${vm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
+              <div class="${vm === 'icons' ? 'vm-plug-icon-center' : 'row'}" style="gap: 10px;">
+                ${head(name)}
+                <b class="vm-item-title">${esc(name)}</b>
+              </div>
+              <div class="mu mono" style="font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${esc(uuid || '')}">${esc(uuid || '—')}</div>
+              <div class="vm-item-foot">
+                <span class="chip">Whitelisted</span>
                 <button class="btn sm dg" onclick="playerAction('whitelist_remove', '${esc(name)}')">Remove</button>
-              </td>
-            </tr>`;
-          }).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:20px;">No players on whitelist.</td></tr>'}
-        </tbody>
-      </table>`;
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`;
+      } else {
+        body = `<div class="card tw"><div class="row" style="margin-bottom:14px">
+          <input type="text" id="wn" placeholder="Add Minecraft username to whitelist" style="max-width:280px">
+          <button class="btn pr" onclick="addWhitelistPlayer()">Add to whitelist</button>
+        </div>
+        <table>
+          <thead><tr><th>Player</th><th>UUID</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.wl.map(p => {
+              const name = typeof p === 'string' ? p : p.name;
+              const uuid = typeof p === 'object' ? p.uuid : '';
+              return `<tr>
+                <td>${head(name)}<b>${esc(name)}</b></td>
+                <td class="mono mu">${uuid || '—'}</td>
+                <td style="text-align:right">
+                  <button class="btn sm dg" onclick="playerAction('whitelist_remove', '${esc(name)}')">Remove</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table></div>`;
+      }
     } else if (t === 'ban') {
-      body = `<table>
-        <thead><tr><th>Player</th><th>Reason</th><th style="text-align:right">Actions</th></tr></thead>
-        <tbody>
-          ${S.bans.length ? S.bans.map(b => `
-            <tr>
-              <td>${head(b.name)}<b>${esc(b.name)}</b></td>
-              <td class="mu">${esc(b.reason || 'Banned by operator')}</td>
-              <td style="text-align:right">
+      if (!S.bans.length) {
+        body = `<div class="card mu" style="text-align:center;padding:24px;">No banned players on record.</div>`;
+      } else if (vm === 'icons' || vm === 'tiles') {
+        body = `<div class="${vm === 'icons' ? 'vm-icons-grid' : 'vm-tiles-grid'}">
+          ${S.bans.map(b => `
+            <div class="${vm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
+              <div class="${vm === 'icons' ? 'vm-plug-icon-center' : 'row'}" style="gap: 10px;">
+                ${head(b.name)}
+                <b class="vm-item-title">${esc(b.name)}</b>
+              </div>
+              <div class="vm-item-sub">${esc(b.reason || 'Banned by operator')}</div>
+              <div class="vm-item-foot">
+                <span class="badge offline">Banned</span>
                 <button class="btn sm" onclick="playerAction('pardon', '${esc(b.name)}')">Pardon</button>
-              </td>
-            </tr>
-          `).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:20px;">No banned players on record.</td></tr>'}
-        </tbody>
-      </table>`;
+              </div>
+            </div>
+          `).join('')}
+        </div>`;
+      } else {
+        body = `<div class="card tw"><table>
+          <thead><tr><th>Player</th><th>Reason</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody>
+            ${S.bans.map(b => `
+              <tr>
+                <td>${head(b.name)}<b>${esc(b.name)}</b></td>
+                <td class="mu">${esc(b.reason || 'Banned by operator')}</td>
+                <td style="text-align:right">
+                  <button class="btn sm" onclick="playerAction('pardon', '${esc(b.name)}')">Pardon</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table></div>`;
+      }
     }
 
     return `${srvh()}
-    <div class="tabs" style="margin-top:14px">
-      ${[['online', 'Online Players'], ['wl', 'Whitelist'], ['ban', 'Banned Players']].map(([k, l]) => `
-        <button class="btn ${t === k ? 'on' : ''}" onclick="S.ptab='${k}'; R(); loadPlayersData();">${l}</button>
-      `).join('')}
+    <div class="row sb" style="margin-top:14px; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+      <div class="tabs" style="margin:0;">
+        ${[['online', 'Online Players'], ['wl', 'Whitelist'], ['ban', 'Banned Players']].map(([k, l]) => `
+          <button class="btn ${t === k ? 'on' : ''}" onclick="S.ptab='${k}'; R(); loadPlayersData();">${l}</button>
+        `).join('')}
+      </div>
+      ${renderViewModeToggle('pl', 'list')}
     </div>
-    <div class="card tw">${body}</div>`;
+    ${body}`;
   },
 
   fi() {
@@ -3436,33 +3989,21 @@ const V = {
     const pathParts = (S.currentDir || '').split('/').filter(Boolean);
     const isSubdir = pathParts.length > 0;
     const allSelected = S.fileList.length > 0 && S.fileList.every(i => S.selectedFiles.has(i.path || i.name));
+    const vm = getViewMode('files', 'list');
 
-    return `${srvh()}
-    <div style="margin-top: 16px;">
-      <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
-        <!-- Breadcrumb Navigation -->
-        <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-          <span onclick="browseFolder('')" style="color: var(--tx-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">${ic('folder', 15)} / home / container /</span>
-          ${pathParts.map((part, idx) => {
-            const sub = pathParts.slice(0, idx + 1).join('/');
-            const isLast = idx === pathParts.length - 1;
-            return `<span onclick="browseFolder('${sub}')" style="cursor: pointer; color: ${isLast ? '#fff' : 'var(--tx-muted)'};">${esc(part)} /</span>`;
-          }).join('')}
-        </div>
+    const renderFileCtxMenuHtml = (item, idx, isDir, itemPath) => `
+      <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
+        ${!isDir ? `<button onclick="openFile('${esc(item.name)}'); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
+        ${!isDir ? `<button onclick="downloadFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
+        ${isArchiveFile(item.name) ? `<button onclick="unzipFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('archive', 14)} Extract</button>` : ''}
+        <button onclick="promptRenameFile('${esc(itemPath)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
+        <button onclick="copyFilePath('${esc(itemPath)}'); closeAllCtx();">${ic('copy', 14)} Copy Path</button>
+        <button class="dg" onclick="deleteFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
+      </div>`;
 
-        <!-- Search & Action Buttons -->
-        <div class="row" style="gap: 10px; flex-wrap: wrap;">
-          <div style="position: relative;">
-            <input type="text" id="fi-filter" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 200px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
-            <kbd style="position: absolute; right: 10px; top: 9px; font-size: 11px; color: var(--tx-muted); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;">/</kbd>
-          </div>
-          <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
-          <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('download', 14)} Upload</button>
-          <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
-        </div>
-      </div>
-
-      <!-- Full-Width File Table -->
+    let filesContainerHtml = '';
+    if (vm === 'list') {
+      filesContainerHtml = `
       <div class="card tw" style="padding: 0; overflow: visible;">
         <table class="file-table" style="width: 100%;">
           <thead>
@@ -3482,7 +4023,7 @@ const V = {
               <tr onclick="browseFolder('..')">
                 <td style="padding-left: 18px;"></td>
                 <td style="width: 40px; padding: 8px 4px;"><span class="fi-badge up" title="Parent folder">${ic('folderUp', 15)}</span></td>
-                <td colspan="4" style="font-weight: 600; color: #fff;">.. (Parent folder)</td>
+                <td colspan="4" style="font-weight: 600; color: var(--tx);">.. (Parent folder)</td>
               </tr>
             ` : ''}
             ${S.fileList.map((item, idx) => {
@@ -3494,35 +4035,161 @@ const V = {
               const isSelected = S.selectedFiles.has(itemPath);
 
               return `
-              <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}" 
+              <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}"
                   onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
                   oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <td style="width: 36px; padding-left: 18px;" onclick="event.stopPropagation();">
-                  <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''} 
-                         onchange="toggleFileSelect('${esc(itemPath)}', this.checked)" 
+                  <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''}
+                         onchange="toggleFileSelect('${esc(itemPath)}', this.checked)"
                          aria-label="Select ${esc(item.name)}">
                 </td>
                 <td style="width: 40px; padding: 8px 4px;">${icon}</td>
-                <td style="font-weight: 500; color: #fff;">${esc(item.name)}</td>
+                <td style="font-weight: 500; color: var(--tx);">${esc(item.name)}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 140px;">${sizeStr}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 180px;">${dateStr}</td>
                 <td style="width: 50px; text-align: right; padding-right: 18px; position: relative;" onclick="event.stopPropagation();">
                   <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
-                  <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
-                    ${!isDir ? `<button onclick="openFile('${esc(item.name)}'); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
-                    ${!isDir ? `<button onclick="downloadFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
-                    ${isArchiveFile(item.name) ? `<button onclick="unzipFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('archive', 14)} Extract</button>` : ''}
-                    <button onclick="promptRenameFile('${esc(itemPath)}'); closeAllCtx();">${ic('settings', 14)} Rename</button>
-                    <button onclick="copyFilePath('${esc(itemPath)}'); closeAllCtx();">${ic('copy', 14)} Copy Path</button>
-                    <button class="dg" onclick="deleteFileItem('${esc(itemPath)}'); closeAllCtx();">${ic('trash', 14)} Delete</button>
-                  </div>
+                  ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
                 </td>
               </tr>`;
             }).join('')}
             ${S.loading?.files ? `<tr><td colspan="6">${loaderHtml('Loading directory contents...')}</td></tr>` : !S.fileList.length && !isSubdir ? '<tr><td colspan="6" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
           </tbody>
         </table>
+      </div>`;
+    } else if (vm === 'icons') {
+      filesContainerHtml = `
+      <div class="card" style="padding: 16px;">
+        ${S.fileList.length > 0 ? `
+          <div class="row sb" style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
+            <label class="row" style="gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--tx-muted);">
+              <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" ${allSelected ? 'checked' : ''} aria-label="Select all files">
+              <span>Select all (${S.fileList.length})</span>
+            </label>
+            <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
+          </div>` : ''}
+        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!S.fileList.length && !isSubdir)
+          ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
+          : `<div class="vm-icons-grid">
+            ${isSubdir ? `
+              <div class="vm-icon-card vm-file-card" onclick="browseFolder('..')">
+                <div class="vm-file-head"><span></span><span></span></div>
+                <div class="vm-file-center">
+                  <span class="fi-badge up lg" title="Parent folder">${ic('folderUp', 24)}</span>
+                  <div class="vm-file-name">.. (Parent folder)</div>
+                  <div class="vm-file-meta">Go up</div>
+                </div>
+              </div>` : ''}
+            ${S.fileList.map((item, idx) => {
+              const isDir = item.is_dir;
+              const sizeStr = isDir ? 'Folder' : formatFileSize(item.size, false);
+              const itemPath = item.path || item.name;
+              const isSelected = S.selectedFiles.has(itemPath);
+              return `
+              <div class="vm-icon-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}"
+                   onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
+                   oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
+                <div class="vm-file-head" onclick="event.stopPropagation();">
+                  <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''}
+                         onchange="toggleFileSelect('${esc(itemPath)}', this.checked)"
+                         aria-label="Select ${esc(item.name)}">
+                  <div style="position: relative;">
+                    <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 2px 6px; border: 0; background: transparent; font-size: 16px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
+                    ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
+                  </div>
+                </div>
+                <div class="vm-file-center">
+                  ${fileListIconHtml(item, 'lg', 24)}
+                  <div class="vm-file-name" title="${esc(item.name)}">${esc(item.name)}</div>
+                  <div class="vm-file-meta">${sizeStr}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>`}
+      </div>`;
+    } else {
+      filesContainerHtml = `
+      <div class="card" style="padding: 16px;">
+        ${S.fileList.length > 0 ? `
+          <div class="row sb" style="margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
+            <label class="row" style="gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--tx-muted);">
+              <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" ${allSelected ? 'checked' : ''} aria-label="Select all files">
+              <span>Select all (${S.fileList.length})</span>
+            </label>
+            <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
+          </div>` : ''}
+        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!S.fileList.length && !isSubdir)
+          ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
+          : `<div class="vm-tiles-grid">
+            ${isSubdir ? `
+              <div class="vm-tile-card vm-file-card" onclick="browseFolder('..')">
+                <div class="vm-tile-file-row">
+                  <span class="fi-badge up md" title="Parent folder">${ic('folderUp', 18)}</span>
+                  <div class="vm-tile-file-info">
+                    <div class="vm-file-name">.. (Parent folder)</div>
+                    <div class="vm-file-meta">Navigate up one level</div>
+                  </div>
+                </div>
+              </div>` : ''}
+            ${S.fileList.map((item, idx) => {
+              const isDir = item.is_dir;
+              const sizeStr = isDir ? 'Folder' : formatFileSize(item.size, false);
+              const dateStr = formatFileDate(item.modified);
+              const itemPath = item.path || item.name;
+              const isSelected = S.selectedFiles.has(itemPath);
+              return `
+              <div class="vm-tile-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}"
+                   onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
+                   oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
+                <div class="vm-tile-file-row">
+                  <div onclick="event.stopPropagation();">
+                    <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''}
+                           onchange="toggleFileSelect('${esc(itemPath)}', this.checked)"
+                           aria-label="Select ${esc(item.name)}">
+                  </div>
+                  ${fileListIconHtml(item, 'md', 18)}
+                  <div class="vm-tile-file-info">
+                    <div class="vm-file-name" title="${esc(item.name)}">${esc(item.name)}</div>
+                    <div class="vm-file-meta">${sizeStr} &bull; ${dateStr}</div>
+                  </div>
+                  <div style="position: relative;" onclick="event.stopPropagation();">
+                    <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 16px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
+                    ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
+                  </div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>`}
+      </div>`;
+    }
+
+    return `${srvh()}
+    <div style="margin-top: 16px;">
+      <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+        <!-- Breadcrumb Navigation -->
+        <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+          <span onclick="browseFolder('')" style="color: var(--tx-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">${ic('folder', 15)} / home / container /</span>
+          ${pathParts.map((part, idx) => {
+            const sub = pathParts.slice(0, idx + 1).join('/');
+            const isLast = idx === pathParts.length - 1;
+            return `<span onclick="browseFolder('${sub}')" style="cursor: pointer; color: ${isLast ? 'var(--tx)' : 'var(--tx-muted)'};">${esc(part)} /</span>`;
+          }).join('')}
+        </div>
+
+        <!-- Search, View Mode & Action Buttons -->
+        <div class="row" style="gap: 10px; flex-wrap: wrap;">
+          <div style="position: relative;">
+            <input type="text" id="fi-filter" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 200px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
+            <kbd style="position: absolute; right: 10px; top: 9px; font-size: 11px; color: var(--tx-muted); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;">/</kbd>
+          </div>
+          ${renderViewModeToggle('files', 'list')}
+          <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
+          <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('download', 14)} Upload</button>
+          <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
+        </div>
       </div>
+
+      ${filesContainerHtml}
 
       <!-- Floating Bulk Action Bar -->
       ${S.selectedFiles.size > 0 ? `
@@ -3546,6 +4213,94 @@ const V = {
     const filteredInstalled = S.plugins
       .map((p, i) => ({ p, i }))
       .filter(({ p }) => !instFilter || String(p[0] || '').toLowerCase().includes(instFilter));
+    const storeVm = getViewMode('plug_store', 'list');
+    const instVm = getViewMode('plug_inst', 'list');
+    const storeVersions = getAllMcVersions(S.plugLoader || '');
+    const verChoices = (S.plugVer && !storeVersions.includes(S.plugVer)) ? [S.plugVer, ...storeVersions] : storeVersions;
+
+    const storeGridClass = storeVm === 'icons' ? 'vm-icons-grid wide' : (storeVm === 'tiles' ? 'vm-tiles-grid' : '');
+    const storeGridStyle = storeVm === 'list' ? 'display: flex; flex-direction: column; gap: 10px;' : '';
+    const storeBodyHtml = Array.isArray(S.lastModrinthHits)
+      ? renderModrinthHitsHtml(S.lastModrinthHits)
+      : loaderHtml('Loading top plugins from Modrinth...');
+
+    let installedBodyHtml = '';
+    if (S.loading?.plugins) {
+      installedBodyHtml = `<div class="card">${loaderHtml('Loading installed plugins...')}</div>`;
+    } else if (!filteredInstalled.length) {
+      installedBodyHtml = `<div class="card" style="padding: 32px; text-align: center;">
+        <div class="mu" style="margin-bottom: 12px;">${S.plugins.length ? 'No installed plugins match your filter.' : 'No plugins installed yet in ' + targetFolder + '.'}</div>
+        ${!S.plugins.length ? `<button class="btn pr sm" onclick="setPlugTab('browse')">${ic('store', 14)} Browse Modrinth Plugins</button>` : ''}
+      </div>`;
+    } else if (instVm === 'icons') {
+      installedBodyHtml = `<div class="vm-icons-grid wide">
+        ${filteredInstalled.map(({ p, i }) => `
+          <div class="vm-icon-card">
+            <div class="vm-plug-icon-center">
+              <div style="width: 48px; height: 48px; border-radius: 12px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 22px;">🧩</div>
+              <b class="plugin-title" style="font-size: 13.5px; word-break: break-word;" title="${esc(p[0])}">${esc(p[0])}</b>
+              <div class="mu mono" style="font-size: 11.5px;">${esc(p[1] || 'installed')}${p[3] ? ` &bull; ${esc(formatFileDate(p[3]))}` : ''}</div>
+            </div>
+            <div class="vm-item-foot">
+              <label class="sw" title="Toggle plugin state">
+                <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
+                <i></i>
+              </label>
+              <button class="btn sm dg" data-plugin="${esc(p[0])}" onclick="deletePlugin(this.dataset.plugin)">${ic('trash', 13)} Remove</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    } else if (instVm === 'tiles') {
+      installedBodyHtml = `<div class="vm-tiles-grid">
+        ${filteredInstalled.map(({ p, i }) => `
+          <div class="vm-tile-card">
+            <div class="vm-item-head">
+              <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+                <div style="width: 40px; height: 40px; border-radius: 10px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 18px; flex-shrink: 0;">🧩</div>
+                <div style="min-width: 0;">
+                  <b class="vm-item-title" style="display:block;" title="${esc(p[0])}">${esc(p[0])}</b>
+                  <div class="mu mono" style="font-size: 11.5px; margin-top: 2px;">${esc(p[1] || 'installed')}${p[3] ? ` &bull; ${esc(formatFileDate(p[3]))}` : ''}</div>
+                </div>
+              </div>
+              <label class="sw" title="Toggle plugin state">
+                <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
+                <i></i>
+              </label>
+            </div>
+            <div class="vm-item-foot">
+              <span class="chip">${p[2] ? 'Enabled' : 'Disabled'}</span>
+              <button class="btn sm dg" data-plugin="${esc(p[0])}" onclick="deletePlugin(this.dataset.plugin)">${ic('trash', 13)} Uninstall</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    } else {
+      installedBodyHtml = `<div style="display: flex; flex-direction: column; gap: 10px;">
+        ${filteredInstalled.map(({ p, i }) => `
+          <div class="plugin-card">
+            <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
+              <div style="width: 44px; height: 44px; border-radius: 8px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 20px; flex-shrink: 0;">
+                🧩
+              </div>
+              <div style="min-width: 0;">
+                <b class="plugin-title">${esc(p[0])}</b>
+                <div class="mu mono" style="font-size: 12px; margin-top: 3px;">
+                  ${esc(p[1] || 'installed')}${p[3] ? ` &bull; ${esc(formatFileDate(p[3]))}` : ''}
+                </div>
+              </div>
+            </div>
+            <div class="row" style="gap: 12px; flex-shrink: 0;">
+              <label class="sw" title="Toggle plugin state">
+                <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
+                <i></i>
+              </label>
+              <button class="btn sm dg" data-plugin="${esc(p[0])}" onclick="deletePlugin(this.dataset.plugin)">${ic('trash', 13)} Uninstall</button>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    }
 
     return `${srvh()}
     <div style="margin-top: 18px;">
@@ -3575,26 +4330,24 @@ const V = {
             <span style="position: absolute; left: 12px; top: 11px; color: var(--tx-muted);">${ic('search', 16)}</span>
           </div>
 
-          <select style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugLoader=this.value; searchModrinth();">
+          <select style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugLoader=this.value; refreshOpenVersionSelects(); searchModrinth();">
             <option value="" ${!S.plugLoader ? 'selected' : ''}>Software: Any</option>
             <option value="paper" ${S.plugLoader === 'paper' ? 'selected' : ''}>Paper</option>
             <option value="purpur" ${S.plugLoader === 'purpur' ? 'selected' : ''}>Purpur</option>
             <option value="spigot" ${S.plugLoader === 'spigot' ? 'selected' : ''}>Spigot</option>
+            <option value="bukkit" ${S.plugLoader === 'bukkit' ? 'selected' : ''}>Bukkit</option>
+            <option value="folia" ${S.plugLoader === 'folia' ? 'selected' : ''}>Folia</option>
             <option value="velocity" ${S.plugLoader === 'velocity' ? 'selected' : ''}>Velocity</option>
+            <option value="waterfall" ${S.plugLoader === 'waterfall' ? 'selected' : ''}>Waterfall</option>
             <option value="bungeecord" ${S.plugLoader === 'bungeecord' ? 'selected' : ''}>BungeeCord</option>
             <option value="fabric" ${S.plugLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
+            <option value="neoforge" ${S.plugLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
+            <option value="forge" ${S.plugLoader === 'forge' ? 'selected' : ''}>Forge</option>
           </select>
 
-          <select style="width: auto; min-width: 135px; height: 40px; font-size: 13px;" onchange="S.plugVer=this.value; searchModrinth();">
+          <select id="plug-ver-sel" data-searchable="1" style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugVer=this.value; searchModrinth();">
             <option value="" ${!S.plugVer ? 'selected' : ''}>Version: Any</option>
-            <option value="1.21.4" ${S.plugVer === '1.21.4' ? 'selected' : ''}>1.21.4</option>
-            <option value="1.21.1" ${S.plugVer === '1.21.1' ? 'selected' : ''}>1.21.1</option>
-            <option value="1.20.4" ${S.plugVer === '1.20.4' ? 'selected' : ''}>1.20.4</option>
-            <option value="1.20.1" ${S.plugVer === '1.20.1' ? 'selected' : ''}>1.20.1</option>
-            <option value="1.19.4" ${S.plugVer === '1.19.4' ? 'selected' : ''}>1.19.4</option>
-            <option value="1.18.2" ${S.plugVer === '1.18.2' ? 'selected' : ''}>1.18.2</option>
-            <option value="1.16.5" ${S.plugVer === '1.16.5' ? 'selected' : ''}>1.16.5</option>
-            <option value="1.12.2" ${S.plugVer === '1.12.2' ? 'selected' : ''}>1.12.2</option>
+            ${verChoices.map(v => `<option value="${esc(v)}" ${S.plugVer === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
           </select>
 
           <select style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugSort=this.value; searchModrinth();">
@@ -3603,10 +4356,12 @@ const V = {
             <option value="follows" ${S.plugSort === 'follows' ? 'selected' : ''}>Sort: Follows</option>
             <option value="newest" ${S.plugSort === 'newest' ? 'selected' : ''}>Sort: Newest</option>
           </select>
+
+          ${renderViewModeToggle('plug_store', 'list')}
         </div>
 
-        <div style="display: flex; flex-direction: column; gap: 10px;" id="store-grid">
-          ${loaderHtml('Loading top plugins from Modrinth...')}
+        <div id="store-grid" class="${storeGridClass}" style="${storeGridStyle}">
+          ${storeBodyHtml}
         </div>
       ` : `
         <!-- Installed Plugins Filter & List -->
@@ -3615,39 +4370,14 @@ const V = {
             <input type="text" placeholder="Filter installed plugins..." value="${esc(S.plugFilter || '')}" oninput="S.plugFilter=this.value; R();" style="height: 38px; font-size: 13.5px; padding-left: 36px; border-radius: 10px;">
             <span style="position: absolute; left: 11px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
           </div>
-          <div class="row" style="gap: 8px;">
+          <div class="row" style="gap: 8px; flex-wrap: wrap;">
+            ${renderViewModeToggle('plug_inst', 'list')}
             <button class="btn sm" onclick="loadPluginsList()">${ic('refresh', 13)} Refresh</button>
             <button class="btn sm pr" onclick="setPlugTab('browse')">${ic('plus', 13)} Install More</button>
           </div>
         </div>
 
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          ${S.loading?.plugins ? `<div class="card">${loaderHtml('Loading installed plugins...')}</div>` : filteredInstalled.map(({ p, i }) => `
-            <div class="plugin-card">
-              <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
-                <div style="width: 44px; height: 44px; border-radius: 8px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 20px; flex-shrink: 0;">
-                  🧩
-                </div>
-                <div style="min-width: 0;">
-                  <b class="plugin-title">${esc(p[0])}</b>
-                  <div class="mu mono" style="font-size: 12px; margin-top: 3px;">
-                    ${esc(p[1] || 'installed')}${p[3] ? ` &bull; ${esc(formatFileDate(p[3]))}` : ''}
-                  </div>
-                </div>
-              </div>
-              <div class="row" style="gap: 12px; flex-shrink: 0;">
-                <label class="sw" title="Toggle plugin state">
-                  <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
-                  <i></i>
-                </label>
-                <button class="btn sm dg" data-plugin="${esc(p[0])}" onclick="deletePlugin(this.dataset.plugin)">${ic('trash', 13)} Uninstall</button>
-              </div>
-            </div>
-          `).join('') || `<div class="card" style="padding: 32px; text-align: center;">
-            <div class="mu" style="margin-bottom: 12px;">${S.plugins.length ? 'No installed plugins match your filter.' : 'No plugins installed yet in ' + targetFolder + '.'}</div>
-            ${!S.plugins.length ? `<button class="btn pr sm" onclick="setPlugTab('browse')">${ic('store', 14)} Browse Modrinth Plugins</button>` : ''}
-          </div>`}
-        </div>
+        ${installedBodyHtml}
       `}
     </div>`;
   },
@@ -3656,6 +4386,7 @@ const V = {
     const sel = S.sel || S.core || 'Paper';
     const isProxy = ['Velocity', 'Waterfall', 'BungeeCord'].includes(sel);
     const srv = curServer();
+    const vm = getViewMode('ver', 'list');
     return `${srvh()}
     <div class="card hero" style="margin-top:14px">
       <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 12px;">
@@ -3689,40 +4420,70 @@ const V = {
         <span class="mu" style="font-size:12.5px;">Click any release to confirm installation &amp; optional world backup</span>
       </div>
 
-      <div class="ver-toolbar">
-        <div class="ver-search-wrap">
-          <input type="text" placeholder="Search versions (e.g. 1.21.4, 1.20.1)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
-          <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted); pointer-events: none;">${ic('search', 15)}</span>
+      <div class="ver-toolbar" style="justify-content: space-between;">
+        <div class="row" style="gap: 10px; flex-wrap: wrap; flex: 1;">
+          <div class="ver-search-wrap">
+            <input type="text" placeholder="Search versions (e.g. 1.21.4, 1.20.1, 1.8.9)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
+            <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted); pointer-events: none;">${ic('search', 15)}</span>
+          </div>
+          ${!isProxy ? `
+            <select data-searchable="1" onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
+              <option value="All Families" ${(S.vf === 'All Families' || S.vf === 'All') ? 'selected' : ''}>All Release Families (1.0 – 26.x)</option>
+              <option value="Popular" ${S.vf === 'Popular' ? 'selected' : ''}>Popular / Recommended</option>
+              ${FAM.map(f => `<option value="${f[0]}" ${S.vf === f[0] ? 'selected' : ''}>${f[0]} — ${f[1]} (${f[2]})</option>`).join('')}
+            </select>
+          ` : ''}
         </div>
-        ${!isProxy ? `
-          <select onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
-            <option value="All Families" ${(S.vf === 'All Families' || S.vf === 'All') ? 'selected' : ''}>All Release Families</option>
-            <option value="Popular" ${S.vf === 'Popular' ? 'selected' : ''}>Popular / Recommended</option>
-            ${FAM.map(f => `<option value="${f[0]}" ${S.vf === f[0] ? 'selected' : ''}>${f[0]} — ${f[1]} (${f[2]})</option>`).join('')}
-          </select>
-        ` : ''}
+        ${renderViewModeToggle('ver', 'list')}
       </div>
 
-      <div class="tw">
-        <table>
-          <thead><tr><th>Version</th><th>Release / Notes</th><th>Java</th><th>Engine</th><th style="text-align:right">Action</th></tr></thead>
-          <tbody id="vres">${versionRowsHtml()}</tbody>
-        </table>
-      </div>
+      ${vm === 'list' ? `
+        <div class="tw">
+          <table>
+            <thead><tr><th>Version</th><th>Release / Notes</th><th>Java</th><th>Engine</th><th style="text-align:right">Action</th></tr></thead>
+            <tbody id="vres">${versionRowsHtml()}</tbody>
+          </table>
+        </div>
+      ` : `
+        <div id="vres" class="${vm === 'icons' ? 'vm-icons-grid' : 'vm-tiles-grid'}">${versionRowsHtml()}</div>
+      `}
     </div>`;
   },
 
   bk() {
-    return `${srvh()}
-    <div class="row sb" style="margin-top:14px; margin-bottom:12px;">
-      <span class="mu">${S.bk.length} backups recorded</span>
-      <button class="btn pr" onclick="createBackup()">${ic('plus', 14)} Create Full Backup</button>
-    </div>
-    <div class="card tw">
-      <table>
+    const vm = getViewMode('bk', 'list');
+    let body = '';
+    if (S.loading?.backups) {
+      body = `<div class="card">${loaderHtml('Loading server backups...')}</div>`;
+    } else if (!S.bk.length) {
+      body = `<div class="card mu" style="text-align:center;padding:24px;">No backups yet. Create your first archive to protect your world!</div>`;
+    } else if (vm === 'icons' || vm === 'tiles') {
+      body = `<div class="${vm === 'icons' ? 'vm-icons-grid wide' : 'vm-tiles-grid'}">
+        ${S.bk.map(b => {
+          const bName = b.name || b[0];
+          const bSize = formatBytes(b.size) || b[1];
+          const bDate = b.created_at ? new Date(b.created_at).toLocaleString() : b[2];
+          return `<div class="${vm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
+            <div class="${vm === 'icons' ? 'vm-plug-icon-center' : 'vm-item-head'}">
+              <div class="row" style="gap: 10px; min-width: 0; ${vm === 'icons' ? 'flex-direction: column;' : ''}">
+                <span class="fi-badge arc ${vm === 'icons' ? 'lg' : 'md'}">${ic('archive', vm === 'icons' ? 22 : 17)}</span>
+                <b class="vm-item-title mono" style="max-width: 100%;" title="${esc(bName)}">${esc(bName)}</b>
+              </div>
+              <span class="chip">${esc(bSize)}</span>
+            </div>
+            <div class="mu" style="font-size: 12px;">${esc(bDate)}</div>
+            <div class="vm-item-foot">
+              <button class="btn sm" onclick="downloadBackup('${esc(bName)}')">${ic('download', 13)} Download</button>
+              <button class="btn sm dg" onclick="deleteBackup('${esc(bName)}')">${ic('trash', 13)} Delete</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    } else {
+      body = `<div class="card tw"><table>
         <thead><tr><th>Archive Name</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead>
         <tbody>
-          ${S.loading?.backups ? `<tr><td colspan="4">${loaderHtml('Loading server backups...')}</td></tr>` : S.bk.length ? S.bk.map((b, i) => `
+          ${S.bk.map(b => `
             <tr>
               <td class="mono"><b>${esc(b.name || b[0])}</b></td>
               <td>${formatBytes(b.size) || b[1]}</td>
@@ -3734,10 +4495,19 @@ const V = {
                 </div>
               </td>
             </tr>
-          `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No backups yet. Create your first archive to protect your world!</td></tr>'}
+          `).join('')}
         </tbody>
-      </table>
-    </div>`;
+      </table></div>`;
+    }
+    return `${srvh()}
+    <div class="row sb" style="margin-top:14px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+      <span class="mu">${S.bk.length} backups recorded</span>
+      <div class="row" style="gap:8px;">
+        ${renderViewModeToggle('bk', 'list')}
+        <button class="btn pr" onclick="createBackup()">${ic('plus', 14)} Create Full Backup</button>
+      </div>
+    </div>
+    ${body}`;
   },
 
   sc() {
@@ -3845,7 +4615,7 @@ const V = {
             <div><span class="mu">Port:</span> <b style="color: #fff;">${sftpPort}</b></div>
             <div><span class="mu">Username:</span> <b style="color: #fff;">${sftpUser}</b></div>
           </div>
-          ${srv.node_id && srv.node_id !== 'local' ? `<div class="mu" style="font-size: 11.5px; margin-bottom: 12px; line-height: 1.45;">Headless node SFTP password: use that node's <code>node_token</code> (<code>sudo neopanel node-token</code>) or a local user password.</div>` : ''}
+          ${srv.node_id && srv.node_id !== 'local' ? `<div class="mu" style="font-size: 11.5px; margin-bottom: 12px; line-height: 1.45;">Remote cluster node SFTP password: use that node's <code>node_token</code> (<code>sudo neopanel node-token</code>) or a local user password.</div>` : ''}
           <button class="btn sm" onclick="copyDbText('sftp://${sftpUser}@${host}:${sftpPort}', 'SFTP URI')">
             Copy SFTP URI
           </button>
@@ -3881,6 +4651,128 @@ const V = {
     const srv = curServer();
     const list = Array.isArray(S.databases) ? S.databases : [];
     const caps = S.dbCapabilities || { sqlite: true, engines_label: 'Built-in SQLite (pure Go)' };
+    const vm = getViewMode('db', 'list');
+
+    const emptyHtml = `<div class="card" style="text-align: center; padding: 36px 20px;">
+      <div style="max-width: 440px; margin: 0 auto;">
+        <div style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 6px;">No databases provisioned for ${esc(srv?.name || 'this server')}</div>
+        <div class="mu" style="font-size: 13px; margin-bottom: 16px;">Create an isolated SQLite database for LuckPerms, CoreProtect, Economy plugins, or custom data — inspect schemas and run live SQL queries right in the browser.</div>
+        <button type="button" class="btn pr" onclick="openCreateDatabaseModal()">${ic('plus', 14)} Create First Database</button>
+      </div>
+    </div>`;
+
+    let dbBody = '';
+    if (S.loading?.databases) {
+      dbBody = `<div class="card">${loaderHtml('Loading server databases...')}</div>`;
+    } else if (!list.length) {
+      dbBody = emptyHtml;
+    } else if (vm === 'icons' || vm === 'tiles') {
+      dbBody = `<div class="${vm === 'icons' ? 'vm-icons-grid wide' : 'vm-tiles-grid'}">
+        ${list.map(d => {
+          const revealed = S.dbRevealIds && S.dbRevealIds.has(d.id);
+          const jdbcUrl = d.jdbc_url || (d.file_path ? `jdbc:sqlite:${d.file_path}` : '');
+          const dsnPath = d.sqlite_dsn || d.file_path || '';
+          return `<div class="${vm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
+            <div class="vm-item-head">
+              <div class="row" style="gap: 10px; min-width: 0;">
+                <span class="fi-badge db md">${ic('database', 17)}</span>
+                <div style="min-width: 0;">
+                  <b class="vm-item-title" style="display:block;" title="${esc(d.name)}">${esc(d.name)}</b>
+                  <span class="chip" style="font-size: 10px; margin-top: 2px;">${esc((d.engine || 'sqlite').toUpperCase())}</span>
+                </div>
+              </div>
+              <span class="mu mono" style="font-size: 11px;">${Number(d.table_count) || 0} tbl &bull; ${formatBytes(d.size_bytes || 0)}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 5px;">
+              <div class="db-cred-row">
+                <span class="mu" style="font-size: 11px; width: 32px;">User</span>
+                <span class="db-secret-chip">${esc(d.username || 'u_db')}</span>
+                <button type="button" class="btn-ico" data-val="${esc(d.username || '')}" onclick="copyDbText(this.dataset.val, 'Username')" title="Copy Username">${ic('copy', 12)}</button>
+              </div>
+              ${vm === 'tiles' ? `<div class="db-cred-row">
+                <span class="mu" style="font-size: 11px; width: 32px;">Pass</span>
+                <span class="db-secret-chip">${revealed ? esc(d.password || '') : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;'}</span>
+                <button type="button" class="btn-ico" onclick="toggleDbPasswordReveal('${esc(d.id)}')" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
+                <button type="button" class="btn-ico" data-val="${esc(d.password || '')}" onclick="copyDbText(this.dataset.val, 'Password')" title="Copy Password">${ic('copy', 12)}</button>
+                <button type="button" class="btn-ico" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="rotateDatabasePassword(this.dataset.id, this.dataset.name)" title="Rotate Password">${ic('key', 12)}</button>
+              </div>` : ''}
+            </div>
+            <div class="vm-item-foot">
+              <button type="button" class="btn sm pr" onclick="openSQLStudioModal('${esc(d.id)}')">${ic('code', 13)} SQL Studio</button>
+              <div class="row" style="gap: 4px;">
+                <button type="button" class="btn sm" data-val="${esc(jdbcUrl)}" onclick="copyDbText(this.dataset.val, 'JDBC URL')" title="Copy JDBC URL">JDBC</button>
+                <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'sql')" title="Download SQL Dump">.sql</button>
+                <button type="button" class="btn sm dg" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="deleteServerDatabase(this.dataset.id, this.dataset.name)" title="Delete Database">${ic('trash', 13)}</button>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    } else {
+      dbBody = `<div class="card tw">
+        <table>
+          <thead>
+            <tr>
+              <th>Database &amp; File</th>
+              <th>Credentials</th>
+              <th>JDBC / DSN</th>
+              <th>Tables &amp; Size</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${list.map(d => {
+              const revealed = S.dbRevealIds && S.dbRevealIds.has(d.id);
+              const jdbcUrl = d.jdbc_url || (d.file_path ? `jdbc:sqlite:${d.file_path}` : '');
+              const dsnPath = d.sqlite_dsn || d.file_path || '';
+              return `<tr>
+                <td>
+                  <div style="font-weight: 700; color: var(--tx);">${esc(d.name)}</div>
+                  <div class="row" style="gap: 5px; margin-top: 4px;">
+                    <span class="chip" style="font-size: 10.5px;">${esc((d.engine || 'sqlite').toUpperCase())}</span>
+                    <span class="mu mono" style="font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${esc(dsnPath)}">${esc(dsnPath)}</span>
+                  </div>
+                </td>
+                <td>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <div class="db-cred-row">
+                      <span class="mu" style="font-size: 11px; width: 34px;">User</span>
+                      <span class="db-secret-chip">${esc(d.username || 'u_db')}</span>
+                      <button type="button" class="btn-ico" data-val="${esc(d.username || '')}" onclick="copyDbText(this.dataset.val, 'Username')" title="Copy Username">${ic('copy', 12)}</button>
+                    </div>
+                    <div class="db-cred-row">
+                      <span class="mu" style="font-size: 11px; width: 34px;">Pass</span>
+                      <span class="db-secret-chip">${revealed ? esc(d.password || '') : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;'}</span>
+                      <button type="button" class="btn-ico" onclick="toggleDbPasswordReveal('${esc(d.id)}')" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
+                      <button type="button" class="btn-ico" data-val="${esc(d.password || '')}" onclick="copyDbText(this.dataset.val, 'Password')" title="Copy Password">${ic('copy', 12)}</button>
+                      <button type="button" class="btn-ico" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="rotateDatabasePassword(this.dataset.id, this.dataset.name)" title="Rotate Password">${ic('key', 12)}</button>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="row" style="gap: 6px; flex-wrap: wrap;">
+                    <button type="button" class="btn sm" data-val="${esc(jdbcUrl)}" onclick="copyDbText(this.dataset.val, 'JDBC URL')" title="${esc(jdbcUrl)}">${ic('copy', 12)} Copy JDBC</button>
+                    <button type="button" class="btn sm" data-val="${esc(dsnPath)}" onclick="copyDbText(this.dataset.val, 'SQLite Path')" title="${esc(dsnPath)}">${ic('copy', 12)} Copy Path</button>
+                  </div>
+                </td>
+                <td>
+                  <div class="mono" style="font-weight: 600; color: var(--tx);">${Number(d.table_count) || 0} table${Number(d.table_count) === 1 ? '' : 's'}</div>
+                  <div class="mu mono" style="font-size: 11.5px; margin-top: 2px;">${formatBytes(d.size_bytes || 0)} &bull; max ${d.max_connections || 25}</div>
+                </td>
+                <td style="text-align: right;">
+                  <div class="row" style="justify-content: flex-end; gap: 6px; flex-wrap: wrap;">
+                    <button type="button" class="btn sm pr" onclick="openSQLStudioModal('${esc(d.id)}')">${ic('code', 13)} SQL Studio</button>
+                    <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'sql')" title="Download SQL Dump">${ic('download', 12)} .sql</button>
+                    <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'db')" title="Download SQLite Binary">${ic('download', 12)} .db</button>
+                    <button type="button" class="btn sm dg" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="deleteServerDatabase(this.dataset.id, this.dataset.name)" title="Delete Database">${ic('trash', 13)}</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    }
 
     return `${srvh()}
     <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 14px;">
@@ -3896,84 +4788,14 @@ const V = {
               Real isolated per-server SQLite databases stored directly on <b>${esc(srv?.node_name || 'this node')}</b> with built-in SQL Studio &amp; binary/SQL exports.
             </div>
           </div>
-          <div class="row" style="gap: 8px;">
+          <div class="row" style="gap: 8px; flex-wrap: wrap;">
+            ${renderViewModeToggle('db', 'list')}
             <button type="button" class="btn sm" onclick="loadDatabases()">${ic('refresh', 13)} Refresh</button>
             <button type="button" class="btn sm pr" onclick="openCreateDatabaseModal()">${ic('plus', 14)} Create Database</button>
           </div>
         </div>
       </div>
-
-      <div class="card tw">
-        <table>
-          <thead>
-            <tr>
-              <th>Database &amp; File</th>
-              <th>Credentials</th>
-              <th>JDBC / DSN</th>
-              <th>Tables &amp; Size</th>
-              <th style="text-align: right;">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${S.loading?.databases ? `<tr><td colspan="5">${loaderHtml('Loading server databases...')}</td></tr>` :
-              list.length ? list.map(d => {
-                const revealed = S.dbRevealIds && S.dbRevealIds.has(d.id);
-                const jdbcUrl = d.jdbc_url || (d.file_path ? `jdbc:sqlite:${d.file_path}` : '');
-                const dsnPath = d.sqlite_dsn || d.file_path || '';
-                return `<tr>
-                  <td>
-                    <div style="font-weight: 700; color: var(--tx);">${esc(d.name)}</div>
-                    <div class="row" style="gap: 5px; margin-top: 4px;">
-                      <span class="chip" style="font-size: 10.5px;">${esc((d.engine || 'sqlite').toUpperCase())}</span>
-                      <span class="mu mono" style="font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${esc(dsnPath)}">${esc(dsnPath)}</span>
-                    </div>
-                  </td>
-                  <td>
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                      <div class="db-cred-row">
-                        <span class="mu" style="font-size: 11px; width: 34px;">User</span>
-                        <span class="db-secret-chip">${esc(d.username || 'u_db')}</span>
-                        <button type="button" class="btn-ico" data-val="${esc(d.username || '')}" onclick="copyDbText(this.dataset.val, 'Username')" title="Copy Username">${ic('copy', 12)}</button>
-                      </div>
-                      <div class="db-cred-row">
-                        <span class="mu" style="font-size: 11px; width: 34px;">Pass</span>
-                        <span class="db-secret-chip">${revealed ? esc(d.password || '') : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;'}</span>
-                        <button type="button" class="btn-ico" onclick="toggleDbPasswordReveal('${esc(d.id)}')" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
-                        <button type="button" class="btn-ico" data-val="${esc(d.password || '')}" onclick="copyDbText(this.dataset.val, 'Password')" title="Copy Password">${ic('copy', 12)}</button>
-                        <button type="button" class="btn-ico" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="rotateDatabasePassword(this.dataset.id, this.dataset.name)" title="Rotate Password">${ic('key', 12)}</button>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="row" style="gap: 6px; flex-wrap: wrap;">
-                      <button type="button" class="btn sm" data-val="${esc(jdbcUrl)}" onclick="copyDbText(this.dataset.val, 'JDBC URL')" title="${esc(jdbcUrl)}">${ic('copy', 12)} Copy JDBC</button>
-                      <button type="button" class="btn sm" data-val="${esc(dsnPath)}" onclick="copyDbText(this.dataset.val, 'SQLite Path')" title="${esc(dsnPath)}">${ic('copy', 12)} Copy Path</button>
-                    </div>
-                  </td>
-                  <td>
-                    <div class="mono" style="font-weight: 600; color: var(--tx);">${Number(d.table_count) || 0} table${Number(d.table_count) === 1 ? '' : 's'}</div>
-                    <div class="mu mono" style="font-size: 11.5px; margin-top: 2px;">${formatBytes(d.size_bytes || 0)} &bull; max ${d.max_connections || 25}</div>
-                  </td>
-                  <td style="text-align: right;">
-                    <div class="row" style="justify-content: flex-end; gap: 6px; flex-wrap: wrap;">
-                      <button type="button" class="btn sm pr" onclick="openSQLStudioModal('${esc(d.id)}')">${ic('code', 13)} SQL Studio</button>
-                      <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'sql')" title="Download SQL Dump">${ic('download', 12)} .sql</button>
-                      <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'db')" title="Download SQLite Binary">${ic('download', 12)} .db</button>
-                      <button type="button" class="btn sm dg" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="deleteServerDatabase(this.dataset.id, this.dataset.name)" title="Delete Database">${ic('trash', 13)}</button>
-                    </div>
-                  </td>
-                </tr>`;
-              }).join('') : `<tr><td colspan="5" style="text-align: center; padding: 36px 20px;">
-                <div style="max-width: 440px; margin: 0 auto;">
-                  <div style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 6px;">No databases provisioned for ${esc(srv?.name || 'this server')}</div>
-                  <div class="mu" style="font-size: 13px; margin-bottom: 16px;">Create an isolated SQLite database for LuckPerms, CoreProtect, Economy plugins, or custom data — inspect schemas and run live SQL queries right in the browser.</div>
-                  <button type="button" class="btn pr" onclick="openCreateDatabaseModal()">${ic('plus', 14)} Create First Database</button>
-                </div>
-              </td></tr>`
-            }
-          </tbody>
-        </table>
-      </div>
+      ${dbBody}
     </div>`;
   },
 
@@ -4034,8 +4856,18 @@ const V = {
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px;">
         <div class="card" style="padding: 20px;">
           <div style="font-size: 12.5px; font-weight: 700; color: var(--tx); text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.04em;">MINECRAFT VERSION</div>
-          <input type="text" id="stp-ver" value="${esc(srv?.version || 'latest')}" style="margin-bottom: 8px; font-weight: 600;">
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">The release or snapshot version of Minecraft running in this container.</span>
+          <div style="display: grid; grid-template-columns: minmax(135px, 165px) 1fr; gap: 8px; margin-bottom: 8px;">
+            <select id="stp-ver-sel" data-searchable="1" onchange="const inp=$('#stp-ver'); if(inp) inp.value=this.value;">
+              ${(() => {
+                const curV = srv?.version || '1.21.4';
+                const allV = getAllMcVersions(srv?.type || S.core || '');
+                const list = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
+                return list.map(v => `<option value="${esc(v)}" ${v === curV ? 'selected' : ''}>${esc(v)}</option>`).join('');
+              })()}
+            </select>
+            <input type="text" id="stp-ver" value="${esc(srv?.version || '1.21.4')}" style="font-weight: 600;" oninput="const sel=$('#stp-ver-sel'); if(sel && Array.from(sel.options).some(o=>o.value===this.value)){ sel.value=this.value; if(sel._cselectRebuild) sel._cselectRebuild(); }">
+          </div>
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Pick any Minecraft release from the searchable list or enter a custom version/snapshot tag.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
@@ -4070,9 +4902,10 @@ const V = {
 
   bill() {
     const srv = curServer();
-    return `${srvh()}
-    <div style="margin-top: 18px;">
-      <h1 style="font-size: 22px; font-weight: 800; color: #fff; margin-bottom: 16px;">Billing & Resource Allocation</h1>
+    const header = srv ? srvh() : '';
+    return `${header}
+    <div style="${srv ? 'margin-top: 18px;' : ''}">
+      <h1 style="font-size: 22px; font-weight: 800; color: var(--tx); margin-bottom: 16px;">Billing &amp; Resource Allocation</h1>
       <div class="grid g2" style="margin-bottom: 16px;">
         <div class="card" style="padding: 20px;">
           <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Active Server Tier</h2>
@@ -4285,7 +5118,7 @@ const V = {
           <div class="card stat">
             <span>Cluster Nodes</span>
             <b style="font-size:18px; padding:6px 0;">${onlineNodesCount} / ${nodesList.length} Online</b>
-            <span class="mu"><a href="#admin" onclick="event.preventDefault(); selectAdminTab(1);" style="color:var(--ac);text-decoration:none;">Manage linked daemons &rarr;</a></span>
+            <span class="mu"><a href="/admin/nodes" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="color:var(--ac);text-decoration:none;">Manage linked daemons &rarr;</a></span>
           </div>
           <div class="card stat">
             <span>SFTP Daemon</span>
@@ -4335,15 +5168,16 @@ const V = {
       `;
     } else if (t === 1) {
       const h = S.nodePairHelper || {};
-      const cmdPreview = buildHeadlessNodeInstallCmd();
+      const cmdPreview = buildClusterNodeInstallCmd();
+      const nodeVm = getViewMode('admin_nodes', 'tiles');
       content = `
         <div class="node-callout">
           <div class="row sb" style="gap: 12px; flex-wrap: wrap; align-items: center;">
             <div style="flex: 1 1 380px;">
-              <b>Headless Game Nodes (No Web UI Needed):</b> Install remote Ubuntu nodes with <code>--node</code> (builds with <code>-tags node</code>, zero panel/web code) and pair automatically using an Admin API key, or connect an existing node via <code>sudo neopanel node-token</code> / <code>sudo neopanel node connect</code>.
+              <b>Dedicated Cluster Nodes:</b> Install remote Ubuntu nodes with <code>--node</code> (builds only the cluster daemon &amp; SFTP agent) and pair automatically using an Admin API key, or connect an existing node via <code>sudo neopanel node-token</code> / <code>sudo neopanel node connect</code>.
             </div>
-            <button type="button" class="btn sm ${S.nodePairOpen ? 'pr' : ''}" onclick="toggleHeadlessNodeHelper()">
-              ${ic('terminal', 13)} ${S.nodePairOpen ? 'Hide Installer Command' : 'Headless Install Command'}
+            <button type="button" class="btn sm ${S.nodePairOpen ? 'pr' : ''}" onclick="toggleClusterNodeHelper()">
+              ${ic('terminal', 13)} ${S.nodePairOpen ? 'Hide Installer Command' : 'Node Install Command'}
             </button>
           </div>
         </div>
@@ -4352,8 +5186,8 @@ const V = {
         <div class="card node-cli-card" style="margin-bottom: 16px;">
           <div class="row sb" style="margin-bottom: 10px; gap: 10px; flex-wrap: wrap;">
             <div>
-              <h3 style="margin: 0 0 3px; font-size: 15px; color: var(--tx);">1-Command Headless Node Installer &amp; Auto-Pairing</h3>
-              <span class="mu" style="font-size: 12.5px;">Compiles only the headless daemon &amp; SFTP agent (zero Web UI code) and links back to this Master Panel.</span>
+              <h3 style="margin: 0 0 3px; font-size: 15px; color: var(--tx);">1-Command Cluster Node Installer &amp; Auto-Pairing</h3>
+              <span class="mu" style="font-size: 12.5px;">Installs the lightweight node daemon &amp; SFTP agent and registers directly with this Master Panel.</span>
             </div>
             <button type="button" class="btn sm pr" onclick="generateNodePairingKey(this)">
               ${ic('key', 13)} Generate API Key
@@ -4379,7 +5213,7 @@ const V = {
           </label>
           <div class="node-cmd-box">
             <code id="node-install-cmd-text">${esc(cmdPreview)}</code>
-            <button type="button" id="node-install-copy-btn" class="btn sm" onclick="copyDbText($('#node-install-cmd-text')?.textContent || '', 'Headless install command')">
+            <button type="button" id="node-install-copy-btn" class="btn sm" onclick="copyDbText($('#node-install-cmd-text')?.textContent || '', 'Node install command')">
               ${ic('copy', 13)} Copy
             </button>
           </div>
@@ -4394,13 +5228,49 @@ const V = {
             <h2 style="margin: 0;">Connected Nodes</h2>
             <span class="chip">${onlineNodesCount} online &bull; ${nodesList.length} total</span>
           </div>
-          <div class="row" style="gap: 8px;">
+          <div class="row" style="gap: 8px; flex-wrap: wrap;">
+            ${renderViewModeToggle('admin_nodes', 'tiles')}
             <button type="button" class="btn sm" onclick="loadAdminNodes(true)">${ic('refresh', 13)} Refresh Nodes</button>
             <button type="button" class="btn sm pr" onclick="openNodeModal()">${ic('plus', 14)} Connect Node</button>
           </div>
         </div>
 
-        <div class="node-grid">
+        ${nodeVm === 'list' ? `
+        <div class="card tw">
+          <table>
+            <thead><tr><th>Node</th><th>Location</th><th>Endpoint</th><th>Hardware</th><th>Servers</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+            <tbody>
+              ${nodesList.map(n => {
+                const sysInfo = n.system || {};
+                const totalGb = sysInfo.total_ram_mb ? (sysInfo.total_ram_mb / 1024).toFixed(1) + ' GB' : '—';
+                return `<tr>
+                  <td>
+                    <div class="row" style="gap:8px;">
+                      <span class="node-status-dot ${n.online ? 'online' : 'offline'}"></span>
+                      <b>${esc(n.name)}</b>
+                      ${n.is_local ? '<span class="chip" style="font-size:10px;">Local</span>' : ''}
+                    </div>
+                  </td>
+                  <td class="mu">${esc(n.location || 'Unspecified')}</td>
+                  <td class="mono">${esc(n.is_local ? 'Internal Direct' : (n.base_url || n.fqdn))}</td>
+                  <td class="mono">${sysInfo.cpus ? `${sysInfo.cpus} vCPU &bull; ${totalGb}` : '—'}</td>
+                  <td>${Number(n.server_count) || 0}</td>
+                  <td><span class="badge ${n.online ? 'online' : 'offline'}"><i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}</span></td>
+                  <td style="text-align:right">
+                    <div class="row" style="justify-content:flex-end; gap:6px;">
+                      <button type="button" class="btn sm" onclick="testClusterNode('${esc(n.id)}', this)">${ic('refresh', 12)} Test</button>
+                      ${n.is_local
+                        ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Configure</button>`
+                        : `<button type="button" class="btn sm" onclick="openNodeModal('${esc(n.id)}')">${ic('edit', 12)} Edit</button>
+                           <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)}</button>`}
+                    </div>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>` : `
+        <div class="${nodeVm === 'icons' ? 'vm-icons-grid wide' : 'node-grid'}">
           ${nodesList.map(n => {
             const sysInfo = n.system || {};
             const totalGb = sysInfo.total_ram_mb ? (sysInfo.total_ram_mb / 1024).toFixed(1) + ' GB' : '—';
@@ -4459,9 +5329,10 @@ const V = {
               </div>
             </div>`;
           }).join('')}
-        </div>
+        </div>`}
       `;
     } else if (t === 2) {
+      const admSrvVm = getViewMode('admin_servers', 'list');
       content = `
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
@@ -4469,12 +5340,14 @@ const V = {
               <h2 style="margin:0 0 4px; color:var(--tx);">All Cluster Servers (${S.servers.length})</h2>
               <span class="mu" style="font-size:13px;">Overview and controls for all server instances across local and linked remote nodes.</span>
             </div>
-            <div class="row" style="gap:8px;">
+            <div class="row" style="gap:8px; flex-wrap:wrap;">
+              ${renderViewModeToggle('admin_servers', 'list')}
               <button class="btn sm" onclick="bulkRestartServers()">${ic('refresh', 14)} Restart All</button>
               <button class="btn sm dg" onclick="bulkStopServers()">Stop All</button>
               <button class="btn sm pr" onclick="openCreateServerModal()">+ Deploy Server</button>
             </div>
           </div>
+          ${admSrvVm === 'list' ? `
           <table>
             <thead><tr><th>Server</th><th>Node</th><th>Port</th><th>Engine</th><th>RAM Limit</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
@@ -4483,6 +5356,7 @@ const V = {
                 const nodeName = s.node_name || getNodeById(nid)?.name || (nid === 'local' ? 'Local Master' : nid);
                 const normSt = normalizeServerStatus(s.stats?.status || s.status);
                 const isRun = normSt === 'online' || normSt === 'starting';
+                const srvUrl = serverRouteUrl(nid, s.id, 'con');
                 return `
                 <tr>
                   <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${esc(s.id)})</span></td>
@@ -4493,7 +5367,7 @@ const V = {
                   <td><span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span></td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
-                      <button class="btn sm" onclick="switchServer(${idx}); go('con');">Manage</button>
+                      <a href="${esc(srvUrl)}" class="btn sm" style="text-decoration:none;" onclick="return handleServerCardClick(event, ${idx}, 'con')">Manage</a>
                       <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">${ic('refresh', 12)} Reinstall</button>
                       <button class="btn sm dg" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)">${ic('trash', 12)} Delete</button>
                     </div>
@@ -4501,7 +5375,36 @@ const V = {
                 </tr>`;
               }).join('') : '<tr><td colspan="7" class="mu" style="text-align:center; padding:24px;">No server instances deployed yet.</td></tr>'}
             </tbody>
-          </table>
+          </table>` : `
+          <div class="${admSrvVm === 'icons' ? 'vm-icons-grid wide' : 'vm-tiles-grid'}">
+            ${S.servers.length ? S.servers.map((s, idx) => {
+              const nid = s.node_id || 'local';
+              const nodeName = s.node_name || getNodeById(nid)?.name || (nid === 'local' ? 'Local Master' : nid);
+              const normSt = normalizeServerStatus(s.stats?.status || s.status);
+              const isRun = normSt === 'online' || normSt === 'starting';
+              const srvUrl = serverRouteUrl(nid, s.id, 'con');
+              return `<div class="${admSrvVm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
+                <div class="vm-item-head">
+                  <div style="min-width:0;">
+                    <b class="vm-item-title" style="display:block;">${esc(s.name)}</b>
+                    <div class="mu mono" style="font-size:11px; margin-top:2px;">Port ${s.port} &bull; ${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</div>
+                  </div>
+                  <span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span>
+                </div>
+                <div class="row" style="gap:6px; flex-wrap:wrap;">
+                  <span class="chip srv-node-badge">${esc(nodeName)}</span>
+                  <span class="chip">${esc(s.type)} ${esc(s.version)}</span>
+                </div>
+                <div class="vm-item-foot">
+                  <a href="${esc(srvUrl)}" class="btn sm pr" style="text-decoration:none;" onclick="return handleServerCardClick(event, ${idx}, 'con')">Manage</a>
+                  <div class="row" style="gap:6px;">
+                    <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">${ic('refresh', 12)}</button>
+                    <button class="btn sm dg" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)">${ic('trash', 12)}</button>
+                  </div>
+                </div>
+              </div>`;
+            }).join('') : '<div class="mu" style="grid-column:1/-1; text-align:center; padding:24px;">No server instances deployed yet.</div>'}
+          </div>`}
         </div>
       `;
     } else if (t === 3) {
@@ -4982,7 +5885,7 @@ const V = {
     </div>
     <div class="tabs">
       ${accTabs.map(([icon, label], i) => `
-        <button class="${t === i ? 'on' : ''}" onclick="S.acct.tab=${i}; R(); loadAccountData();">
+        <button class="${t === i ? 'on' : ''}" onclick="selectAccountTab(${i});">
           ${ic(icon, 15)}
           <span>${label}</span>
         </button>
@@ -4997,78 +5900,133 @@ function versionRowsHtml() {
   const q = (S.vq || '').toLowerCase().trim();
   const sel = S.sel || S.core || 'Paper';
   const fam = S.vf || 'All Families';
+  const vm = getViewMode('ver', 'list');
 
   if (sel === 'Velocity' || sel === 'Waterfall' || sel === 'BungeeCord') {
-    const proxyReleases = sel === 'Velocity'
-      ? [
-          { v: '3.4.0-SNAPSHOT', n: 'Popular latest proxy build', j: '21' },
-          { v: '3.3.0-SNAPSHOT', n: 'Stable proxy release', j: '17' }
-        ]
-      : sel === 'Waterfall'
-      ? [
-          { v: '1.20', n: 'Final Waterfall release (Build 578)', j: '21' },
-          { v: '1.19', n: 'Legacy stable proxy', j: '17' }
-        ]
-      : [
-          { v: 'latest', n: 'Continuous Jenkins CI build', j: '17+' }
-        ];
+    const dynamicProxy = getAllMcVersions(sel);
+    const descMap = {
+      '3.4.0-SNAPSHOT': 'Popular latest Velocity build',
+      '3.3.0-SNAPSHOT': 'Stable Velocity release',
+      '1.20': 'Final Waterfall release (Build 578)',
+      latest: 'Continuous Jenkins CI build'
+    };
+    const proxyReleases = dynamicProxy.map(v => ({
+      v,
+      n: descMap[v] || `${sel} proxy release`,
+      j: getRecommendedJavaForMcVersion(v, sel)
+    }));
 
-    return proxyReleases
-      .filter(item => !q || (item.v + ' ' + item.n).toLowerCase().includes(q))
-      .map(item => {
-        const isRunning = S.ver === item.v && S.core === sel;
-        const isInstalling = S.installingSoftware === `${sel}:${item.v}`;
-        return `<tr>
-          <td class="mono"><b>${esc(item.v)}</b></td>
-          <td><span class="chip">${esc(item.n)}</span></td>
-          <td class="mono">Java ${esc(item.j)}</td>
-          <td><span class="chip">${esc(sel)}</span></td>
-          <td style="text-align:right">
-            ${isRunning
-              ? '<span class="badge online"><i class="dot"></i>Active</span>'
-              : isInstalling
-                ? `<button class="btn sm pr is-loading" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)" disabled aria-busy="true"><span class="np-spinner-sm"></span> Installing...</button>`
-                : `<button class="btn sm pr" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)">Install ${esc(sel)} ${esc(item.v)}</button>`
-            }
-          </td>
-        </tr>`;
-      }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching proxy builds found.</td></tr>';
-  }
-
-  const POPULAR_VERS = new Set(['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4']);
-
-  return ALL_VERS
-    .filter(item => {
-      const matchesQ = !q || (item.v + ' ' + item.n + ' ' + item.y).toLowerCase().includes(q);
-      const matchesF =
-        fam === 'All Families' ||
-        fam === 'All' ||
-        (fam === 'Popular' ? POPULAR_VERS.has(item.v) : item.f === fam.split(' ')[0]);
-      return matchesQ && matchesF;
-    })
-    .map(item => {
+    const filtered = proxyReleases.filter(item => !q || (item.v + ' ' + item.n).toLowerCase().includes(q));
+    if (!filtered.length) {
+      return vm === 'list'
+        ? '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching proxy builds found.</td></tr>'
+        : '<div class="mu" style="grid-column:1/-1; text-align:center;padding:20px;">No matching proxy builds found.</div>';
+    }
+    return filtered.map(item => {
       const isRunning = S.ver === item.v && S.core === sel;
       const isInstalling = S.installingSoftware === `${sel}:${item.v}`;
-      const javaVer = getRecommendedJavaForMcVersion(item.v, sel);
-      const isPopular = POPULAR_VERS.has(item.v);
+      const actionBtn = isRunning
+        ? '<span class="badge online"><i class="dot"></i>Active</span>'
+        : isInstalling
+          ? `<button class="btn sm pr is-loading" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)" disabled aria-busy="true"><span class="np-spinner-sm"></span> Installing...</button>`
+          : `<button class="btn sm pr" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)">Install ${esc(sel)} ${esc(item.v)}</button>`;
+      if (vm === 'icons') {
+        return `<div class="vm-icon-card">
+          <div class="vm-item-head"><b class="mono">${esc(item.v)}</b><span class="chip">${esc(sel)}</span></div>
+          <div class="vm-item-sub">${esc(item.n)} &bull; Java ${esc(item.j)}</div>
+          <div class="vm-item-foot">${actionBtn}</div>
+        </div>`;
+      }
+      if (vm === 'tiles') {
+        return `<div class="vm-tile-card">
+          <div class="vm-item-head">
+            <div><b class="mono" style="font-size:15px;">${esc(item.v)}</b><div class="mu" style="font-size:12px;margin-top:2px;">${esc(item.n)}</div></div>
+            <span class="chip">${esc(sel)}</span>
+          </div>
+          <div class="vm-item-foot"><span class="mono mu" style="font-size:12px;">Java ${esc(item.j)}</span>${actionBtn}</div>
+        </div>`;
+      }
       return `<tr>
-        <td class="mono">
-          <b>${esc(item.v)}</b>
-          ${item.v === '26.3' ? '<span class="badge online" style="font-size:10px;padding:1px 6px;margin-left:6px;">Latest</span>' : isPopular ? '<span class="chip" style="font-size:10px;padding:1px 6px;margin-left:6px;">Popular</span>' : ''}
-        </td>
-        <td><span class="chip">${esc(item.n)} (${esc(item.y)})</span></td>
-        <td class="mono">Java ${esc(javaVer)}</td>
+        <td class="mono"><b>${esc(item.v)}</b></td>
+        <td><span class="chip">${esc(item.n)}</span></td>
+        <td class="mono">Java ${esc(item.j)}</td>
         <td><span class="chip">${esc(sel)}</span></td>
-        <td style="text-align:right">
-          ${isRunning
-            ? '<span class="badge online"><i class="dot"></i>Active</span>'
-            : isInstalling
-              ? `<button class="btn sm pr is-loading" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)" disabled aria-busy="true"><span class="np-spinner-sm"></span> Installing...</button>`
-              : `<button class="btn sm pr" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)">Install ${esc(sel)} ${esc(item.v)}</button>`
-          }
-        </td>
+        <td style="text-align:right">${actionBtn}</td>
       </tr>`;
-    }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching versions found.</td></tr>';
+    }).join('');
+  }
+
+  const POPULAR_VERS = new Set(['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4', '1.16.5', '1.12.2', '1.8.9']);
+  const items = getMergedVersionItems(sel).filter(item => {
+    const matchesQ = !q || (item.v + ' ' + item.n + ' ' + item.y).toLowerCase().includes(q);
+    const matchesF =
+      fam === 'All Families' ||
+      fam === 'All' ||
+      (fam === 'Popular' ? POPULAR_VERS.has(item.v) : item.f === fam.split(' ')[0]);
+    return matchesQ && matchesF;
+  });
+
+  if (!items.length) {
+    return vm === 'list'
+      ? '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching versions found.</td></tr>'
+      : '<div class="mu" style="grid-column:1/-1; text-align:center;padding:20px;">No matching versions found.</div>';
+  }
+
+  return items.map(item => {
+    const isRunning = S.ver === item.v && S.core === sel;
+    const isInstalling = S.installingSoftware === `${sel}:${item.v}`;
+    const javaVer = getRecommendedJavaForMcVersion(item.v, sel);
+    const isPopular = POPULAR_VERS.has(item.v);
+    const tagHtml = item.v === '26.3'
+      ? '<span class="badge online" style="font-size:10px;padding:1px 6px;">Latest</span>'
+      : isPopular
+        ? '<span class="chip" style="font-size:10px;padding:1px 6px;">Popular</span>'
+        : '';
+    const actionBtn = isRunning
+      ? '<span class="badge online"><i class="dot"></i>Active</span>'
+      : isInstalling
+        ? `<button class="btn sm pr is-loading" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)" disabled aria-busy="true"><span class="np-spinner-sm"></span> Installing...</button>`
+        : `<button class="btn sm pr" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)">Install ${esc(sel)} ${esc(item.v)}</button>`;
+
+    if (vm === 'icons') {
+      return `<div class="vm-icon-card">
+        <div class="vm-item-head">
+          <b class="mono" style="font-size:15px;">${esc(item.v)}</b>
+          ${tagHtml || `<span class="chip" style="font-size:10.5px;">Java ${esc(javaVer)}</span>`}
+        </div>
+        <div class="vm-item-sub">${esc(item.n)} (${esc(item.y)})</div>
+        <div class="vm-item-foot">
+          <span class="mu mono" style="font-size:11.5px;">Java ${esc(javaVer)}</span>
+          ${actionBtn}
+        </div>
+      </div>`;
+    }
+    if (vm === 'tiles') {
+      return `<div class="vm-tile-card">
+        <div class="vm-item-head">
+          <div>
+            <div class="row" style="gap:6px;"><b class="mono" style="font-size:15px;">${esc(item.v)}</b>${tagHtml}</div>
+            <div class="mu" style="font-size:12px; margin-top:3px;">${esc(item.n)} (${esc(item.y)})</div>
+          </div>
+          <span class="chip">${esc(sel)}</span>
+        </div>
+        <div class="vm-item-foot">
+          <span class="mono mu" style="font-size:12px;">Java ${esc(javaVer)}</span>
+          ${actionBtn}
+        </div>
+      </div>`;
+    }
+    return `<tr>
+      <td class="mono">
+        <b>${esc(item.v)}</b>
+        ${item.v === '26.3' ? '<span class="badge online" style="font-size:10px;padding:1px 6px;margin-left:6px;">Latest</span>' : isPopular ? '<span class="chip" style="font-size:10px;padding:1px 6px;margin-left:6px;">Popular</span>' : ''}
+      </td>
+      <td><span class="chip">${esc(item.n)} (${esc(item.y)})</span></td>
+      <td class="mono">Java ${esc(javaVer)}</td>
+      <td><span class="chip">${esc(sel)}</span></td>
+      <td style="text-align:right">${actionBtn}</td>
+    </tr>`;
+  }).join('');
 }
 
 function renderVersionRows() {
@@ -5078,13 +6036,18 @@ function renderVersionRows() {
 
 // --- Navigation Render ---
 function navHtml() {
-  const isDash = S.view === 'dash';
+  const showGlobalNav = S.view === 'dash' || S.view === 'bill' || (S.view === 'act' && !window.location.pathname.startsWith('/server/')) || !curServer();
+  const isAdminGlobal = (S.view === 'admin' || S.view === 'acc') && (!curServer() || S.view === 'dash');
+  const brandHref = '/';
+  const adminHref = routeUrl('admin');
+  const accHref = routeUrl('acc');
 
-  if (isDash) {
+  if (showGlobalNav || isAdminGlobal) {
+    const isActGlobal = S.view === 'act';
     return `
-    <div class="brand" onclick="go('dash')" style="cursor:pointer;">
+    <a class="brand" href="${brandHref}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
       ${brandLogoHtml(false)}
-    </div>
+    </a>
     
     <button class="nsearch" onclick="openPalette(1)" aria-label="Search (Ctrl+K)">
       ${ic('search', 15)}
@@ -5092,48 +6055,48 @@ function navHtml() {
       <kbd>Ctrl K</kbd>
     </button>
 
-    <button class="nav-item on" onclick="go('dash')">
+    <a class="nav-item ${S.view === 'dash' ? 'on' : ''}" href="/" onclick="return handleNavClick(event, 'dash')" ${S.view === 'dash' ? 'aria-current="page"' : ''}>
       ${ic('server', 16)}
       <span>Servers</span>
-    </button>
-    <button class="nav-item ${S.view === 'act' ? 'on' : ''}" onclick="go('act')">
+    </a>
+    <a class="nav-item ${isActGlobal ? 'on' : ''}" href="/activity" onclick="return handleNavClick(event, 'act', { global: true })" ${isActGlobal ? 'aria-current="page"' : ''}>
       ${ic('activity', 16)}
       <span>Activity</span>
-    </button>
+    </a>
 
     <div class="ng">Billing</div>
-    <button class="nav-item" onclick="go('dash')">
+    <a class="nav-item" href="/" onclick="return handleNavClick(event, 'dash')">
       ${ic('layers', 16)}
       <span>Overview</span>
-    </button>
-    <button class="nav-item ${S.view === 'bill' ? 'on' : ''}" onclick="go('bill')">
+    </a>
+    <a class="nav-item ${S.view === 'bill' ? 'on' : ''}" href="/billing" onclick="return handleNavClick(event, 'bill')" ${S.view === 'bill' ? 'aria-current="page"' : ''}>
       ${ic('file', 16)}
       <span>Invoices</span>
-    </button>
+    </a>
 
     <span class="sp"></span>
 
-    <button class="nav-item ${S.view === 'admin' ? 'on' : ''}" onclick="go('admin')" style="margin-bottom:6px;">
+    <a class="nav-item ${S.view === 'admin' ? 'on' : ''}" href="${esc(adminHref)}" onclick="return handleNavClick(event, 'admin')" style="margin-bottom:6px;" ${S.view === 'admin' ? 'aria-current="page"' : ''}>
       ${ic('shield', 16)}
       <span>Open Admin Area</span>
-    </button>
+    </a>
 
-    <button class="chip2 ${S.view === 'acc' ? 'on' : ''}" onclick="go('acc')" aria-label="Account Settings">
+    <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
       ${av(34)}
       <span class="who">
         <b>${esc(S.acct.fn)} ${esc(S.acct.ln)}</b>
         <span class="mu pv">${esc(S.acct.em)}</span>
       </span>
       ${ic('settings', 16)}
-    </button>`;
+    </a>`;
   }
 
   // Inside a Server Workspace
   let group = '';
   return `
-  <div class="brand" onclick="go('dash')" style="cursor:pointer;">
+  <a class="brand" href="${brandHref}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
     ${brandLogoHtml(false)}
-  </div>
+  </a>
   
   <button class="nsearch" onclick="openPalette(1)" aria-label="Search (Ctrl+K)">
     ${ic('search', 15)}
@@ -5141,39 +6104,40 @@ function navHtml() {
     <kbd>Ctrl K</kbd>
   </button>
 
-  <button class="nb" onclick="go('dash')" style="margin-bottom: 6px;">
+  <a class="nb" href="/" onclick="return handleNavClick(event, 'dash')" style="margin-bottom: 6px; text-decoration:none;">
     &larr; All servers
-  </button>
+  </a>
 
   ${PG.map(([key, label, iconName, grp]) => {
     const header = grp !== group ? `<div class="ng">${grp}</div>` : '';
     group = grp;
     const active = S.view === key ? 'on' : '';
+    const href = routeUrl(key);
     return `${header}
-    <button class="nav-item ${active}" onclick="go('${key}')" ${active ? 'aria-current="page"' : ''}>
+    <a class="nav-item ${active}" href="${esc(href)}" onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
       ${ic(iconName, 16)}
       <span>${label}</span>
-    </button>`;
+    </a>`;
   }).join('')}
 
   <span class="sp"></span>
 
-  <button class="nav-item ${S.view === 'admin' ? 'on' : ''}" onclick="go('admin')" style="margin-bottom:6px;">
+  <a class="nav-item ${S.view === 'admin' ? 'on' : ''}" href="${esc(adminHref)}" onclick="return handleNavClick(event, 'admin')" style="margin-bottom:6px;" ${S.view === 'admin' ? 'aria-current="page"' : ''}>
     ${ic('shield', 16)}
     <span>Open Admin Area</span>
-  </button>
+  </a>
 
-  <button class="chip2 ${S.view === 'acc' ? 'on' : ''}" onclick="go('acc')" aria-label="Account Settings">
+  <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
     ${av(34)}
     <span class="who">
       <b>${esc(S.acct.fn)} ${esc(S.acct.ln)}</b>
       <span class="mu pv">${esc(S.acct.em)}</span>
     </span>
     ${ic('settings', 16)}
-  </button>`;
+  </a>`;
 }
 
-// --- View Router & URL Hash Engine ---
+// --- View Router & Multi-Page Navigation Engine ---
 function normalizeRoute(view) {
   if (view === 'store') {
     S.plugTab = 'browse';
@@ -5185,15 +6149,12 @@ function normalizeRoute(view) {
   return view;
 }
 
-window.go = function(view) {
+window.go = function(view, opts = {}) {
   const target = normalizeRoute(view);
   if (S.view === 'admin' && target !== 'admin' && (S.adminTab || 0) === 4) {
     applyBranding(S.branding);
   }
-  S.view = target;
-  window.location.hash = '#' + target;
-  R();
-  onEnterView(target);
+  navigateToUrl(routeUrl(target, opts), getViewDisplayLabel(target));
 };
 
 window.addEventListener('hashchange', () => {
@@ -5256,18 +6217,49 @@ function bindEditorTabKey() {
   });
 }
 
-// --- View Transition Lifecycle Hook ---
+// --- View Transition Lifecycle Hook & Initial Route Preloader ---
+async function loadInitialRouteData(view) {
+  const jobs = [];
+  if (view === 'pl') jobs.push(loadPlayersData(true));
+  else if (view === 'fi') jobs.push(loadFileList(S.currentDir, true));
+  else if (view === 'db') jobs.push(loadDatabases(true, true));
+  else if (view === 'plug') {
+    jobs.push(loadPluginsList(true));
+    jobs.push(loadVersionsCatalog());
+    if ((S.plugTab || 'browse') === 'browse') jobs.push(searchModrinth(true));
+  }
+  else if (view === 'bk') jobs.push(loadBackupsList(true));
+  else if (view === 'set') {
+    jobs.push(loadProperties(true));
+    jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
+  }
+  else if (view === 'stp' || view === 'ver') {
+    jobs.push(loadVersionsCatalog());
+    jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
+  }
+  else if (view === 'net') {
+    jobs.push(loadSFTPDetails(true));
+    jobs.push(loadServerPorts(true));
+  }
+  else if (view === 'act') jobs.push(loadActivityLog(S.actFilter?.limit || 200, true));
+  else if (view === 'admin') jobs.push(loadAdminData(true));
+  else if (view === 'acc') jobs.push(loadAccountData(true));
+  else if (view === 'con') jobs.push(loadServerPorts(true));
+  await Promise.all(jobs).catch(() => {});
+}
+
 window.onEnterView = function(view) {
   if (view === 'pl') loadPlayersData();
   else if (view === 'fi') loadFileList(S.currentDir);
   else if (view === 'db') loadDatabases();
   else if (view === 'plug') {
     loadPluginsList();
+    loadVersionsCatalog();
     if ((S.plugTab || 'browse') === 'browse') searchModrinth();
   }
   else if (view === 'bk') loadBackupsList();
   else if (view === 'set') { loadProperties(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
-  else if (view === 'stp' || view === 'ver') { loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
+  else if (view === 'stp' || view === 'ver') { loadVersionsCatalog(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
   else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
   else if (view === 'act') loadActivityLog();
   else if (view === 'admin') loadAdminData();
@@ -5281,12 +6273,12 @@ function setNodeFilter(nodeId) {
 }
 
 // --- Backend Data Loaders ---
-async function loadDashboard() {
+async function loadDashboard(skipRender = false, preferredRef = null) {
   if (!S.loading) S.loading = {};
-  if (S.servers.length === 0) S.loading.dash = true;
+  if (!skipRender && S.servers.length === 0) S.loading.dash = true;
   const prevCur = curServer();
-  const prevId = prevCur?.id || S.activeServerId;
-  const prevNodeId = prevCur?.node_id || S.activeNodeId || 'local';
+  const prevId = preferredRef?.id || prevCur?.id || S.activeServerId;
+  const prevNodeId = preferredRef?.nodeId || prevCur?.node_id || S.activeNodeId || 'local';
 
   try {
     const [clusterRes, nodesRes, act] = await Promise.all([
@@ -5311,9 +6303,11 @@ async function loadDashboard() {
 
     if (S.servers.length > 0) {
       let idx = prevId ? S.servers.findIndex(s => s.id === prevId && (s.node_id || 'local') === prevNodeId) : -1;
+      if (idx === -1 && prevId) idx = S.servers.findIndex(s => s.id === prevId);
       if (idx === -1) idx = 0;
       S.cs = idx;
       const cur = curServer();
+      saveActiveServerRef(cur);
       applyServerStatsSnapshot(cur, cur.stats, false);
       S.ver = cur.version || S.ver;
       S.core = (cur.type || 'paper').charAt(0).toUpperCase() + (cur.type || 'paper').slice(1);
@@ -5323,7 +6317,7 @@ async function loadDashboard() {
     }
   } catch (e) {} finally {
     S.loading.dash = false;
-    R();
+    if (!skipRender) R();
   }
 }
 
@@ -5338,7 +6332,7 @@ async function loadAdminNodes(toastOnDone = false) {
   if (S.view === 'admin' || S.view === 'dash') R();
 }
 
-function buildHeadlessNodeInstallCmd() {
+function buildClusterNodeInstallCmd() {
   const h = S.nodePairHelper || {};
   const origin = window.location.origin;
   const name = (h.name || 'mc-node-01').trim() || 'mc-node-01';
@@ -5352,7 +6346,7 @@ function buildHeadlessNodeInstallCmd() {
   return cmd;
 }
 
-function toggleHeadlessNodeHelper() {
+function toggleClusterNodeHelper() {
   S.nodePairOpen = !S.nodePairOpen;
   R();
 }
@@ -5361,14 +6355,14 @@ function onNodeHelperInput(field, val) {
   if (!S.nodePairHelper) S.nodePairHelper = { name: 'mc-node-01', location: '', port: '8080', apiKey: '' };
   S.nodePairHelper[field] = val;
   const el = $('#node-install-cmd-text');
-  if (el) el.textContent = buildHeadlessNodeInstallCmd();
+  if (el) el.textContent = buildClusterNodeInstallCmd();
 }
 
 async function generateNodePairingKey(btnEl) {
   if (!S.nodePairHelper) S.nodePairHelper = { name: 'mc-node-01', location: '', port: '8080', apiKey: '' };
   if (btnEl) setBtnLoading(btnEl, true, 'Generating...');
   try {
-    const label = `Headless Node (${(S.nodePairHelper.name || 'mc-node-01').trim() || 'mc-node-01'})`;
+    const label = `Cluster Node (${(S.nodePairHelper.name || 'mc-node-01').trim() || 'mc-node-01'})`;
     const res = await api('/api/account/api-keys', {
       method: 'POST',
       body: JSON.stringify({ name: label })
@@ -5379,7 +6373,7 @@ async function generateNodePairingKey(btnEl) {
       return;
     }
     S.nodePairHelper.apiKey = tok;
-    toast('Admin API key generated for headless node pairing!', 'ok');
+    toast('Admin API key generated for cluster node pairing!', 'ok');
     R();
   } catch (e) {} finally {
     if (btnEl) setBtnLoading(btnEl, false);
@@ -5387,22 +6381,17 @@ async function generateNodePairingKey(btnEl) {
 }
 
 function selectAdminTab(idx) {
-  const prev = S.adminTab || 0;
-  if (prev === 4 && idx !== 4) {
+  if ((S.adminTab || 0) === 4 && idx !== 4) {
     applyBranding(S.branding);
   }
-  S.adminTab = idx;
-  if (idx === 4) {
-    if (!S.brandDraft) S.brandDraft = { ...DEFAULT_BRANDING, ...S.branding };
-    if (!S.daemonDraft) S.daemonDraft = { ...S.brandingDaemon };
-    applyBranding(S.brandDraft);
-  }
-  R();
-  if (idx === 1) loadAdminNodes();
-  else if (idx === 5) loadActivityLog();
+  navigateToUrl(routeUrl('admin', { adminTab: idx }), 'Admin Area');
 }
 
-async function loadAdminData() {
+function selectAccountTab(idx) {
+  navigateToUrl(routeUrl('acc', { acctTab: idx }), 'Account Settings');
+}
+
+async function loadAdminData(skipRender = false) {
   const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes] = await Promise.all([
     api('/api/system').catch(() => null),
     api('/api/admin/users').catch(() => null),
@@ -5436,8 +6425,8 @@ async function loadAdminData() {
   if (Array.isArray(actRes)) S.acct.act = actRes;
 
   applyBranding((S.adminTab || 0) === 4 && S.brandDraft ? S.brandDraft : S.branding);
-  await loadJavaRuntimes(true, 'local');
-  R();
+  await loadJavaRuntimes(true, 'local', skipRender);
+  if (!skipRender) R();
 }
 
 function openNodeModal(nodeId = null) {
@@ -5456,7 +6445,7 @@ function openNodeModal(nodeId = null) {
       </div>
 
       <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
-        Enter the reachable HTTP/HTTPS URL of your remote NeoPanel daemon along with its Node Token (<code>neo_node_...</code> via <code>sudo neopanel node-token</code> on headless nodes) or an admin <code>neo_...</code> API key.
+        Enter the reachable HTTP/HTTPS URL of your remote NeoPanel daemon along with its Node Token (<code>neo_node_...</code> via <code>sudo neopanel node-token</code> on cluster nodes) or an admin <code>neo_...</code> API key.
       </p>
 
       <form onsubmit="submitNodeModal(event, '${isEdit ? esc(existing.id) : ''}')">
@@ -5637,12 +6626,12 @@ async function bulkStopServers() {
   toast('All servers stopped');
 }
 
-async function loadPlayersData() {
+async function loadPlayersData(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
   S.loading.players = true;
-  if (S.view === 'pl') R();
+  if (!skipRender && S.view === 'pl') R();
   try {
     const data = await api(srvApiPath(srv, '/players'));
     S.wl = data.whitelist || [];
@@ -5650,7 +6639,7 @@ async function loadPlayersData() {
     S.ops = data.ops || [];
   } catch (e) {} finally {
     S.loading.players = false;
-    R();
+    if (!skipRender) R();
   }
 }
 
@@ -5733,19 +6722,19 @@ function addWhitelistPlayer() {
 }
 
 // --- File Manager Operations ---
-async function loadFileList(path = '') {
+async function loadFileList(path = '', skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
   S.loading.files = true;
-  if (S.view === 'fi') R();
+  if (!skipRender && S.view === 'fi') R();
   try {
     const data = await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`));
     S.fileList = data || [];
     S.currentDir = path;
   } catch (e) {} finally {
     S.loading.files = false;
-    R();
+    if (!skipRender) R();
   }
 }
 
@@ -5834,10 +6823,7 @@ function closeEditor() {
 }
 
 function setPlugTab(tab) {
-  S.plugTab = tab;
-  R();
-  if (tab === 'browse') searchModrinth();
-  else loadPluginsList();
+  navigateToUrl(routeUrl('plug', { plugTab: tab }), tab === 'installed' ? 'Installed Plugins' : 'Plugin Store');
 }
 
 function toggleCustomJavaInput(val) {
@@ -6394,12 +7380,12 @@ function initDragAndDrop() {
 }
 
 // --- Plugins & Modrinth Store ---
-async function loadPluginsList() {
+async function loadPluginsList(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
   S.loading.plugins = true;
-  if (S.view === 'plug' && (S.plugTab || 'browse') === 'installed') R();
+  if (!skipRender && S.view === 'plug' && (S.plugTab || 'browse') === 'installed') R();
   try {
     const data = await api(srvApiPath(srv, '/plugins'));
     const list = Array.isArray(data) ? data : (data?.plugins || []);
@@ -6411,11 +7397,13 @@ async function loadPluginsList() {
     });
   } catch (e) {} finally {
     S.loading.plugins = false;
-    if (S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
-      const cnt = $('#plug-installed-count');
-      if (cnt) cnt.textContent = String(S.plugins.length);
-    } else {
-      R();
+    if (!skipRender) {
+      if (S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
+        const cnt = $('#plug-installed-count');
+        if (cnt) cnt.textContent = String(S.plugins.length);
+      } else {
+        R();
+      }
     }
   }
 }
@@ -6448,13 +7436,101 @@ function togglePlugin(idx, enabled) {
 let searchTimeout = null;
 function searchModrinthDebounced() {
   clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(searchModrinth, 350);
+  searchTimeout = setTimeout(() => searchModrinth(), 350);
 }
 
-async function searchModrinth() {
+function renderModrinthHitsHtml(hits) {
+  const list = Array.isArray(hits) ? hits : [];
+  const storeVm = getViewMode('plug_store', 'list');
+  if (!list.length) {
+    return '<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">No matching plugins found on Modrinth.</div>';
+  }
+  return list.map(hit => {
+    const titleLow = String(hit.title || '').toLowerCase();
+    const slugLow = String(hit.slug || '').toLowerCase();
+    const isInstalled = S.plugins.some(p => {
+      const fname = String(p[0] || '').toLowerCase();
+      return (titleLow && fname.includes(titleLow.replace(/\s+/g, ''))) || (slugLow && fname.includes(slugLow));
+    });
+    const icon = hit.icon_url
+      ? `<img src="${esc(hit.icon_url)}" class="plugin-icon" onerror="this.src='/favicon.svg'">`
+      : `<div class="plugin-icon" style="display:grid; place-items:center; color:var(--ac); font-size:20px;">🧩</div>`;
+    const slugVal = hit.slug || hit.project_id || hit.id || '';
+    const isInstalling = Boolean(S.installingPlugins && S.installingPlugins.has(slugVal));
+    const btnPad = storeVm === 'icons' ? 'min-width: 88px; font-size: 12px; padding: 5px 10px;' : 'min-width: 112px;';
+    const actionHtml = isInstalled
+      ? '<span class="badge online"><i class="dot"></i>Installed</span>'
+      : isInstalling
+        ? `<button class="btn ${storeVm === 'icons' ? 'sm ' : ''}pr is-loading" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" disabled aria-busy="true" style="${btnPad} justify-content: center;"><span class="np-spinner-sm"></span> Installing...</button>`
+        : `<button class="btn ${storeVm === 'icons' ? 'sm ' : ''}pr" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" style="${btnPad} justify-content: center;">${ic('download', 14)} Install</button>`;
+
+    if (storeVm === 'icons') {
+      return `
+      <div class="vm-icon-card">
+        <div class="vm-plug-icon-center">
+          ${icon}
+          <b class="plugin-title" style="font-size: 13.5px;" title="${esc(hit.title)}">${esc(hit.title)}</b>
+          <div class="mu" style="font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">by ${esc(hit.author || 'Author')}</div>
+        </div>
+        <div class="vm-item-foot">
+          <span class="mu" style="font-size: 11px;">&darr; ${formatNum(hit.downloads)}</span>
+          ${actionHtml}
+        </div>
+      </div>`;
+    }
+
+    if (storeVm === 'tiles') {
+      return `
+      <div class="vm-tile-card">
+        <div class="vm-item-head" style="align-items: flex-start;">
+          <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1;">
+            ${icon}
+            <div style="min-width: 0;">
+              <b class="vm-item-title" style="display: block;" title="${esc(hit.title)}">${esc(hit.title)}</b>
+              <div class="mu" style="font-size: 12px; margin-top: 2px;">by ${esc(hit.author || 'Author')}</div>
+            </div>
+          </div>
+        </div>
+        <div class="plugin-desc" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal;">${esc(hit.description || '')}</div>
+        <div class="vm-item-foot">
+          <div class="row" style="gap: 8px; font-size: 11.5px;">
+            <span class="mu">&darr; ${formatNum(hit.downloads)}</span>
+            <span class="chip">Modrinth</span>
+          </div>
+          ${actionHtml}
+        </div>
+      </div>`;
+    }
+
+    return `
+    <div class="plugin-card">
+      <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
+        ${icon}
+        <div style="min-width: 0;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
+            <b class="plugin-title">${esc(hit.title)}</b>
+            <span class="mu" style="font-size: 12.5px;">by ${esc(hit.author || 'Author')}</span>
+          </div>
+          <div class="plugin-desc">${esc(hit.description || '')}</div>
+          <div class="row" style="gap: 10px; font-size: 11.5px; margin-top: 5px; flex-wrap: wrap;">
+            <span class="mu">&darr; ${formatNum(hit.downloads)}</span>
+            <span class="mu">&hearts; ${formatNum(hit.follows || 0)} follows</span>
+            <span class="chip">Modrinth</span>
+          </div>
+        </div>
+      </div>
+      <div style="flex-shrink: 0;">
+        ${actionHtml}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function searchModrinth(skipDomWrite = false) {
   const grid = $('#store-grid');
-  if (!grid) return;
-  grid.innerHTML = loaderHtml('Searching Modrinth plugins...');
+  if (!skipDomWrite && grid) {
+    grid.innerHTML = loaderHtml('Searching Modrinth plugins...');
+  }
   const q = S.q || '';
   const loader = S.plugLoader || '';
   const ver = S.plugVer || '';
@@ -6468,49 +7544,15 @@ async function searchModrinth() {
       limit: '24'
     });
     const res = await api(`/api/plugins/search?${params.toString()}`);
-    const hits = res.hits || [];
-    grid.innerHTML = hits.map(hit => {
-      const titleLow = String(hit.title || '').toLowerCase();
-      const slugLow = String(hit.slug || '').toLowerCase();
-      const isInstalled = S.plugins.some(p => {
-        const fname = String(p[0] || '').toLowerCase();
-        return (titleLow && fname.includes(titleLow.replace(/\s+/g, ''))) || (slugLow && fname.includes(slugLow));
-      });
-      const icon = hit.icon_url
-        ? `<img src="${esc(hit.icon_url)}" class="plugin-icon" onerror="this.src='/favicon.svg'">`
-        : `<div class="plugin-icon" style="display:grid; place-items:center; color:var(--ac); font-size:20px;">🧩</div>`;
-      const slugVal = hit.slug || hit.project_id || hit.id || '';
-      const isInstalling = Boolean(S.installingPlugins && S.installingPlugins.has(slugVal));
-
-      return `
-      <div class="plugin-card">
-        <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
-          ${icon}
-          <div style="min-width: 0;">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
-              <b class="plugin-title">${esc(hit.title)}</b>
-              <span class="mu" style="font-size: 12.5px;">by ${esc(hit.author || 'Author')}</span>
-            </div>
-            <div class="plugin-desc">${esc(hit.description || '')}</div>
-            <div class="row" style="gap: 10px; font-size: 11.5px; margin-top: 5px; flex-wrap: wrap;">
-              <span class="mu">&darr; ${formatNum(hit.downloads)}</span>
-              <span class="mu">&hearts; ${formatNum(hit.follows || 0)} follows</span>
-              <span class="chip">Modrinth</span>
-            </div>
-          </div>
-        </div>
-        <div style="flex-shrink: 0;">
-          ${isInstalled
-            ? '<span class="badge online"><i class="dot"></i>Installed</span>'
-            : isInstalling
-              ? `<button class="btn pr is-loading" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" disabled aria-busy="true" style="min-width: 112px; justify-content: center;"><span class="np-spinner-sm"></span> Installing...</button>`
-              : `<button class="btn pr" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" style="min-width: 112px; justify-content: center;">${ic('download', 14)} Install</button>`
-          }
-        </div>
-      </div>`;
-    }).join('') || '<div class="mu" style="padding:24px; text-align:center;">No matching plugins found on Modrinth.</div>';
+    S.lastModrinthHits = res.hits || [];
+    if (!skipDomWrite && grid) {
+      grid.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
+    }
   } catch (e) {
-    grid.innerHTML = '<div class="mu" style="padding:24px; text-align:center;">Error reaching Modrinth API.</div>';
+    S.lastModrinthHits = [];
+    if (!skipDomWrite && grid) {
+      grid.innerHTML = '<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">Error reaching Modrinth API.</div>';
+    }
   }
 }
 
@@ -6571,18 +7613,18 @@ async function installPlugin(projectSlug, title, btnEl) {
 }
 
 // --- Backups ---
-async function loadBackupsList() {
+async function loadBackupsList(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
   S.loading.backups = true;
-  if (S.view === 'bk') R();
+  if (!skipRender && S.view === 'bk') R();
   try {
     const list = await api(srvApiPath(srv, '/backups'));
     S.bk = list || [];
   } catch (e) {} finally {
     S.loading.backups = false;
-    R();
+    if (!skipRender) R();
   }
 }
 
@@ -6781,7 +7823,7 @@ async function installSoftware(software, version, btnEl) {
   }
 }
 
-async function loadProperties() {
+async function loadProperties(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   try {
@@ -6793,7 +7835,7 @@ async function loadProperties() {
     S.props.pvp = props['pvp'] !== 'false';
     S.props.wl = props['white-list'] === 'true';
     S.props.cmd = props['enable-command-block'] === 'true';
-    R();
+    if (!skipRender) R();
   } catch (e) {}
 }
 
@@ -6860,18 +7902,18 @@ async function saveProperties() {
   }
 }
 
-async function loadSFTPDetails() {
+async function loadSFTPDetails(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   try {
     const data = await api(srvApiPath(srv, '/sftp'));
     S.sftp = data;
-    R();
+    if (!skipRender) R();
   } catch (e) {}
 }
 
 // --- Account Management ---
-async function loadAccountData() {
+async function loadAccountData(skipRender = false) {
   try {
     const savedProf = JSON.parse(localStorage.getItem('neopanel_profile') || '{}');
     const prof = await api('/api/account/profile');
@@ -6888,7 +7930,7 @@ async function loadAccountData() {
     } else if (S.acct.tab === 4) {
       S.acct.act = (await api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`)) || [];
     }
-    R();
+    if (!skipRender) R();
   } catch (e) {}
 }
 
@@ -7003,7 +8045,7 @@ async function deleteAPIKey(id) {
 }
 
 // --- Appearance ---
-function setAppearanceMode(mode) {
+function setAppearanceMode(mode, skipRender = false) {
   S.acct.mode = mode;
   localStorage.setItem('neopanel_mode', mode);
   const d = document.documentElement;
@@ -7015,7 +8057,7 @@ function setAppearanceMode(mode) {
     d.dataset.theme = mode === 'Light' ? 'light' : 'dark';
   }
   applyBranding((S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : S.branding);
-  R();
+  if (!skipRender) R();
 }
 
 if (window.matchMedia) {
@@ -7052,6 +8094,7 @@ function switchServer(index) {
   const srv = S.servers[index];
   if (!srv) return;
   const nodeId = srv.node_id || 'local';
+  saveActiveServerRef(srv);
   applyServerStatsSnapshot(srv, srv.stats, false);
   S.ver = srv.version || S.ver;
   S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
@@ -7089,8 +8132,11 @@ function paletteItems() {
     ...PG.map(p => ['Pages', p[1], 'Go to page', () => go(p[0])]),
     ['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')],
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
-    ...S.servers.map((s, i) => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => switchServer(i)]),
-    ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.view = 'pl'; S.ptab = 'online'; R(); }]),
+    ...S.servers.map(s => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => {
+      saveActiveServerRef(s);
+      navigateToUrl(serverRouteUrl(s.node_id || 'local', s.id, 'con'), s.name || 'Server Console');
+    }]),
+    ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.ptab = 'online'; go('pl'); }]),
     ['Actions', 'Toggle Live Console', 'Ctrl + `', () => toggleFlyConsole()],
     ['Actions', 'Create Backup', 'Backups', () => createBackup()],
     ['Actions', 'Restart Server', 'Power', () => power('restart')],
@@ -7217,6 +8263,21 @@ window.syncCreateJavaFromVersion = function(ver) {
   }
 };
 
+function syncCreateSelectValue(ver) {
+  const sel = $('#cs-ver-sel');
+  if (!sel) return;
+  const v = String(ver || '').trim();
+  if (v && Array.from(sel.options).some(o => o.value === v)) {
+    sel.value = v;
+    if (typeof sel._cselectRebuild === 'function') sel._cselectRebuild();
+  }
+}
+
+window.onCreateVersionInput = function(ver) {
+  syncCreateSelectValue(ver);
+  syncCreateJavaFromVersion(ver);
+};
+
 window.setCreateEngine = function(type) {
   const sel = $('#cs-type');
   if (sel) sel.value = type;
@@ -7224,24 +8285,42 @@ window.setCreateEngine = function(type) {
     card.classList.toggle('on', card.dataset.engine === type);
   });
 
-  // Proxy presets
+  const verInp = $('#cs-ver');
+  const portInp = $('#cs-port');
   if (type === 'velocity') {
-    $('#cs-ver').value = '3.4.0-SNAPSHOT';
-    $('#cs-port').value = '25565';
+    if (verInp) verInp.value = '3.4.0-SNAPSHOT';
+    if (portInp) portInp.value = '25565';
     setCreateRam(1024);
-  } else if (type === 'waterfall' || type === 'bungeecord') {
-    $('#cs-ver').value = '1.20';
-    $('#cs-port').value = '25577';
+  } else if (type === 'waterfall') {
+    if (verInp) verInp.value = '1.20';
+    if (portInp) portInp.value = '25577';
     setCreateRam(1024);
-  } else if (type === 'paper') {
-    $('#cs-ver').value = '1.21.4';
+  } else if (type === 'bungeecord') {
+    if (verInp) verInp.value = 'latest';
+    if (portInp) portInp.value = '25577';
+    setCreateRam(1024);
+  } else if (verInp) {
+    const cur = verInp.value.trim();
+    if (!cur || cur === '3.4.0-SNAPSHOT' || cur === 'latest' || cur === '1.20') {
+      verInp.value = '1.21.4';
+    }
   }
-  syncCreateJavaFromVersion($('#cs-ver')?.value || '');
+
+  const csVerSel = $('#cs-ver-sel');
+  if (csVerSel) {
+    const curVer = verInp?.value?.trim() || '1.21.4';
+    const vers = getAllMcVersions(type);
+    const list = (curVer && !vers.includes(curVer)) ? [curVer, ...vers] : vers;
+    csVerSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVer ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    if (typeof csVerSel._cselectRebuild === 'function') csVerSel._cselectRebuild();
+  }
+  syncCreateJavaFromVersion(verInp?.value || '');
 };
 
 window.setCreateVersion = function(ver) {
   const inp = $('#cs-ver');
   if (inp) inp.value = ver;
+  syncCreateSelectValue(ver);
   syncCreateJavaFromVersion(ver);
 };
 
@@ -7289,13 +8368,14 @@ function openCreateServerModal() {
     : (nodesList.find(n => n.id === 'local')?.id || nodesList[0].id);
   const nextPort = getNextSuggestedPort(defaultNodeId);
   const defaultRam = Number(S.brandingDaemon?.default_ram_mb) || Number(S.adminDaemonCfg?.defaultRamMB) || 2048;
+  const initialVers = getAllMcVersions('paper');
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
-    <div class="card pbox" style="padding:26px; max-width:620px; max-height:88vh; overflow-y:auto;">
+    <div class="card pbox" style="padding:26px; max-width:680px; max-height:88vh; overflow-y:auto;">
       <div class="row sb" style="margin-bottom:16px;">
         <div>
           <h2 style="font-size:22px; margin:0;">Create Server or Proxy</h2>
-          <span class="mu" style="font-size:13px;">Deploy a high-performance Minecraft instance</span>
+          <span class="mu" style="font-size:13px;">Deploy any Minecraft server engine &amp; release version</span>
         </div>
         <button class="btn sm" onclick="closeModal()">✕</button>
       </div>
@@ -7316,56 +8396,43 @@ function openCreateServerModal() {
           </label>` : `<input type="hidden" id="cs-node" value="${esc(defaultNodeId)}">`}
         </div>
 
-        <!-- Category: Game Server vs Network Proxy -->
+        <!-- Category: Game Server vs Network Proxy (All 11 Engines) -->
         <div style="margin-bottom:14px;">
           <span class="mu" style="display:block; margin-bottom:6px; font-size:13px; font-weight:600;">Engine / Flavor</span>
-          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:8px;">
-            <button type="button" class="card engine-card sel on" data-engine="paper" onclick="setCreateEngine('paper')" style="padding:10px; text-align:center;">
-              <b>Paper</b>
-              <span class="mu" style="font-size:11px; display:block;">Fast &bull; Plugins</span>
-            </button>
-            <button type="button" class="card engine-card sel" data-engine="purpur" onclick="setCreateEngine('purpur')" style="padding:10px; text-align:center;">
-              <b>Purpur</b>
-              <span class="mu" style="font-size:11px; display:block;">Extra Configs</span>
-            </button>
-            <button type="button" class="card engine-card sel" data-engine="fabric" onclick="setCreateEngine('fabric')" style="padding:10px; text-align:center;">
-              <b>Fabric</b>
-              <span class="mu" style="font-size:11px; display:block;">Modern Mods</span>
-            </button>
-            <button type="button" class="card engine-card sel" data-engine="velocity" onclick="setCreateEngine('velocity')" style="padding:10px; text-align:center;">
-              <b>Velocity</b>
-              <span class="mu" style="font-size:11px; display:block;">Proxy Egg</span>
-            </button>
-            <button type="button" class="card engine-card sel" data-engine="waterfall" onclick="setCreateEngine('waterfall')" style="padding:10px; text-align:center;">
-              <b>Waterfall</b>
-              <span class="mu" style="font-size:11px; display:block;">Bungee Proxy</span>
-            </button>
-            <button type="button" class="card engine-card sel" data-engine="vanilla" onclick="setCreateEngine('vanilla')" style="padding:10px; text-align:center;">
-              <b>Vanilla</b>
-              <span class="mu" style="font-size:11px; display:block;">Plain Mojang</span>
-            </button>
+          <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap:8px;">
+            ${CORES.map(([label, desc]) => {
+              const slug = label.toLowerCase();
+              return `
+              <button type="button" class="card engine-card sel ${slug === 'paper' ? 'on' : ''}" data-engine="${esc(slug)}" onclick="setCreateEngine('${esc(slug)}')" style="padding:9px 8px; text-align:center;">
+                <b>${esc(label)}</b>
+                <span class="mu" style="font-size:10.5px; display:block; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(desc)}">${esc(desc)}</span>
+              </button>`;
+            }).join('')}
           </div>
           <select id="cs-type" style="display:none;">
-            <option value="paper">paper</option>
-            <option value="purpur">purpur</option>
-            <option value="fabric">fabric</option>
-            <option value="velocity">velocity</option>
-            <option value="waterfall">waterfall</option>
-            <option value="vanilla">vanilla</option>
+            ${CORES.map(([label]) => {
+              const slug = label.toLowerCase();
+              return `<option value="${esc(slug)}" ${slug === 'paper' ? 'selected' : ''}>${esc(slug)}</option>`;
+            }).join('')}
           </select>
         </div>
 
-        <!-- Version Input with Selectable Pills -->
+        <!-- Version Searchable Catalog + Custom Input + Popular Pills -->
         <div style="margin-bottom:14px;">
           <div class="row sb" style="margin-bottom:6px; flex-wrap:wrap; gap:6px;">
-            <span class="mu" style="font-size:13px; font-weight:600;">Minecraft / Release Version</span>
+            <span class="mu" style="font-size:13px; font-weight:600;">Minecraft / Release Version (All Releases)</span>
             <div class="row" style="gap:4px; flex-wrap:wrap;">
-              ${['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.16.5'].map(v => `
+              ${['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.16.5', '1.12.2', '1.8.9'].map(v => `
                 <button type="button" class="btn sm ver-pill ${v === '1.21.4' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
               `).join('')}
             </div>
           </div>
-          <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 26.3, 1.21.4, 1.20.4, 3.4.0-SNAPSHOT" oninput="syncCreateJavaFromVersion(this.value)">
+          <div style="display:grid; grid-template-columns: minmax(145px, 185px) 1fr; gap:8px;">
+            <select id="cs-ver-sel" data-searchable="1" onchange="setCreateVersion(this.value)">
+              ${initialVers.map(v => `<option value="${esc(v)}" ${v === '1.21.4' ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+            </select>
+            <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 26.3, 1.21.4, 1.12.2, 1.8.9, or custom" oninput="onCreateVersionInput(this.value)">
+          </div>
         </div>
 
         <!-- Custom Port Allocation -->
@@ -7424,6 +8491,7 @@ function openCreateServerModal() {
   </div>`;
 
   enhanceSelects(container);
+  loadVersionsCatalog();
   loadJavaRuntimes(false, defaultNodeId);
   setTimeout(() => $('#cs-name')?.focus(), 50);
 }
@@ -7484,16 +8552,19 @@ async function handleCreateServer(e) {
     closeModal();
     toast(`Server ${name} created successfully!`);
 
-    await loadDashboard();
+    await loadDashboard(true);
 
-    let newIdx = S.servers.findIndex(s => s.id === res.id && (s.node_id || 'local') === targetNodeId);
-    if (newIdx === -1) {
-      newIdx = S.servers.findIndex(s => s.name === name && (s.node_id || 'local') === targetNodeId);
+    let createdSrv = S.servers.find(s => s.id === res.id && (s.node_id || 'local') === targetNodeId);
+    if (!createdSrv) {
+      createdSrv = S.servers.find(s => s.name === name && (s.node_id || 'local') === targetNodeId);
     }
-    if (newIdx !== -1) {
-      switchServer(newIdx);
+    const createdId = createdSrv?.id || res?.id;
+    if (createdId) {
+      saveActiveServerRef({ id: createdId, node_id: targetNodeId });
+      navigateToUrl(serverRouteUrl(targetNodeId, createdId, 'con'), name);
+    } else {
+      navigateToUrl('/', 'Servers Overview');
     }
-    go('con');
   } catch (err) {
     if (btn) {
       btn.disabled = false;
@@ -7513,14 +8584,14 @@ async function handleCreateServer(e) {
 }
 
 // --- Port Allocation Management ---
-async function loadServerPorts() {
+async function loadServerPorts(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   try {
     const list = await api(srvApiPath(srv, '/ports'));
     if (Array.isArray(list)) {
       S.ports = list;
-      if (S.view === 'net') R();
+      if (!skipRender && S.view === 'net') R();
     }
   } catch (err) {
     console.error('Failed to load server ports:', err);
@@ -7774,12 +8845,13 @@ async function executeDeleteServer(srvId, nodeId = 'local') {
     }
 
     await api(nodeApiPath(targetNodeId, `/api/servers/${encodeURIComponent(srvId)}`), { method: 'DELETE' });
+    const saved = getSavedActiveServerRef();
+    if (saved && saved.id === srvId && (saved.nodeId || 'local') === targetNodeId) {
+      try { localStorage.removeItem('neopanel_active_srv'); } catch (e) {}
+    }
     toast('Server deleted successfully', 'ok');
     closeModal();
-
-    await loadDashboard();
-    S.cs = 0;
-    go('dash');
+    navigateToUrl('/', 'Servers Overview');
   } catch (err) {
     toast(err.message || 'Failed to delete server', 'bad');
     if (btn) {
@@ -7797,6 +8869,44 @@ function updateReinstallJavaPreview() {
   if (el) el.textContent = `Java ${getRecommendedJavaForMcVersion(ver, sw)}`;
 }
 
+function syncReinstallSelectFromInput(ver) {
+  const sel = $('#reinst-ver-sel');
+  if (!sel) return;
+  const v = String(ver || '').trim();
+  if (v && Array.from(sel.options).some(o => o.value === v)) {
+    sel.value = v;
+    if (typeof sel._cselectRebuild === 'function') sel._cselectRebuild();
+  }
+}
+
+function setReinstallVersion(ver) {
+  const inp = $('#reinst-version');
+  if (inp) inp.value = ver;
+  syncReinstallSelectFromInput(ver);
+  updateReinstallJavaPreview();
+}
+
+function onReinstallEngineChange(sw) {
+  const sel = $('#reinst-ver-sel');
+  const inp = $('#reinst-version');
+  const curV = inp?.value?.trim() || '1.21.4';
+  if (sw === 'velocity' && !curV.includes('SNAPSHOT')) {
+    if (inp) inp.value = '3.4.0-SNAPSHOT';
+  } else if (sw === 'waterfall' && curV !== '1.20') {
+    if (inp) inp.value = '1.20';
+  } else if (sw === 'bungeecord') {
+    if (inp) inp.value = 'latest';
+  }
+  if (sel) {
+    const newCur = inp?.value?.trim() || '1.21.4';
+    const vers = getAllMcVersions(sw);
+    const list = (newCur && !vers.includes(newCur)) ? [newCur, ...vers] : vers;
+    sel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === newCur ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    if (typeof sel._cselectRebuild === 'function') sel._cselectRebuild();
+  }
+  updateReinstallJavaPreview();
+}
+
 function openReinstallModal(srvId, nodeId = null) {
   const container = $('#modal-container');
   if (!container) return;
@@ -7810,6 +8920,8 @@ function openReinstallModal(srvId, nodeId = null) {
   const curType = (targetSrv.type || 'paper').toLowerCase();
   const curVer = targetSrv.version || '1.21.4';
   const recJava = getRecommendedJavaForMcVersion(curVer, curType);
+  const allVers = getAllMcVersions(curType);
+  const verList = (curVer && !allVers.includes(curVer)) ? [curVer, ...allVers] : allVers;
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:580px; max-height:88vh; overflow-y:auto; border:1px solid var(--border-light);">
@@ -7827,7 +8939,7 @@ function openReinstallModal(srvId, nodeId = null) {
       <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
         <label class="f" style="margin-bottom:12px;">
           <span>Minecraft Engine / Server Software</span>
-          <select id="reinst-software" style="height:38px;" onchange="updateReinstallJavaPreview()">
+          <select id="reinst-software" style="height:38px;" onchange="onReinstallEngineChange(this.value)">
             <option value="paper" ${curType === 'paper' ? 'selected' : ''}>Paper (High performance, Bukkit/Spigot plugins)</option>
             <option value="purpur" ${curType === 'purpur' ? 'selected' : ''}>Purpur (Ultra-configurable Paper fork)</option>
             <option value="leaf" ${curType === 'leaf' || curType === 'leafmc' ? 'selected' : ''}>LeafMC (Hyper-optimized Paper fork)</option>
@@ -7837,13 +8949,20 @@ function openReinstallModal(srvId, nodeId = null) {
             <option value="neoforge" ${curType === 'neoforge' ? 'selected' : ''}>NeoForge (Modern community mod loader)</option>
             <option value="vanilla" ${curType === 'vanilla' ? 'selected' : ''}>Vanilla (Official Mojang release)</option>
             <option value="velocity" ${curType === 'velocity' ? 'selected' : ''}>Velocity (High-performance modern proxy)</option>
+            <option value="waterfall" ${curType === 'waterfall' ? 'selected' : ''}>Waterfall (PaperMC BungeeCord proxy fork)</option>
+            <option value="bungeecord" ${curType === 'bungeecord' ? 'selected' : ''}>BungeeCord (Classic multi-server proxy)</option>
           </select>
         </label>
 
-        <label class="f" style="margin-bottom:16px;">
-          <span>Version</span>
-          <input type="text" id="reinst-version" value="${esc(curVer)}" placeholder="26.3, 1.21.4, 1.20.4, or latest" required oninput="updateReinstallJavaPreview()">
-        </label>
+        <div class="f" style="margin-bottom:16px;">
+          <span style="display:block; margin-bottom:6px; font-size:13px; color:var(--tx-muted); font-weight:500;">Version</span>
+          <div style="display:grid; grid-template-columns: minmax(145px, 180px) 1fr; gap:8px;">
+            <select id="reinst-ver-sel" data-searchable="1" onchange="setReinstallVersion(this.value)">
+              ${verList.map(v => `<option value="${esc(v)}" ${v === curVer ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+            </select>
+            <input type="text" id="reinst-version" value="${esc(curVer)}" placeholder="26.3, 1.21.4, 1.12.2, or latest" required oninput="syncReinstallSelectFromInput(this.value); updateReinstallJavaPreview();">
+          </div>
+        </div>
 
         <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
           <b style="font-size:13px; color:#fff; display:block; margin-bottom:8px;">Preservation Options</b>
@@ -7882,6 +9001,7 @@ function openReinstallModal(srvId, nodeId = null) {
   </div>`;
 
   enhanceSelects(container);
+  loadVersionsCatalog();
 }
 
 async function submitReinstall(e, srvId, nodeId = 'local') {
@@ -8360,12 +9480,21 @@ function applyLoginOverlayBackground(el) {
 }
 
 async function checkAuth() {
+  startPageProgress(22);
   const savedMode = localStorage.getItem('neopanel_mode');
-  if (savedMode) setAppearanceMode(savedMode);
+  if (savedMode) setAppearanceMode(savedMode, true);
   if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
   if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
 
+  const route = parseCurrentRoute(window.location.pathname, window.location.hash);
+  S.view = normalizeRoute(route.view || 'dash');
+  if (route.adminTab !== undefined) S.adminTab = route.adminTab;
+  if (route.acctTab !== undefined && S.acct) S.acct.tab = route.acctTab;
+  if (route.plugTab !== undefined) S.plugTab = route.plugTab;
+  const preferredRef = route.serverId ? { id: route.serverId, nodeId: route.nodeId || 'local' } : null;
+
   try {
+    setPageProgress(42);
     const [, status] = await Promise.all([
       loadPublicBranding().catch(() => {}),
       fetch('/api/auth/status').then(r => r.json())
@@ -8374,16 +9503,28 @@ async function checkAuth() {
     S.turnstileSiteKey = S.turnstileEnabled ? status.turnstile_site_key : '';
 
     if (status.needs_setup) {
+      finishPageProgress();
       showSetupScreen();
       return;
     }
 
     if (!S.token) {
+      finishPageProgress();
       showLoginScreen();
       return;
     }
 
-    const user = await api('/api/auth/me');
+    const meRes = await fetch('/api/auth/me', {
+      headers: { 'Authorization': 'Bearer ' + S.token }
+    });
+    if (!meRes.ok) {
+      S.token = '';
+      localStorage.removeItem('neopanel_token');
+      finishPageProgress();
+      showLoginScreen();
+      return;
+    }
+    const user = await meRes.json();
     const savedProf = JSON.parse(localStorage.getItem('neopanel_profile') || '{}');
     S.user = user;
     S.acct.un = savedProf.un || user.username || S.acct.un;
@@ -8392,18 +9533,33 @@ async function checkAuth() {
     if (savedProf.ln !== undefined) S.acct.ln = savedProf.ln;
     S.acct.h = await computeGravatarHash(S.acct.em);
 
-    await loadDashboard();
-    applyBranding(S.branding);
+    setPageProgress(65);
+    await loadDashboard(true, preferredRef || getSavedActiveServerRef());
 
-    // Respect URL hash if present
-    const rawHash = window.location.hash.replace('#', '');
-    const hash = normalizeRoute(rawHash);
-    if (hash && (V[hash] || hash === 'admin' || hash === 'acc')) {
-      go(hash);
+    const globalOnlyViews = ['dash', 'bill', 'admin', 'acc'];
+    if (!globalOnlyViews.includes(S.view) && !(S.view === 'act' && route.global)) {
+      if (S.servers.length === 0) {
+        S.view = 'dash';
+        try { history.replaceState(null, '', '/'); } catch (e) {}
+      }
     }
+    if (route.legacyHash) {
+      try { history.replaceState(null, '', routeUrl(S.view, route)); } catch (e) {}
+    }
+
+    setPageProgress(82);
+    await loadInitialRouteData(S.view);
+    if (!['plug', 'stp', 'ver'].includes(S.view)) {
+      loadVersionsCatalog();
+    }
+
+    applyBranding(S.branding);
+    R();
+    finishPageProgress();
   } catch (e) {
     S.token = '';
     localStorage.removeItem('neopanel_token');
+    finishPageProgress();
     showLoginScreen();
   }
 }
@@ -8719,8 +9875,10 @@ window.installJavaRuntime = installJavaRuntime;
 window.updateReinstallJavaPreview = updateReinstallJavaPreview;
 window.setNodeFilter = setNodeFilter;
 window.selectAdminTab = selectAdminTab;
+window.selectAccountTab = selectAccountTab;
 window.loadAdminNodes = loadAdminNodes;
-window.toggleHeadlessNodeHelper = toggleHeadlessNodeHelper;
+window.toggleClusterNodeHelper = toggleClusterNodeHelper;
+window.buildClusterNodeInstallCmd = buildClusterNodeInstallCmd;
 window.onNodeHelperInput = onNodeHelperInput;
 window.generateNodePairingKey = generateNodePairingKey;
 window.openNodeModal = openNodeModal;
@@ -8748,6 +9906,19 @@ window.discardBrandDraft = discardBrandDraft;
 window.saveBrandingAndDaemon = saveBrandingAndDaemon;
 window.resetBrandingDefaults = resetBrandingDefaults;
 window.onCreateNodeChange = onCreateNodeChange;
+window.handleNavClick = handleNavClick;
+window.handleServerCardClick = handleServerCardClick;
+window.setViewMode = setViewMode;
+window.getViewMode = getViewMode;
+window.routeUrl = routeUrl;
+window.serverRouteUrl = serverRouteUrl;
+window.onCreateVersionInput = onCreateVersionInput;
+window.setCreateVersion = setCreateVersion;
+window.onReinstallEngineChange = onReinstallEngineChange;
+window.setReinstallVersion = setReinstallVersion;
+window.syncReinstallSelectFromInput = syncReinstallSelectFromInput;
+window.refreshOpenVersionSelects = refreshOpenVersionSelects;
+window.renderModrinthHitsHtml = renderModrinthHitsHtml;
 
 // --- Custom Glassmorphic Selects System ---
 function closeAllCustomSelects() {
@@ -8803,6 +9974,36 @@ function enhanceSelects(root = document) {
     function rebuildOptions() {
       menu.innerHTML = '';
       const opts = Array.from(sel.options);
+      const isSearchable = sel.dataset.searchable === '1' || opts.length > 12;
+
+      let searchInp = null;
+      let emptyEl = null;
+      const optionItems = [];
+
+      if (isSearchable) {
+        const searchWrap = document.createElement('div');
+        searchWrap.className = 'cselect-search-wrap';
+        searchInp = document.createElement('input');
+        searchInp.type = 'search';
+        searchInp.className = 'cselect-search';
+        searchInp.placeholder = 'Search options...';
+        searchInp.setAttribute('autocomplete', 'off');
+        searchInp.addEventListener('click', (e) => e.stopPropagation());
+        searchInp.addEventListener('keydown', (e) => {
+          e.stopPropagation();
+          if (e.key === 'Escape') {
+            closeAllCustomSelects();
+            trigger.focus();
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const firstVis = optionItems.find(it => it.style.display !== 'none' && it.dataset.disabled !== '1');
+            if (firstVis) firstVis.click();
+          }
+        });
+        searchWrap.appendChild(searchInp);
+        menu.appendChild(searchWrap);
+      }
+
       opts.forEach((opt, idx) => {
         const item = document.createElement('div');
         item.className = 'cselect-opt' + (opt.selected ? ' on' : '');
@@ -8810,7 +10011,10 @@ function enhanceSelects(root = document) {
         item.dataset.value = opt.value;
         item.dataset.index = String(idx);
         item.setAttribute('role', 'option');
-        if (opt.disabled) item.style.opacity = '0.5';
+        if (opt.disabled) {
+          item.style.opacity = '0.5';
+          item.dataset.disabled = '1';
+        }
 
         item.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -8823,7 +10027,35 @@ function enhanceSelects(root = document) {
           sel.dispatchEvent(new Event('change', { bubbles: true }));
         });
         menu.appendChild(item);
+        optionItems.push(item);
       });
+
+      if (isSearchable) {
+        emptyEl = document.createElement('div');
+        emptyEl.className = 'cselect-empty';
+        emptyEl.textContent = 'No matching options';
+        emptyEl.style.display = 'none';
+        menu.appendChild(emptyEl);
+
+        searchInp.addEventListener('input', () => {
+          const term = searchInp.value.trim().toLowerCase();
+          let visibleCount = 0;
+          for (const it of optionItems) {
+            const hay = `${it.textContent || ''} ${it.dataset.value || ''}`.toLowerCase();
+            const show = !term || hay.includes(term);
+            it.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+          }
+          if (emptyEl) emptyEl.style.display = visibleCount === 0 ? 'block' : 'none';
+        });
+      }
+
+      menu._resetSearch = () => {
+        if (!searchInp) return;
+        searchInp.value = '';
+        optionItems.forEach(it => { it.style.display = ''; });
+        if (emptyEl) emptyEl.style.display = 'none';
+      };
 
       const currentOpt = sel.options[sel.selectedIndex] || sel.options[0];
       valSpan.textContent = currentOpt ? currentOpt.textContent : 'Select...';
@@ -8847,9 +10079,11 @@ function enhanceSelects(root = document) {
       const isOpen = wrap.classList.contains('open');
       closeAllCustomSelects();
       if (!isOpen) {
+        if (typeof menu._resetSearch === 'function') menu._resetSearch();
         const rect = wrap.getBoundingClientRect();
         const spaceBelow = window.innerHeight - rect.bottom;
-        if (spaceBelow < 220 && rect.top > 220) {
+        const hasSearch = Boolean(menu.querySelector('.cselect-search'));
+        if (spaceBelow < (hasSearch ? 300 : 220) && rect.top > (hasSearch ? 280 : 220)) {
           wrap.classList.add('cselect-up');
         } else {
           wrap.classList.remove('cselect-up');
@@ -8858,6 +10092,8 @@ function enhanceSelects(root = document) {
         trigger.setAttribute('aria-expanded', 'true');
         const active = menu.querySelector('.cselect-opt.on');
         if (active) active.scrollIntoView({ block: 'nearest' });
+        const searchInp = menu.querySelector('.cselect-search');
+        if (searchInp) requestAnimationFrame(() => searchInp.focus());
       }
     });
 

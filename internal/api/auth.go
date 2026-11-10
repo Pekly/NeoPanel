@@ -164,7 +164,7 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	if h.cfg != nil && h.cfg.IsNode() {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Web setup is disabled in headless node daemon mode; authenticate using an API key or node_token"})
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Setup is managed from the Master Panel on dedicated node instances; authenticate using an API key or node_token"})
 		return
 	}
 	count, err := h.db.GetUserCount()
@@ -229,7 +229,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if h.cfg != nil && h.cfg.IsNode() {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Interactive web login is disabled in headless node daemon mode; authenticate using an API key or node_token"})
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Direct login is managed from the Master Panel on dedicated node instances; authenticate using an API key or node_token"})
 		return
 	}
 	var req struct {

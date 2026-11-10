@@ -52,7 +52,7 @@ func runCLI(defaultConfigPath string, args []string) int {
 }
 
 func printCLIUsage() {
-	fmt.Printf(`NeoPanel v%s — Panel & Headless Node CLI
+	fmt.Printf(`NeoPanel v%s — Panel & Cluster Node CLI
 
 Usage:
   neopanel [server flags]                   Start the HTTP/SFTP daemon
@@ -62,13 +62,13 @@ Daemon Flags:
   -config <path>    Path to config.yaml (auto-detects /etc/neopanel/config.yaml)
   -host <ip>        Override HTTP listening host
   -port <port>      Override HTTP listening port
-  -role <role>      Override runtime role: "panel" (Web UI + API) or "node" (headless API only)
+  -role <role>      Override runtime role: "panel" (Master Panel) or "node" (Cluster Node Daemon)
   -node             Shorthand for -role node
 
 CLI Commands:
   node-token [--rotate] [--raw]
       Print (or rotate) this daemon's security.node_token (neo_node_...).
-      Use this token on a Master Panel to authenticate this headless node.
+      Use this token on a Master Panel to authenticate this cluster node.
 
   api-key create [--name <label>] [--user <username>] [--raw]
       Generate a persistent neo_... API key directly in SQLite.
@@ -370,7 +370,7 @@ func resolveCLIUser(db *database.DB, preferredUsername string) (*database.User, 
 		return nil, err
 	}
 	if len(users) == 0 {
-		return nil, fmt.Errorf("no users exist in %s yet (finish web setup first, or use node-token on headless nodes)", "database")
+		return nil, fmt.Errorf("no users exist in %s yet (complete panel setup first, or use node-token on cluster nodes)", "database")
 	}
 	for _, u := range users {
 		if strings.EqualFold(u.Role, "admin") {

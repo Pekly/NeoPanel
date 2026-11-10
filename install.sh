@@ -3,8 +3,8 @@
 # -----------------------------------------------------------------------------
 # NeoPanel All-In-One Installer for Ubuntu 24.04 LTS
 # Supports:
-#   - Full Master Panel (Web UI + Daemon + Java + Caddy SSL + Firewall)
-#   - Dedicated Headless Game Node (-tags node, zero Web UI, paired via API Key)
+#   - Master Panel (Dashboard + Daemon + Java + Caddy SSL + Firewall)
+#   - Cluster Node Daemon (Dedicated Game Node, paired via API Key)
 # GitHub: https://github.com/Pekly/NeoPanel
 # -----------------------------------------------------------------------------
 
@@ -527,7 +527,7 @@ EOF
 
   local svc_desc="NeoPanel Minecraft Server Manager"
   if [ "$role" = "node" ]; then
-    svc_desc="NeoPanel Headless Node Daemon"
+    svc_desc="NeoPanel Cluster Node Daemon"
   fi
 
   cat > "$SERVICE_FILE" <<EOF
@@ -606,7 +606,7 @@ wait_for_local_daemon() {
 }
 
 # -----------------------------------------------------------------------------
-# Full Panel Installation Flow (Web UI + Daemon)
+# Master Panel Installation Flow (Dashboard + Daemon)
 # -----------------------------------------------------------------------------
 
 run_full_installation() {
@@ -618,7 +618,7 @@ run_full_installation() {
   local pub_ip
   pub_ip=$(get_public_ip)
 
-  echo -e "${BOLD}Mode:${NC} ${CYAN}Full Master Panel (Web UI + Daemon)${NC}"
+  echo -e "${BOLD}Mode:${NC} ${CYAN}NeoPanel Master Panel (Dashboard + Local Daemon)${NC}"
   echo -e "${BOLD}Server Public IP detected:${NC} ${CYAN}${pub_ip}${NC}\n"
 
   local use_ssl="${ARG_USE_SSL}"
@@ -716,10 +716,10 @@ run_full_installation() {
   echo -e "  ${BOLD}Config Path:${NC}     ${CONFIG_DIR}/config.yaml"
   echo -e "  ${BOLD}Data Path:${NC}       ${DATA_DIR}"
 
-  echo -e "\n  ${CYAN}${BOLD}[CLUSTER] Adding Dedicated Remote Game Nodes (No Web UI Needed):${NC}"
-  echo -e "    1. Create an Admin API key in Web UI (Account -> API Keys) OR on Master terminal:"
+  echo -e "\n  ${CYAN}${BOLD}[CLUSTER] Expanding Your Infrastructure with Cluster Nodes:${NC}"
+  echo -e "    1. Create an Admin API key in NeoPanel (Account -> API Keys) OR on Master terminal:"
   echo -e "       ${YELLOW}sudo neopanel api-key create --name \"Node Join Key\"${NC}"
-  echo -e "    2. Run on any remote Ubuntu server to install Headless Node Daemon & auto-pair:"
+  echo -e "    2. Run on any remote Ubuntu server to deploy a Cluster Node & auto-pair:"
   echo -e "       ${YELLOW}curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- --node --master <PANEL_URL> --api-key <neo_...> --name node-01${NC}"
 
   echo -e "\n  ${YELLOW}${BOLD}[REMINDER] Cloud Firewalls & Security Groups:${NC}"
@@ -742,7 +742,7 @@ run_full_installation() {
 }
 
 # -----------------------------------------------------------------------------
-# Dedicated Headless Game Node Installation Flow (Zero Web Panel / UI)
+# Dedicated Cluster Node Daemon Installation Flow
 # -----------------------------------------------------------------------------
 
 run_node_installation() {
@@ -760,7 +760,7 @@ run_node_installation() {
     streamlined="true"
   fi
 
-  echo -e "${BOLD}Mode:${NC} ${MAGENTA}Dedicated Headless Game Node (-tags node, ZERO Web UI code)${NC}"
+  echo -e "${BOLD}Mode:${NC} ${MAGENTA}Dedicated Cluster Game Node (-tags node)${NC}"
   echo -e "${BOLD}Detected Host IP:${NC} ${CYAN}${pub_ip}${NC}\n"
 
   local node_name="${NODE_NAME}"
@@ -869,13 +869,13 @@ run_node_installation() {
   fi
 
   print_banner
-  echo -e "${BOLD}Installing NeoPanel Dedicated Node Daemon...${NC} (Zero Web UI, logs -> ${CYAN}${LOG_FILE}${NC})\n"
+  echo -e "${BOLD}Installing NeoPanel Cluster Node Daemon...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
   run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
   run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
   run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
-  run_step 55 75 "Compiling headless Node binary (-tags node)" "step_build_neopanel"
-  run_step 75 85 "Configuring headless Node daemon & systemd" "step_config_service '$bind_host' '$PANEL_PORT' 'false' '' '' 'node' '$node_tok'"
+  run_step 55 75 "Compiling NeoPanel Node Daemon (-tags node)" "step_build_neopanel"
+  run_step 75 85 "Configuring Cluster Node Daemon & systemd" "step_config_service '$bind_host' '$PANEL_PORT' 'false' '' '' 'node' '$node_tok'"
 
   local fw_include_http="false"
   if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
@@ -886,7 +886,7 @@ run_node_installation() {
   if [[ "$conf_ufw" =~ ^[Yy]$ ]]; then
     run_step 95 100 "Applying UFW firewall security rules" "step_firewall '$fw_include_http'"
   else
-    draw_progress 100 "✔ Headless Node installation completed"
+    draw_progress 100 "✔ Cluster Node installation completed"
     echo ""
   fi
 
@@ -925,10 +925,10 @@ run_node_installation() {
   # Node Completion Banner
   # -----------------------------------------------------------------------------
   echo -e "\n${GREEN}${BOLD}================================================================${NC}"
-  echo -e "${GREEN}${BOLD}        NeoPanel Headless Node Installation Complete!           ${NC}"
+  echo -e "${GREEN}${BOLD}         NeoPanel Cluster Node Installation Complete!           ${NC}"
   echo -e "${GREEN}${BOLD}================================================================${NC}\n"
 
-  echo -e "  ${BOLD}Daemon Role:${NC}      ${MAGENTA}node (Headless API + SFTP only — Web Panel omitted)${NC}"
+  echo -e "  ${BOLD}Daemon Role:${NC}      ${MAGENTA}node (Cluster Node Daemon + SFTP)${NC}"
   echo -e "  ${BOLD}Node Name:${NC}        ${CYAN}${node_name}${NC}"
   echo -e "  ${BOLD}API Endpoint:${NC}     ${CYAN}${node_adv_url}${NC}"
   echo -e "  ${BOLD}Player Host/FQDN:${NC} ${CYAN}${node_fqdn}${NC}"
@@ -938,15 +938,15 @@ run_node_installation() {
 
   if [ "$pair_status" != "ok" ]; then
     echo -e "\n  ${CYAN}${BOLD}Connect this node to your Master Panel using EITHER method:${NC}"
-    echo -e "    ${BOLD}1. On Master VPS CLI (No Browser Needed):${NC}"
+    echo -e "    ${BOLD}1. On Master VPS CLI:${NC}"
     echo -e "       ${YELLOW}sudo neopanel node connect --name \"${node_name}\" --url \"${node_adv_url}\" --fqdn \"${node_fqdn}\" --location \"${node_loc}\" --token \"${node_tok}\"${NC}"
     echo -e "    ${BOLD}2. From this Node using a Master API Key (neo_...):${NC}"
     echo -e "       ${YELLOW}sudo neopanel node connect --master https://panel.example.com --api-key <neo_...> --name \"${node_name}\" --url \"${node_adv_url}\" --fqdn \"${node_fqdn}\"${NC}"
-    echo -e "    ${BOLD}3. Master Web UI:${NC} Admin -> Cluster Nodes -> Connect Node"
+    echo -e "    ${BOLD}3. Master Panel UI:${NC} Admin -> Cluster Nodes -> Connect Node"
   fi
 
   echo -e "\n  ${YELLOW}${BOLD}[SECURITY TIP]${NC}"
-  echo -e "    This node runs without any web login page and authenticates exclusively via ${YELLOW}node_token${NC}."
+  echo -e "    This node is seamlessly managed by your Master Panel and authenticates via ${YELLOW}node_token${NC}."
   if [[ ! "$use_ssl" =~ ^[Yy]$ ]]; then
     echo -e "    For extra hardening on public VPS hosts, restrict port ${PANEL_PORT}/tcp in UFW to your Master IP:"
     echo -e "      ${CYAN}sudo ufw delete allow ${PANEL_PORT}/tcp && sudo ufw allow from <MASTER_IP> to any port ${PANEL_PORT} proto tcp${NC}"
@@ -955,9 +955,9 @@ run_node_installation() {
   echo -e "\n  ${BOLD}Useful Node Commands:${NC}"
   echo -e "    ${YELLOW}sudo neopanel node-token${NC}            # Show node auth token"
   echo -e "    ${YELLOW}sudo neopanel node-token --rotate${NC}   # Rotate token cleanly"
-  echo -e "    ${YELLOW}sudo neopanel-update${NC}                # Update headless binary (-tags node preserved)"
+  echo -e "    ${YELLOW}sudo neopanel-update${NC}                # Update cluster node binary (-tags node preserved)"
   echo -e "    ${YELLOW}systemctl status neopanel${NC}           # View service health"
-  echo -e "\n${GREEN}Headless node ready!${NC}\n"
+  echo -e "\n${GREEN}Cluster node ready!${NC}\n"
 }
 
 # -----------------------------------------------------------------------------
@@ -998,7 +998,7 @@ interactive_connect_node_wizard() {
 }
 
 # -----------------------------------------------------------------------------
-# Update Flow (Preserves Full Panel vs Headless Node Role Automatically)
+# Update Flow (Preserves Master Panel vs Cluster Node Role Automatically)
 # -----------------------------------------------------------------------------
 
 step_update_ensure_java() {
@@ -1067,7 +1067,7 @@ update_neopanel() {
   fi
 
   if [ "$INSTALL_ROLE" = "node" ]; then
-    echo -e "${BOLD}Updating NeoPanel Headless Node Daemon (-tags node)...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
+    echo -e "${BOLD}Updating NeoPanel Cluster Node Daemon (-tags node)...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
   else
     echo -e "${BOLD}Updating NeoPanel to Latest Release...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
   fi
@@ -1075,7 +1075,7 @@ update_neopanel() {
   run_step 0 20 "Ensuring Java 25, 21, 17 & 8 runtimes" "step_update_ensure_java"
   run_step 20 45 "Fetching latest updates from GitHub" "step_update_fetch"
   if [ "$INSTALL_ROLE" = "node" ]; then
-    run_step 45 80 "Compiling fresh headless Node binary (-tags node)" "step_update_compile"
+    run_step 45 80 "Compiling fresh Cluster Node binary (-tags node)" "step_update_compile"
   else
     run_step 45 80 "Compiling fresh NeoPanel binary" "step_update_compile"
   fi
@@ -1102,11 +1102,11 @@ Usage:
   install.sh [options]
 
 Installation Actions:
-  --install, --panel        Install Full Master Panel (Web UI + Daemon + Java)
-  --node                    Install Dedicated Headless Game Node (-tags node, ZERO Web UI)
+  --install, --panel        Install Master Panel (Dashboard + Daemon + Java)
+  --node                    Install Dedicated Cluster Game Node (-tags node)
   --update, -u              Update existing installation (auto-preserves panel vs node build)
 
-Headless Node & Pairing Flags (combine with --node):
+Cluster Node & Pairing Flags (combine with --node):
   --master <url>            Master Panel base URL (e.g. https://panel.example.com)
   --api-key <neo_...>       Master Admin API Key to auto-pair immediately after install
   --name <label>            Node display name (defaults to server hostname)
@@ -1138,8 +1138,8 @@ EOF
 interactive_menu() {
   print_banner
   echo "Please select an option:"
-  echo -e "  ${GREEN}[1]${NC}  Install Full Master Panel (Web UI + Daemon + Java + SSL + Firewall)"
-  echo -e "  ${GREEN}[2]${NC}  Install Dedicated Game Node (Headless Daemon — Zero Web UI)"
+  echo -e "  ${GREEN}[1]${NC}  Install Master Panel (Dashboard + Daemon + Java + SSL + Firewall)"
+  echo -e "  ${GREEN}[2]${NC}  Install Dedicated Cluster Game Node (Daemon + SFTP + Java)"
   echo -e "  ${GREEN}[3]${NC}  Update NeoPanel to Latest Version (Preserves Panel / Node Mode)"
   echo -e "  ${GREEN}[4]${NC}  Connect / Pair a Remote Node (CLI Wizard)"
   echo -e "  ${GREEN}[5]${NC}  Show Node Token or Generate CLI API Key"

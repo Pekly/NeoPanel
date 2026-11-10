@@ -4,7 +4,7 @@ package web
 
 import "io/fs"
 
-// GetFS returns nil in headless node builds so no web panel assets are bundled or served.
+// GetFS returns nil in cluster node builds so resources stay focused on server workloads.
 func GetFS() fs.FS {
 	return nil
 }

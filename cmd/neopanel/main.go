@@ -47,7 +47,7 @@ func main() {
 	portFlag := flag.Int("port", 0, "Override HTTP listening port")
 	hostFlag := flag.String("host", "", "Override HTTP listening host")
 	roleFlag := flag.String("role", "", "Override server role ('panel' or 'node')")
-	nodeOnlyFlag := flag.Bool("node", false, "Run in headless Node Daemon mode (no web panel UI)")
+	nodeOnlyFlag := flag.Bool("node", false, "Run as a NeoPanel Cluster Node Daemon")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
 
@@ -58,7 +58,7 @@ func main() {
 
 	targetConfig := resolveConfigPath(*configPath)
 
-	// Handle headless CLI subcommands (e.g. `neopanel node-token`, `neopanel api-key`, `neopanel node`)
+	// Handle CLI subcommands (e.g. `neopanel node-token`, `neopanel api-key`, `neopanel node`)
 	if args := flag.Args(); len(args) > 0 {
 		os.Exit(runCLI(targetConfig, args))
 	}
@@ -103,7 +103,7 @@ func main() {
 		manager.SetStartupTimeout(time.Duration(cfg.Server.StartupTimeoutSec) * time.Second)
 	}
 
-	// 3. Mount Router (omit embedded web UI completely in node builds or headless node role)
+	// 3. Mount Router (cluster node daemons expose daemon & control APIs only)
 	var staticFS fs.FS
 	if !cfg.IsNode() {
 		staticFS = web.GetFS()
@@ -162,9 +162,9 @@ func main() {
 
 	// 6. Start HTTP Server
 	if cfg.IsNode() || staticFS == nil {
-		log.Printf("[SUCCESS] NeoPanel Node Daemon (API-only, no web UI) running at: http://%s", addr)
+		log.Printf("[SUCCESS] NeoPanel Cluster Node Daemon running at: http://%s", addr)
 	} else {
-		log.Printf("[SUCCESS] NeoPanel web dashboard running at: http://%s", addr)
+		log.Printf("[SUCCESS] NeoPanel Master Panel running at: http://%s", addr)
 	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("[FATAL] Server terminated unexpectedly: %v", err)
