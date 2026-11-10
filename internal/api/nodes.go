@@ -765,3 +765,4 @@ func (h *NodeHandler) ProxyWS(w http.ResponseWriter, r *http.Request) {
 
 	<-errCh
 }
+

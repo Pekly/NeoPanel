@@ -387,3 +387,4 @@ func (h *BrandingHandler) ResetAdminBranding(w http.ResponseWriter, r *http.Requ
 		"daemon":   daemon,
 	})
 }
+

@@ -211,7 +211,8 @@ func ResolveJavaBinary(versionOrPath string) (binaryPath string, displayLabel st
 
 	// 5. Check system PATH "java" only if its major version matches the requested target
 	if lp, err := exec.LookPath("java"); err == nil {
-		if maj := detectJavaBinaryMajor(lp); maj == targetTag {
+		maj := detectJavaBinaryMajor(lp)
+		if maj == targetTag {
 			return lp, "OpenJDK " + targetTag + " (System PATH)"
 		}
 		if !javaSupported[targetTag] && maj == "" {
