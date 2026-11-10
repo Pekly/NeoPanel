@@ -1686,8 +1686,15 @@ input:focus, select:focus, textarea:focus {
 
 .sw input {
   opacity: 0;
-  width: 0;
-  height: 0;
+  width: 0 !important;
+  height: 0 !important;
+  min-width: 0 !important;
+  position: absolute;
+  pointer-events: none;
+}
+
+.sw input::before {
+  display: none !important;
 }
 
 .sw i {
@@ -1717,6 +1724,80 @@ input:focus, select:focus, textarea:focus {
 
 .sw input:checked + i:after {
   transform: translateX(16px);
+}
+
+/* Custom Glassmorphic Checkboxes */
+input[type="checkbox"]:not(.no-ccheck) {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px !important;
+  height: 17px !important;
+  min-width: 17px;
+  padding: 0 !important;
+  margin: 0;
+  border-radius: 5px;
+  border: 1.5px solid rgba(148, 163, 184, 0.36);
+  background: rgba(15, 23, 42, 0.72);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
+}
+
+input[type="checkbox"]:not(.no-ccheck):hover:not(:disabled) {
+  border-color: var(--ac);
+  background: rgba(56, 122, 255, 0.14);
+  box-shadow: 0 0 0 3px rgba(56, 122, 255, 0.14);
+}
+
+input[type="checkbox"]:not(.no-ccheck):focus-visible {
+  border-color: var(--ac);
+  box-shadow: 0 0 0 3px rgba(56, 122, 255, 0.26);
+}
+
+input[type="checkbox"]:not(.no-ccheck):active:not(:disabled) {
+  transform: scale(0.93);
+}
+
+input[type="checkbox"]:not(.no-ccheck)::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  transform: scale(0) rotate(-6deg);
+  transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  background: #ffffff;
+  clip-path: polygon(14% 46%, 0 62%, 48% 100%, 100% 18%, 83% 4%, 44% 68%);
+}
+
+input[type="checkbox"]:not(.no-ccheck):checked,
+input[type="checkbox"]:not(.no-ccheck):indeterminate {
+  background: var(--ac);
+  border-color: var(--ac);
+  box-shadow: 0 2px 8px rgba(56, 122, 255, 0.38);
+}
+
+input[type="checkbox"]:not(.no-ccheck):checked::before {
+  transform: scale(1) rotate(0deg);
+}
+
+input[type="checkbox"]:not(.no-ccheck):indeterminate::before {
+  width: 9px;
+  height: 2px;
+  transform: scale(1) rotate(0deg);
+  clip-path: none;
+  border-radius: 2px;
+}
+
+input[type="checkbox"]:not(.no-ccheck):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+html[data-theme="light"] input[type="checkbox"]:not(.no-ccheck):not(:checked):not(:indeterminate) {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.28);
 }
 
 /* Engine Choice Card */

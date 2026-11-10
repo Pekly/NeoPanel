@@ -1086,9 +1086,47 @@ setInterval(() => {
 }, 1000);
 
 // --- Power Actions ---
-async function power(action) {
+async function power(action, skipConfirm = false) {
   const srv = curServer();
   if (!srv) return;
+
+  if (!skipConfirm && action !== 'start') {
+    const confirmMeta = {
+      restart: {
+        title: 'Restart Server',
+        message: `Are you sure you want to restart <b>${esc(srv.name)}</b>? Connected players will be temporarily disconnected while the server reboots.`,
+        confirmText: 'Restart Server',
+        isDanger: false,
+        icon: 'refresh'
+      },
+      stop: {
+        title: 'Stop Server',
+        message: `Are you sure you want to stop <b>${esc(srv.name)}</b>? The server will save world data and shut down cleanly.`,
+        confirmText: 'Stop Server',
+        isDanger: true,
+        icon: 'alert'
+      },
+      kill: {
+        title: 'Force Kill Server Process',
+        message: `Are you sure you want to <b>force kill</b> <b>${esc(srv.name)}</b>? This immediately terminates the Java process without saving chunks and may cause world data loss.`,
+        confirmText: 'Force Kill',
+        isDanger: true,
+        icon: 'alert'
+      }
+    }[action];
+
+    if (confirmMeta) {
+      const ok = await uiConfirm({
+        title: confirmMeta.title,
+        message: confirmMeta.message,
+        confirmText: confirmMeta.confirmText,
+        cancelText: 'Cancel',
+        isDanger: confirmMeta.isDanger,
+        icon: confirmMeta.icon
+      });
+      if (!ok) return;
+    }
+  }
 
   if (action === 'start') {
     S.status = 'starting';
@@ -1772,7 +1810,7 @@ const V = {
           <thead>
             <tr style="border-bottom: 1px solid var(--ln); color: var(--tx-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
               <th style="width: 36px; padding: 12px 0 12px 18px; text-align: left;">
-                <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" style="cursor: pointer; width: 15px; height: 15px; accent-color: var(--ac);" ${allSelected ? 'checked' : ''}>
+                <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" ${allSelected ? 'checked' : ''} aria-label="Select all files">
               </th>
               <th style="width: 40px; padding: 12px 4px;"></th>
               <th style="padding: 12px 10px; text-align: left;">Name</th>
@@ -1804,7 +1842,7 @@ const V = {
                 <td style="width: 36px; padding-left: 18px;" onclick="event.stopPropagation();">
                   <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''} 
                          onchange="toggleFileSelect('${esc(itemPath)}', this.checked)" 
-                         style="cursor: pointer; width: 15px; height: 15px; accent-color: var(--ac);">
+                         aria-label="Select ${esc(item.name)}">
                 </td>
                 <td style="width: 40px; padding: 8px 4px;">${icon}</td>
                 <td style="font-weight: 500; color: #fff;">${esc(item.name)}</td>
@@ -1988,9 +2026,7 @@ const V = {
 
     <div class="row sb" style="margin:22px 0 12px; flex-wrap: wrap; gap: 10px;">
       <h2 style="margin:0">2. Select ${esc(sel)} Version</h2>
-      <label class="row" style="cursor:pointer">
-        <input type="checkbox" id="bkf" checked style="width:auto; margin-right:6px;"> Back up the world first
-      </label>
+      <span class="mu" style="font-size:12.5px;">Click any release to confirm installation &amp; optional world backup</span>
     </div>
 
     <div class="row" style="margin:0 0 12px; gap:10px; flex-wrap: wrap;">
@@ -3242,6 +3278,18 @@ async function bulkRestartServers() {
 }
 
 async function bulkStopServers() {
+  const count = S.servers.length;
+  if (!count) return;
+  const ok = await uiConfirm({
+    title: 'Stop All Server Instances',
+    message: `Are you sure you want to stop all <b>${count}</b> server instance${count > 1 ? 's' : ''} across the cluster? Connected players on all servers will be disconnected.`,
+    confirmText: `Stop All (${count})`,
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'alert'
+  });
+  if (!ok) return;
+
   toast('Stopping all cluster instances...');
   for (const s of S.servers) {
     await api(`/api/servers/${s.id}/power`, { method: 'POST', body: JSON.stringify({ action: 'stop' }) }).catch(() => {});
@@ -3269,6 +3317,64 @@ async function loadPlayersData() {
 async function playerAction(action, player, reason = '') {
   const srv = curServer();
   if (!srv) return;
+
+  const actionMeta = {
+    kick: {
+      title: 'Kick Player',
+      message: `Kick <b>${esc(player)}</b> from <b>${esc(srv.name)}</b>?`,
+      confirmText: 'Kick Player',
+      isDanger: true,
+      icon: 'alert'
+    },
+    ban: {
+      title: 'Ban Player',
+      message: `Permanently ban <b>${esc(player)}</b> from <b>${esc(srv.name)}</b>? They will be disconnected and blocked from rejoining.`,
+      confirmText: 'Ban Player',
+      isDanger: true,
+      icon: 'shield'
+    },
+    unban: {
+      title: 'Pardon / Unban Player',
+      message: `Remove the ban on <b>${esc(player)}</b> so they can rejoin <b>${esc(srv.name)}</b>?`,
+      confirmText: 'Unban Player',
+      isDanger: false,
+      icon: 'check'
+    },
+    op: {
+      title: 'Grant Operator (OP)',
+      message: `Grant full server operator permissions to <b>${esc(player)}</b> on <b>${esc(srv.name)}</b>?`,
+      confirmText: 'Grant OP',
+      isDanger: false,
+      icon: 'shield'
+    },
+    deop: {
+      title: 'Revoke Operator (De-OP)',
+      message: `Revoke server operator permissions from <b>${esc(player)}</b>?`,
+      confirmText: 'Revoke OP',
+      isDanger: true,
+      icon: 'shield'
+    },
+    whitelist_remove: {
+      title: 'Remove from Whitelist',
+      message: `Remove <b>${esc(player)}</b> from the server whitelist?`,
+      confirmText: 'Remove',
+      isDanger: true,
+      icon: 'trash'
+    }
+  }[action];
+
+  if (actionMeta) {
+    const ok = await uiConfirm({
+      title: actionMeta.title,
+      message: actionMeta.message,
+      confirmText: actionMeta.confirmText,
+      cancelText: 'Cancel',
+      isDanger: actionMeta.isDanger,
+      icon: actionMeta.icon
+    });
+    if (!ok) return;
+  }
+
   try {
     await api(`/api/servers/${srv.id}/players/action`, {
       method: 'POST',
@@ -3665,6 +3771,14 @@ async function promptNewFolder() {
 }
 
 // --- File Selection & Bulk Actions ---
+function syncSelectAllCheckbox() {
+  const chk = $('#chk-all-files');
+  if (!chk || !S.fileList.length) return;
+  const selectedCount = S.fileList.filter(i => S.selectedFiles.has(i.path || i.name)).length;
+  chk.checked = selectedCount === S.fileList.length;
+  chk.indeterminate = selectedCount > 0 && selectedCount < S.fileList.length;
+}
+
 function toggleFileSelect(path, checked) {
   if (checked) {
     S.selectedFiles.add(path);
@@ -3672,6 +3786,7 @@ function toggleFileSelect(path, checked) {
     S.selectedFiles.delete(path);
   }
   R();
+  syncSelectAllCheckbox();
 }
 
 function toggleSelectAllFiles(checked) {
@@ -3683,11 +3798,13 @@ function toggleSelectAllFiles(checked) {
     S.selectedFiles.clear();
   }
   R();
+  syncSelectAllCheckbox();
 }
 
 function deselectAllFiles() {
   S.selectedFiles.clear();
   R();
+  syncSelectAllCheckbox();
 }
 
 async function deleteSelectedFiles() {
@@ -3964,6 +4081,16 @@ async function loadPluginsList() {
 async function deletePlugin(name) {
   const srv = curServer();
   if (!srv || !name) return;
+  const ok = await uiConfirm({
+    title: 'Remove Plugin',
+    message: `Are you sure you want to delete <b>${esc(name)}</b> from <b>${esc(srv.name)}</b>? Restart the server afterward to unload the plugin.`,
+    confirmText: 'Remove Plugin',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'trash'
+  });
+  if (!ok) return;
+
   try {
     await api(`/api/servers/${srv.id}/plugins?filename=${encodeURIComponent(name)}`, { method: 'DELETE' });
     toast(`Removed plugin ${name}`);
@@ -4045,6 +4172,17 @@ async function searchModrinth() {
 async function installPlugin(projectSlug, title, btnEl) {
   const srv = curServer();
   if (!srv || !projectSlug) return;
+  const targetFolder = String(S.core || '').toLowerCase() === 'fabric' ? 'mods/' : 'plugins/';
+  const ok = await uiConfirm({
+    title: 'Install Plugin from Modrinth',
+    message: `Download and install <b>${esc(title || projectSlug)}</b> into <code>${targetFolder}</code> on <b>${esc(srv.name)}</b>?`,
+    confirmText: 'Download & Install',
+    cancelText: 'Cancel',
+    isDanger: false,
+    icon: 'download'
+  });
+  if (!ok) return;
+
   if (btnEl) {
     btnEl.disabled = true;
     btnEl.innerHTML = 'Installing...';
@@ -4087,6 +4225,16 @@ async function loadBackupsList() {
 async function createBackup() {
   const srv = curServer();
   if (!srv) return;
+  const ok = await uiConfirm({
+    title: 'Create Full Server Backup',
+    message: `Create a new compressed <code>.tar.gz</code> backup snapshot of <b>${esc(srv.name)}</b> (including worlds, plugins, and configs)?`,
+    confirmText: 'Create Backup',
+    cancelText: 'Cancel',
+    isDanger: false,
+    icon: 'backup'
+  });
+  if (!ok) return;
+
   toast('Creating full server archive (.tar.gz)...');
   try {
     await api(`/api/servers/${srv.id}/backups`, {
@@ -4108,6 +4256,16 @@ function downloadBackup(name) {
 async function deleteBackup(name) {
   const srv = curServer();
   if (!srv) return;
+  const ok = await uiConfirm({
+    title: 'Delete Backup Archive',
+    message: `Are you sure you want to permanently delete backup <b>${esc(name)}</b>? This action cannot be undone.`,
+    confirmText: 'Delete Backup',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'trash'
+  });
+  if (!ok) return;
+
   try {
     await api(`/api/servers/${srv.id}/backups?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
     toast(`Backup ${name} deleted`);
@@ -4116,12 +4274,57 @@ async function deleteBackup(name) {
 }
 
 // --- Software & Properties ---
+function askInstallSoftwareModal(srv, software, version) {
+  return new Promise(resolve => {
+    if (_uiModalResolver) {
+      _uiModalResolver(null);
+    }
+    _uiModalResolver = (val) => resolve(val);
+
+    const container = $('#modal-container') || document.body;
+    container.innerHTML = `
+      <div class="pal" onclick="if(event.target===this) closeUiModal(null)">
+        <div class="pbox ui-modal-box" style="max-width: 480px;">
+          <div class="row sb" style="margin-bottom: 14px; align-items: center;">
+            <h3 style="font-size: 17px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; color: var(--tx);">
+              ${ic('download', 18)} <span>Install ${esc(software)} ${esc(version)}</span>
+            </h3>
+            <button class="btn sm" onclick="closeUiModal(null)" aria-label="Close" style="padding: 4px 8px; font-size: 15px; opacity: 0.8;">&times;</button>
+          </div>
+          <div class="ui-modal-body" style="line-height: 1.55;">
+            Download and install <b>${esc(software)} ${esc(version)}</b> onto <b>${esc(srv.name)}</b>? This will replace your current server JAR and restart the instance.
+            <div style="margin-top: 14px; padding: 12px 14px; background: rgba(56, 122, 255, 0.08); border: 1px solid rgba(56, 122, 255, 0.25); border-radius: 10px;">
+              <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
+                <input type="checkbox" id="confirm-bkf" checked style="margin-top: 2px;">
+                <div>
+                  <b style="color: var(--tx); display: block; font-size: 13.5px;">Back up the world first (Recommended)</b>
+                  <span class="mu" style="font-size: 12px; display: block; margin-top: 2px;">Creates a full <code>before-${esc(version)}</code> backup archive before downloading and replacing the server JAR.</span>
+                </div>
+              </label>
+            </div>
+          </div>
+          <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
+            <button type="button" class="btn" onclick="closeUiModal(null)">Cancel</button>
+            <button type="button" id="ui-modal-confirm-btn" class="btn pr" onclick="closeUiModal({ confirmed: true, backup: Boolean(document.getElementById('confirm-bkf')?.checked) })">
+              ${ic('download', 14)} Download &amp; Install
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    setTimeout(() => $('#ui-modal-confirm-btn')?.focus(), 40);
+  });
+}
+
 async function installSoftware(software, version) {
   const srv = curServer();
   if (!srv) return;
-  const bkChecked = $('#bkf')?.checked;
-  if (bkChecked) {
-    toast('Creating backup prior to software upgrade...');
+  const choice = await askInstallSoftwareModal(srv, software, version);
+  if (!choice || !choice.confirmed) return;
+
+  if (choice.backup) {
+    toast('Creating world & server backup prior to upgrade...');
     await api(`/api/servers/${srv.id}/backups`, { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
   }
   toast(`Downloading ${software} ${version} server jar...`);
@@ -4133,7 +4336,7 @@ async function installSoftware(software, version) {
     S.core = software;
     S.ver = version;
     toast(`Successfully installed ${software} ${version}! Restarting...`);
-    power('restart');
+    power('restart', true);
     R();
   } catch (e) {
     toast(`Software installation failed: ${e.message}`, 'bad');
@@ -4314,6 +4517,16 @@ async function addSSHKey() {
 }
 
 async function deleteSSHKey(id) {
+  const ok = await uiConfirm({
+    title: 'Delete SSH Public Key',
+    message: 'Are you sure you want to remove this SSH public key? SFTP clients authenticating with this key will lose access immediately.',
+    confirmText: 'Delete Key',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'key'
+  });
+  if (!ok) return;
+
   try {
     await api(`/api/account/ssh-keys/${id}`, { method: 'DELETE' });
     toast('SSH Key deleted');
@@ -4339,6 +4552,16 @@ async function createAPIKey() {
 }
 
 async function deleteAPIKey(id) {
+  const ok = await uiConfirm({
+    title: 'Revoke API Key',
+    message: 'Are you sure you want to revoke this API key? Any scripts or external integrations using this token will immediately fail authentication.',
+    confirmText: 'Revoke Key',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'key'
+  });
+  if (!ok) return;
+
   try {
     await api(`/api/account/api-keys/${id}`, { method: 'DELETE' });
     toast('API Key revoked');
@@ -4931,6 +5154,15 @@ async function deletePort(portId, portNum) {
 async function setPrimaryPort(portId) {
   const srv = curServer();
   if (!srv) return;
+  const ok = await uiConfirm({
+    title: 'Change Primary Game Port',
+    message: `Set this port allocation as the primary Minecraft game port for <b>${esc(srv.name)}</b>? This updates <code>server.properties</code> and requires a server restart to take effect.`,
+    confirmText: 'Set Primary Port',
+    cancelText: 'Cancel',
+    isDanger: false,
+    icon: 'network'
+  });
+  if (!ok) return;
 
   try {
     const res = await api(`/api/servers/${srv.id}/ports/${portId}/primary`, { method: 'POST' });
@@ -5083,16 +5315,16 @@ function openReinstallModal(srvId) {
 
         <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:20px;">
           <b style="font-size:13px; color:#fff; display:block; margin-bottom:8px;">Preservation Options</b>
-          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px;">
-            <input type="checkbox" id="reinst-world" checked style="width:auto; margin-right:8px; accent-color:var(--ac);">
+          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
+            <input type="checkbox" id="reinst-world" checked>
             <span>Preserve Worlds (keep <code>world</code>, <code>world_nether</code>, <code>world_the_end</code>)</span>
           </label>
-          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px;">
-            <input type="checkbox" id="reinst-config" checked style="width:auto; margin-right:8px; accent-color:var(--ac);">
+          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
+            <input type="checkbox" id="reinst-config" checked>
             <span>Preserve Configurations (keep <code>server.properties</code>, <code>bukkit.yml</code>, <code>spigot.yml</code>, <code>paper-*.yml</code>)</span>
           </label>
-          <label class="row" style="cursor:pointer; font-size:13px;">
-            <input type="checkbox" id="reinst-plugins" checked style="width:auto; margin-right:8px; accent-color:var(--ac);">
+          <label class="row" style="cursor:pointer; font-size:13px; gap:10px;">
+            <input type="checkbox" id="reinst-plugins" checked>
             <span>Preserve Plugins &amp; Mods (keep <code>plugins</code>, <code>mods</code> folders)</span>
           </label>
         </div>
@@ -5265,6 +5497,16 @@ async function deleteAdminUser(id, username) {
 }
 
 async function triggerAdminGC() {
+  const ok = await uiConfirm({
+    title: 'Run Daemon Garbage Collection',
+    message: 'Trigger an immediate Go runtime garbage collection cycle across the NeoPanel daemon to reclaim unused heap memory?',
+    confirmText: 'Run Garbage Collection',
+    cancelText: 'Cancel',
+    isDanger: false,
+    icon: 'cpu'
+  });
+  if (!ok) return;
+
   toast('Running Go runtime garbage collection...');
   try {
     const res = await api('/api/admin/gc', { method: 'POST' });
@@ -5550,7 +5792,17 @@ async function submitLogin() {
   }
 }
 
-function logout() {
+async function logout() {
+  const ok = await uiConfirm({
+    title: 'Sign Out of NeoPanel',
+    message: 'Are you sure you want to log out of your current NeoPanel session?',
+    confirmText: 'Log Out',
+    cancelText: 'Stay Signed In',
+    isDanger: false,
+    icon: 'lock'
+  });
+  if (!ok) return;
+
   S.token = '';
   S.activeServerId = null;
   S.wsState = 'disconnected';
