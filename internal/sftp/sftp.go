@@ -3,6 +3,7 @@ package sftp
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -90,13 +91,23 @@ func (s *SFTPServer) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permiss
 		targetServer = rawUser[idx+1:]
 	}
 
-	user, err := s.db.GetUserByUsername(username)
-	if err != nil || user == nil {
-		return nil, fmt.Errorf("authentication failed for user %q", rawUser)
+	authenticated := false
+	if s.cfg != nil && s.cfg.IsNode() {
+		if nodeTok := strings.TrimSpace(s.cfg.Security.NodeToken); nodeTok != "" && len(pass) == len(nodeTok) &&
+			subtle.ConstantTimeCompare(pass, []byte(nodeTok)) == 1 {
+			authenticated = true
+		}
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), pass); err != nil {
-		return nil, fmt.Errorf("invalid password for user %q", rawUser)
+	if !authenticated {
+		user, err := s.db.GetUserByUsername(username)
+		if err != nil || user == nil {
+			return nil, fmt.Errorf("authentication failed for user %q", rawUser)
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), pass); err != nil {
+			return nil, fmt.Errorf("invalid password for user %q", rawUser)
+		}
 	}
 
 	jailPath := s.cfg.Paths.ServersDir

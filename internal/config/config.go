@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -23,6 +24,7 @@ type ServerConfig struct {
 	Host              string `yaml:"host"`
 	Port              int    `yaml:"port"`
 	Mode              string `yaml:"mode"` // "standalone" or "behind_proxy"
+	Role              string `yaml:"role"` // "panel" (full web UI + API) or "node" (headless agent API only)
 	StartupTimeoutSec int    `yaml:"startup_timeout_seconds"`
 }
 
@@ -47,6 +49,7 @@ type TurnstileConfig struct {
 type SecurityConfig struct {
 	JWTSecret       string          `yaml:"jwt_secret"`
 	TokenExpiration int             `yaml:"token_expiration_hours"` // in hours (default 72)
+	NodeToken       string          `yaml:"node_token"`             // headless daemon API token (neo_node_...)
 	Turnstile       TurnstileConfig `yaml:"turnstile"`
 }
 
@@ -67,6 +70,7 @@ func DefaultConfig() *Config {
 			Host:              "0.0.0.0",
 			Port:              8080,
 			Mode:              "behind_proxy",
+			Role:              "panel",
 			StartupTimeoutSec: 180,
 		},
 		Paths: PathsConfig{
@@ -115,6 +119,25 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	// Optional environment variable overrides for Role, NodeToken, and Turnstile
+	if envRole := strings.ToLower(strings.TrimSpace(os.Getenv("NEOPANEL_ROLE"))); envRole == "node" || envRole == "panel" {
+		cfg.Server.Role = envRole
+	}
+	if strings.TrimSpace(cfg.Server.Role) == "" {
+		cfg.Server.Role = "panel"
+	} else {
+		cfg.Server.Role = strings.ToLower(strings.TrimSpace(cfg.Server.Role))
+	}
+	if envNodeToken := strings.TrimSpace(os.Getenv("NEOPANEL_NODE_TOKEN")); envNodeToken != "" {
+		cfg.Security.NodeToken = envNodeToken
+	}
+	if cfg.IsNode() && strings.TrimSpace(cfg.Security.NodeToken) == "" {
+		cfg.Security.NodeToken = GenerateNodeToken()
+		if path != "" {
+			_ = SaveConfig(path, cfg)
+		}
+	}
+
 	// Optional environment variable overrides for Turnstile
 	if envEnabled := os.Getenv("NEOPANEL_TURNSTILE_ENABLED"); envEnabled != "" {
 		cfg.Security.Turnstile.Enabled = envEnabled == "true" || envEnabled == "1"
@@ -131,6 +154,14 @@ func LoadConfig(path string) (*Config, error) {
 	_ = os.MkdirAll(cfg.Paths.ServersDir, 0755)
 
 	return cfg, nil
+}
+
+func (c *Config) IsNode() bool {
+	return c != nil && strings.EqualFold(strings.TrimSpace(c.Server.Role), "node")
+}
+
+func GenerateNodeToken() string {
+	return "neo_node_" + generateRandomKey(28)
 }
 
 func SaveConfig(path string, cfg *Config) error {

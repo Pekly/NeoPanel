@@ -1,3 +1,5 @@
+//go:build !node
+
 package web
 
 import (
@@ -16,4 +18,3 @@ func GetFS() fs.FS {
 	}
 	return sub
 }
-

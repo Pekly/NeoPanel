@@ -230,6 +230,13 @@ window.S = {
   },
   flyConOpen: false,
   flyConTall: false,
+  nodePairOpen: false,
+  nodePairHelper: {
+    name: 'mc-node-01',
+    location: '',
+    port: '8080',
+    apiKey: ''
+  },
   installingPlugins: new Set(),
   installingSoftware: null,
   actFilter: {
@@ -3838,7 +3845,8 @@ const V = {
             <div><span class="mu">Port:</span> <b style="color: #fff;">${sftpPort}</b></div>
             <div><span class="mu">Username:</span> <b style="color: #fff;">${sftpUser}</b></div>
           </div>
-          <button class="btn sm" onclick="navigator.clipboard.writeText('sftp://${sftpUser}@${host}:${sftpPort}'); toast('SFTP URI copied!');">
+          ${srv.node_id && srv.node_id !== 'local' ? `<div class="mu" style="font-size: 11.5px; margin-bottom: 12px; line-height: 1.45;">Headless node SFTP password: use that node's <code>node_token</code> (<code>sudo neopanel node-token</code>) or a local user password.</div>` : ''}
+          <button class="btn sm" onclick="copyDbText('sftp://${sftpUser}@${host}:${sftpPort}', 'SFTP URI')">
             Copy SFTP URI
           </button>
         </div>
@@ -4326,10 +4334,60 @@ const V = {
         </div>
       `;
     } else if (t === 1) {
+      const h = S.nodePairHelper || {};
+      const cmdPreview = buildHeadlessNodeInstallCmd();
       content = `
         <div class="node-callout">
-          <b>How to link another NeoPanel node:</b> Install NeoPanel on your secondary VPS, sign in there, open <b>Account Settings &rarr; API Keys</b> to generate a <code>neo_...</code> key, and click <b>+ Connect Node</b> below. Servers across all linked nodes appear unified on the Dashboard.
+          <div class="row sb" style="gap: 12px; flex-wrap: wrap; align-items: center;">
+            <div style="flex: 1 1 380px;">
+              <b>Headless Game Nodes (No Web UI Needed):</b> Install remote Ubuntu nodes with <code>--node</code> (builds with <code>-tags node</code>, zero panel/web code) and pair automatically using an Admin API key, or connect an existing node via <code>sudo neopanel node-token</code> / <code>sudo neopanel node connect</code>.
+            </div>
+            <button type="button" class="btn sm ${S.nodePairOpen ? 'pr' : ''}" onclick="toggleHeadlessNodeHelper()">
+              ${ic('terminal', 13)} ${S.nodePairOpen ? 'Hide Installer Command' : 'Headless Install Command'}
+            </button>
+          </div>
         </div>
+
+        ${S.nodePairOpen ? `
+        <div class="card node-cli-card" style="margin-bottom: 16px;">
+          <div class="row sb" style="margin-bottom: 10px; gap: 10px; flex-wrap: wrap;">
+            <div>
+              <h3 style="margin: 0 0 3px; font-size: 15px; color: var(--tx);">1-Command Headless Node Installer &amp; Auto-Pairing</h3>
+              <span class="mu" style="font-size: 12.5px;">Compiles only the headless daemon &amp; SFTP agent (zero Web UI code) and links back to this Master Panel.</span>
+            </div>
+            <button type="button" class="btn sm pr" onclick="generateNodePairingKey(this)">
+              ${ic('key', 13)} Generate API Key
+            </button>
+          </div>
+          <div class="grid g3" style="gap: 10px; margin-bottom: 12px;">
+            <label class="f" style="margin: 0;">
+              <span>Node Name</span>
+              <input type="text" id="nh-name" value="${esc(h.name || 'mc-node-01')}" oninput="onNodeHelperInput('name', this.value)" placeholder="mc-node-01">
+            </label>
+            <label class="f" style="margin: 0;">
+              <span>Location (optional)</span>
+              <input type="text" id="nh-loc" value="${esc(h.location || '')}" oninput="onNodeHelperInput('location', this.value)" placeholder="Frankfurt, DE">
+            </label>
+            <label class="f" style="margin: 0;">
+              <span>Daemon Port</span>
+              <input type="number" id="nh-port" value="${esc(h.port || '8080')}" min="1024" max="65535" oninput="onNodeHelperInput('port', this.value)" placeholder="8080">
+            </label>
+          </div>
+          <label class="f" style="margin-bottom: 10px;">
+            <span>Admin API Key (<code>neo_...</code>)</span>
+            <input type="text" id="nh-key" class="mono" value="${esc(h.apiKey || '')}" oninput="onNodeHelperInput('apiKey', this.value)" placeholder="Click 'Generate API Key' above or paste an existing neo_... key">
+          </label>
+          <div class="node-cmd-box">
+            <code id="node-install-cmd-text">${esc(cmdPreview)}</code>
+            <button type="button" id="node-install-copy-btn" class="btn sm" onclick="copyDbText($('#node-install-cmd-text')?.textContent || '', 'Headless install command')">
+              ${ic('copy', 13)} Copy
+            </button>
+          </div>
+          <div class="mu" style="font-size: 11.5px; margin-top: 8px; line-height: 1.45;">
+            Prefer manual pairing on Master SSH without creating an API key? Run <code>sudo neopanel node-token</code> on the remote node, then run <code>sudo neopanel node connect --name "${esc(h.name || 'mc-node-01')}" --url "http://&lt;NODE_IP&gt;:${esc(h.port || '8080')}" --token "&lt;neo_node_...&gt;"</code> here.
+          </div>
+        </div>
+        ` : ''}
 
         <div class="row sb" style="margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
           <div class="row" style="gap: 8px;">
@@ -5280,6 +5338,54 @@ async function loadAdminNodes(toastOnDone = false) {
   if (S.view === 'admin' || S.view === 'dash') R();
 }
 
+function buildHeadlessNodeInstallCmd() {
+  const h = S.nodePairHelper || {};
+  const origin = window.location.origin;
+  const name = (h.name || 'mc-node-01').trim() || 'mc-node-01';
+  const loc = (h.location || '').trim();
+  const port = String(h.port || '8080').replace(/[^0-9]/g, '') || '8080';
+  const key = (h.apiKey || '').trim() || '<ADMIN_API_KEY>';
+  const q = s => `"${String(s).replace(/["\\$`]/g, '\\$&')}"`;
+  let cmd = `curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- --node --master ${q(origin)} --api-key ${q(key)} --name ${q(name)}`;
+  if (port && port !== '8080') cmd += ` --port ${port}`;
+  if (loc) cmd += ` --location ${q(loc)}`;
+  return cmd;
+}
+
+function toggleHeadlessNodeHelper() {
+  S.nodePairOpen = !S.nodePairOpen;
+  R();
+}
+
+function onNodeHelperInput(field, val) {
+  if (!S.nodePairHelper) S.nodePairHelper = { name: 'mc-node-01', location: '', port: '8080', apiKey: '' };
+  S.nodePairHelper[field] = val;
+  const el = $('#node-install-cmd-text');
+  if (el) el.textContent = buildHeadlessNodeInstallCmd();
+}
+
+async function generateNodePairingKey(btnEl) {
+  if (!S.nodePairHelper) S.nodePairHelper = { name: 'mc-node-01', location: '', port: '8080', apiKey: '' };
+  if (btnEl) setBtnLoading(btnEl, true, 'Generating...');
+  try {
+    const label = `Headless Node (${(S.nodePairHelper.name || 'mc-node-01').trim() || 'mc-node-01'})`;
+    const res = await api('/api/account/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ name: label })
+    });
+    const tok = res?.token || res?.key || '';
+    if (!tok) {
+      toast('Server did not return an API key token', 'bad');
+      return;
+    }
+    S.nodePairHelper.apiKey = tok;
+    toast('Admin API key generated for headless node pairing!', 'ok');
+    R();
+  } catch (e) {} finally {
+    if (btnEl) setBtnLoading(btnEl, false);
+  }
+}
+
 function selectAdminTab(idx) {
   const prev = S.adminTab || 0;
   if (prev === 4 && idx !== 4) {
@@ -5350,7 +5456,7 @@ function openNodeModal(nodeId = null) {
       </div>
 
       <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
-        Enter the reachable HTTP/HTTPS URL of another NeoPanel daemon along with an API key (<code>neo_...</code>) generated in that node's <b>Account &rarr; API Keys</b> tab.
+        Enter the reachable HTTP/HTTPS URL of your remote NeoPanel daemon along with its Node Token (<code>neo_node_...</code> via <code>sudo neopanel node-token</code> on headless nodes) or an admin <code>neo_...</code> API key.
       </p>
 
       <form onsubmit="submitNodeModal(event, '${isEdit ? esc(existing.id) : ''}')">
@@ -5376,8 +5482,8 @@ function openNodeModal(nodeId = null) {
         </label>
 
         <label class="f">
-          <span>Node API Token ${isEdit ? '<span class="mu">(leave blank to keep current)</span>' : ''}</span>
-          <input type="password" id="nm-token" ${isEdit ? '' : 'required'} autocomplete="new-password" placeholder="${isEdit ? `Saved (${esc(existing.token_prefix || 'neo_...')})` : 'neo_xxxxxxxxxxxxxxxxxxxxxxxx'}">
+          <span>Node Auth Token ${isEdit ? '<span class="mu">(leave blank to keep current)</span>' : ''}</span>
+          <input type="password" id="nm-token" ${isEdit ? '' : 'required'} autocomplete="new-password" placeholder="${isEdit ? `Saved (${esc(existing.token_prefix || 'neo_...')})` : 'neo_node_... or neo_...'}">
         </label>
 
         <div id="node-modal-test-res" style="margin-bottom: 14px;"></div>
@@ -8614,6 +8720,9 @@ window.updateReinstallJavaPreview = updateReinstallJavaPreview;
 window.setNodeFilter = setNodeFilter;
 window.selectAdminTab = selectAdminTab;
 window.loadAdminNodes = loadAdminNodes;
+window.toggleHeadlessNodeHelper = toggleHeadlessNodeHelper;
+window.onNodeHelperInput = onNodeHelperInput;
+window.generateNodePairingKey = generateNodePairingKey;
 window.openNodeModal = openNodeModal;
 window.testNodeModalConnection = testNodeModalConnection;
 window.submitNodeModal = submitNodeModal;

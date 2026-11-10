@@ -3787,6 +3787,34 @@ html[data-theme="light"] .act-cat-nodes { color: #0e7490; }
   margin-bottom: 14px;
 }
 
+.node-cli-card {
+  padding: 18px 20px;
+  border: 1px solid var(--border-accent);
+}
+
+.node-cmd-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--con-bg);
+  border: 1px solid var(--border);
+}
+
+.node-cmd-box code {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--con-tx);
+  word-break: break-all;
+  white-space: pre-wrap;
+  user-select: all;
+}
+
 /* =============================================================================
    PER-SERVER DATABASES & INTERACTIVE SQL STUDIO
    ============================================================================= */
@@ -4148,4 +4176,8 @@ html[data-theme="light"] .db-result-grid {
 
 html[data-theme="light"] .node-error-note {
   color: #b91c1c;
+}
+
+html[data-theme="light"] .node-cmd-box {
+  background: rgba(15, 23, 42, 0.05);
 }

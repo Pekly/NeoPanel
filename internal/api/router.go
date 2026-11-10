@@ -217,8 +217,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	}
 	r.mux.HandleFunc("GET /api/nodes/{id}/ws/{serverId}", r.nodes.ProxyWS)
 
-	// Embedded Static & SPA routes
-	if r.embeddedStatic != nil {
+	// Embedded Static & SPA routes (disabled in headless node builds or role: node)
+	if r.embeddedStatic != nil && !(r.cfg != nil && r.cfg.IsNode()) {
 		fileServer := http.FileServer(http.FS(r.embeddedStatic))
 		r.mux.HandleFunc("GET /", func(w http.ResponseWriter, req *http.Request) {
 			path := req.URL.Path
@@ -229,6 +229,20 @@ func (r *Router) registerRoutes(db *database.DB) {
 				}
 			}
 			fileServer.ServeHTTP(w, req)
+		})
+	} else {
+		r.mux.HandleFunc("GET /", func(w http.ResponseWriter, req *http.Request) {
+			if strings.HasPrefix(req.URL.Path, "/api/") {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "API endpoint not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]interface{}{
+				"service": "neopanel",
+				"role":    "node",
+				"status":  "online",
+				"web_ui":  false,
+				"version": "1.0.0",
+			})
 		})
 	}
 }

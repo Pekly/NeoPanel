@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -88,11 +89,19 @@ func (h *AuthHandler) ValidateToken(tokenStr string) (*JWTClaims, error) {
 	return nil, jwt.ErrSignatureInvalid
 }
 
-// ValidateAuthToken validates either a signed JWT session token or a raw "neo_..." API key.
+// ValidateAuthToken validates a configured node token, a "neo_..." API key, or a signed JWT session token.
 func (h *AuthHandler) ValidateAuthToken(tokenStr string) (*JWTClaims, error) {
 	tokenStr = strings.TrimSpace(tokenStr)
 	if tokenStr == "" {
 		return nil, jwt.ErrTokenMalformed
+	}
+	if nodeTok := h.getNodeToken(); nodeTok != "" && len(tokenStr) == len(nodeTok) &&
+		subtle.ConstantTimeCompare([]byte(tokenStr), []byte(nodeTok)) == 1 {
+		return &JWTClaims{
+			UserID:   0,
+			Username: "node-daemon",
+			Role:     "admin",
+		}, nil
 	}
 	if strings.HasPrefix(tokenStr, "neo_") {
 		sum := sha256.Sum256([]byte(tokenStr))
@@ -110,7 +119,28 @@ func (h *AuthHandler) ValidateAuthToken(tokenStr string) (*JWTClaims, error) {
 	return h.ValidateToken(tokenStr)
 }
 
+func (h *AuthHandler) getNodeToken() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(h.cfg.Security.NodeToken)
+}
+
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
+	if h.cfg != nil && h.cfg.IsNode() {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"needs_setup":        false,
+			"version":            "1.0.0",
+			"role":               "node",
+			"node_mode":          true,
+			"turnstile_enabled":  false,
+			"turnstile_site_key": "",
+		})
+		return
+	}
+
 	count, err := h.db.GetUserCount()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to query database"})
@@ -125,12 +155,18 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"needs_setup":        count == 0,
 		"version":            "1.0.0",
+		"role":               "panel",
+		"node_mode":          false,
 		"turnstile_enabled":  tsActive,
 		"turnstile_site_key": tsSiteKey,
 	})
 }
 
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
+	if h.cfg != nil && h.cfg.IsNode() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Web setup is disabled in headless node daemon mode; authenticate using an API key or node_token"})
+		return
+	}
 	count, err := h.db.GetUserCount()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "database error"})
@@ -192,6 +228,10 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	if h.cfg != nil && h.cfg.IsNode() {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Interactive web login is disabled in headless node daemon mode; authenticate using an API key or node_token"})
+		return
+	}
 	var req struct {
 		Username       string `json:"username"`
 		Password       string `json:"password"`

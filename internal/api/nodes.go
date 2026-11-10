@@ -418,6 +418,7 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 		APIToken string `json:"api_token"`
 		FQDN     string `json:"fqdn"`
 		Location string `json:"location"`
+		Upsert   bool   `json:"upsert"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
@@ -446,6 +447,45 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 	if fqdn == "" {
 		if u, err := url.Parse(baseURL); err == nil {
 			fqdn = u.Hostname()
+		}
+	}
+
+	if req.Upsert {
+		if existingList, err := h.db.ListNodes(); err == nil {
+			for _, ex := range existingList {
+				if strings.EqualFold(strings.TrimRight(ex.BaseURL, "/"), baseURL) || strings.EqualFold(ex.Name, req.Name) {
+					ex.Name = req.Name
+					ex.BaseURL = baseURL
+					ex.APIToken = apiToken
+					ex.FQDN = fqdn
+					ex.Location = strings.TrimSpace(req.Location)
+					if err := h.db.UpdateNode(ex); err != nil {
+						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update existing node: " + err.Error()})
+						return
+					}
+					online, sys, cnt, latency, probeErr := h.probeRemote(r.Context(), ex.BaseURL, ex.APIToken)
+					hasTok, tokPrefix := maskNodeToken(ex.APIToken)
+					logAudit(h.db, r, "node_update", fmt.Sprintf("Re-paired cluster node '%s' (%s) at %s", ex.Name, ex.ID, ex.BaseURL))
+					writeJSON(w, http.StatusOK, NodeStatusView{
+						ID:          ex.ID,
+						Name:        ex.Name,
+						BaseURL:     ex.BaseURL,
+						FQDN:        ex.FQDN,
+						Location:    ex.Location,
+						IsLocal:     false,
+						Online:      online,
+						Error:       probeErr,
+						LatencyMS:   latency,
+						ServerCount: cnt,
+						System:      sys,
+						HasToken:    hasTok,
+						TokenPrefix: tokPrefix,
+						CreatedAt:   ex.CreatedAt,
+						UpdatedAt:   ex.UpdatedAt,
+					})
+					return
+				}
+			}
 		}
 	}
 

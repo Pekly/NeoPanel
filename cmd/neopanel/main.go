@@ -4,10 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,10 +32,22 @@ const banner = `
    >> Ultra-Lightweight Minecraft Server Manager (v%s) <<
 `
 
+func resolveConfigPath(flagVal string) string {
+	if strings.TrimSpace(flagVal) != "" {
+		return strings.TrimSpace(flagVal)
+	}
+	if _, err := os.Stat("/etc/neopanel/config.yaml"); err == nil {
+		return "/etc/neopanel/config.yaml"
+	}
+	return "./config.yaml"
+}
+
 func main() {
 	configPath := flag.String("config", "", "Path to YAML configuration file")
 	portFlag := flag.Int("port", 0, "Override HTTP listening port")
 	hostFlag := flag.String("host", "", "Override HTTP listening host")
+	roleFlag := flag.String("role", "", "Override server role ('panel' or 'node')")
+	nodeOnlyFlag := flag.Bool("node", false, "Run in headless Node Daemon mode (no web panel UI)")
 	showVersion := flag.Bool("version", false, "Show version and exit")
 	flag.Parse()
 
@@ -42,17 +56,14 @@ func main() {
 		return
 	}
 
-	fmt.Printf(banner, Version)
+	targetConfig := resolveConfigPath(*configPath)
 
-	// Determine configuration file path
-	targetConfig := *configPath
-	if targetConfig == "" {
-		if _, err := os.Stat("/etc/neopanel/config.yaml"); err == nil {
-			targetConfig = "/etc/neopanel/config.yaml"
-		} else {
-			targetConfig = "./config.yaml"
-		}
+	// Handle headless CLI subcommands (e.g. `neopanel node-token`, `neopanel api-key`, `neopanel node`)
+	if args := flag.Args(); len(args) > 0 {
+		os.Exit(runCLI(targetConfig, args))
 	}
+
+	fmt.Printf(banner, Version)
 
 	cfg, err := config.LoadConfig(targetConfig)
 	if err != nil {
@@ -64,6 +75,17 @@ func main() {
 	}
 	if *hostFlag != "" {
 		cfg.Server.Host = *hostFlag
+	}
+	if *nodeOnlyFlag {
+		cfg.Server.Role = "node"
+	} else if r := strings.ToLower(strings.TrimSpace(*roleFlag)); r == "node" || r == "panel" {
+		cfg.Server.Role = r
+	}
+	if cfg.IsNode() && strings.TrimSpace(cfg.Security.NodeToken) == "" {
+		cfg.Security.NodeToken = config.GenerateNodeToken()
+		if cfg.FilePath != "" {
+			_ = config.SaveConfig(cfg.FilePath, cfg)
+		}
 	}
 
 	// 1. Initialize SQLite Database
@@ -81,8 +103,11 @@ func main() {
 		manager.SetStartupTimeout(time.Duration(cfg.Server.StartupTimeoutSec) * time.Second)
 	}
 
-	// 3. Mount Embedded Frontend & Router
-	staticFS := web.GetFS()
+	// 3. Mount Router (omit embedded web UI completely in node builds or headless node role)
+	var staticFS fs.FS
+	if !cfg.IsNode() {
+		staticFS = web.GetFS()
+	}
 	router := api.NewRouter(cfg, db, manager, staticFS)
 
 	// 4. Initialize & Start Built-in SFTP Server (Port 2022)
@@ -136,7 +161,11 @@ func main() {
 	}()
 
 	// 6. Start HTTP Server
-	log.Printf("[SUCCESS] NeoPanel web dashboard running at: http://%s", addr)
+	if cfg.IsNode() || staticFS == nil {
+		log.Printf("[SUCCESS] NeoPanel Node Daemon (API-only, no web UI) running at: http://%s", addr)
+	} else {
+		log.Printf("[SUCCESS] NeoPanel web dashboard running at: http://%s", addr)
+	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("[FATAL] Server terminated unexpectedly: %v", err)
 	}

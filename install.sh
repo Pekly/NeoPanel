@@ -2,6 +2,9 @@
 
 # -----------------------------------------------------------------------------
 # NeoPanel All-In-One Installer for Ubuntu 24.04 LTS
+# Supports:
+#   - Full Master Panel (Web UI + Daemon + Java + Caddy SSL + Firewall)
+#   - Dedicated Headless Game Node (-tags node, zero Web UI, paired via API Key)
 # GitHub: https://github.com/Pekly/NeoPanel
 # -----------------------------------------------------------------------------
 
@@ -17,7 +20,7 @@ MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-# Default values
+# Default paths & constants
 PANEL_PORT="8080"
 CONFIG_DIR="/etc/neopanel"
 DATA_DIR="/var/lib/neopanel"
@@ -27,12 +30,31 @@ BINARY_NAME="neopanel"
 LOG_FILE="/tmp/neopanel-install.log"
 BUILD_DIR="/tmp/neopanel-build"
 
-# Cloudflare Turnstile defaults
+# Cloudflare Turnstile defaults (Full Panel mode only)
 DEFAULT_TURNSTILE_SITE_KEY="0x4AAAAAAF7CgzdQmoC3Ho3H"
 DEFAULT_TURNSTILE_SECRET_KEY="0x4AAAAAAF7Cg6ZKTqdgSA2s8Sg2oZ2HApU"
 TURNSTILE_ENABLED="false"
 TURNSTILE_SITE_KEY=""
 TURNSTILE_SECRET_KEY=""
+
+# Role & CLI pairing options
+ACTION=""
+INSTALL_ROLE=""
+MASTER_URL=""
+MASTER_API_KEY=""
+NODE_NAME=""
+NODE_ADVERTISE_URL=""
+NODE_FQDN=""
+NODE_LOCATION=""
+NODE_TOKEN_OVERRIDE=""
+ARG_USE_SSL=""
+ARG_DOMAIN=""
+ARG_EMAIL=""
+ARG_CONF_UFW=""
+ARG_USE_TURNSTILE=""
+ARG_API_KEY_NAME=""
+PAIR_INSECURE="false"
+ASSUME_YES="false"
 
 # Prevent apt interactive prompts from hanging in background
 export DEBIAN_FRONTEND=noninteractive
@@ -46,7 +68,9 @@ export NEEDRESTART_MODE=a
 # -----------------------------------------------------------------------------
 
 print_banner() {
-  clear
+  if [ -t 1 ] || [ -e /dev/tty ]; then
+    clear 2>/dev/null || true
+  fi
   echo -e "${CYAN}${BOLD}"
   cat << 'EOF'
   _   _             ____                  _ 
@@ -80,11 +104,11 @@ prompt_user() {
   local prompt_text="$1"
   local var_name="$2"
   if [ -t 0 ]; then
-    read -r -p "$prompt_text" "$var_name"
+    read -r -p "$prompt_text" "$var_name" || true
   elif [ -e /dev/tty ]; then
-    read -r -p "$prompt_text" "$var_name" </dev/tty
+    read -r -p "$prompt_text" "$var_name" </dev/tty || true
   else
-    read -r -p "$prompt_text" "$var_name"
+    eval "$var_name=''"
   fi
 }
 
@@ -101,7 +125,7 @@ draw_progress() {
   for ((i=0; i<empty; i++)); do bar+="░"; done
 
   # Carriage return with ANSI erase-to-end-of-line (\033[K) to cleanly overwrite line
-  printf "\r\033[K  ${CYAN}[${GREEN}%s${CYAN}] ${BOLD}%3d%%${NC}  %-48s" "$bar" "$pct" "$text"
+  printf "\r\033[K  ${CYAN}[${GREEN}%s${CYAN}] ${BOLD}%3d%%${NC}  %-52s" "$bar" "$pct" "$text"
 }
 
 # Executes a background task silently while rendering an animated spinner & smooth percentage progress
@@ -166,19 +190,38 @@ check_os() {
 
   if [ "$OS" != "ubuntu" ]; then
     log_warn "This script is tailored for Ubuntu 24.04 LTS, but detected: $OS $VERSION_ID"
-    prompt_user "Do you want to continue anyway? (y/N): " choice
-    if [[ ! "$choice" =~ ^[Yy]$ ]]; then
-      exit 1
+    if [ "$ASSUME_YES" != "true" ] && { [ -t 0 ] || [ -e /dev/tty ]; }; then
+      prompt_user "Do you want to continue anyway? (y/N): " choice
+      if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+        exit 1
+      fi
     fi
   fi
 }
 
 get_public_ip() {
-  curl -s4 https://ifconfig.me || curl -s4 https://api.ipify.org || echo "127.0.0.1"
+  curl -s4 --connect-timeout 4 https://ifconfig.me || curl -s4 --connect-timeout 4 https://api.ipify.org || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1"
 }
 
 generate_secret() {
   openssl rand -hex 32 2>/dev/null || date +%s | sha256sum | head -c 64
+}
+
+generate_node_token() {
+  local rnd
+  rnd=$(openssl rand -hex 28 2>/dev/null || { date +%s; uname -a; } | sha256sum | head -c 56)
+  echo "neo_node_${rnd}"
+}
+
+detect_installed_role() {
+  if [ "$INSTALL_ROLE" = "node" ] || [ "$INSTALL_ROLE" = "panel" ]; then
+    return 0
+  fi
+  if [ -f "$CONFIG_DIR/config.yaml" ] && grep -Eq '^[[:space:]]*role:[[:space:]]*"?node"?' "$CONFIG_DIR/config.yaml"; then
+    INSTALL_ROLE="node"
+  else
+    INSTALL_ROLE="panel"
+  fi
 }
 
 # -----------------------------------------------------------------------------
@@ -188,7 +231,7 @@ generate_secret() {
 step_prerequisites() {
   apt-get update -y -q
   apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-    curl wget jq tar ufw ca-certificates software-properties-common git
+    curl wget jq tar ufw ca-certificates software-properties-common git openssl
 }
 
 has_java_version() {
@@ -290,33 +333,12 @@ step_go_compiler() {
   fi
 }
 
-step_build_neopanel() {
-  mkdir -p "$CONFIG_DIR"
-  mkdir -p "$DATA_DIR/servers"
-  mkdir -p "$DATA_DIR/backups"
-
-  if [ -f "./cmd/neopanel/main.go" ]; then
-    go mod tidy
-    go build -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
-  else
-    rm -rf "$BUILD_DIR"
-    git clone https://github.com/Pekly/NeoPanel.git "$BUILD_DIR"
-    if [ -f "$BUILD_DIR/cmd/neopanel/main.go" ]; then
-      (cd "$BUILD_DIR" && go mod tidy && go build -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
-      rm -rf "$BUILD_DIR"
-    else
-      echo "Failed to clone repository or main.go missing." >&2
-      exit 1
-    fi
-  fi
-
-  chmod +x "$INSTALL_DIR/$BINARY_NAME"
-
+write_global_shortcuts() {
   # Install global neopanel-update command shortcut
   cat > "$INSTALL_DIR/neopanel-update" <<'EOF'
 #!/usr/bin/env bash
 set -e
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- --update
+curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- --update "$@"
 EOF
   chmod +x "$INSTALL_DIR/neopanel-update"
 
@@ -327,6 +349,35 @@ set -e
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- "$@"
 EOF
   chmod +x "$INSTALL_DIR/neopanel-installer"
+}
+
+step_build_neopanel() {
+  mkdir -p "$CONFIG_DIR"
+  mkdir -p "$DATA_DIR/servers"
+  mkdir -p "$DATA_DIR/backups"
+
+  local -a go_tags=()
+  if [ "$INSTALL_ROLE" = "node" ]; then
+    go_tags=(-tags node)
+  fi
+
+  if [ -f "./cmd/neopanel/main.go" ] && [ -f "./cmd/neopanel/cli.go" ]; then
+    go mod tidy
+    go build "${go_tags[@]}" -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
+  else
+    rm -rf "$BUILD_DIR"
+    git clone --depth 1 https://github.com/Pekly/NeoPanel.git "$BUILD_DIR"
+    if [ -f "$BUILD_DIR/cmd/neopanel/main.go" ]; then
+      (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
+      rm -rf "$BUILD_DIR"
+    else
+      echo "Failed to clone repository or main.go missing." >&2
+      exit 1
+    fi
+  fi
+
+  chmod +x "$INSTALL_DIR/$BINARY_NAME"
+  write_global_shortcuts
 }
 
 prompt_turnstile_setup() {
@@ -413,15 +464,24 @@ step_config_service() {
   local ts_enabled="${3:-false}"
   local ts_site="${4:-}"
   local ts_secret="${5:-}"
+  local role="${6:-panel}"
+  local node_tok="${7:-}"
 
   local secret
   secret=$(generate_secret)
 
-  cat > "$CONFIG_DIR/config.yaml" <<EOF
+  local srv_mode="behind_proxy"
+  if [ "$host" = "0.0.0.0" ] && [ "$role" = "node" ]; then
+    srv_mode="standalone"
+  fi
+
+  if [ "$role" = "node" ]; then
+    cat > "$CONFIG_DIR/config.yaml" <<EOF
 server:
   host: "${host}"
   port: ${port}
-  mode: "behind_proxy"
+  mode: "${srv_mode}"
+  role: "node"
 
 paths:
   data_dir: "${DATA_DIR}"
@@ -431,6 +491,28 @@ paths:
 security:
   jwt_secret: "${secret}"
   token_expiration_hours: 72
+  node_token: "${node_tok}"
+
+java:
+  default_path: "java"
+EOF
+  else
+    cat > "$CONFIG_DIR/config.yaml" <<EOF
+server:
+  host: "${host}"
+  port: ${port}
+  mode: "behind_proxy"
+  role: "panel"
+
+paths:
+  data_dir: "${DATA_DIR}"
+  servers_dir: "${DATA_DIR}/servers"
+  db_path: "${DATA_DIR}/neopanel.db"
+
+security:
+  jwt_secret: "${secret}"
+  token_expiration_hours: 72
+  node_token: "${node_tok}"
   turnstile:
     enabled: ${ts_enabled}
     site_key: "${ts_site}"
@@ -439,12 +521,18 @@ security:
 java:
   default_path: "java"
 EOF
+  fi
 
   chmod 600 "$CONFIG_DIR/config.yaml"
 
+  local svc_desc="NeoPanel Minecraft Server Manager"
+  if [ "$role" = "node" ]; then
+    svc_desc="NeoPanel Headless Node Daemon"
+  fi
+
   cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=NeoPanel Minecraft Server Manager
+Description=${svc_desc}
 After=network.target
 
 [Service]
@@ -491,9 +579,12 @@ EOF
 }
 
 step_firewall() {
+  local include_http_ports="${1:-true}"
   ufw allow 22/tcp >/dev/null 2>&1 || true
-  ufw allow 80/tcp >/dev/null 2>&1
-  ufw allow 443/tcp >/dev/null 2>&1
+  if [ "$include_http_ports" = "true" ]; then
+    ufw allow 80/tcp >/dev/null 2>&1
+    ufw allow 443/tcp >/dev/null 2>&1
+  fi
   ufw allow 2022/tcp >/dev/null 2>&1
   ufw allow "${PANEL_PORT}/tcp" >/dev/null 2>&1
   ufw allow 25565:25600/tcp >/dev/null 2>&1
@@ -501,11 +592,25 @@ step_firewall() {
   echo "y" | ufw enable >/dev/null 2>&1
 }
 
+wait_for_local_daemon() {
+  local port="$1"
+  local i=0
+  while [ "$i" -lt 15 ]; do
+    if curl -fsS "http://127.0.0.1:${port}/api/auth/status" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.4
+    i=$((i + 1))
+  done
+  return 1
+}
+
 # -----------------------------------------------------------------------------
-# Main Install Flow
+# Full Panel Installation Flow (Web UI + Daemon)
 # -----------------------------------------------------------------------------
 
 run_full_installation() {
+  INSTALL_ROLE="panel"
   print_banner
   check_root
   check_os
@@ -513,67 +618,82 @@ run_full_installation() {
   local pub_ip
   pub_ip=$(get_public_ip)
 
+  echo -e "${BOLD}Mode:${NC} ${CYAN}Full Master Panel (Web UI + Daemon)${NC}"
   echo -e "${BOLD}Server Public IP detected:${NC} ${CYAN}${pub_ip}${NC}\n"
 
-  echo -e "${YELLOW}Would you like to configure a custom domain with automated Let's Encrypt SSL?${NC}"
-  prompt_user "Use Domain & SSL? (y/n) [default: y]: " use_ssl
-  use_ssl=${use_ssl:-y}
-
-  local domain=""
-  local email=""
+  local use_ssl="${ARG_USE_SSL}"
+  local domain="${ARG_DOMAIN}"
+  local email="${ARG_EMAIL}"
   local bind_host="0.0.0.0"
 
+  if [ -n "$domain" ]; then
+    use_ssl="y"
+  fi
+  if [ -z "$use_ssl" ]; then
+    echo -e "${YELLOW}Would you like to configure a custom domain with automated Let's Encrypt SSL?${NC}"
+    prompt_user "Use Domain & SSL? (y/n) [default: y]: " use_ssl
+    use_ssl=${use_ssl:-y}
+  fi
+
   if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
-    echo -e "\n${CYAN}[REMINDER] Ensure your domain's DNS 'A' record points to this server's IP (${pub_ip}).${NC}"
-    echo -e "${YELLOW}           If DNS has not propagated yet, Let's Encrypt certificate issuance will fail.${NC}\n"
+    if [ -z "$domain" ]; then
+      echo -e "\n${CYAN}[REMINDER] Ensure your domain's DNS 'A' record points to this server's IP (${pub_ip}).${NC}"
+      echo -e "${YELLOW}           If DNS has not propagated yet, Let's Encrypt certificate issuance will fail.${NC}\n"
 
-    prompt_user "Enter your Domain name (e.g. panel.example.com): " domain
-    while [ -z "$domain" ]; do
-      prompt_user "Domain cannot be empty. Enter Domain: " domain
-    done
+      prompt_user "Enter your Domain name (e.g. panel.example.com): " domain
+      while [ -z "$domain" ]; do
+        prompt_user "Domain cannot be empty. Enter Domain: " domain
+      done
 
-    # Quick DNS check
-    local resolved_ip
-    resolved_ip=$(getent ahostsv4 "$domain" 2>/dev/null | head -n 1 | awk '{print $1}')
-    if [ -n "$resolved_ip" ] && [ "$resolved_ip" != "$pub_ip" ]; then
-      log_warn "DNS check: '$domain' resolves to $resolved_ip, but server IP is $pub_ip."
-      echo -e "${YELLOW}[REMINDER] If you just updated your DNS record, please wait a minute for propagation.${NC}"
-      prompt_user "Do you want to continue anyway? (y/N): " override_dns
-      if [[ ! "$override_dns" =~ ^[Yy]$ ]]; then
-        exit 1
+      local resolved_ip
+      resolved_ip=$(getent ahostsv4 "$domain" 2>/dev/null | head -n 1 | awk '{print $1}')
+      if [ -n "$resolved_ip" ] && [ "$resolved_ip" != "$pub_ip" ]; then
+        log_warn "DNS check: '$domain' resolves to $resolved_ip, but server IP is $pub_ip."
+        echo -e "${YELLOW}[REMINDER] If you just updated your DNS record, please wait a minute for propagation.${NC}"
+        prompt_user "Do you want to continue anyway? (y/N): " override_dns
+        if [[ ! "$override_dns" =~ ^[Yy]$ ]]; then
+          exit 1
+        fi
       fi
     fi
 
-    prompt_user "Enter Email for Let's Encrypt certificate notices: " email
-    while [ -z "$email" ]; do
-      prompt_user "Email cannot be empty. Enter Email: " email
-    done
+    if [ -z "$email" ]; then
+      prompt_user "Enter Email for Let's Encrypt certificate notices [default: admin@${domain}]: " email
+      email=${email:-"admin@${domain}"}
+    fi
 
     bind_host="127.0.0.1"
   fi
 
-  prompt_user "Would you like to configure UFW firewall rules automatically? (y/n) [default: y]: " conf_ufw
-  conf_ufw=${conf_ufw:-y}
+  local conf_ufw="${ARG_CONF_UFW}"
+  if [ -z "$conf_ufw" ]; then
+    prompt_user "Would you like to configure UFW firewall rules automatically? (y/n) [default: y]: " conf_ufw
+    conf_ufw=${conf_ufw:-y}
+  fi
 
-  prompt_turnstile_setup
+  if [ "$ARG_USE_TURNSTILE" = "n" ]; then
+    TURNSTILE_ENABLED="false"
+  else
+    prompt_turnstile_setup
+  fi
 
   # Clear terminal for clean, premium progress view
   print_banner
-  echo -e "${BOLD}Installing NeoPanel...${NC} (Silent background execution, logs -> ${CYAN}${LOG_FILE}${NC})\n"
+  echo -e "${BOLD}Installing NeoPanel Master Panel...${NC} (Silent background execution, logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
   # Run steps with smooth percentage progress
   run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
   run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
   run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
-  run_step 55 75 "Compiling NeoPanel core binary from source" "step_build_neopanel"
-  run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT' '$TURNSTILE_ENABLED' '$TURNSTILE_SITE_KEY' '$TURNSTILE_SECRET_KEY'"
+  run_step 55 75 "Compiling NeoPanel panel & daemon binary" "step_build_neopanel"
+  run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT' '$TURNSTILE_ENABLED' '$TURNSTILE_SITE_KEY' '$TURNSTILE_SECRET_KEY' 'panel' ''"
 
   if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
     run_step 85 95 "Setting up automated Let's Encrypt SSL & Caddy" "step_ssl_caddy '$domain' '$email'"
   fi
 
   if [[ "$conf_ufw" =~ ^[Yy]$ ]]; then
-    run_step 95 100 "Applying UFW firewall security rules" "step_firewall"
+    run_step 95 100 "Applying UFW firewall security rules" "step_firewall 'true'"
   else
     draw_progress 100 "✔ Installation completed"
     echo ""
@@ -596,16 +716,17 @@ run_full_installation() {
   echo -e "  ${BOLD}Config Path:${NC}     ${CONFIG_DIR}/config.yaml"
   echo -e "  ${BOLD}Data Path:${NC}       ${DATA_DIR}"
 
+  echo -e "\n  ${CYAN}${BOLD}[CLUSTER] Adding Dedicated Remote Game Nodes (No Web UI Needed):${NC}"
+  echo -e "    1. Create an Admin API key in Web UI (Account -> API Keys) OR on Master terminal:"
+  echo -e "       ${YELLOW}sudo neopanel api-key create --name \"Node Join Key\"${NC}"
+  echo -e "    2. Run on any remote Ubuntu server to install Headless Node Daemon & auto-pair:"
+  echo -e "       ${YELLOW}curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- --node --master <PANEL_URL> --api-key <neo_...> --name node-01${NC}"
+
   echo -e "\n  ${YELLOW}${BOLD}[REMINDER] Cloud Firewalls & Security Groups:${NC}"
-  echo -e "    If your VPS is hosted on AWS, Oracle Cloud, Google Cloud, Azure, or OVH,"
-  echo -e "    remember to also allow incoming ports in your cloud provider's web console:"
+  echo -e "    Remember to also allow incoming ports in your cloud provider's web console:"
   echo -e "      - ${CYAN}Port 80 / 443 (TCP)${NC}       -> Web Dashboard"
   echo -e "      - ${CYAN}Port 2022 (TCP)${NC}           -> Pure-Go Built-in SFTP Server"
   echo -e "      - ${CYAN}Port 25565-25600 (TCP/UDP)${NC} -> Minecraft Player Connections"
-
-  echo -e "\n  ${CYAN}${BOLD}[REMINDER] Minecraft Server Ports:${NC}"
-  echo -e "    Your first server can use default port 25565."
-  echo -e "    Each subsequent server requires its own unique port (e.g. 25566, 25567)."
 
   if [ -f /var/run/reboot-required ]; then
     echo -e "\n  ${YELLOW}${BOLD}[NOTE] Pending Kernel Updates:${NC}"
@@ -614,14 +735,270 @@ run_full_installation() {
 
   echo -e "\n  ${BOLD}Useful Commands:${NC}"
   echo -e "    ${YELLOW}sudo neopanel-update${NC}       # Instant one-command update from GitHub"
+  echo -e "    ${YELLOW}sudo neopanel help${NC}         # Manage API keys & cluster nodes via CLI"
   echo -e "    ${YELLOW}systemctl status neopanel${NC}    # View status"
   echo -e "    ${YELLOW}journalctl -u neopanel -f${NC}    # View live logs"
-  echo -e "    ${YELLOW}systemctl restart neopanel${NC}   # Restart panel"
   echo -e "\n${GREEN}Thank you for choosing NeoPanel!${NC}\n"
 }
 
 # -----------------------------------------------------------------------------
-# Update Flow
+# Dedicated Headless Game Node Installation Flow (Zero Web Panel / UI)
+# -----------------------------------------------------------------------------
+
+run_node_installation() {
+  INSTALL_ROLE="node"
+  print_banner
+  check_root
+  check_os
+
+  local pub_ip default_hostname streamlined
+  pub_ip=$(get_public_ip)
+  default_hostname=$(hostname -s 2>/dev/null || hostname 2>/dev/null || echo "mc-node-01")
+
+  streamlined="false"
+  if [ "$ASSUME_YES" = "true" ] || { [ -n "$MASTER_URL" ] && [ -n "$MASTER_API_KEY" ]; } || { [ ! -t 0 ] && [ ! -e /dev/tty ]; }; then
+    streamlined="true"
+  fi
+
+  echo -e "${BOLD}Mode:${NC} ${MAGENTA}Dedicated Headless Game Node (-tags node, ZERO Web UI code)${NC}"
+  echo -e "${BOLD}Detected Host IP:${NC} ${CYAN}${pub_ip}${NC}\n"
+
+  local node_name="${NODE_NAME}"
+  local node_loc="${NODE_LOCATION}"
+  local use_ssl="${ARG_USE_SSL}"
+  local domain="${ARG_DOMAIN}"
+  local email="${ARG_EMAIL}"
+  local bind_host="0.0.0.0"
+
+  if [ -z "$node_name" ]; then
+    if [ "$streamlined" = "true" ]; then
+      node_name="$default_hostname"
+    else
+      prompt_user "Enter Node Name [default: ${default_hostname}]: " node_name
+      node_name=${node_name:-$default_hostname}
+    fi
+  fi
+
+  if [ -z "$node_loc" ] && [ "$streamlined" != "true" ]; then
+    prompt_user "Enter Region / Location label (optional, e.g. Frankfurt, DE): " node_loc
+  fi
+
+  if [ -n "$domain" ]; then
+    use_ssl="y"
+  elif [ -z "$use_ssl" ]; then
+    if [ "$streamlined" = "true" ]; then
+      use_ssl="n"
+    else
+      echo -e "\n${YELLOW}Optionally protect this node's Daemon API with a domain & Let's Encrypt SSL.${NC}"
+      prompt_user "Use Domain & SSL for this Node API? (y/n) [default: n — uses direct HTTP on port ${PANEL_PORT}]: " use_ssl
+      use_ssl=${use_ssl:-n}
+    fi
+  fi
+
+  if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
+    if [ -z "$domain" ]; then
+      echo -e "\n${CYAN}[REMINDER] Ensure DNS 'A' record for your node subdomain points to ${pub_ip}.${NC}"
+      prompt_user "Enter Node Domain/Subdomain (e.g. eu1.example.com): " domain
+      while [ -z "$domain" ]; do
+        prompt_user "Domain cannot be empty. Enter Domain: " domain
+      done
+    fi
+    if [ -z "$email" ]; then
+      if [ "$streamlined" = "true" ]; then
+        email="admin@${domain}"
+      else
+        prompt_user "Enter Email for Let's Encrypt certificate [default: admin@${domain}]: " email
+        email=${email:-"admin@${domain}"}
+      fi
+    fi
+    bind_host="127.0.0.1"
+  fi
+
+  local default_adv_url="http://${pub_ip}:${PANEL_PORT}"
+  if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
+    default_adv_url="https://${domain}"
+  fi
+
+  local node_adv_url="${NODE_ADVERTISE_URL}"
+  if [ -z "$node_adv_url" ]; then
+    if [ "$streamlined" = "true" ]; then
+      node_adv_url="$default_adv_url"
+    else
+      echo -e "\n${CYAN}Reachable Daemon API URL (used by Master Panel to control this node):${NC}"
+      prompt_user "Daemon URL [default: ${default_adv_url}]: " node_adv_url
+      node_adv_url=${node_adv_url:-$default_adv_url}
+    fi
+  fi
+
+  local default_fqdn="${pub_ip}"
+  if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
+    default_fqdn="${domain}"
+  fi
+  local node_fqdn="${NODE_FQDN}"
+  if [ -z "$node_fqdn" ]; then
+    if [ "$streamlined" = "true" ]; then
+      node_fqdn="$default_fqdn"
+    else
+      prompt_user "Public Game Host / IP shown to players [default: ${default_fqdn}]: " node_fqdn
+      node_fqdn=${node_fqdn:-$default_fqdn}
+    fi
+  fi
+
+  local conf_ufw="${ARG_CONF_UFW}"
+  if [ -z "$conf_ufw" ]; then
+    if [ "$streamlined" = "true" ]; then
+      conf_ufw="y"
+    else
+      prompt_user "Configure UFW firewall rules automatically? (y/n) [default: y]: " conf_ufw
+      conf_ufw=${conf_ufw:-y}
+    fi
+  fi
+
+  if [ -z "$MASTER_URL" ] && [ "$streamlined" != "true" ]; then
+    echo ""
+    prompt_user "Pair automatically with your Master Panel right now using an API Key? (y/n) [default: n]: " pair_now
+    if [[ "$pair_now" =~ ^[Yy]$ ]]; then
+      prompt_user "Master Panel URL (e.g. https://panel.example.com): " MASTER_URL
+      prompt_user "Master Admin API Key (neo_...): " MASTER_API_KEY
+    fi
+  fi
+
+  local node_tok="${NODE_TOKEN_OVERRIDE}"
+  if [ -z "$node_tok" ]; then
+    node_tok=$(generate_node_token)
+  fi
+
+  print_banner
+  echo -e "${BOLD}Installing NeoPanel Dedicated Node Daemon...${NC} (Zero Web UI, logs -> ${CYAN}${LOG_FILE}${NC})\n"
+
+  run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
+  run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
+  run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
+  run_step 55 75 "Compiling headless Node binary (-tags node)" "step_build_neopanel"
+  run_step 75 85 "Configuring headless Node daemon & systemd" "step_config_service '$bind_host' '$PANEL_PORT' 'false' '' '' 'node' '$node_tok'"
+
+  local fw_include_http="false"
+  if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
+    fw_include_http="true"
+    run_step 85 95 "Setting up automated Let's Encrypt SSL & Caddy" "step_ssl_caddy '$domain' '$email'"
+  fi
+
+  if [[ "$conf_ufw" =~ ^[Yy]$ ]]; then
+    run_step 95 100 "Applying UFW firewall security rules" "step_firewall '$fw_include_http'"
+  else
+    draw_progress 100 "✔ Headless Node installation completed"
+    echo ""
+  fi
+
+  wait_for_local_daemon "$PANEL_PORT" || true
+
+  local pair_status="not_attempted"
+  local pair_output=""
+  if [ -n "$MASTER_URL" ] && [ -n "$MASTER_API_KEY" ]; then
+    echo -e "\n${BLUE}[PAIRING]${NC} Registering node '${node_name}' with Master Panel ${CYAN}${MASTER_URL}${NC}..."
+    local -a pair_cmd=(
+      "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml"
+      node connect
+      --master "$MASTER_URL"
+      --api-key "$MASTER_API_KEY"
+      --name "$node_name"
+      --url "$node_adv_url"
+      --token "$node_tok"
+      --fqdn "$node_fqdn"
+      --location "$node_loc"
+    )
+    if [ "$PAIR_INSECURE" = "true" ]; then
+      pair_cmd+=(--insecure)
+    fi
+
+    if pair_output=$("${pair_cmd[@]}" 2>&1); then
+      pair_status="ok"
+      log_success "Node paired with Master Panel!"
+      echo "$pair_output" | sed 's/^/  /'
+    else
+      pair_status="failed"
+      log_warn "Automatic pairing did not succeed yet: ${pair_output}"
+    fi
+  fi
+
+  # -----------------------------------------------------------------------------
+  # Node Completion Banner
+  # -----------------------------------------------------------------------------
+  echo -e "\n${GREEN}${BOLD}================================================================${NC}"
+  echo -e "${GREEN}${BOLD}        NeoPanel Headless Node Installation Complete!           ${NC}"
+  echo -e "${GREEN}${BOLD}================================================================${NC}\n"
+
+  echo -e "  ${BOLD}Daemon Role:${NC}      ${MAGENTA}node (Headless API + SFTP only — Web Panel omitted)${NC}"
+  echo -e "  ${BOLD}Node Name:${NC}        ${CYAN}${node_name}${NC}"
+  echo -e "  ${BOLD}API Endpoint:${NC}     ${CYAN}${node_adv_url}${NC}"
+  echo -e "  ${BOLD}Player Host/FQDN:${NC} ${CYAN}${node_fqdn}${NC}"
+  echo -e "  ${BOLD}Node Token:${NC}       ${YELLOW}${node_tok}${NC}"
+  echo -e "  ${BOLD}Config Path:${NC}      ${CONFIG_DIR}/config.yaml"
+  echo -e "  ${BOLD}Data Path:${NC}        ${DATA_DIR}"
+
+  if [ "$pair_status" != "ok" ]; then
+    echo -e "\n  ${CYAN}${BOLD}Connect this node to your Master Panel using EITHER method:${NC}"
+    echo -e "    ${BOLD}1. On Master VPS CLI (No Browser Needed):${NC}"
+    echo -e "       ${YELLOW}sudo neopanel node connect --name \"${node_name}\" --url \"${node_adv_url}\" --fqdn \"${node_fqdn}\" --location \"${node_loc}\" --token \"${node_tok}\"${NC}"
+    echo -e "    ${BOLD}2. From this Node using a Master API Key (neo_...):${NC}"
+    echo -e "       ${YELLOW}sudo neopanel node connect --master https://panel.example.com --api-key <neo_...> --name \"${node_name}\" --url \"${node_adv_url}\" --fqdn \"${node_fqdn}\"${NC}"
+    echo -e "    ${BOLD}3. Master Web UI:${NC} Admin -> Cluster Nodes -> Connect Node"
+  fi
+
+  echo -e "\n  ${YELLOW}${BOLD}[SECURITY TIP]${NC}"
+  echo -e "    This node runs without any web login page and authenticates exclusively via ${YELLOW}node_token${NC}."
+  if [[ ! "$use_ssl" =~ ^[Yy]$ ]]; then
+    echo -e "    For extra hardening on public VPS hosts, restrict port ${PANEL_PORT}/tcp in UFW to your Master IP:"
+    echo -e "      ${CYAN}sudo ufw delete allow ${PANEL_PORT}/tcp && sudo ufw allow from <MASTER_IP> to any port ${PANEL_PORT} proto tcp${NC}"
+  fi
+
+  echo -e "\n  ${BOLD}Useful Node Commands:${NC}"
+  echo -e "    ${YELLOW}sudo neopanel node-token${NC}            # Show node auth token"
+  echo -e "    ${YELLOW}sudo neopanel node-token --rotate${NC}   # Rotate token cleanly"
+  echo -e "    ${YELLOW}sudo neopanel-update${NC}                # Update headless binary (-tags node preserved)"
+  echo -e "    ${YELLOW}systemctl status neopanel${NC}           # View service health"
+  echo -e "\n${GREEN}Headless node ready!${NC}\n"
+}
+
+# -----------------------------------------------------------------------------
+# Interactive Connect Remote Node Wizard
+# -----------------------------------------------------------------------------
+
+interactive_connect_node_wizard() {
+  check_root
+  print_banner
+  echo -e "${CYAN}${BOLD}Connect Remote Node Wizard${NC}\n"
+
+  prompt_user "Enter Node Name (e.g. EU-Frankfurt-01): " c_name
+  while [ -z "$c_name" ]; do
+    prompt_user "Node name cannot be empty: " c_name
+  done
+  prompt_user "Enter Remote Node Daemon URL (e.g. http://192.168.1.50:8080 or https://eu1.example.com): " c_url
+  while [ -z "$c_url" ]; do
+    prompt_user "Node URL cannot be empty: " c_url
+  done
+  prompt_user "Enter Remote Node Token (neo_node_... or neo_...): " c_tok
+  while [ -z "$c_tok" ]; do
+    prompt_user "Token cannot be empty: " c_tok
+  done
+  prompt_user "Public Game Host/FQDN for players [optional, defaults to URL host]: " c_fqdn
+  prompt_user "Region / Location [optional, e.g. Frankfurt, DE]: " c_loc
+  prompt_user "Register on local Master DB or remote Master URL? [leave blank for local DB]: " c_master
+
+  local -a cmd=("$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" node connect --name "$c_name" --url "$c_url" --token "$c_tok")
+  [ -n "$c_fqdn" ] && cmd+=(--fqdn "$c_fqdn")
+  [ -n "$c_loc" ] && cmd+=(--location "$c_loc")
+  if [ -n "$c_master" ]; then
+    prompt_user "Enter Master Panel Admin API Key (neo_...): " c_mkey
+    cmd+=(--master "$c_master" --api-key "$c_mkey")
+  fi
+
+  echo ""
+  "${cmd[@]}"
+}
+
+# -----------------------------------------------------------------------------
+# Update Flow (Preserves Full Panel vs Headless Node Role Automatically)
 # -----------------------------------------------------------------------------
 
 step_update_ensure_java() {
@@ -651,7 +1028,11 @@ step_update_fetch() {
 }
 
 step_update_compile() {
-  (cd "$BUILD_DIR" && go mod tidy && go build -ldflags="-s -w" -o "$BUILD_DIR/neopanel_new" ./cmd/neopanel)
+  local -a go_tags=()
+  if [ "$INSTALL_ROLE" = "node" ]; then
+    go_tags=(-tags node)
+  fi
+  (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w" -o "$BUILD_DIR/neopanel_new" ./cmd/neopanel)
 }
 
 step_update_swap() {
@@ -663,20 +1044,7 @@ step_update_swap() {
   chmod +x "$INSTALL_DIR/$BINARY_NAME"
   rm -rf "$BUILD_DIR"
 
-  # Ensure shortcuts are installed
-  cat > "$INSTALL_DIR/neopanel-update" <<'EOF'
-#!/usr/bin/env bash
-set -e
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- --update
-EOF
-  chmod +x "$INSTALL_DIR/neopanel-update"
-
-  cat > "$INSTALL_DIR/neopanel-installer" <<'EOF'
-#!/usr/bin/env bash
-set -e
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- "$@"
-EOF
-  chmod +x "$INSTALL_DIR/neopanel-installer"
+  write_global_shortcuts
 
   systemctl restart neopanel
   sleep 1
@@ -686,9 +1054,10 @@ EOF
 update_neopanel() {
   print_banner
   check_root
+  detect_installed_role
 
-  # Prompt for Cloudflare Turnstile if upgrading from a version prior to Turnstile support
-  if [ -f "$CONFIG_DIR/config.yaml" ] && ! grep -q "turnstile:" "$CONFIG_DIR/config.yaml"; then
+  # Prompt for Cloudflare Turnstile ONLY in full Web Panel mode if upgrading from pre-Turnstile config
+  if [ "$INSTALL_ROLE" != "node" ] && [ -f "$CONFIG_DIR/config.yaml" ] && ! grep -q "turnstile:" "$CONFIG_DIR/config.yaml"; then
     if [ -t 0 ] || [ -e /dev/tty ]; then
       echo -e "${CYAN}${BOLD}[NEW IN THIS VERSION] Cloudflare Turnstile Bot Protection${NC}"
       prompt_turnstile_setup
@@ -697,37 +1066,90 @@ update_neopanel() {
     fi
   fi
 
-  echo -e "${BOLD}Updating NeoPanel to Latest Release...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
+  if [ "$INSTALL_ROLE" = "node" ]; then
+    echo -e "${BOLD}Updating NeoPanel Headless Node Daemon (-tags node)...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
+  else
+    echo -e "${BOLD}Updating NeoPanel to Latest Release...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
+  fi
 
   run_step 0 20 "Ensuring Java 25, 21, 17 & 8 runtimes" "step_update_ensure_java"
   run_step 20 45 "Fetching latest updates from GitHub" "step_update_fetch"
-  run_step 45 80 "Compiling fresh NeoPanel binary" "step_update_compile"
+  if [ "$INSTALL_ROLE" = "node" ]; then
+    run_step 45 80 "Compiling fresh headless Node binary (-tags node)" "step_update_compile"
+  else
+    run_step 45 80 "Compiling fresh NeoPanel binary" "step_update_compile"
+  fi
   run_step 80 100 "Restarting service and verifying health" "step_update_swap"
 
   echo -e "\n${GREEN}${BOLD}================================================================${NC}"
   echo -e "${GREEN}${BOLD}           NeoPanel Successfully Updated to Latest Version!     ${NC}"
   echo -e "${GREEN}${BOLD}================================================================${NC}\n"
+  echo -e "  ${BOLD}Role Preserved:${NC}   ${CYAN}${INSTALL_ROLE}${NC}"
   echo -e "  ${BOLD}Service Status:${NC}   ${GREEN}Active & Running (systemd)${NC}"
-  echo -e "  ${BOLD}Dashboard:${NC}        All database records, servers & configs preserved.\n"
+  echo -e "  ${BOLD}Data Safety:${NC}      All database records, servers & configs preserved.\n"
   echo -e "${GREEN}================================================================${NC}\n"
 }
 
 # -----------------------------------------------------------------------------
-# Interactive Menu
+# Interactive Menu & CLI Argument Parsing
 # -----------------------------------------------------------------------------
+
+print_help() {
+  cat <<'EOF'
+NeoPanel Installer & Cluster Tooling
+
+Usage:
+  install.sh [options]
+
+Installation Actions:
+  --install, --panel        Install Full Master Panel (Web UI + Daemon + Java)
+  --node                    Install Dedicated Headless Game Node (-tags node, ZERO Web UI)
+  --update, -u              Update existing installation (auto-preserves panel vs node build)
+
+Headless Node & Pairing Flags (combine with --node):
+  --master <url>            Master Panel base URL (e.g. https://panel.example.com)
+  --api-key <neo_...>       Master Admin API Key to auto-pair immediately after install
+  --name <label>            Node display name (defaults to server hostname)
+  --node-url <url>          Reachable API URL for this node (defaults to http://<ip>:8080 or https://<domain>)
+  --fqdn <host>             Player-facing game IP/domain
+  --location <region>       Region label (e.g. Frankfurt, DE)
+  --node-token <neo_node_>  Preset node auth token (auto-generated if omitted)
+  --port <port>             Daemon HTTP listening port (default: 8080)
+  --domain <domain>         Configure Caddy + Let's Encrypt HTTPS for this host
+  --email <email>           Let's Encrypt contact email
+  --ssl / --no-ssl          Enable or skip Let's Encrypt SSL setup
+  --firewall / --no-firewall Enable or skip UFW firewall setup
+  --no-turnstile            Skip Turnstile prompt during Panel install
+  --insecure                Allow self-signed HTTPS cert when pairing with --master
+  -y, --yes                 Use defaults for any unspecified interactive prompts
+
+Maintenance & CLI Shortcuts:
+  --connect-node            Launch interactive remote node pairing wizard
+  --show-token              Show this host's security.node_token
+  --rotate-token            Rotate node_token and restart service
+  --create-api-key [name]   Generate a new Admin API Key in Master SQLite
+  --java                    Install/repair Java 25, 21, 17 & 8 runtimes
+  --firewall                Apply UFW firewall rules
+  --turnstile               Configure Cloudflare Turnstile on Panel
+  -h, --help                Show this help
+EOF
+}
 
 interactive_menu() {
   print_banner
   echo "Please select an option:"
-  echo -e "  ${GREEN}[1]${NC} Full Installation (Panel + Java + SSL + Firewall)"
-  echo -e "  ${GREEN}[2]${NC} Update NeoPanel to Latest Version (From GitHub)"
-  echo -e "  ${GREEN}[3]${NC} Install Java Runtimes (Java 25, 21, 17 & 8)"
-  echo -e "  ${GREEN}[4]${NC} Configure / Reconfigure Let's Encrypt SSL (Caddy)"
-  echo -e "  ${GREEN}[5]${NC} Configure UFW Firewall"
-  echo -e "  ${GREEN}[6]${NC} Configure Cloudflare Turnstile Bot Protection"
-  echo -e "  ${GREEN}[7]${NC} Restart NeoPanel Service"
-  echo -e "  ${GREEN}[8]${NC} Uninstall NeoPanel"
-  echo -e "  ${RED}[0]${NC} Exit"
+  echo -e "  ${GREEN}[1]${NC}  Install Full Master Panel (Web UI + Daemon + Java + SSL + Firewall)"
+  echo -e "  ${GREEN}[2]${NC}  Install Dedicated Game Node (Headless Daemon — Zero Web UI)"
+  echo -e "  ${GREEN}[3]${NC}  Update NeoPanel to Latest Version (Preserves Panel / Node Mode)"
+  echo -e "  ${GREEN}[4]${NC}  Connect / Pair a Remote Node (CLI Wizard)"
+  echo -e "  ${GREEN}[5]${NC}  Show Node Token or Generate CLI API Key"
+  echo -e "  ${GREEN}[6]${NC}  Install Java Runtimes (Java 25, 21, 17 & 8)"
+  echo -e "  ${GREEN}[7]${NC}  Configure / Reconfigure Let's Encrypt SSL (Caddy)"
+  echo -e "  ${GREEN}[8]${NC}  Configure UFW Firewall"
+  echo -e "  ${GREEN}[9]${NC}  Configure Cloudflare Turnstile Bot Protection"
+  echo -e "  ${GREEN}[10]${NC} Restart NeoPanel Service"
+  echo -e "  ${GREEN}[11]${NC} Uninstall NeoPanel"
+  echo -e "  ${RED}[0]${NC}  Exit"
   echo ""
   prompt_user "Enter selection [1]: " choice
   choice=${choice:-1}
@@ -737,15 +1159,48 @@ interactive_menu() {
       run_full_installation
       ;;
     2)
-      update_neopanel
+      run_node_installation
       ;;
     3)
+      update_neopanel
+      ;;
+    4)
+      interactive_connect_node_wizard
+      ;;
+    5)
+      check_root
+      print_banner
+      echo -e "  ${GREEN}[1]${NC} Show this host's node_token"
+      echo -e "  ${GREEN}[2]${NC} Rotate node_token (and restart service)"
+      echo -e "  ${GREEN}[3]${NC} Generate Admin API Key (neo_...) in Master DB"
+      prompt_user "Choose action [1]: " tok_act
+      tok_act=${tok_act:-1}
+      case "$tok_act" in
+        1)
+          "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" node-token
+          ;;
+        2)
+          "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" node-token --rotate
+          systemctl restart neopanel || true
+          ;;
+        3)
+          prompt_user "Enter API Key label [CLI Node Key]: " kname
+          kname=${kname:-"CLI Node Key"}
+          "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" api-key create --name "$kname"
+          ;;
+        *)
+          log_error "Invalid option."
+          exit 1
+          ;;
+      esac
+      ;;
+    6)
       check_root
       print_banner
       run_step 0 100 "Installing Java 25, 21, 17 & 8 runtimes" "step_java"
       log_success "Java installed successfully."
       ;;
-    4)
+    7)
       check_root
       prompt_user "Enter Domain: " dom
       prompt_user "Enter Email: " em
@@ -753,13 +1208,13 @@ interactive_menu() {
       run_step 0 100 "Configuring Let's Encrypt SSL & Caddy" "step_ssl_caddy '$dom' '$em'"
       log_success "SSL configured."
       ;;
-    5)
+    8)
       check_root
       print_banner
-      run_step 0 100 "Configuring UFW Firewall" "step_firewall"
+      run_step 0 100 "Configuring UFW Firewall" "step_firewall 'true'"
       log_success "Firewall configured."
       ;;
-    6)
+    9)
       check_root
       print_banner
       prompt_turnstile_setup
@@ -767,11 +1222,11 @@ interactive_menu() {
       systemctl restart neopanel || true
       log_success "Cloudflare Turnstile configuration saved and NeoPanel restarted."
       ;;
-    7)
+    10)
       systemctl restart neopanel
       log_success "NeoPanel restarted."
       ;;
-    8)
+    11)
       check_root
       prompt_user "Are you sure you want to completely uninstall NeoPanel? (y/N): " uninst
       if [[ "$uninst" =~ ^[Yy]$ ]]; then
@@ -781,6 +1236,7 @@ interactive_menu() {
         systemctl daemon-reload
         rm -f "$INSTALL_DIR/$BINARY_NAME"
         rm -f "$INSTALL_DIR/neopanel-update"
+        rm -f "$INSTALL_DIR/neopanel-installer"
         log_success "NeoPanel service and binary removed. (Data kept at $DATA_DIR for safety)"
       fi
       ;;
@@ -794,32 +1250,232 @@ interactive_menu() {
   esac
 }
 
-# Check if arguments provided
+parse_cli_args() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --install|--panel)
+        ACTION="${ACTION:-install}"
+        INSTALL_ROLE="panel"
+        shift
+        ;;
+      --node)
+        INSTALL_ROLE="node"
+        if [ -z "$ACTION" ]; then
+          ACTION="node"
+        fi
+        shift
+        ;;
+      --update|-u)
+        ACTION="update"
+        shift
+        ;;
+      --master)
+        MASTER_URL="${2:-}"
+        shift 2
+        ;;
+      --master=*)
+        MASTER_URL="${1#*=}"
+        shift
+        ;;
+      --api-key|--key)
+        MASTER_API_KEY="${2:-}"
+        shift 2
+        ;;
+      --api-key=*|--key=*)
+        MASTER_API_KEY="${1#*=}"
+        shift
+        ;;
+      --name|--node-name)
+        NODE_NAME="${2:-}"
+        shift 2
+        ;;
+      --name=*|--node-name=*)
+        NODE_NAME="${1#*=}"
+        shift
+        ;;
+      --node-url|--url)
+        NODE_ADVERTISE_URL="${2:-}"
+        shift 2
+        ;;
+      --node-url=*|--url=*)
+        NODE_ADVERTISE_URL="${1#*=}"
+        shift
+        ;;
+      --fqdn)
+        NODE_FQDN="${2:-}"
+        shift 2
+        ;;
+      --fqdn=*)
+        NODE_FQDN="${1#*=}"
+        shift
+        ;;
+      --location)
+        NODE_LOCATION="${2:-}"
+        shift 2
+        ;;
+      --location=*)
+        NODE_LOCATION="${1#*=}"
+        shift
+        ;;
+      --node-token|--token)
+        NODE_TOKEN_OVERRIDE="${2:-}"
+        shift 2
+        ;;
+      --node-token=*|--token=*)
+        NODE_TOKEN_OVERRIDE="${1#*=}"
+        shift
+        ;;
+      --port)
+        PANEL_PORT="${2:-8080}"
+        shift 2
+        ;;
+      --port=*)
+        PANEL_PORT="${1#*=}"
+        shift
+        ;;
+      --domain)
+        ARG_DOMAIN="${2:-}"
+        ARG_USE_SSL="y"
+        shift 2
+        ;;
+      --domain=*)
+        ARG_DOMAIN="${1#*=}"
+        ARG_USE_SSL="y"
+        shift
+        ;;
+      --email)
+        ARG_EMAIL="${2:-}"
+        shift 2
+        ;;
+      --email=*)
+        ARG_EMAIL="${1#*=}"
+        shift
+        ;;
+      --ssl)
+        ARG_USE_SSL="y"
+        shift
+        ;;
+      --no-ssl)
+        ARG_USE_SSL="n"
+        shift
+        ;;
+      --firewall)
+        if [ -z "$ACTION" ] && [ $# -eq 1 ]; then
+          ACTION="firewall"
+        else
+          ARG_CONF_UFW="y"
+        fi
+        shift
+        ;;
+      --no-firewall)
+        ARG_CONF_UFW="n"
+        shift
+        ;;
+      --no-turnstile)
+        ARG_USE_TURNSTILE="n"
+        shift
+        ;;
+      --insecure)
+        PAIR_INSECURE="true"
+        shift
+        ;;
+      -y|--yes)
+        ASSUME_YES="true"
+        shift
+        ;;
+      --java)
+        ACTION="java"
+        shift
+        ;;
+      --turnstile)
+        ACTION="turnstile"
+        shift
+        ;;
+      --connect-node)
+        ACTION="connect-node"
+        shift
+        ;;
+      --show-token)
+        ACTION="show-token"
+        shift
+        ;;
+      --rotate-token)
+        ACTION="rotate-token"
+        shift
+        ;;
+      --create-api-key)
+        ACTION="create-api-key"
+        if [ $# -ge 2 ] && [[ "${2}" != -* ]]; then
+          ARG_API_KEY_NAME="${2}"
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      -h|--help)
+        ACTION="help"
+        shift
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+}
+
+# Entrypoint
 if [ $# -eq 0 ]; then
   interactive_menu
 else
-  case "$1" in
-    --install)
+  parse_cli_args "$@"
+  case "$ACTION" in
+    install)
       run_full_installation
       ;;
-    --update|-u)
+    node)
+      run_node_installation
+      ;;
+    update)
       update_neopanel
       ;;
-    --java)
+    java)
       check_root
       run_step 0 100 "Installing Java 25, 21, 17 & 8 runtimes" "step_java"
       ;;
-    --firewall)
+    firewall)
       check_root
-      run_step 0 100 "Configuring UFW Firewall" "step_firewall"
+      run_step 0 100 "Configuring UFW Firewall" "step_firewall 'true'"
       ;;
-    --turnstile)
+    turnstile)
       check_root
       print_banner
       prompt_turnstile_setup
       configure_turnstile_in_config "$TURNSTILE_ENABLED" "$TURNSTILE_SITE_KEY" "$TURNSTILE_SECRET_KEY"
       systemctl restart neopanel || true
       log_success "Cloudflare Turnstile configuration saved and NeoPanel restarted."
+      ;;
+    connect-node)
+      interactive_connect_node_wizard
+      ;;
+    show-token)
+      check_root
+      "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" node-token
+      ;;
+    rotate-token)
+      check_root
+      "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" node-token --rotate
+      systemctl restart neopanel || true
+      ;;
+    create-api-key)
+      check_root
+      if [ -n "$ARG_API_KEY_NAME" ]; then
+        "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" api-key create --name "$ARG_API_KEY_NAME"
+      else
+        "$INSTALL_DIR/$BINARY_NAME" -config "$CONFIG_DIR/config.yaml" api-key create
+      fi
+      ;;
+    help)
+      print_help
       ;;
     *)
       interactive_menu
