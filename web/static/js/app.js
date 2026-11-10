@@ -24,6 +24,8 @@ function ic(name, size = 18) {
     search: `<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>`,
     server: `<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>`,
     download: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`,
+    upload: `<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>`,
+    external: `<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>`,
     trash: `<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>`,
     edit: `<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>`,
     folder: `<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>`,
@@ -117,7 +119,17 @@ const DEFAULT_BRANDING = {
   border_radius_px: 14,
   glass_blur_px: 16,
   default_theme: 'dark',
-  custom_css: ''
+  custom_css: '',
+  maintenance_enabled: false,
+  maintenance_title: 'Scheduled Maintenance',
+  maintenance_message: 'We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.',
+  maintenance_eta: '',
+  client_area_enabled: false,
+  client_area_available: true,
+  client_area_label: 'Client Area',
+  client_area_url: '',
+  client_area_open_mode: 'tab',
+  client_area_subtitle: 'Purchase servers, manage subscriptions, and view invoices in your storefront.'
 };
 
 const BRAND_PRESETS = [
@@ -250,6 +262,9 @@ window.S = {
   },
   installingPlugins: new Set(),
   installingSoftware: null,
+  skipPlugConfirm: (() => {
+    try { return localStorage.getItem('neopanel_skip_plug_confirm') === 'true'; } catch (e) { return false; }
+  })(),
   actFilter: {
     q: '',
     category: 'all',
@@ -263,8 +278,24 @@ window.S = {
   memMaxMB: 2048,
   cpu: Array.from({ length: 40 }, () => 0),
   ram: Array.from({ length: 40 }, () => 0),
+  memSeriesMB: Array.from({ length: 40 }, () => 0),
   ni: Array.from({ length: 40 }, () => 0),
   no: Array.from({ length: 40 }, () => 0),
+  seriesTs: Array.from({ length: 40 }, (_, i) => Date.now() - (39 - i) * 2000),
+  chartHoverKind: null,
+  chartHoverIdx: -1,
+  notFoundPath: '',
+  maintPreview: false,
+  maintPublicInfo: null,
+  maintAdminSignInOpen: false,
+  clientIframeWarning: false,
+  mods: [],
+  adminMods: [],
+  modsDir: '',
+  selectedModId: '',
+  modDraft: null,
+  modsSafeMode: false,
+  modPageId: '',
   tps: 20.00,
   ver: '1.21.4',
   core: 'Paper',
@@ -496,7 +527,7 @@ function renderViewModeToggle(scope, fallback = 'list') {
   </div>`;
 }
 
-// --- Clean Multi-Page Routing Helpers ---
+// --- Clean Multi-Page In-Place Routing Helpers ---
 const VIEW_TO_SLUG = {
   dash: '',
   con: 'console',
@@ -514,17 +545,37 @@ const VIEW_TO_SLUG = {
   ver: 'versions',
   admin: 'admin',
   acc: 'account',
-  bill: 'billing'
+  client: 'client-area',
+  mod: 'mod'
 };
 
 const SLUG_TO_VIEW = Object.fromEntries(
-  Object.entries(VIEW_TO_SLUG).filter(([, slug]) => slug).map(([k, slug]) => [slug, k])
+  Object.entries(VIEW_TO_SLUG)
+    .filter(([k, slug]) => slug && k !== 'notfound')
+    .map(([k, slug]) => [slug, k])
 );
 SLUG_TO_VIEW.store = 'plug';
 SLUG_TO_VIEW.servers = 'dash';
 
-const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit'];
+const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods'];
 const ACC_TAB_SLUGS = ['general', 'security', 'ssh', 'api', 'activity'];
+
+function shortServerId(id) {
+  return String(id || '').trim().replace(/^srv-+/i, '');
+}
+
+function resolveServerByParam(param, nodeId = null) {
+  const p = String(param || '').trim();
+  if (!p) return null;
+  const shortP = shortServerId(p);
+  const nid = nodeId ? String(nodeId).trim() : null;
+  const list = Array.isArray(S.servers) ? S.servers : [];
+  if (nid) {
+    const exact = list.find(s => (s.node_id || 'local') === nid && (s.id === p || shortServerId(s.id) === shortP));
+    if (exact) return exact;
+  }
+  return list.find(s => s.id === p || shortServerId(s.id) === shortP) || null;
+}
 
 function saveActiveServerRef(srv) {
   if (!srv || !srv.id) return;
@@ -544,86 +595,187 @@ function getSavedActiveServerRef() {
   }
 }
 
+function withSafeModeQuery(url) {
+  if (!S.modsSafeMode || !url) return url;
+  if (String(url).includes('safemode=1')) return url;
+  return url + (String(url).includes('?') ? '&' : '?') + 'safemode=1';
+}
+
 function serverRouteUrl(nodeId, srvId, view = 'con', opts = {}) {
-  const nid = nodeId || 'local';
+  const nid = String(nodeId || 'local').trim() || 'local';
   const target = normalizeRoute(view);
+  const shortId = shortServerId(srvId);
+  let path;
   if (target === 'plug') {
     const tab = opts.plugTab || S.plugTab || 'browse';
-    return `/server/${encodeURIComponent(nid)}/${encodeURIComponent(srvId)}/plugins/${tab === 'installed' ? 'installed' : 'store'}`;
+    path = `/server/${encodeURIComponent(shortId)}/plugins/${tab === 'installed' ? 'installed' : 'store'}`;
+  } else {
+    const slug = VIEW_TO_SLUG[target] || 'console';
+    path = `/server/${encodeURIComponent(shortId)}/${slug}`;
   }
-  const slug = VIEW_TO_SLUG[target] || 'console';
-  return `/server/${encodeURIComponent(nid)}/${encodeURIComponent(srvId)}/${slug}`;
+  if (nid !== 'local') {
+    path += `?node=${encodeURIComponent(nid)}`;
+  }
+  return withSafeModeQuery(path);
 }
 
 function routeUrl(view, opts = {}) {
   const target = normalizeRoute(view);
-  if (target === 'dash') return '/';
-  if (target === 'bill') return '/billing';
+  if (target === 'dash') return withSafeModeQuery('/');
+  if (target === 'client') return withSafeModeQuery('/client-area');
+  if (target === 'mod') {
+    const mid = opts.modPageId || opts.modId || S.modPageId || '';
+    return withSafeModeQuery(mid ? `/mod/${encodeURIComponent(mid)}` : '/');
+  }
+  if (target === 'notfound') {
+    return withSafeModeQuery(opts.notFoundPath || window.location.pathname || '/not-found');
+  }
   if (target === 'admin') {
     const t = opts.adminTab !== undefined ? opts.adminTab : (S.adminTab || 0);
     const slug = ADMIN_TAB_SLUGS[t] || 'health';
-    return t === 0 ? '/admin' : `/admin/${slug}`;
+    return withSafeModeQuery(t === 0 ? '/admin' : `/admin/${slug}`);
   }
   if (target === 'acc') {
     const t = opts.acctTab !== undefined ? opts.acctTab : (S.acct?.tab || 0);
     const slug = ACC_TAB_SLUGS[t] || 'general';
-    return t === 0 ? '/account' : `/account/${slug}`;
+    return withSafeModeQuery(t === 0 ? '/account' : `/account/${slug}`);
   }
   if (target === 'act' && (opts.global || (!opts.srv && !window.location.pathname.startsWith('/server/') && S.view === 'dash'))) {
-    return '/activity';
+    return withSafeModeQuery('/activity');
   }
   const srv = opts.srv || curServer();
   if (!srv || !srv.id) {
-    return target === 'act' ? '/activity' : '/';
+    return withSafeModeQuery(target === 'act' ? '/activity' : '/');
   }
   return serverRouteUrl(srv.node_id || 'local', srv.id, target, opts);
 }
 
-function parseCurrentRoute(pathname = window.location.pathname, hashStr = window.location.hash) {
-  const cleanPath = String(pathname || '/').replace(/\/+$/, '') || '/';
-  const rawHash = String(hashStr || '').replace(/^#/, '').trim();
+function parseCurrentRoute(urlOrPath = window.location.pathname + window.location.search, hashStr = window.location.hash) {
+  let u;
+  try {
+    u = new URL(urlOrPath || '/', window.location.origin);
+  } catch (e) {
+    u = new URL('/', window.location.origin);
+  }
+  const cleanPath = String(u.pathname || '/').replace(/\/+$/, '') || '/';
+  const rawHash = String(u.hash || hashStr || '').replace(/^#/, '').trim();
+  const safeMode = u.searchParams.get('safemode') === '1';
+  const nodeParam = u.searchParams.get('node') ? decodeURIComponent(u.searchParams.get('node')) : null;
 
   if (cleanPath === '/' || cleanPath === '/index.html') {
     if (rawHash) {
       const hView = normalizeRoute(rawHash);
-      if (hView && (V[hView] || ['admin', 'acc', 'dash', 'act', 'bill'].includes(hView))) {
-        return { view: hView, plugTab: rawHash === 'store' ? 'browse' : undefined, legacyHash: true };
+      if (hView && V[hView] && hView !== 'notfound' && hView !== 'maintenance') {
+        return { view: hView, plugTab: rawHash === 'store' ? 'browse' : undefined, legacyHash: true, safeMode };
       }
+      return { view: 'notfound', notFoundPath: `${cleanPath}#${rawHash}`, safeMode };
     }
-    return { view: 'dash' };
+    return { view: 'dash', safeMode };
   }
-  if (cleanPath === '/servers') return { view: 'dash' };
-  if (cleanPath === '/activity') return { view: 'act', global: true };
-  if (cleanPath === '/billing') return { view: 'bill' };
+  if (cleanPath === '/servers') return { view: 'dash', safeMode };
+  if (cleanPath === '/activity') return { view: 'act', global: true, safeMode };
+  if (cleanPath === '/client-area') return { view: 'client', safeMode };
+  if (cleanPath === '/billing') return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+
+  if (cleanPath.startsWith('/mod/')) {
+    const parts = cleanPath.split('/').filter(Boolean);
+    if (parts.length !== 2) {
+      return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+    }
+    return { view: 'mod', modPageId: decodeURIComponent(parts[1] || ''), safeMode };
+  }
 
   if (cleanPath === '/admin' || cleanPath.startsWith('/admin/')) {
-    const sub = cleanPath.split('/')[2] || 'health';
+    const parts = cleanPath.split('/').filter(Boolean);
+    if (parts.length > 2) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+    const sub = parts[1] || 'health';
     const idx = ADMIN_TAB_SLUGS.indexOf(sub);
-    return { view: 'admin', adminTab: idx >= 0 ? idx : 0 };
+    if (idx < 0) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+    return { view: 'admin', adminTab: idx, safeMode };
   }
+
   if (cleanPath === '/account' || cleanPath.startsWith('/account/')) {
-    const sub = cleanPath.split('/')[2] || 'general';
+    const parts = cleanPath.split('/').filter(Boolean);
+    if (parts.length > 2) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+    const sub = parts[1] || 'general';
     const idx = ACC_TAB_SLUGS.indexOf(sub);
-    return { view: 'acc', acctTab: idx >= 0 ? idx : 0 };
+    if (idx < 0) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+    return { view: 'acc', acctTab: idx, safeMode };
   }
+
   if (cleanPath.startsWith('/server/')) {
     const parts = cleanPath.split('/').filter(Boolean);
-    const nodeId = decodeURIComponent(parts[1] || 'local');
-    const serverId = decodeURIComponent(parts[2] || '');
-    const slug = (parts[3] || 'console').toLowerCase();
-    const extra = (parts[4] || '').toLowerCase();
-    if (slug === 'plugins') {
+    if (parts.length < 2) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+
+    // Clean short format: /server/{id}/{slug?}[/installed|store]
+    // Legacy format: /server/{nodeId}/{id}/{slug?}[/installed|store]
+    const rawP1 = decodeURIComponent(parts[1] || '');
+    const p2Lower = (parts[2] || '').toLowerCase();
+    const isShortTwoSeg = parts.length === 2;
+    const isShortWithKnownSlug = parts.length >= 3 && (SLUG_TO_VIEW[p2Lower] || p2Lower === 'plugins');
+
+    if (isShortTwoSeg || isShortWithKnownSlug) {
+      const serverId = rawP1;
+      const slug = (parts[2] || 'console').toLowerCase();
+      const extra = (parts[3] || '').toLowerCase();
+      if (slug === 'plugins') {
+        if (parts.length > 4 || (extra && !['store', 'installed'].includes(extra))) {
+          return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+        }
+        return {
+          view: 'plug',
+          nodeId: nodeParam,
+          serverId,
+          plugTab: extra === 'installed' ? 'installed' : 'browse',
+          canonicalRedirect: isShortTwoSeg || rawP1 !== shortServerId(rawP1) || (parts.length === 3),
+          safeMode
+        };
+      }
+      if (parts.length > 3) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+      const mappedView = SLUG_TO_VIEW[slug];
+      if (!mappedView) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
       return {
-        view: 'plug',
-        nodeId,
+        view: mappedView,
+        nodeId: nodeParam,
         serverId,
-        plugTab: extra === 'installed' ? 'installed' : 'browse'
+        canonicalRedirect: isShortTwoSeg || rawP1 !== shortServerId(rawP1),
+        safeMode
       };
     }
-    const mappedView = SLUG_TO_VIEW[slug] || 'con';
-    return { view: mappedView, nodeId, serverId };
+
+    // Legacy 3+ segment: /server/{nodeId}/{serverId}/...
+    if (parts.length >= 3) {
+      const nodeId = rawP1 || 'local';
+      const serverId = decodeURIComponent(parts[2] || '');
+      const slug = (parts[3] || 'console').toLowerCase();
+      const extra = (parts[4] || '').toLowerCase();
+      if (slug === 'plugins') {
+        if (parts.length > 5 || (extra && !['store', 'installed'].includes(extra))) {
+          return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+        }
+        return {
+          view: 'plug',
+          nodeId,
+          serverId,
+          plugTab: extra === 'installed' ? 'installed' : 'browse',
+          canonicalRedirect: true,
+          safeMode
+        };
+      }
+      if (parts.length > 4) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+      const mappedView = SLUG_TO_VIEW[slug];
+      if (!mappedView) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
+      return {
+        view: mappedView,
+        nodeId,
+        serverId,
+        canonicalRedirect: true,
+        safeMode
+      };
+    }
   }
-  return { view: 'dash' };
+
+  return { view: 'notfound', notFoundPath: cleanPath, safeMode };
 }
 
 function getViewDisplayLabel(view) {
@@ -644,27 +796,152 @@ function getViewDisplayLabel(view) {
     ver: 'Software & Versions',
     admin: 'Admin Area',
     acc: 'Account Settings',
-    bill: 'Billing & Resources'
+    client: getBrand('client_area_label') || 'Client Area',
+    notfound: 'Page Not Found',
+    maintenance: 'Scheduled Maintenance',
+    mod: 'Extension Page'
   };
   return map[view] || 'NeoPanel';
 }
 
-function navigateToUrl(url, label = 'Page') {
-  if (!url) return;
+function syncActiveServerState(srv) {
+  if (!srv || !srv.id) return;
+  const idx = S.servers.findIndex(x => x.id === srv.id && (x.node_id || 'local') === (srv.node_id || 'local'));
+  if (idx >= 0) S.cs = idx;
+  const nodeId = srv.node_id || 'local';
+  const changed = S.activeServerId !== srv.id || (S.activeNodeId || 'local') !== nodeId;
+
+  saveActiveServerRef(srv);
+  applyServerStatsSnapshot(srv, srv.stats, false);
+  syncPropsFromServer(srv, changed);
+  S.ver = srv.version || S.ver;
+  S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
+
+  if (changed) {
+    S.log = [];
+    S.ports = [];
+    S.databases = [];
+    S.dbRevealIds = new Set();
+    S.sqlStudio = null;
+    S.fileList = [];
+    S.currentDir = '';
+    S.editingFile = null;
+    S.selectedFiles = new Set();
+    S.bk = [];
+    S.plugins = [];
+    S.sftp = null;
+    S.cpu = Array.from({ length: 40 }, () => 0);
+    S.ram = Array.from({ length: 40 }, () => 0);
+    S.memSeriesMB = Array.from({ length: 40 }, () => 0);
+    S.ni = Array.from({ length: 40 }, () => 0);
+    S.no = Array.from({ length: 40 }, () => 0);
+    S.seriesTs = Array.from({ length: 40 }, (_, i) => Date.now() - (39 - i) * 2000);
+    S.chartHoverKind = null;
+    S.chartHoverIdx = -1;
+    S.startupFailures = Number(srv.stats?.startup_failures) || 0;
+    S.startupHalted = Boolean(srv.stats?.startup_halted);
+    applyServerStatsSnapshot(srv, srv.stats, false);
+    connectWs(srv.id, false, nodeId);
+    loadServerPorts(true);
+    if (window.NP && typeof window.NP._emit === 'function') {
+      window.NP._emit('server:switch', { server: srv });
+    }
+  }
+}
+
+function applyRoute(urlStr, opts = {}) {
+  const { replace = false, fromPopState = false } = opts;
+  const prevPath = window.location.pathname;
+  const prevView = S.view;
+  const prevAdminTab = S.adminTab || 0;
+
   closeAllCtx();
   closeFloatingCtx();
   closeAllCustomSelects();
   S.cmenu = false;
-  S.navigating = true;
-  startPageProgress(32);
-  const main = $('#main');
-  if (main) {
-    main.innerHTML = `<div class="np-page-loader" role="status" aria-live="polite">
-      <div class="np-spinner"></div>
-      <span>Loading ${esc(label)}...</span>
-    </div>`;
+  S.chartHoverKind = null;
+  S.chartHoverIdx = -1;
+
+  const targetUrlStr = withSafeModeQuery(urlStr || '/');
+  const route = parseCurrentRoute(targetUrlStr);
+  if (route.safeMode) S.modsSafeMode = true;
+
+  if (prevView === 'admin' && prevAdminTab === 4 && (route.view !== 'admin' || (route.adminTab || 0) !== 4)) {
+    applyBranding(S.branding);
   }
-  window.location.assign(url);
+
+  let resolvedView = normalizeRoute(route.view || 'dash');
+  let finalUrl = targetUrlStr;
+
+  if (route.notFoundPath) {
+    S.notFoundPath = route.notFoundPath;
+    resolvedView = 'notfound';
+  } else if (resolvedView === 'mod') {
+    const pid = route.modPageId || '';
+    if (!window.NP || !window.NP._pages || !window.NP._pages.has(pid)) {
+      S.notFoundPath = `/mod/${pid}`;
+      resolvedView = 'notfound';
+    } else {
+      S.modPageId = pid;
+      finalUrl = routeUrl('mod', { modPageId: pid });
+    }
+  } else if (route.serverId) {
+    const srv = resolveServerByParam(route.serverId, route.nodeId || null);
+    if (!srv) {
+      S.notFoundPath = new URL(targetUrlStr, window.location.origin).pathname;
+      resolvedView = 'notfound';
+    } else {
+      syncActiveServerState(srv);
+      if (route.plugTab !== undefined) S.plugTab = route.plugTab;
+      if (route.canonicalRedirect) {
+        finalUrl = serverRouteUrl(srv.node_id || 'local', srv.id, resolvedView, { plugTab: S.plugTab });
+      }
+    }
+  } else {
+    S.notFoundPath = '';
+    if (route.adminTab !== undefined) S.adminTab = route.adminTab;
+    if (route.acctTab !== undefined && S.acct) S.acct.tab = route.acctTab;
+    if (route.plugTab !== undefined) S.plugTab = route.plugTab;
+  }
+
+  S.view = resolvedView;
+  if (route.adminTab !== undefined && resolvedView === 'admin') S.adminTab = route.adminTab;
+  if (route.acctTab !== undefined && resolvedView === 'acc' && S.acct) S.acct.tab = route.acctTab;
+
+  if (!fromPopState) {
+    try {
+      const curFull = window.location.pathname + window.location.search;
+      if (curFull !== finalUrl) {
+        if (replace || route.canonicalRedirect || route.legacyHash) {
+          history.replaceState(null, '', finalUrl);
+        } else {
+          history.pushState(null, '', finalUrl);
+        }
+      }
+    } catch (e) {}
+  }
+
+  startPageProgress(38);
+  R();
+  const mainEl = $('#main');
+  if (mainEl && prevPath !== window.location.pathname) {
+    mainEl.scrollTop = 0;
+  }
+  if (window.NP && typeof window.NP._emit === 'function') {
+    window.NP._emit('route', {
+      view: S.view,
+      prevView,
+      url: finalUrl,
+      server: curServer()
+    });
+  }
+  onEnterView(S.view);
+  finishPageProgress();
+}
+
+function navigateToUrl(url, label = 'Page', opts = {}) {
+  if (!url) return;
+  applyRoute(url, opts);
 }
 
 function handleNavClick(e, view, opts = {}) {
@@ -673,10 +950,10 @@ function handleNavClick(e, view, opts = {}) {
   }
   if (e) e.preventDefault();
   const target = normalizeRoute(view);
-  if (opts.srv) saveActiveServerRef(opts.srv);
+  if (opts.srv) syncActiveServerState(opts.srv);
   else if (curServer()) saveActiveServerRef(curServer());
   if (target === 'plug' && view === 'store') opts.plugTab = 'browse';
-  navigateToUrl(routeUrl(target, opts), getViewDisplayLabel(target));
+  applyRoute(routeUrl(target, opts));
   return false;
 }
 
@@ -687,15 +964,24 @@ function handleServerCardClick(e, index, targetView = 'con') {
   if (e) e.preventDefault();
   const srv = S.servers[index];
   if (!srv) return false;
-  saveActiveServerRef(srv);
-  navigateToUrl(serverRouteUrl(srv.node_id || 'local', srv.id, targetView), srv.name || 'Server Console');
+  syncActiveServerState(srv);
+  applyRoute(serverRouteUrl(srv.node_id || 'local', srv.id, targetView));
   return false;
 }
+
+window.addEventListener('popstate', () => {
+  if (!S.token || $('#login')) return;
+  applyRoute(window.location.pathname + window.location.search + window.location.hash, {
+    fromPopState: true,
+    replace: true
+  });
+});
 
 // --- Custom Modal Dialog System (Replacing browser default alert, confirm, prompt) ---
 let _uiModalResolver = null;
 
 function closeUiModal(value) {
+  closeAllCustomSelects();
   const container = $('#modal-container');
   if (container) container.innerHTML = '';
   if (_uiModalResolver) {
@@ -966,24 +1252,37 @@ function applyServerStatsSnapshot(srv, stats, pushSeries = false) {
   const ramPct = Math.max(0, Math.min(100, (memMB / maxMemMB) * 100));
   const netIn = Math.max(0, Number(stats.net_in_kib) || 0);
   const netOut = Math.max(0, Number(stats.net_out_kib) || 0);
+  const nowTs = Date.now();
 
   S.memUsedMB = memMB;
   S.memMaxMB = maxMemMB;
+  if (!Array.isArray(S.memSeriesMB) || S.memSeriesMB.length !== S.cpu.length) {
+    S.memSeriesMB = S.ram.map(pct => (pct / 100) * maxMemMB);
+  }
+  if (!Array.isArray(S.seriesTs) || S.seriesTs.length !== S.cpu.length) {
+    S.seriesTs = Array.from({ length: S.cpu.length }, (_, i) => nowTs - (S.cpu.length - 1 - i) * 2000);
+  }
 
   if (pushSeries) {
     S.cpu.push(cpuVal);
     S.cpu.shift();
     S.ram.push(ramPct);
     S.ram.shift();
+    S.memSeriesMB.push(memMB);
+    S.memSeriesMB.shift();
     S.ni.push(netIn);
     S.ni.shift();
     S.no.push(netOut);
     S.no.shift();
+    S.seriesTs.push(nowTs);
+    S.seriesTs.shift();
   } else {
     S.cpu[S.cpu.length - 1] = cpuVal;
     S.ram[S.ram.length - 1] = ramPct;
+    S.memSeriesMB[S.memSeriesMB.length - 1] = memMB;
     S.ni[S.ni.length - 1] = netIn;
     S.no[S.no.length - 1] = netOut;
+    S.seriesTs[S.seriesTs.length - 1] = nowTs;
   }
 
   if (srv) {
@@ -1001,9 +1300,22 @@ function applyServerStatsSnapshot(srv, stats, pushSeries = false) {
       startup_halted: S.startupHalted
     };
   }
+  if (pushSeries && window.NP && typeof window.NP._emit === 'function') {
+    window.NP._emit('stats', { server: srv, stats: srv?.stats || stats });
+  }
 }
 
-// --- Sparklines SVGs ---
+function copyServerAddress(addr, ev) {
+  if (ev) {
+    ev.preventDefault();
+    ev.stopPropagation();
+  }
+  if (!addr) return false;
+  copyDbText(addr, 'Server Address');
+  return false;
+}
+
+// --- Sparklines & Interactive Hover Charts ---
 function spark(data, max) {
   if (!data || data.length === 0) data = [0];
   const m = max || Math.max(...data, 1);
@@ -1022,6 +1334,147 @@ function lines(arrays, max) {
       return `<polyline points="${p}" fill="none" stroke="${j ? '#f0b429' : 'var(--ac)'}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
     }).join('')}
   </svg>`;
+}
+
+function formatChartTimestamp(ts) {
+  try {
+    return new Date(ts || Date.now()).toTimeString().slice(0, 8);
+  } catch (e) {
+    return clock();
+  }
+}
+
+function chartSeriesSpec(kind) {
+  const active = S.status === 'online' || S.status === 'starting';
+  const z = arr => arr.map(() => 0);
+  if (kind === 'cpu') {
+    const data = active ? S.cpu : z(S.cpu);
+    return { data, max: 100 };
+  }
+  if (kind === 'mem') {
+    const data = active ? S.ram : z(S.ram);
+    return { data, max: 100 };
+  }
+  const ni = active ? S.ni : z(S.ni);
+  const no = active ? S.no : z(S.no);
+  const max = Math.max(10, ...ni, ...no);
+  return { ni, no, max };
+}
+
+function chartPointCoords(data, max) {
+  const n = Math.max(1, data.length);
+  const m = max || 100;
+  return data.map((v, i) => {
+    const x = n > 1 ? (i * 300) / (n - 1) : 150;
+    const val = Math.max(0, Number(v) || 0);
+    const y = 92 - Math.min(1, val / m) * 80;
+    return [Number(x.toFixed(2)), Number(y.toFixed(2))];
+  });
+}
+
+function buildChartSeriesInnerSvg(kind) {
+  const spec = chartSeriesSpec(kind);
+  if (kind === 'net') {
+    const pIn = chartPointCoords(spec.ni, spec.max).map(([x, y]) => `${x},${y}`).join(' ');
+    const pOut = chartPointCoords(spec.no, spec.max).map(([x, y]) => `${x},${y}`).join(' ');
+    return `<polyline points="${pIn}" fill="none" stroke="var(--ac)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+      <polyline points="${pOut}" fill="none" stroke="#f0b429" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  }
+  const coords = chartPointCoords(spec.data, spec.max);
+  const pts = coords.map(([x, y]) => `${x},${y}`).join(' ');
+  return `<polygon points="0,92 ${pts} 300,92" fill="var(--acs)"/>
+    <polyline points="${pts}" fill="none" stroke="var(--ac)" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+}
+
+function updateChartHoverDom(kind) {
+  const hoverSvg = document.getElementById(`ch-hover-svg-${kind}`);
+  const tip = document.getElementById(`ch-tip-${kind}`);
+  if (!hoverSvg || !tip) return;
+
+  const activeHover = S.chartHoverKind === kind && Number.isInteger(S.chartHoverIdx) && S.chartHoverIdx >= 0;
+  if (!activeHover) {
+    hoverSvg.innerHTML = '';
+    tip.style.display = 'none';
+    return;
+  }
+
+  const len = Math.max(1, (S.cpu || []).length);
+  const idx = Math.max(0, Math.min(len - 1, S.chartHoverIdx));
+  const x = len > 1 ? (idx * 300) / (len - 1) : 150;
+  const pctX = len > 1 ? (idx * 100) / (len - 1) : 50;
+  const tsVal = Array.isArray(S.seriesTs) ? S.seriesTs[idx] : Date.now();
+  const tsStr = formatChartTimestamp(tsVal);
+  const active = S.status === 'online' || S.status === 'starting';
+
+  if (kind === 'net') {
+    const spec = chartSeriesSpec('net');
+    const cIn = chartPointCoords(spec.ni, spec.max)[idx] || [x, 92];
+    const cOut = chartPointCoords(spec.no, spec.max)[idx] || [x, 92];
+    const vIn = active ? (spec.ni[idx] || 0) : 0;
+    const vOut = active ? (spec.no[idx] || 0) : 0;
+    hoverSvg.innerHTML = `
+      <line class="ch-crosshair" x1="${x.toFixed(2)}" y1="6" x2="${x.toFixed(2)}" y2="94"/>
+      <circle class="ch-dot-active" cx="${cIn[0]}" cy="${cIn[1]}" r="3.6" fill="var(--ac)" stroke="#fff" stroke-width="1.3"/>
+      <circle class="ch-dot-active" cx="${cOut[0]}" cy="${cOut[1]}" r="3.6" fill="#f0b429" stroke="#fff" stroke-width="1.3"/>
+    `;
+    tip.innerHTML = `
+      <div class="ch-tooltip-ts">${esc(tsStr)}</div>
+      <div class="ch-tooltip-row"><span class="ch-dot-legend" style="background:var(--ac)"></span><span>In: ${vIn.toFixed(1)} KiB/s</span></div>
+      <div class="ch-tooltip-row"><span class="ch-dot-legend" style="background:#f0b429"></span><span>Out: ${vOut.toFixed(1)} KiB/s</span></div>
+    `;
+  } else if (kind === 'mem') {
+    const spec = chartSeriesSpec('mem');
+    const pt = chartPointCoords(spec.data, spec.max)[idx] || [x, 92];
+    const pct = active ? (spec.data[idx] || 0) : 0;
+    const maxRamMB = S.memMaxMB || getServerMaxRamMB(curServer());
+    const memMB = active
+      ? ((Array.isArray(S.memSeriesMB) && S.memSeriesMB[idx] !== undefined) ? Number(S.memSeriesMB[idx]) : (pct / 100) * maxRamMB)
+      : 0;
+    hoverSvg.innerHTML = `
+      <line class="ch-crosshair" x1="${x.toFixed(2)}" y1="6" x2="${x.toFixed(2)}" y2="94"/>
+      <circle class="ch-dot-active" cx="${pt[0]}" cy="${pt[1]}" r="3.8" fill="var(--ac)" stroke="#fff" stroke-width="1.4"/>
+    `;
+    tip.innerHTML = `
+      <div class="ch-tooltip-ts">${esc(tsStr)}</div>
+      <div class="ch-tooltip-row"><span class="ch-dot-legend" style="background:var(--ac)"></span><span>${memMB.toFixed(0)} MiB (${pct.toFixed(1)}%)</span></div>
+    `;
+  } else {
+    const spec = chartSeriesSpec('cpu');
+    const pt = chartPointCoords(spec.data, spec.max)[idx] || [x, 92];
+    const val = active ? (spec.data[idx] || 0) : 0;
+    hoverSvg.innerHTML = `
+      <line class="ch-crosshair" x1="${x.toFixed(2)}" y1="6" x2="${x.toFixed(2)}" y2="94"/>
+      <circle class="ch-dot-active" cx="${pt[0]}" cy="${pt[1]}" r="3.8" fill="var(--ac)" stroke="#fff" stroke-width="1.4"/>
+    `;
+    tip.innerHTML = `
+      <div class="ch-tooltip-ts">${esc(tsStr)}</div>
+      <div class="ch-tooltip-row"><span class="ch-dot-legend" style="background:var(--ac)"></span><span>CPU: ${val.toFixed(1)}%</span></div>
+    `;
+  }
+
+  tip.style.left = `${Math.max(18, Math.min(82, pctX))}%`;
+  tip.style.display = 'block';
+}
+
+function onChartMouseMove(ev, kind) {
+  const hitEl = ev?.currentTarget;
+  const svg = hitEl?.ownerSVGElement || hitEl?.closest?.('svg');
+  if (!svg) return;
+  const rect = svg.getBoundingClientRect();
+  const relX = Math.max(0, Math.min(rect.width || 1, (ev.clientX ?? 0) - rect.left));
+  const len = Math.max(1, (S.cpu || []).length);
+  const idx = Math.max(0, Math.min(len - 1, Math.round((relX / (rect.width || 1)) * (len - 1))));
+  S.chartHoverKind = kind;
+  S.chartHoverIdx = idx;
+  updateChartHoverDom(kind);
+}
+
+function onChartMouseLeave(kind) {
+  if (S.chartHoverKind === kind) {
+    S.chartHoverKind = null;
+    S.chartHoverIdx = -1;
+  }
+  updateChartHoverDom(kind);
 }
 
 function head(name) {
@@ -1068,6 +1521,21 @@ function av(s) {
 }
 
 // --- Branding, Theme Presets & Multi-Node Helpers ---
+function detectFaviconMime(url) {
+  const clean = String(url || '').split('?')[0].split('#')[0].toLowerCase();
+  if (clean.startsWith('data:')) {
+    const m = /^data:([^;,]+)/.exec(clean);
+    return m ? m[1] : '';
+  }
+  if (clean.endsWith('.svg')) return 'image/svg+xml';
+  if (clean.endsWith('.png')) return 'image/png';
+  if (clean.endsWith('.ico')) return 'image/x-icon';
+  if (clean.endsWith('.webp')) return 'image/webp';
+  if (clean.endsWith('.gif')) return 'image/gif';
+  if (clean.endsWith('.jpg') || clean.endsWith('.jpeg')) return 'image/jpeg';
+  return '';
+}
+
 function getBrand(key) {
   const active = (S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : (S.branding || DEFAULT_BRANDING);
   const val = active && active[key] !== undefined ? active[key] : DEFAULT_BRANDING[key];
@@ -1176,10 +1644,16 @@ function applyBranding(raw) {
   const brandSub = (b.brand_subtitle || 'Minecraft Server Manager').trim();
   document.title = brandSub ? `${brandName} — ${brandSub}` : brandName;
 
-  const favEl = $('#app-favicon');
-  if (favEl) {
-    favEl.href = (b.favicon_url || '').trim() || '/favicon.svg';
-  }
+  const favHref = (b.favicon_url || '').trim() || '/favicon.svg';
+  const favType = detectFaviconMime(favHref);
+  ['#app-favicon', '#app-favicon-shortcut'].forEach(sel => {
+    const el = $(sel);
+    if (el) {
+      el.href = favHref;
+      if (favType) el.type = favType;
+      else el.removeAttribute('type');
+    }
+  });
 
   const cssEl = $('#custom-brand-css');
   if (cssEl) {
@@ -1241,12 +1715,11 @@ function getNodeById(nodeId = 'local') {
 
 function findServerRef(srvId, nodeId = null) {
   if (!srvId) return null;
-  if (nodeId) {
-    return (S.servers || []).find(s => s.id === srvId && (s.node_id || 'local') === nodeId) || null;
-  }
+  const resolved = resolveServerByParam(srvId, nodeId);
+  if (resolved) return resolved;
   const cur = curServer();
-  if (cur && cur.id === srvId) return cur;
-  return (S.servers || []).find(s => s.id === srvId) || null;
+  if (cur && (cur.id === srvId || shortServerId(cur.id) === shortServerId(srvId))) return cur;
+  return null;
 }
 
 function nodeApiPath(nodeId, apiPath) {
@@ -2692,7 +3165,7 @@ function renderFlyConsole() {
   if (!root) return;
   const srv = curServer();
   const isLoginOpen = Boolean($('#login'));
-  const showTrigger = !['dash', 'admin', 'acc'].includes(S.view);
+  const showTrigger = !['dash', 'admin', 'acc', 'client', 'notfound', 'mod', 'maintenance'].includes(S.view);
   if (!S.token || isLoginOpen || !srv || S.view === 'con' || (!showTrigger && !S.flyConOpen)) {
     root.innerHTML = '';
     delete root.dataset.flySig;
@@ -3472,7 +3945,7 @@ function srvh() {
         <span id="srv-halt-badge" class="badge halted" style="display:${st === 'offline' && S.startupHalted ? 'inline-flex' : 'none'};" title="Auto-restart stopped after 2 consecutive startup failures">Start Halted (2/2)</span>
       </div>
       <div id="hst" class="row hst">
-        <span class="mono mu pv">${esc(hostAddr)}</span>
+        <span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span>
         <span class="mono mu">CPU ${c.toFixed(1)}%</span>
         <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
       </div>
@@ -3523,7 +3996,7 @@ function statsHtml() {
     </div>
   </div>`;
 
-  return row(ic('network', 16), 'Address', `<span class="pv">${esc(hostAddr)}</span>`) +
+  return row(ic('network', 16), 'Address', `<span class="copyable-ip" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span>`) +
     row(ic('clock', 16), 'Uptime', up()) +
     row(ic('cpu', 16), 'CPU load', `${c.toFixed(1)}%`, '/ 100%') +
     row(ic('layers', 16), 'Memory', `${m.toFixed(0)} MiB`, `/ ${(maxRamMB / 1024).toFixed(1)} GiB`) +
@@ -3537,36 +4010,67 @@ function chartsHtml() {
   const active = S.status === 'online' || S.status === 'starting';
   const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
   const maxRamGB = (maxRamMB / 1024).toFixed(1);
-  const z = a => a.map(() => 0);
-  const netPeak = Math.max(10, ...S.ni, ...S.no);
-  return `<div class="card ch">
-    <div class="row sb"><span class="mu">CPU load</span><span class="mu mono">${active ? (S.cpu.at(-1) || 0).toFixed(1) + '%' : '100%'}</span></div>
-    ${spark(active ? S.cpu : z(S.cpu), 100)}
-  </div>
-  <div class="card ch">
-    <div class="row sb"><span class="mu">Memory</span><span class="mu mono">${active ? `${(S.memUsedMB || 0).toFixed(0)} MiB / ${maxRamGB} GiB` : `${maxRamGB} GiB`}</span></div>
-    ${spark(active ? S.ram : z(S.ram), 100)}
-  </div>
-  <div class="card ch">
-    <div class="row sb"><span class="mu">Network I/O</span><span class="mu"><span style="color:var(--ac)">in</span> <span style="color:#f0b429">out</span></span></div>
-    ${lines(active ? [S.ni, S.no] : [z(S.ni), z(S.no)], netPeak)}
-  </div>`;
+  const cpuStr = active ? `${(S.cpu.at(-1) || 0).toFixed(1)}%` : '0.0%';
+  const memStr = active ? `${(S.memUsedMB || 0).toFixed(0)} MiB / ${maxRamGB} GiB` : `0 MiB / ${maxRamGB} GiB`;
+  const renderCard = (kind, title, valHtml) => `
+    <div class="card ch" data-chart-kind="${kind}">
+      <div class="row sb">
+        <span class="mu">${title}</span>
+        <span id="ch-val-${kind}" class="mu mono">${valHtml}</span>
+      </div>
+      <div class="ch-wrap">
+        <svg class="ch-svg" viewBox="0 0 300 98" preserveAspectRatio="none" aria-hidden="true">
+          <g id="ch-series-${kind}">${buildChartSeriesInnerSvg(kind)}</g>
+          <g id="ch-hover-svg-${kind}"></g>
+          <rect class="ch-hit-layer" x="0" y="0" width="300" height="98"
+                onmousemove="onChartMouseMove(event, '${kind}')"
+                onmouseleave="onChartMouseLeave('${kind}')"/>
+        </svg>
+        <div id="ch-tip-${kind}" class="ch-tooltip" style="display:none;"></div>
+      </div>
+    </div>`;
+
+  return renderCard('cpu', 'CPU load', cpuStr) +
+    renderCard('mem', 'Memory', memStr) +
+    renderCard('net', 'Network I/O', '<span style="color:var(--ac)">in</span> <span style="color:#f0b429">out</span>');
 }
 
 function liveCon() {
+  const srv = curServer();
+  const active = S.status === 'online' || S.status === 'starting';
+  const c = active ? (S.cpu.at(-1) || 0) : 0;
+  const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
+  const maxRamGB = (maxRamMB / 1024).toFixed(1);
+  const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
+  const hostAddr = `${srvHost(srv)}:${srv ? srv.port : 25565}`;
+
   const stc = $('#stc');
   const chr = $('#chr');
   const hst = $('#hst');
   if (stc) stc.innerHTML = statsHtml();
-  if (chr) chr.innerHTML = chartsHtml();
+
+  if (chr) {
+    const cpuSeriesEl = $('#ch-series-cpu');
+    const memSeriesEl = $('#ch-series-mem');
+    const netSeriesEl = $('#ch-series-net');
+    if (cpuSeriesEl && memSeriesEl && netSeriesEl) {
+      const cpuValEl = $('#ch-val-cpu');
+      const memValEl = $('#ch-val-mem');
+      if (cpuValEl) cpuValEl.textContent = active ? `${c.toFixed(1)}%` : '0.0%';
+      if (memValEl) memValEl.textContent = active ? `${m.toFixed(0)} MiB / ${maxRamGB} GiB` : `0 MiB / ${maxRamGB} GiB`;
+      cpuSeriesEl.innerHTML = buildChartSeriesInnerSvg('cpu');
+      memSeriesEl.innerHTML = buildChartSeriesInnerSvg('mem');
+      netSeriesEl.innerHTML = buildChartSeriesInnerSvg('net');
+      if (S.chartHoverKind) {
+        updateChartHoverDom(S.chartHoverKind);
+      }
+    } else {
+      chr.innerHTML = chartsHtml();
+    }
+  }
+
   if (hst) {
-    const srv = curServer();
-    const active = S.status === 'online' || S.status === 'starting';
-    const c = active ? (S.cpu.at(-1) || 0) : 0;
-    const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
-    const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
-    const hostAddr = `${srvHost(srv)}:${srv ? srv.port : 25565}`;
-    hst.innerHTML = `<span class="mono mu pv">${esc(hostAddr)}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
+    hst.innerHTML = `<span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${maxRamGB} GiB</span>`;
   }
 }
 
@@ -4147,6 +4651,8 @@ const V = {
       </div>
     ` : ''}
 
+    <div class="np-slot-container" data-np-slot="dashboard:top" style="margin-bottom: 16px;"></div>
+
     <div class="dash-grid">
       <!-- Left Column: Server Cards Grid -->
       <div id="srv-card-grid" class="${gridCls}" style="${gridStyle}">
@@ -4187,7 +4693,7 @@ const V = {
                     </span>
                   </div>
                   <div class="row" style="gap: 8px; margin-top: 4px; flex-wrap: wrap;">
-                    <span class="srv-card-addr">${esc(host)}</span>
+                    <span class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</span>
                     <span class="chip" style="font-size: 11px;">${esc(coreLabel)} ${esc(s.version || '')}</span>
                     ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
                   </div>
@@ -4234,7 +4740,7 @@ const V = {
                   ${isRun && dashVm !== 'icons' ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
                 </span>
               </div>
-              <div class="srv-card-addr">${esc(host)}</div>
+              <div class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</div>
               <div class="srv-meters-row">
                 <div class="srv-meter">
                   <div class="srv-meter-head">
@@ -4312,7 +4818,8 @@ const V = {
           </div>
         </div>
       </div>
-    </div>`;
+    </div>
+    <div class="np-slot-container" data-np-slot="dashboard:bottom" style="margin-top: 16px;"></div>`;
   },
 
   con() {
@@ -4337,7 +4844,9 @@ const V = {
       </div>
       <div class="card stc" id="stc">${statsHtml()}</div>
     </div>
-    <div class="grid g3" id="chr">${chartsHtml()}</div>`;
+    <div class="np-slot-container" data-np-slot="console:below-stats" style="margin-bottom: 14px;"></div>
+    <div class="grid g3" id="chr">${chartsHtml()}</div>
+    <div class="np-slot-container" data-np-slot="console:below-charts" style="margin-top: 16px;"></div>`;
   },
 
   pl() {
@@ -4562,7 +5071,7 @@ const V = {
               const isSelected = S.selectedFiles.has(itemPath);
 
               return `
-              <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}"
+              <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
                   onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
                   oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <td style="width: 36px; padding-left: 18px;" onclick="event.stopPropagation();">
@@ -4613,7 +5122,7 @@ const V = {
               const itemPath = item.path || item.name;
               const isSelected = S.selectedFiles.has(itemPath);
               return `
-              <div class="vm-icon-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}"
+              <div class="vm-icon-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
                    onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
                    oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <div class="vm-file-head" onclick="event.stopPropagation();">
@@ -4665,7 +5174,7 @@ const V = {
               const itemPath = item.path || item.name;
               const isSelected = S.selectedFiles.has(itemPath);
               return `
-              <div class="vm-tile-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}"
+              <div class="vm-tile-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
                    onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
                    oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <div class="vm-tile-file-row">
@@ -4692,6 +5201,7 @@ const V = {
 
     return `${srvh()}
     <div style="margin-top: 16px;">
+      <div class="np-slot-container" data-np-slot="files:top" style="margin-bottom: 12px;"></div>
       <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
         <!-- Breadcrumb Navigation -->
         <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
@@ -4711,7 +5221,7 @@ const V = {
           </div>
           ${renderViewModeToggle('files', 'list')}
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
-          <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('download', 14)} Upload</button>
+          <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
           <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
         </div>
       </div>
@@ -4719,18 +5229,7 @@ const V = {
       ${filesContainerHtml}
 
       <!-- Floating Bulk Action Bar -->
-      ${S.selectedFiles.size > 0 ? `
-        <div class="bulk-action-bar">
-          <span style="font-weight: 600; font-size: 13.5px; color: #fff;">${S.selectedFiles.size} item${S.selectedFiles.size > 1 ? 's' : ''} selected</span>
-          <div class="row" style="gap: 8px;">
-            <button class="btn sm" onclick="openMoveFilesModal()">${ic('move', 14)} Move</button>
-            <button class="btn sm" onclick="openCompressFilesModal()">${ic('archive', 14)} Archive</button>
-            ${Array.from(S.selectedFiles).some(p => isArchiveFile(p)) ? `<button class="btn sm" onclick="unzipSelectedArchive()">${ic('package', 14)} Extract</button>` : ''}
-            <button class="btn sm dg" onclick="deleteSelectedFiles()">${ic('trash', 14)} Delete Selected</button>
-            <button class="btn sm" onclick="deselectAllFiles()">Deselect</button>
-          </div>
-        </div>
-      ` : ''}
+      <div id="file-bulk-bar-root">${renderFileBulkBarHtml()}</div>
     </div>`;
   },
 
@@ -4833,6 +5332,7 @@ const V = {
 
     return `${srvh()}
     <div style="margin-top: 18px;">
+      <div class="np-slot-container" data-np-slot="plugins:top" style="margin-bottom: 12px;"></div>
       <!-- Top Title and Tabs Bar -->
       <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 14px;">
         <div>
@@ -4887,6 +5387,14 @@ const V = {
           </select>
 
           ${renderViewModeToggle('plug_store', 'list')}
+        </div>
+
+        <div class="row sb" style="margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
+          <label class="row" style="gap: 8px; cursor: pointer; font-size: 12.5px; color: var(--tx-muted);">
+            <input type="checkbox" id="plug-confirm-toggle" ${S.skipPlugConfirm ? 'checked' : ''} onchange="setPlugSkipConfirm(this.checked)">
+            <span>Install plugins immediately without confirmation prompt</span>
+          </label>
+          <span class="mu" style="font-size: 11.5px;">Direct Modrinth install into <code class="mono">${targetFolder}</code></span>
         </div>
 
         <div id="store-grid" class="${storeGridClass}" style="${storeGridStyle}">
@@ -5429,39 +5937,164 @@ const V = {
     </div>`;
   },
 
-  bill() {
-    const srv = curServer();
-    const header = srv ? srvh() : '';
-    return `${header}
-    <div style="${srv ? 'margin-top: 18px;' : ''}">
-      <h1 style="font-size: 22px; font-weight: 800; color: var(--tx); margin-bottom: 16px;">Billing &amp; Resource Allocation</h1>
-      <div class="grid g2" style="margin-bottom: 16px;">
-        <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Active Server Tier</h2>
-          <div class="row sb" style="margin-bottom: 8px;">
-            <span class="mu">Plan Name</span>
-            <b style="color: #fff;">NeoPanel Dedicated vCPU Tier 1</b>
-          </div>
-          <div class="row sb" style="margin-bottom: 8px;">
-            <span class="mu">Allocated Memory</span>
-            <b class="mono">${getServerMaxRamMB(srv)} MB Dedicated RAM</b>
-          </div>
-          <div class="row sb" style="margin-bottom: 8px;">
-            <span class="mu">Port Allocation</span>
-            <b class="mono">${srv?.port || 25565} (Primary IPv4)</b>
-          </div>
-          <div class="row sb">
-            <span class="mu">Billing Cycle</span>
-            <span class="badge online"><i class="dot"></i>Active &bull; Renews in 30 days</span>
+  client() {
+    const b = S.branding || DEFAULT_BRANDING;
+    const enabled = Boolean(b.client_area_enabled);
+    const available = b.client_area_available !== false;
+    const rawUrl = (b.client_area_url || '').trim();
+    const mode = b.client_area_open_mode === 'embed' ? 'embed' : 'tab';
+    const label = (b.client_area_label || 'Client Area').trim() || 'Client Area';
+    const subtitle = (b.client_area_subtitle || 'Purchase servers, manage subscriptions, and view invoices in your storefront.').trim();
+    const isAdmin = S.user?.role === 'admin';
+
+    if (!enabled) {
+      return `<div class="np-status-shell">
+        <div class="card np-status-card">
+          <div class="np-status-code warn">${ic('store', 14)} NOT CONFIGURED</div>
+          <h1 style="font-size:24px; margin:0 0 10px; color:var(--tx);">${esc(label)} Is Not Configured Yet</h1>
+          <p class="mu" style="font-size:13.5px; line-height:1.6; margin:0;">
+            No external hosting storefront or billing portal has been linked to this panel yet (for example <span class="mono">https://client.hosting.net</span>).
+          </p>
+          <div class="row" style="justify-content:center; gap:10px; margin-top:22px; flex-wrap:wrap;">
+            <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn pr" style="text-decoration:none;">${ic('server', 14)} Back to Servers</a>
+            ${isAdmin ? `<a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn" style="text-decoration:none;">${ic('settings', 14)} Connect Storefront</a>` : ''}
           </div>
         </div>
+      </div>`;
+    }
 
-        <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: #fff; margin-bottom: 12px;">Payment Method</h2>
-          <p class="mu" style="font-size: 13px; margin-bottom: 14px;">Direct VPS node deployment. No third-party recurring subscription fee.</p>
-          <button class="btn sm" onclick="toast('Invoice downloaded')">${ic('download', 14)} Download Receipt (.PDF)</button>
+    if (!available) {
+      return `<div class="np-status-shell">
+        <div class="card np-status-card">
+          <div class="np-status-code err">${ic('alert', 14)} 503 UNAVAILABLE</div>
+          <h1 style="font-size:24px; margin:0 0 10px; color:var(--tx);">${esc(label)} Temporarily Unavailable</h1>
+          <p class="mu" style="font-size:13.5px; line-height:1.6; margin:0;">
+            The connected ordering storefront is currently marked as unavailable by an administrator. Running game servers in your panel remain unaffected.
+          </p>
+          <div class="row" style="justify-content:center; gap:10px; margin-top:22px; flex-wrap:wrap;">
+            <button type="button" class="btn" onclick="applyRoute('/client-area', { replace: true })">${ic('refresh', 14)} Retry</button>
+            <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn pr" style="text-decoration:none;">${ic('server', 14)} Back to Servers</a>
+            ${isAdmin ? `<a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn" style="text-decoration:none;">${ic('settings', 14)} Storefront Settings</a>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    if (!rawUrl) {
+      return `<div class="np-status-shell">
+        <div class="card np-status-card">
+          <div class="np-status-code warn">${ic('link', 14)} 422 URL MISSING</div>
+          <h1 style="font-size:24px; margin:0 0 10px; color:var(--tx);">Storefront URL Is Empty</h1>
+          <p class="mu" style="font-size:13.5px; line-height:1.6; margin:0;">
+            ${esc(label)} is enabled, but the external storefront URL is empty or invalid. Provide a valid <span class="mono">https://...</span> portal URL in Admin Panel Branding.
+          </p>
+          <div class="row" style="justify-content:center; gap:10px; margin-top:22px; flex-wrap:wrap;">
+            <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn pr" style="text-decoration:none;">${ic('server', 14)} Back to Servers</a>
+            ${isAdmin ? `<a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn" style="text-decoration:none;">${ic('settings', 14)} Set Storefront URL</a>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    let safeHost = rawUrl;
+    try {
+      safeHost = new URL(rawUrl, window.location.origin).origin;
+    } catch (e) {}
+
+    if (mode === 'embed') {
+      return `
+      <div class="row sb" style="margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <div class="row" style="gap: 8px; flex-wrap: wrap;">
+            <h1 style="font-size: 22px; font-weight: 800; margin: 0; color: var(--tx);">${esc(label)}</h1>
+            <span class="badge online"><i class="dot"></i>Connected</span>
+            <span class="chip mono" style="font-size: 11px;">${esc(safeHost)}</span>
+          </div>
+          ${subtitle ? `<p class="mu" style="font-size: 13px; margin: 4px 0 0;">${esc(subtitle)}</p>` : ''}
+        </div>
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
+          ${isAdmin ? `<a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn sm" style="text-decoration:none;">${ic('settings', 13)} Configure</a>` : ''}
+          <a href="${esc(rawUrl)}" target="_blank" rel="noopener noreferrer" class="btn sm pr" style="text-decoration:none;">${ic('external', 13)} Open in New Tab</a>
         </div>
       </div>
+      ${S.clientIframeWarning ? `
+        <div class="np-maint-banner" style="margin-bottom: 12px;">
+          <span>External site may block iframe embedding (<code class="mono">X-Frame-Options</code> / CSP). Use Open in New Tab if the frame stays blank.</span>
+          <a href="${esc(rawUrl)}" target="_blank" rel="noopener noreferrer" class="btn sm pr" style="text-decoration:none;">${ic('external', 13)} Launch Storefront</a>
+        </div>` : ''}
+      <div class="client-area-iframe-wrap">
+        <iframe id="client-area-frame" src="${esc(rawUrl)}" title="${esc(label)}" referrerpolicy="no-referrer-when-downgrade" onerror="S.clientIframeWarning=true; R();"></iframe>
+      </div>`;
+    }
+
+    return `<div class="np-status-shell">
+      <div class="card np-status-card" style="max-width: 580px;">
+        <div class="np-status-code">${ic('store', 14)} STOREFRONT PORTAL</div>
+        <h1 style="font-size:25px; margin:0 0 10px; color:var(--tx);">${esc(label)}</h1>
+        <p class="mu" style="font-size:13.5px; line-height:1.6; margin:0 0 16px;">${esc(subtitle)}</p>
+        <div class="chip mono" style="display:inline-flex; max-width:100%; overflow:hidden; text-overflow:ellipsis; padding:6px 12px; font-size:12px;">
+          ${esc(rawUrl)}
+        </div>
+        <div class="row" style="justify-content:center; gap:10px; margin-top:22px; flex-wrap:wrap;">
+          <a href="${esc(rawUrl)}" target="_blank" rel="noopener noreferrer" class="btn pr" style="text-decoration:none;">${ic('external', 14)} Open ${esc(label)}</a>
+          <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn" style="text-decoration:none;">${ic('server', 14)} Back to Servers</a>
+          ${isAdmin ? `<a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn" style="text-decoration:none;">${ic('settings', 14)} Configure</a>` : ''}
+        </div>
+      </div>
+    </div>`;
+  },
+
+  notfound() {
+    const path = S.notFoundPath || window.location.pathname || '/unknown';
+    const srv = curServer();
+    return `<div class="np-status-shell">
+      <div class="card np-status-card">
+        <div class="np-status-code err">${ic('alert', 14)} 404 NOT FOUND</div>
+        <h1 style="font-size:26px; font-weight:800; margin:0 0 10px; color:var(--tx);">Page Not Found</h1>
+        <p class="mu" style="font-size:13.5px; line-height:1.6; margin:0 0 14px;">
+          The route <span class="chip mono" style="padding:2px 8px; font-size:12px;">${esc(path)}</span> does not exist, or the requested server or extension is unavailable.
+        </p>
+        <div class="row" style="justify-content:center; gap:10px; margin-top:20px; flex-wrap:wrap;">
+          <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn pr" style="text-decoration:none;">${ic('server', 14)} Back to Servers</a>
+          ${srv ? `<button type="button" class="btn" onclick="applyRoute(serverRouteUrl('${esc(srv.node_id || 'local')}', '${esc(srv.id)}', 'con'))">${ic('terminal', 14)} Open Active Server</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  },
+
+  maintenance() {
+    const b = S.branding || DEFAULT_BRANDING;
+    const title = (b.maintenance_title || 'Scheduled Maintenance').trim();
+    const message = (b.maintenance_message || 'We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.').trim();
+    const eta = (b.maintenance_eta || '').trim();
+    const isAdminPreview = S.maintPreview && S.user?.role === 'admin';
+    return `<div class="np-status-shell full-screen">
+      <div class="card np-status-card">
+        <div class="llogo" style="margin-bottom:14px;">${brandLogoHtml(true, b)}</div>
+        <div class="np-status-code warn">${ic('alert', 14)} 503 MAINTENANCE</div>
+        <h1 style="font-size:25px; font-weight:800; margin:0 0 10px; color:var(--tx);">${esc(title)}</h1>
+        <p class="mu" style="font-size:13.5px; line-height:1.65; margin:0;">${esc(message)}</p>
+        ${eta ? `<div class="chip mono" style="margin-top:14px; display:inline-flex;">Estimated return: ${esc(eta)}</div>` : ''}
+        <div class="row" style="justify-content:center; gap:10px; margin-top:24px; flex-wrap:wrap;">
+          ${isAdminPreview
+            ? `<button type="button" class="btn pr" onclick="toggleMaintPreview(false)">Exit Maintenance Preview</button>`
+            : `<button type="button" class="btn pr" onclick="checkAuth()">${ic('refresh', 14)} Check Status</button>
+               <button type="button" class="btn" onclick="logout()">${ic('lock', 14)} Sign Out</button>`}
+        </div>
+      </div>
+    </div>`;
+  },
+
+  mod() {
+    const page = window.NP?._pages?.get(S.modPageId);
+    if (!page) {
+      S.notFoundPath = `/mod/${S.modPageId || ''}`;
+      return V.notfound();
+    }
+    const header = page.scope === 'server' && curServer() ? srvh() : '';
+    return `${header}
+    <div style="${header ? 'margin-top: 16px;' : ''}">
+      <div id="np-mod-page-root" data-mod-page="${esc(page.id)}"></div>
     </div>`;
   },
 
@@ -5580,7 +6213,8 @@ const V = {
           ${ic('trash', 14)} Delete Server
         </button>
       </div>
-    </div>`;
+    </div>
+    <div class="np-slot-container" data-np-slot="settings:bottom" style="margin-top: 16px;"></div>`;
   },
 
   act() {
@@ -5633,7 +6267,8 @@ const V = {
       ['Managed Servers', 2],
       ['Users & Roles', 3],
       ['Panel Look & Branding', 4],
-      ['Audit Logs', 5]
+      ['Audit Logs', 5],
+      ['Mods & Extensions', 6]
     ];
 
     let content = '';
@@ -6110,32 +6745,32 @@ const V = {
             </div>
 
             <div style="margin-top: 18px;">
-              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 10px;">Media &amp; Artwork URLs</div>
+              <div class="row sb" style="margin-bottom: 10px;">
+                <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted);">Media &amp; Artwork Assets (Upload or URL)</div>
+                <span class="mu" style="font-size: 11px;">PNG, JPG, WebP, SVG, ICO, GIF (up to 12 MB)</span>
+              </div>
+              <input type="file" id="brand-file-input" accept="image/*,.ico,.svg" style="display:none" onchange="handleBrandingFileSelect(this)">
               <div class="grid g2">
-                <label class="f" style="margin-bottom: 0;">
-                  <span>Sidebar Logo URL (blank = 3D Cube)</span>
-                  <input type="text" value="${esc(draft.logo_url || '')}" oninput="onBrandInputChange('logo_url', this.value)" placeholder="https://example.com/logo.png">
-                </label>
-                <label class="f" style="margin-bottom: 0;">
-                  <span>Favicon URL (blank = default SVG)</span>
-                  <input type="text" value="${esc(draft.favicon_url || '')}" oninput="onBrandInputChange('favicon_url', this.value)" placeholder="https://example.com/favicon.ico">
-                </label>
-                <label class="f" style="margin-bottom: 0;">
-                  <span>Login Screen Wallpaper URL</span>
-                  <input type="text" value="${esc(draft.login_bg_url || '')}" oninput="onBrandInputChange('login_bg_url', this.value)" placeholder="https://example.com/login-bg.jpg">
-                </label>
-                <label class="f" style="margin-bottom: 0;">
-                  <span>Server Workspace Hero URL</span>
-                  <input type="text" value="${esc(draft.server_hero_url || '')}" oninput="onBrandInputChange('server_hero_url', this.value)" placeholder="${esc(SERVER_HERO_URL)}">
-                </label>
-                <label class="f" style="margin-bottom: 0;">
-                  <span>Dashboard Card Cover URL</span>
-                  <input type="text" value="${esc(draft.card_cover_url || '')}" oninput="onBrandInputChange('card_cover_url', this.value)" placeholder="${esc(MINECRAFT_COVER_URL)}">
-                </label>
-                <label class="f" style="margin-bottom: 0;">
-                  <span>Default User Avatar URL</span>
-                  <input type="text" value="${esc(draft.default_avatar_url || '')}" oninput="onBrandInputChange('default_avatar_url', this.value)" placeholder="${esc(DEFAULT_USER_AVATAR_URL)}">
-                </label>
+                ${[
+                  ['logo_url', 'Sidebar Logo (blank = 3D Cube)', 'https://example.com/logo.png', '/favicon.svg'],
+                  ['favicon_url', 'Browser Favicon (syncs tab icon)', 'https://example.com/favicon.png', '/favicon.svg'],
+                  ['login_bg_url', 'Login Screen Wallpaper', 'https://example.com/login-bg.jpg', MINECRAFT_COVER_URL],
+                  ['server_hero_url', 'Server Workspace Hero Banner', SERVER_HERO_URL, SERVER_HERO_URL],
+                  ['card_cover_url', 'Dashboard Card Cover', MINECRAFT_COVER_URL, MINECRAFT_COVER_URL],
+                  ['default_avatar_url', 'Default User Avatar', DEFAULT_USER_AVATAR_URL, DEFAULT_USER_AVATAR_URL]
+                ].map(([field, label, ph, fallbackThumb]) => {
+                  const curVal = draft[field] || '';
+                  const thumbSrc = curVal || fallbackThumb;
+                  return `<label class="f" style="margin-bottom: 0;">
+                    <span>${label}</span>
+                    <div class="brand-upload-row">
+                      <img class="brand-thumb-mini" data-brand-thumb="${field}" src="${esc(thumbSrc)}" alt="" onerror="this.src='/favicon.svg'">
+                      <input type="text" data-brand-media="${field}" value="${esc(curVal)}" oninput="onBrandInputChange('${field}', this.value)" placeholder="${esc(ph)}">
+                      <button type="button" class="btn sm" data-upload-btn="${field}" onclick="triggerBrandingUpload('${field}', this)" title="Upload local image file">${ic('upload', 12)} Upload</button>
+                      <button type="button" class="btn sm" onclick="clearBrandingMedia('${field}')" title="Reset to default">&times;</button>
+                    </div>
+                  </label>`;
+                }).join('')}
               </div>
             </div>
 
@@ -6247,6 +6882,98 @@ const V = {
             </div>
           </form>
         </div>
+
+        <div class="grid g2" style="margin-bottom:18px;">
+          <div class="card">
+            <div class="row sb" style="margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+              <h2 style="margin:0; color:var(--tx);">Global Maintenance Mode</h2>
+              <span class="badge ${draft.maintenance_enabled ? 'starting' : 'offline'}">
+                <i class="dot"></i>${draft.maintenance_enabled ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+            <span class="mu" style="font-size:12.5px; display:block; margin-bottom:14px;">
+              Locks standard user access and guests behind a 503 Maintenance screen while Administrators retain full access.
+            </span>
+            <div style="margin-bottom:12px; padding:10px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px;">
+              <label class="row sb" style="cursor:pointer;">
+                <span style="font-weight:600; color:var(--tx);">Enable Maintenance Mode</span>
+                <span class="sw">
+                  <input type="checkbox" ${draft.maintenance_enabled ? 'checked' : ''} onchange="onBrandInputChange('maintenance_enabled', this.checked)">
+                  <i></i>
+                </span>
+              </label>
+            </div>
+            <label class="f">
+              <span>Maintenance Title</span>
+              <input type="text" value="${esc(draft.maintenance_title || '')}" maxlength="96" oninput="onBrandInputChange('maintenance_title', this.value)" placeholder="Scheduled Maintenance">
+            </label>
+            <label class="f">
+              <span>Maintenance Message</span>
+              <textarea rows="3" maxlength="512" oninput="onBrandInputChange('maintenance_message', this.value)" placeholder="We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.">${esc(draft.maintenance_message || '')}</textarea>
+            </label>
+            <label class="f">
+              <span>Estimated Return / ETA (optional)</span>
+              <input type="text" value="${esc(draft.maintenance_eta || '')}" maxlength="96" oninput="onBrandInputChange('maintenance_eta', this.value)" placeholder="e.g. ~15 minutes / 02:30 UTC">
+            </label>
+            <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px; flex-wrap:wrap;">
+              <button type="button" class="btn sm" onclick="toggleMaintPreview(true)">${ic('eye', 13)} Preview Screen</button>
+              <button type="button" class="btn sm pr" onclick="saveBrandingAndDaemon()">${ic('check', 13)} Save Maintenance</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="row sb" style="margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+              <h2 style="margin:0; color:var(--tx);">Client Area Storefront Portal</h2>
+              <span class="badge ${draft.client_area_enabled ? (draft.client_area_available !== false ? 'online' : 'starting') : 'offline'}">
+                <i class="dot"></i>${draft.client_area_enabled ? (draft.client_area_available !== false ? 'Connected' : 'Unavailable') : 'Not Set Up'}
+              </span>
+            </div>
+            <span class="mu" style="font-size:12.5px; display:block; margin-bottom:14px;">
+              Link your external billing / server-buying storefront (e.g. <code class="mono">https://client.hosting.net</code>) inside the sidebar.
+            </span>
+            <div style="margin-bottom:10px; padding:10px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px;">
+              <label class="row sb" style="cursor:pointer; margin-bottom:8px;">
+                <span style="font-weight:600; color:var(--tx);">Enable Storefront Integration</span>
+                <span class="sw">
+                  <input type="checkbox" ${draft.client_area_enabled ? 'checked' : ''} onchange="onBrandInputChange('client_area_enabled', this.checked)">
+                  <i></i>
+                </span>
+              </label>
+              <label class="row sb" style="cursor:pointer;">
+                <span style="font-size:13px; color:var(--tx-muted);">Mark Storefront Available (off = 503 Unavailable error)</span>
+                <span class="sw">
+                  <input type="checkbox" ${draft.client_area_available !== false ? 'checked' : ''} onchange="onBrandInputChange('client_area_available', this.checked)">
+                  <i></i>
+                </span>
+              </label>
+            </div>
+            <div class="grid g2">
+              <label class="f">
+                <span>Sidebar Link Label</span>
+                <input type="text" value="${esc(draft.client_area_label || 'Client Area')}" maxlength="48" oninput="onBrandInputChange('client_area_label', this.value)" placeholder="Client Area">
+              </label>
+              <label class="f">
+                <span>Open Behavior</span>
+                <select onchange="onBrandInputChange('client_area_open_mode', this.value)">
+                  <option value="tab" ${(draft.client_area_open_mode || 'tab') === 'tab' ? 'selected' : ''}>Portal Card &amp; New Tab</option>
+                  <option value="embed" ${draft.client_area_open_mode === 'embed' ? 'selected' : ''}>Embed in Panel (iframe)</option>
+                </select>
+              </label>
+            </div>
+            <label class="f">
+              <span>External Storefront URL</span>
+              <input type="text" value="${esc(draft.client_area_url || '')}" maxlength="1024" oninput="onBrandInputChange('client_area_url', this.value)" placeholder="https://client.hosting.net">
+            </label>
+            <label class="f">
+              <span>Storefront Subtitle</span>
+              <input type="text" value="${esc(draft.client_area_subtitle || '')}" maxlength="200" oninput="onBrandInputChange('client_area_subtitle', this.value)" placeholder="Purchase servers, manage subscriptions, and view invoices.">
+            </label>
+            <div class="row" style="justify-content:flex-end; gap:8px; margin-top:14px; flex-wrap:wrap;">
+              <a href="/client-area" onclick="return handleNavClick(event, 'client')" class="btn sm" style="text-decoration:none;">${ic('external', 13)} Open /client-area</a>
+              <button type="button" class="btn sm pr" onclick="saveBrandingAndDaemon()">${ic('check', 13)} Save Storefront</button>
+            </div>
+          </div>
+        </div>
       `;
     } else if (t === 5) {
       content = renderActivityLogSection({
@@ -6255,6 +6982,8 @@ const V = {
         subtitle: 'Cluster-wide security, node connections, databases, user management, power, console, file & software audit events',
         showActor: true
       });
+    } else if (t === 6) {
+      content = renderAdminModsTabHtml();
     }
 
     return `<header class="top">
@@ -6571,17 +7300,43 @@ function renderVersionRows() {
 }
 
 // --- Navigation Render ---
+function renderModSidebarItemsHtml(scope) {
+  const items = Array.isArray(window.NP?._sidebarItems) ? window.NP._sidebarItems : [];
+  const filtered = items.filter(it => (it.scope || 'both') === scope || (it.scope || 'both') === 'both');
+  if (!filtered.length) return '';
+  return `<div class="ng">Extensions</div>` + filtered.map(it => {
+    const href = it.url || (it.pageId ? `/mod/${encodeURIComponent(it.pageId)}` : '#');
+    const isActive = Boolean(it.pageId && S.view === 'mod' && S.modPageId === it.pageId);
+    const clickAttr = it.pageId
+      ? `onclick="return handleNavClick(event, 'mod', { modPageId: '${esc(it.pageId)}' })"`
+      : `onclick="if(window.NP&&window.NP._execSidebarItem){return window.NP._execSidebarItem('${esc(it.id)}', event);}return false;"`;
+    return `<a class="nav-item ${isActive ? 'on' : ''}" href="${esc(withSafeModeQuery(href))}" ${clickAttr} ${isActive ? 'aria-current="page"' : ''}>
+      ${ic(it.icon || 'puzzle', 16)}
+      <span>${esc(it.label || 'Extension')}</span>
+    </a>`;
+  }).join('');
+}
+
 function navHtml() {
-  const showGlobalNav = S.view === 'dash' || S.view === 'bill' || (S.view === 'act' && !window.location.pathname.startsWith('/server/')) || !curServer();
+  const showGlobalNav = ['dash', 'client', 'notfound', 'mod', 'maintenance'].includes(S.view) ||
+    (S.view === 'act' && !window.location.pathname.startsWith('/server/')) ||
+    !curServer();
   const isAdminGlobal = (S.view === 'admin' || S.view === 'acc') && (!curServer() || S.view === 'dash');
-  const brandHref = '/';
+  const brandHref = withSafeModeQuery('/');
   const adminHref = routeUrl('admin');
   const accHref = routeUrl('acc');
+  const b = S.branding || DEFAULT_BRANDING;
+  const clientLabel = (b.client_area_label || 'Client Area').trim() || 'Client Area';
+  const clientStatusBadge = !b.client_area_enabled
+    ? `<span class="chip" style="margin-left:auto; font-size:10px; padding:1px 6px;">Setup</span>`
+    : (b.client_area_available === false
+      ? `<span class="chip" style="margin-left:auto; font-size:10px; padding:1px 6px; color:#f87171;">503</span>`
+      : '');
 
   if (showGlobalNav || isAdminGlobal) {
     const isActGlobal = S.view === 'act';
     return `
-    <a class="brand" href="${brandHref}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
+    <a class="brand" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
       ${brandLogoHtml(false)}
     </a>
     
@@ -6591,24 +7346,22 @@ function navHtml() {
       <kbd>Ctrl K</kbd>
     </button>
 
-    <a class="nav-item ${S.view === 'dash' ? 'on' : ''}" href="/" onclick="return handleNavClick(event, 'dash')" ${S.view === 'dash' ? 'aria-current="page"' : ''}>
+    <a class="nav-item ${S.view === 'dash' ? 'on' : ''}" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" ${S.view === 'dash' ? 'aria-current="page"' : ''}>
       ${ic('server', 16)}
       <span>Servers</span>
     </a>
-    <a class="nav-item ${isActGlobal ? 'on' : ''}" href="/activity" onclick="return handleNavClick(event, 'act', { global: true })" ${isActGlobal ? 'aria-current="page"' : ''}>
+    <a class="nav-item ${isActGlobal ? 'on' : ''}" href="${esc(withSafeModeQuery('/activity'))}" onclick="return handleNavClick(event, 'act', { global: true })" ${isActGlobal ? 'aria-current="page"' : ''}>
       ${ic('activity', 16)}
       <span>Activity</span>
     </a>
+    <a class="nav-item ${S.view === 'client' ? 'on' : ''}" href="${esc(routeUrl('client'))}" onclick="return handleNavClick(event, 'client')" ${S.view === 'client' ? 'aria-current="page"' : ''}>
+      ${ic('store', 16)}
+      <span>${esc(clientLabel)}</span>
+      ${clientStatusBadge}
+    </a>
 
-    <div class="ng">Billing</div>
-    <a class="nav-item" href="/" onclick="return handleNavClick(event, 'dash')">
-      ${ic('layers', 16)}
-      <span>Overview</span>
-    </a>
-    <a class="nav-item ${S.view === 'bill' ? 'on' : ''}" href="/billing" onclick="return handleNavClick(event, 'bill')" ${S.view === 'bill' ? 'aria-current="page"' : ''}>
-      ${ic('file', 16)}
-      <span>Invoices</span>
-    </a>
+    ${renderModSidebarItemsHtml('global')}
+    <div class="np-slot-container" data-np-slot="nav:bottom"></div>
 
     <span class="sp"></span>
 
@@ -6630,7 +7383,7 @@ function navHtml() {
   // Inside a Server Workspace
   let group = '';
   return `
-  <a class="brand" href="${brandHref}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
+  <a class="brand" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
     ${brandLogoHtml(false)}
   </a>
   
@@ -6640,7 +7393,7 @@ function navHtml() {
     <kbd>Ctrl K</kbd>
   </button>
 
-  <a class="nb" href="/" onclick="return handleNavClick(event, 'dash')" style="margin-bottom: 6px; text-decoration:none;">
+  <a class="nb" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="margin-bottom: 6px; text-decoration:none;">
     &larr; All servers
   </a>
 
@@ -6655,6 +7408,9 @@ function navHtml() {
       <span>${label}</span>
     </a>`;
   }).join('')}
+
+  ${renderModSidebarItemsHtml('server')}
+  <div class="np-slot-container" data-np-slot="nav:bottom"></div>
 
   <span class="sp"></span>
 
@@ -6690,24 +7446,61 @@ window.go = function(view, opts = {}) {
   if (S.view === 'admin' && target !== 'admin' && (S.adminTab || 0) === 4) {
     applyBranding(S.branding);
   }
-  navigateToUrl(routeUrl(target, opts), getViewDisplayLabel(target));
+  applyRoute(routeUrl(target, opts), opts);
 };
 
 window.addEventListener('hashchange', () => {
+  if (!S.token || $('#login')) return;
   const raw = window.location.hash.replace('#', '');
   const hash = normalizeRoute(raw);
-  if (hash && hash !== S.view && (V[hash] || hash === 'admin' || hash === 'acc')) {
+  if (hash && V[hash] && hash !== 'notfound' && hash !== 'maintenance') {
     go(hash);
   }
 });
 
 // --- Main Render Function (R) ---
 window.R = function() {
+  closeAllCustomSelects();
   const nav = $('#nav');
   const main = $('#main');
-  if (nav) nav.innerHTML = navHtml();
+  const prevNavScroll = nav ? nav.scrollTop : 0;
+  const prevMainScroll = main ? main.scrollTop : 0;
+
+  const isMaintEnabled = Boolean(S.branding?.maintenance_enabled);
+  const isAdmin = S.user?.role === 'admin';
+  const showMaintLockout = (isMaintEnabled && !isAdmin) || (S.maintPreview && isAdmin);
+
+  if (showMaintLockout) {
+    if (nav) nav.innerHTML = '';
+    if (main) {
+      main.innerHTML = V.maintenance();
+      main.scrollTop = 0;
+    }
+    const fly = $('#fly-console-root');
+    if (fly) {
+      fly.innerHTML = '';
+      delete fly.dataset.flySig;
+    }
+    return;
+  }
+
+  if (nav) {
+    nav.innerHTML = navHtml();
+    nav.scrollTop = prevNavScroll;
+  }
   if (main) {
-    main.innerHTML = (V[S.view] ? V[S.view]() : V.dash());
+    const maintBannerHtml = (isMaintEnabled && isAdmin)
+      ? `<div class="np-maint-banner">
+          <span><b>Maintenance Mode Active:</b> Standard users &amp; visitors see the maintenance lockout screen. Administrators retain full panel access.</span>
+          <div class="row" style="gap: 8px;">
+            <button type="button" class="btn sm" onclick="toggleMaintPreview(true)">${ic('eye', 13)} Preview Screen</button>
+            <a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn sm pr" style="text-decoration:none;">Manage</a>
+          </div>
+        </div>`
+      : '';
+    const viewFn = V[S.view] || V.notfound;
+    main.innerHTML = maintBannerHtml + viewFn();
+    main.scrollTop = prevMainScroll;
     if (S.view === 'con') {
       paintLog();
       bindConsoleInput();
@@ -6719,6 +7512,12 @@ window.R = function() {
     enhanceSelects(main);
   }
   renderFlyConsole();
+  if (typeof mountPanelModHooks === 'function') {
+    mountPanelModHooks();
+  }
+  if (window.NP && typeof window.NP._emit === 'function') {
+    window.NP._emit('render', { view: S.view, server: curServer() });
+  }
 };
 
 function bindConsoleInput() {
@@ -6787,7 +7586,7 @@ async function loadInitialRouteData(view) {
 window.onEnterView = function(view) {
   if (view === 'pl') loadPlayersData();
   else if (view === 'fi') loadFileList(S.currentDir);
-  else if (view === 'db') loadDatabases();
+  else if (view === 'db') loadDatabases(Array.isArray(S.databases) && S.databases.length > 0);
   else if (view === 'plug') {
     loadPluginsList();
     loadVersionsCatalog();
@@ -6838,8 +7637,13 @@ async function loadDashboard(skipRender = false, preferredRef = null) {
     if (Array.isArray(act)) S.acct.act = act;
 
     if (S.servers.length > 0) {
-      let idx = prevId ? S.servers.findIndex(s => s.id === prevId && (s.node_id || 'local') === prevNodeId) : -1;
-      if (idx === -1 && prevId) idx = S.servers.findIndex(s => s.id === prevId);
+      let idx = -1;
+      if (prevId) {
+        const matched = resolveServerByParam(prevId, prevNodeId);
+        if (matched) {
+          idx = S.servers.findIndex(s => s.id === matched.id && (s.node_id || 'local') === (matched.node_id || 'local'));
+        }
+      }
       if (idx === -1) idx = 0;
       S.cs = idx;
       const cur = curServer();
@@ -6921,27 +7725,35 @@ function selectAdminTab(idx) {
   if ((S.adminTab || 0) === 4 && idx !== 4) {
     applyBranding(S.branding);
   }
-  navigateToUrl(routeUrl('admin', { adminTab: idx }), 'Admin Area');
+  applyRoute(routeUrl('admin', { adminTab: idx }));
 }
 
 function selectAccountTab(idx) {
-  navigateToUrl(routeUrl('acc', { acctTab: idx }), 'Account Settings');
+  applyRoute(routeUrl('acc', { acctTab: idx }));
 }
 
 async function loadAdminData(skipRender = false) {
-  const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes] = await Promise.all([
+  const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes, modsRes] = await Promise.all([
     api('/api/system').catch(() => null),
     api('/api/admin/users').catch(() => null),
     api('/api/admin/turnstile').catch(() => null),
     api('/api/nodes').catch(() => null),
     api('/api/admin/branding').catch(() => null),
-    api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null)
+    api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null),
+    api('/api/admin/mods').catch(() => null)
   ]);
 
   if (sysRes) S.system = sysRes;
   if (usersRes) S.adminUsers = usersRes || [];
   if (tsRes) S.adminTurnstile = tsRes;
   if (Array.isArray(nodesRes)) S.nodes = nodesRes;
+  if (modsRes && Array.isArray(modsRes.mods)) {
+    S.adminMods = modsRes.mods;
+    if (modsRes.mods_dir) S.modsDir = modsRes.mods_dir;
+    if (!S.selectedModId && S.adminMods.length > 0 && !S.modDraft) {
+      selectAdminMod(S.adminMods[0].id, true);
+    }
+  }
   if (brandRes && brandRes.branding) {
     S.branding = { ...DEFAULT_BRANDING, ...brandRes.branding };
     S.brandingLoaded = true;
@@ -7167,8 +7979,11 @@ async function loadPlayersData(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
-  S.loading.players = true;
-  if (!skipRender && S.view === 'pl') R();
+  const hasCached = (S.wl && S.wl.length > 0) || (S.bans && S.bans.length > 0) || (S.ops && S.ops.length > 0);
+  if (!hasCached) {
+    S.loading.players = true;
+    if (!skipRender && S.view === 'pl') R();
+  }
   try {
     const data = await api(srvApiPath(srv, '/players'));
     S.wl = data.whitelist || [];
@@ -7176,7 +7991,7 @@ async function loadPlayersData(skipRender = false) {
     S.ops = data.ops || [];
   } catch (e) {} finally {
     S.loading.players = false;
-    if (!skipRender) R();
+    if (!skipRender && S.view === 'pl') R();
   }
 }
 
@@ -7263,18 +8078,21 @@ async function loadFileList(path = '', skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
-  if (path !== S.currentDir && S.selectedFiles) {
+  const dirChanged = path !== S.currentDir;
+  if (dirChanged && S.selectedFiles) {
     S.selectedFiles.clear();
   }
-  S.loading.files = true;
-  if (!skipRender && S.view === 'fi') R();
+  if (dirChanged || !S.fileList || S.fileList.length === 0) {
+    S.loading.files = true;
+    if (!skipRender && S.view === 'fi') R();
+  }
   try {
     const data = await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`));
     S.fileList = data || [];
     S.currentDir = path;
   } catch (e) {} finally {
     S.loading.files = false;
-    if (!skipRender) R();
+    if (!skipRender && S.view === 'fi') R();
   }
 }
 
@@ -7363,7 +8181,8 @@ function closeEditor() {
 }
 
 function setPlugTab(tab) {
-  navigateToUrl(routeUrl('plug', { plugTab: tab }), tab === 'installed' ? 'Installed Plugins' : 'Plugin Store');
+  const nextTab = tab === 'installed' ? 'installed' : 'browse';
+  applyRoute(routeUrl('plug', { plugTab: nextTab }));
 }
 
 function toggleCustomJavaInput(val) {
@@ -7940,12 +8759,54 @@ async function promptNewFolder() {
 }
 
 // --- File Selection & Bulk Actions ---
+function renderFileBulkBarHtml() {
+  const count = S.selectedFiles ? S.selectedFiles.size : 0;
+  if (count <= 0) return '';
+  return `<div class="bulk-action-bar">
+    <span style="font-weight: 600; font-size: 13.5px; color: #fff;">${count} item${count > 1 ? 's' : ''} selected</span>
+    <div class="row" style="gap: 8px;">
+      <button class="btn sm" onclick="openMoveFilesModal()">${ic('move', 14)} Move</button>
+      <button class="btn sm" onclick="openCompressFilesModal()">${ic('archive', 14)} Archive</button>
+      ${Array.from(S.selectedFiles).some(p => isArchiveFile(p)) ? `<button class="btn sm" onclick="unzipSelectedArchive()">${ic('package', 14)} Extract</button>` : ''}
+      <button class="btn sm dg" onclick="deleteSelectedFiles()">${ic('trash', 14)} Delete Selected</button>
+      <button class="btn sm" onclick="deselectAllFiles()">Deselect</button>
+    </div>
+  </div>`;
+}
+
 function syncSelectAllCheckbox() {
   const chk = $('#chk-all-files');
-  if (!chk || !S.fileList.length) return;
+  if (!chk) return;
+  if (!S.fileList || !S.fileList.length) {
+    chk.checked = false;
+    chk.indeterminate = false;
+    return;
+  }
   const selectedCount = S.fileList.filter(i => S.selectedFiles.has(i.path || i.name)).length;
   chk.checked = selectedCount === S.fileList.length;
   chk.indeterminate = selectedCount > 0 && selectedCount < S.fileList.length;
+}
+
+function syncFileSelectionUI() {
+  const vm = getViewMode('files', 'list');
+  $$('.file-row[data-path]').forEach(row => {
+    const p = row.getAttribute('data-path') || '';
+    const isSel = Boolean(S.selectedFiles && S.selectedFiles.has(p));
+    if (vm === 'list') {
+      row.classList.toggle('row-selected', isSel);
+      row.classList.remove('selected');
+    } else {
+      row.classList.toggle('selected', isSel);
+      row.classList.remove('row-selected');
+    }
+    const cb = row.querySelector('.file-chk');
+    if (cb) cb.checked = isSel;
+  });
+  syncSelectAllCheckbox();
+  const root = $('#file-bulk-bar-root');
+  if (root) {
+    root.innerHTML = renderFileBulkBarHtml();
+  }
 }
 
 function toggleFileSelect(path, checked) {
@@ -7954,8 +8815,7 @@ function toggleFileSelect(path, checked) {
   } else {
     S.selectedFiles.delete(path);
   }
-  R();
-  syncSelectAllCheckbox();
+  syncFileSelectionUI();
 }
 
 function toggleSelectAllFiles(checked) {
@@ -7966,14 +8826,12 @@ function toggleSelectAllFiles(checked) {
   } else {
     S.selectedFiles.clear();
   }
-  R();
-  syncSelectAllCheckbox();
+  syncFileSelectionUI();
 }
 
 function deselectAllFiles() {
   S.selectedFiles.clear();
-  R();
-  syncSelectAllCheckbox();
+  syncFileSelectionUI();
 }
 
 async function deleteSelectedFiles() {
@@ -8403,21 +9261,53 @@ async function searchModrinth(skipDomWrite = false) {
   }
 }
 
+function setPlugSkipConfirm(val) {
+  S.skipPlugConfirm = Boolean(val);
+  try {
+    if (S.skipPlugConfirm) localStorage.setItem('neopanel_skip_plug_confirm', 'true');
+    else localStorage.removeItem('neopanel_skip_plug_confirm');
+  } catch (e) {}
+  const toggleEl = $('#plug-confirm-toggle');
+  if (toggleEl) toggleEl.checked = S.skipPlugConfirm;
+}
+
 async function installPlugin(projectSlug, title, btnEl) {
   const srv = curServer();
   if (!srv || !projectSlug) return;
   if (S.installingPlugins && S.installingPlugins.has(projectSlug)) return;
 
   const targetFolder = String(S.core || '').toLowerCase() === 'fabric' ? 'mods/' : 'plugins/';
-  const ok = await uiConfirm({
-    title: 'Install Plugin from Modrinth',
-    message: `Download and install <b>${esc(title || projectSlug)}</b> into <code>${targetFolder}</code> on <b>${esc(srv.name)}</b>?`,
-    confirmText: 'Download & Install',
-    cancelText: 'Cancel',
-    isDanger: false,
-    icon: 'download'
-  });
-  if (!ok) return;
+  let skipConfirm = false;
+  try {
+    skipConfirm = Boolean(S.skipPlugConfirm || localStorage.getItem('neopanel_skip_plug_confirm') === 'true');
+  } catch (e) {
+    skipConfirm = Boolean(S.skipPlugConfirm);
+  }
+
+  if (!skipConfirm) {
+    window.__plugSkipPending = false;
+    const ok = await uiConfirm({
+      title: 'Install Plugin from Modrinth',
+      message: `
+        <div>Download and install <b>${esc(title || projectSlug)}</b> into <code>${targetFolder}</code> on <b>${esc(srv.name)}</b>?</div>
+        <label class="row" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); gap: 9px; cursor: pointer; font-size: 13px; color: var(--tx-muted);">
+          <input type="checkbox" id="plug-skip-confirm-chk" onchange="window.__plugSkipPending=this.checked">
+          <span>Don't ask again &mdash; install future plugins immediately without confirmation</span>
+        </label>
+      `,
+      confirmText: 'Download & Install',
+      cancelText: 'Cancel',
+      isDanger: false,
+      icon: 'download'
+    });
+    const wantSkip = Boolean(window.__plugSkipPending);
+    window.__plugSkipPending = false;
+    if (!ok) return;
+    if (wantSkip) {
+      setPlugSkipConfirm(true);
+      toast('Plugin install confirmation disabled — installs are now instant');
+    }
+  }
 
   if (!S.installingPlugins) S.installingPlugins = new Set();
   S.installingPlugins.add(projectSlug);
@@ -8464,14 +9354,16 @@ async function loadBackupsList(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (!S.loading) S.loading = {};
-  S.loading.backups = true;
-  if (!skipRender && S.view === 'bk') R();
+  if (!S.bk || S.bk.length === 0) {
+    S.loading.backups = true;
+    if (!skipRender && S.view === 'bk') R();
+  }
   try {
     const list = await api(srvApiPath(srv, '/backups'));
     S.bk = list || [];
   } catch (e) {} finally {
     S.loading.backups = false;
-    if (!skipRender) R();
+    if (!skipRender && S.view === 'bk') R();
   }
 }
 
@@ -8967,37 +9859,25 @@ function toggleTheme() {
 }
 
 function switchServer(index) {
-  S.cs = index;
   const srv = S.servers[index];
   if (!srv) return;
-  const nodeId = srv.node_id || 'local';
-  saveActiveServerRef(srv);
-  applyServerStatsSnapshot(srv, srv.stats, false);
-  syncPropsFromServer(srv, true);
-  S.ver = srv.version || S.ver;
-  S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
-  if (S.activeServerId !== srv.id || (S.activeNodeId || 'local') !== nodeId) {
-    S.log = [];
-    S.ports = [];
-    S.databases = [];
-    S.dbRevealIds = new Set();
-    S.sqlStudio = null;
-    S.fileList = [];
-    S.currentDir = '';
-    S.editingFile = null;
-    S.selectedFiles = new Set();
-    S.bk = [];
-    S.plugins = [];
-    S.sftp = null;
-    S.startupFailures = Number(srv.stats?.startup_failures) || 0;
-    S.startupHalted = Boolean(srv.stats?.startup_halted);
-    connectWs(srv.id, false, nodeId);
-    loadServerPorts();
+  syncActiveServerState(srv);
+
+  const serverViews = ['con', 'set', 'act', 'fi', 'db', 'bk', 'sc', 'net', 'sub', 'stp', 'pl', 'plug', 'ver'];
+  if (serverViews.includes(S.view) && !(S.view === 'act' && !window.location.pathname.startsWith('/server/'))) {
+    try {
+      const nextUrl = serverRouteUrl(srv.node_id || 'local', srv.id, S.view, { plugTab: S.plugTab });
+      if ((window.location.pathname + window.location.search) !== nextUrl) {
+        history.replaceState(null, '', nextUrl);
+      }
+    } catch (e) {}
   }
+
   R();
   if (S.view === 'net') {
     loadSFTPDetails();
-  } else if (S.view && !['dash', 'con', 'admin', 'acc'].includes(S.view)) {
+    loadServerPorts();
+  } else if (S.view && !['dash', 'con', 'admin', 'acc', 'client', 'notfound', 'maintenance'].includes(S.view)) {
     onEnterView(S.view);
   }
   toast(`Switched to ${srv.name}`);
@@ -9006,20 +9886,26 @@ function switchServer(index) {
 // --- Command Palette (Ctrl + K) ---
 function paletteItems() {
   const q = (S.pq || '').toLowerCase();
+  const clientLabel = (getBrand('client_area_label') || 'Client Area').trim() || 'Client Area';
+  const modCmds = Array.isArray(window.NP?._paletteCommands)
+    ? window.NP._paletteCommands.map(c => [c.group || 'Extensions', c.label || 'Extension Action', c.subtitle || 'Mod command', () => c.action && c.action()])
+    : [];
   const items = [
     ...PG.map(p => ['Pages', p[1], 'Go to page', () => go(p[0])]),
+    ['Pages', clientLabel, 'External storefront & billing portal', () => go('client')],
     ['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')],
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
     ...S.servers.map(s => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => {
-      saveActiveServerRef(s);
-      navigateToUrl(serverRouteUrl(s.node_id || 'local', s.id, 'con'), s.name || 'Server Console');
+      syncActiveServerState(s);
+      applyRoute(serverRouteUrl(s.node_id || 'local', s.id, 'con'));
     }]),
     ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.ptab = 'online'; go('pl'); }]),
     ['Actions', 'Toggle Live Console', 'Ctrl + `', () => toggleFlyConsole()],
     ['Actions', 'Create Backup', 'Backups', () => createBackup()],
     ['Actions', 'Restart Server', 'Power', () => power('restart')],
     ['Actions', 'Toggle Dark / Light Theme', 'Appearance', () => toggleTheme()],
-    ['Actions', 'Toggle Privacy Mode', 'Privacy', () => togglePrivacy(!S.acct.priv)]
+    ['Actions', 'Toggle Privacy Mode', 'Privacy', () => togglePrivacy(!S.acct.priv)],
+    ...modCmds
   ];
   return items.filter(x => (x[1] + ' ' + x[0]).toLowerCase().includes(q));
 }
@@ -9118,15 +10004,15 @@ window.addEventListener('keydown', e => {
 });
 
 // --- Flexible Server Creation Modal (With Proxies & Custom Ports) ---
-window.setCreateRam = function(mb) {
+function setCreateRam(mb) {
   const inp = $('#cs-mem');
   if (inp) inp.value = mb;
   $$('.ram-pill').forEach(btn => {
     btn.classList.toggle('pr', btn.dataset.ram == mb);
   });
-};
+}
 
-window.syncCreateJavaFromVersion = function(ver) {
+function syncCreateJavaFromVersion(ver) {
   const engine = $('#cs-type')?.value || 'paper';
   const v = String(ver ?? $('#cs-ver')?.value ?? '').trim();
   $$('.ver-pill').forEach(btn => {
@@ -9139,7 +10025,7 @@ window.syncCreateJavaFromVersion = function(ver) {
     sel.value = rec;
     sel.dispatchEvent(new Event('change', { bubbles: true }));
   }
-};
+}
 
 function syncCreateSelectValue(ver) {
   const sel = $('#cs-ver-sel');
@@ -9151,12 +10037,12 @@ function syncCreateSelectValue(ver) {
   }
 }
 
-window.onCreateVersionInput = function(ver) {
+function onCreateVersionInput(ver) {
   syncCreateSelectValue(ver);
   syncCreateJavaFromVersion(ver);
-};
+}
 
-window.setCreateEngine = function(type) {
+function setCreateEngine(type) {
   const sel = $('#cs-type');
   if (sel) sel.value = type;
   $$('.engine-card').forEach(card => {
@@ -9193,14 +10079,14 @@ window.setCreateEngine = function(type) {
     if (typeof csVerSel._cselectRebuild === 'function') csVerSel._cselectRebuild();
   }
   syncCreateJavaFromVersion(verInp?.value || '');
-};
+}
 
-window.setCreateVersion = function(ver) {
+function setCreateVersion(ver) {
   const inp = $('#cs-ver');
   if (inp) inp.value = ver;
   syncCreateSelectValue(ver);
   syncCreateJavaFromVersion(ver);
-};
+}
 
 function getNextSuggestedPort(targetNodeId = null) {
   const nid = targetNodeId || curServer()?.node_id || 'local';
@@ -9375,6 +10261,7 @@ function openCreateServerModal() {
 }
 
 function closeModal() {
+  closeAllCustomSelects();
   const container = $('#modal-container');
   if (container) container.innerHTML = '';
   if (_uiModalResolver) {
@@ -9438,10 +10325,11 @@ async function handleCreateServer(e) {
     }
     const createdId = createdSrv?.id || res?.id;
     if (createdId) {
-      saveActiveServerRef({ id: createdId, node_id: targetNodeId });
-      navigateToUrl(serverRouteUrl(targetNodeId, createdId, 'con'), name);
+      if (createdSrv) syncActiveServerState(createdSrv);
+      else saveActiveServerRef({ id: createdId, node_id: targetNodeId });
+      applyRoute(serverRouteUrl(targetNodeId, createdId, 'con'));
     } else {
-      navigateToUrl('/', 'Servers Overview');
+      applyRoute('/');
     }
   } catch (err) {
     if (btn) {
@@ -9729,7 +10617,8 @@ async function executeDeleteServer(srvId, nodeId = 'local') {
     }
     toast('Server deleted successfully', 'ok');
     closeModal();
-    navigateToUrl('/', 'Servers Overview');
+    await loadDashboard(true);
+    applyRoute('/');
   } catch (err) {
     toast(err.message || 'Failed to delete server', 'bad');
     if (btn) {
@@ -10141,6 +11030,24 @@ function onBrandInputChange(field, val, srcEl = null) {
 
   applyBranding(S.brandDraft);
   updateBrandLivePreview();
+  if (['logo_url', 'favicon_url', 'login_bg_url', 'server_hero_url', 'card_cover_url', 'default_avatar_url'].includes(field)) {
+    const fallbacks = {
+      logo_url: '/favicon.svg',
+      favicon_url: '/favicon.svg',
+      login_bg_url: MINECRAFT_COVER_URL,
+      server_hero_url: SERVER_HERO_URL,
+      card_cover_url: MINECRAFT_COVER_URL,
+      default_avatar_url: DEFAULT_USER_AVATAR_URL
+    };
+    const thumb = document.querySelector(`[data-brand-thumb="${field}"]`);
+    if (thumb) thumb.src = (val || '').trim() || fallbacks[field] || '/favicon.svg';
+    const inp = document.querySelector(`input[data-brand-media="${field}"]`);
+    if (inp && inp.value !== (val || '')) inp.value = val || '';
+  }
+  if (['brand_name', 'logo_url', 'client_area_label', 'client_area_enabled', 'client_area_available', 'maintenance_enabled'].includes(field)) {
+    const nav = $('#nav');
+    if (nav) nav.innerHTML = navHtml();
+  }
 }
 
 function onDaemonInputChange(field, val) {
@@ -10357,6 +11264,1026 @@ function applyLoginOverlayBackground(el) {
   }
 }
 
+// --- Branding Asset Upload & Maintenance Mode Helpers ---
+let _brandUploadField = '';
+let _brandUploadBtn = null;
+
+function triggerBrandingUpload(field, btnEl) {
+  _brandUploadField = field || '';
+  _brandUploadBtn = btnEl || null;
+  const inp = $('#brand-file-input');
+  if (!inp) return;
+  inp.value = '';
+  inp.click();
+}
+
+async function handleBrandingFileSelect(inputEl) {
+  const file = inputEl?.files?.[0];
+  const field = _brandUploadField || '';
+  const btnEl = _brandUploadBtn;
+  _brandUploadField = '';
+  _brandUploadBtn = null;
+  if (inputEl) inputEl.value = '';
+  if (!file || !field) return;
+
+  if (file.size > 12 * 1024 * 1024) {
+    toast('Image file exceeds 12 MiB upload limit', 'bad');
+    return;
+  }
+
+  if (btnEl) setBtnLoading(btnEl, true, 'Uploading...');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('field', field);
+    const res = await fetch('/api/admin/branding/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + S.token },
+      body: fd
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.url) {
+      toast(data.error || 'Failed to upload branding image', 'bad');
+      return;
+    }
+    onBrandInputChange(field, data.url);
+    toast(`Uploaded ${data.filename || file.name} — remember to click Save Global Look`, 'ok');
+  } catch (err) {
+    toast(err.message || 'Branding upload failed', 'bad');
+  } finally {
+    if (btnEl && document.body.contains(btnEl)) setBtnLoading(btnEl, false);
+  }
+}
+
+function clearBrandingMedia(field) {
+  const resetMap = {
+    logo_url: '',
+    favicon_url: '',
+    login_bg_url: '',
+    server_hero_url: SERVER_HERO_URL,
+    card_cover_url: MINECRAFT_COVER_URL,
+    default_avatar_url: DEFAULT_USER_AVATAR_URL
+  };
+  const nextVal = Object.prototype.hasOwnProperty.call(resetMap, field) ? resetMap[field] : '';
+  onBrandInputChange(field, nextVal);
+  toast('Reset media field to default (save to persist)');
+}
+
+function toggleMaintPreview(val) {
+  S.maintPreview = (val === undefined) ? !S.maintPreview : Boolean(val);
+  R();
+}
+
+function enterAdminLoginFromMaint() {
+  S.maintAdminSignInOpen = true;
+  $('#login')?.remove();
+  showLoginScreen();
+}
+
+// --- Official Open Panel Modding System (window.NP / window.NeoPanelMod) ---
+const MOD_TEMPLATES = {
+  'custom-page': {
+    id: 'cluster-tools',
+    name: 'Cluster Tools Mod',
+    version: '1.0.0',
+    author: 'Community',
+    description: 'Adds a dedicated /mod/cluster-tools sidebar page, a top dashboard banner, and a Ctrl+K command.',
+    js: `// Official NeoPanel Mod SDK v2 — Custom Page + Slot + Command Palette
+NP.registerPage({
+  id: 'cluster-tools',
+  title: 'Cluster Tools',
+  icon: 'terminal',
+  scope: 'both', // 'global', 'server', or 'both'
+  render(root, ctx) {
+    const servers = ctx.servers || [];
+    const online = servers.filter(s => (s.stats?.status || s.status) === 'running').length;
+    root.innerHTML = \`
+      <div class="card">
+        <div class="row sb" style="margin-bottom:12px;">
+          <div>
+            <h1 style="margin:0; font-size:22px;">Cluster Tools Extension</h1>
+            <div class="mu" style="font-size:13px;">Powered by window.NP SDK v\${NP.version}</div>
+          </div>
+          <span class="badge online"><i class="dot"></i>\${online} / \${servers.length} Online</span>
+        </div>
+        <p class="mu" style="font-size:13.5px; line-height:1.6;">
+          You can call authenticated APIs via <code>NP.api(...)</code>, render into extension slots, and store preferences in <code>NP.storage('cluster-tools')</code>.
+        </p>
+        <div class="row" style="gap:10px; margin-top:14px;">
+          <button class="btn pr" id="mod-ping-btn">Check System Info</button>
+          <button class="btn" onclick="NP.navigate('dash')">Back to Dashboard</button>
+        </div>
+        <pre id="mod-ping-out" class="mono" style="margin-top:14px; font-size:12px; color:var(--tx-muted);"></pre>
+      </div>\`;
+    const btn = root.querySelector('#mod-ping-btn');
+    if (btn) {
+      btn.onclick = async () => {
+        const info = await NP.api('/api/system');
+        root.querySelector('#mod-ping-out').textContent = JSON.stringify(info, null, 2);
+      };
+    }
+  }
+});
+
+NP.registerSlot('dashboard:top', (root, ctx) => {
+  root.innerHTML = \`<div class="card" style="padding:12px 16px; border-color:var(--border-accent);">
+    <div class="row sb" style="gap:10px; flex-wrap:wrap;">
+      <span><b>Cluster Tools Active</b> &mdash; Managing \${ctx.servers.length} server instance(s)</span>
+      <button class="btn sm pr" onclick="NP.navigate('/mod/cluster-tools')">Open Extension Page</button>
+    </div>
+  </div>\`;
+});
+
+NP.addPaletteCommand({
+  id: 'open-cluster-tools',
+  group: 'Extensions',
+  label: 'Open Cluster Tools',
+  subtitle: 'Jump to Cluster Tools mod page',
+  action: () => NP.navigate('/mod/cluster-tools')
+});`,
+    css: `/* Optional CSS scoped cleanly by your mod */
+#np-mod-page-root[data-mod-page="cluster-tools"] .card {
+  border-color: var(--border-accent);
+}`
+  },
+  'console-widget': {
+    id: 'tps-quickbar',
+    name: 'Console Quick Actions Bar',
+    version: '1.0.0',
+    author: 'Community',
+    description: 'Injects custom one-click admin shortcuts right beneath console live charts.',
+    js: `// Adds custom operator buttons below the Server Console charts
+NP.registerSlot('console:below-charts', (root, ctx) => {
+  if (!ctx.server) return;
+  root.innerHTML = \`
+    <div class="card" style="padding:12px 16px;">
+      <div class="row sb" style="gap:10px; flex-wrap:wrap;">
+        <span style="font-size:13px; font-weight:600;">Quick Operator Macros (\${ctx.server.name})</span>
+        <div class="row" style="gap:8px; flex-wrap:wrap;">
+          <button class="btn sm" data-cmd="save-all">Save World</button>
+          <button class="btn sm" data-cmd="list">List Players</button>
+          <button class="btn sm pr" data-cmd="timings paste">Timings Report</button>
+        </div>
+      </div>
+    </div>\`;
+  root.querySelectorAll('button[data-cmd]').forEach(btn => {
+    btn.onclick = async () => {
+      await NP.srvApi('/command', {
+        method: 'POST',
+        body: JSON.stringify({ command: btn.dataset.cmd })
+      });
+      NP.toast('Sent command: ' + btn.dataset.cmd, 'ok');
+    };
+  });
+});`,
+    css: ``
+  },
+  'custom-theme': {
+    id: 'neon-glass-theme',
+    name: 'Neon Glass CSS Theme Pack',
+    version: '1.0.0',
+    author: 'Community',
+    description: 'Pure CSS visual enhancement highlighting active cards and console edges.',
+    js: ``,
+    css: `/* Neon Glass Style Extension */
+.card {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.sift-server-card:hover {
+  border-color: var(--ac) !important;
+  box-shadow: 0 12px 34px var(--ac-glow) !important;
+}`
+  }
+};
+
+function initNeoPanelModSdk() {
+  if (window.NP && window.NP._initialized) return window.NP;
+
+  const normalizeId = (raw) => String(raw || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+
+  const sdk = {
+    version: '2.0.0',
+    _initialized: true,
+    _mods: [],
+    _errors: [],
+    _loadedModSigs: new Map(),
+    _pages: new Map(),
+    _sidebarItems: [],
+    _slots: new Map(),
+    _paletteCommands: [],
+    _listeners: new Map(),
+    _modRegistrations: new Map(),
+    _currentLoadingModId: null,
+
+    _trackReg(modId, kind, key) {
+      if (!modId) return;
+      let rec = this._modRegistrations.get(modId);
+      if (!rec) {
+        rec = { pages: new Set(), sidebar: new Set(), slots: [], palette: new Set(), css: new Set() };
+        this._modRegistrations.set(modId, rec);
+      }
+      if (kind === 'slot') rec.slots.push(key);
+      else if (rec[kind]) rec[kind].add(key);
+    },
+
+    clearModRegistrations(modId) {
+      const rec = this._modRegistrations.get(modId);
+      if (!rec) return;
+      rec.pages.forEach(pid => this._pages.delete(pid));
+      this._sidebarItems = this._sidebarItems.filter(it => it.modId !== modId && !rec.sidebar.has(it.id));
+      for (const [slotName, list] of this._slots.entries()) {
+        this._slots.set(slotName, list.filter(it => it.modId !== modId));
+      }
+      this._paletteCommands = this._paletteCommands.filter(c => c.modId !== modId && !rec.palette.has(c.id));
+      rec.css.forEach(cid => this.removeCSS(cid));
+      this._modRegistrations.delete(modId);
+    },
+
+    on(event, fn) {
+      if (!event || typeof fn !== 'function') return () => {};
+      if (!this._listeners.has(event)) this._listeners.set(event, []);
+      this._listeners.get(event).push(fn);
+      return () => this.off(event, fn);
+    },
+
+    off(event, fn) {
+      const list = this._listeners.get(event);
+      if (!list) return;
+      this._listeners.set(event, list.filter(f => f !== fn));
+    },
+
+    _emit(event, payload) {
+      const list = this._listeners.get(event);
+      if (!list || !list.length) return;
+      for (const fn of list) {
+        try {
+          fn(payload, this.getState());
+        } catch (err) {
+          this._recordError(this._currentLoadingModId || 'event:' + event, err);
+        }
+      }
+    },
+
+    _recordError(modId, err) {
+      const msg = err?.message || String(err || 'Unknown mod error');
+      this._errors.push({ modId: modId || 'unknown', message: msg, stack: err?.stack || '', time: Date.now() });
+      if (this._errors.length > 30) this._errors.shift();
+      console.error(`[NeoPanel Mod:${modId}]`, err);
+    },
+
+    getState() {
+      return {
+        view: S.view,
+        server: curServer(),
+        servers: S.servers || [],
+        nodes: S.nodes || [],
+        user: S.user || null,
+        branding: S.branding || DEFAULT_BRANDING,
+        theme: document.documentElement.dataset.theme || 'dark',
+        safeMode: Boolean(S.modsSafeMode)
+      };
+    },
+
+    registerPage(idOrOpts, maybeRender) {
+      const opts = (typeof idOrOpts === 'object' && idOrOpts)
+        ? idOrOpts
+        : { id: idOrOpts, render: maybeRender };
+      const cleanId = normalizeId(opts.id);
+      if (!cleanId || typeof opts.render !== 'function') return null;
+      const modId = opts.modId || this._currentLoadingModId || 'inline';
+      const entry = {
+        id: cleanId,
+        title: opts.title || cleanId,
+        icon: opts.icon || 'puzzle',
+        scope: opts.scope || 'both',
+        render: opts.render,
+        modId
+      };
+      this._pages.set(cleanId, entry);
+      this._trackReg(modId, 'pages', cleanId);
+      if (opts.sidebar !== false) {
+        this.addSidebarItem({
+          id: `page-${cleanId}`,
+          label: opts.sidebarLabel || entry.title,
+          icon: entry.icon,
+          scope: entry.scope,
+          pageId: cleanId,
+          modId
+        });
+      }
+      return entry;
+    },
+
+    addSidebarItem(opts) {
+      if (!opts || !opts.label) return null;
+      const modId = opts.modId || this._currentLoadingModId || 'inline';
+      const itemId = opts.id || `${modId}:${opts.pageId || opts.label}`;
+      const item = {
+        id: itemId,
+        label: opts.label,
+        icon: opts.icon || 'puzzle',
+        scope: opts.scope || 'both',
+        pageId: opts.pageId ? normalizeId(opts.pageId) : '',
+        url: opts.url || '',
+        onClick: typeof opts.onClick === 'function' ? opts.onClick : null,
+        modId
+      };
+      const existingIdx = this._sidebarItems.findIndex(x => x.id === itemId);
+      if (existingIdx >= 0) this._sidebarItems[existingIdx] = item;
+      else this._sidebarItems.push(item);
+      this._trackReg(modId, 'sidebar', itemId);
+      return item;
+    },
+
+    _execSidebarItem(id, e) {
+      const item = this._sidebarItems.find(x => x.id === id);
+      if (!item) return false;
+      if (e) e.preventDefault();
+      try {
+        if (item.onClick) item.onClick(this.getState(), e);
+        else if (item.pageId) this.navigate(`/mod/${item.pageId}`);
+        else if (item.url) applyRoute(item.url);
+      } catch (err) {
+        this._recordError(item.modId, err);
+        toast(`Mod action failed: ${err.message}`, 'bad');
+      }
+      return false;
+    },
+
+    registerSlot(slotName, fnOrOpts) {
+      const opts = typeof fnOrOpts === 'function' ? { render: fnOrOpts } : (fnOrOpts || {});
+      if (!slotName || typeof opts.render !== 'function') return null;
+      const modId = opts.modId || this._currentLoadingModId || 'inline';
+      const entry = {
+        id: opts.id || `${modId}:${slotName}:${Math.random().toString(36).slice(2, 7)}`,
+        slot: slotName,
+        order: Number(opts.order) || 10,
+        render: opts.render,
+        modId
+      };
+      if (!this._slots.has(slotName)) this._slots.set(slotName, []);
+      const list = this._slots.get(slotName).filter(x => x.id !== entry.id);
+      list.push(entry);
+      list.sort((a, b) => a.order - b.order);
+      this._slots.set(slotName, list);
+      this._trackReg(modId, 'slot', entry.id);
+      return entry;
+    },
+
+    addPaletteCommand(opts) {
+      if (!opts || !opts.label || typeof opts.action !== 'function') return null;
+      const modId = opts.modId || this._currentLoadingModId || 'inline';
+      const id = opts.id || `${modId}:${opts.label}`;
+      const cmd = {
+        id,
+        group: opts.group || 'Extensions',
+        label: opts.label,
+        subtitle: opts.subtitle || 'Mod command',
+        action: opts.action,
+        modId
+      };
+      const idx = this._paletteCommands.findIndex(x => x.id === id);
+      if (idx >= 0) this._paletteCommands[idx] = cmd;
+      else this._paletteCommands.push(cmd);
+      this._trackReg(modId, 'palette', id);
+      return cmd;
+    },
+
+    navigate(target, opts = {}) {
+      if (!target) return;
+      const s = String(target);
+      if (s.startsWith('/')) {
+        applyRoute(s, opts);
+        return;
+      }
+      applyRoute(routeUrl(s, opts), opts);
+    },
+
+    api(path, opts) {
+      return api(path, opts);
+    },
+
+    srvApi(subPath, opts) {
+      const srv = curServer();
+      if (!srv) return Promise.reject(new Error('No active server selected'));
+      const cleanSub = subPath.startsWith('/') ? subPath : '/' + subPath;
+      return api(srvApiPath(srv, cleanSub), opts);
+    },
+
+    toast(msg, kind) {
+      toast(msg, kind);
+    },
+
+    modal: {
+      alert: (opts, t) => uiAlert(opts, t),
+      confirm: (opts, t) => uiConfirm(opts, t),
+      prompt: (opts, d, t) => uiPrompt(opts, d, t),
+      close: () => closeModal()
+    },
+
+    injectCSS(id, cssText) {
+      const cid = normalizeId(id) || 'mod-style';
+      const modId = this._currentLoadingModId || cid;
+      let styleEl = document.querySelector(`style[data-np-mod-css="${cid}"]`);
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.setAttribute('data-np-mod-css', cid);
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = String(cssText || '');
+      this._trackReg(modId, 'css', cid);
+      return styleEl;
+    },
+
+    removeCSS(id) {
+      const cid = normalizeId(id) || 'mod-style';
+      document.querySelectorAll(`style[data-np-mod-css="${cid}"]`).forEach(el => el.remove());
+    },
+
+    storage(modId) {
+      const prefix = `neopanel_mod_${normalizeId(modId) || 'default'}_`;
+      return {
+        get(key, fallback = null) {
+          try {
+            const raw = localStorage.getItem(prefix + key);
+            return raw === null ? fallback : JSON.parse(raw);
+          } catch (e) {
+            return fallback;
+          }
+        },
+        set(key, val) {
+          try {
+            localStorage.setItem(prefix + key, JSON.stringify(val));
+          } catch (e) {}
+        },
+        remove(key) {
+          try {
+            localStorage.removeItem(prefix + key);
+          } catch (e) {}
+        }
+      };
+    }
+  };
+
+  window.NP = sdk;
+  window.NeoPanelMod = sdk;
+  return sdk;
+}
+
+initNeoPanelModSdk();
+
+function mountPanelModHooks() {
+  const sdk = initNeoPanelModSdk();
+  if (S.modsSafeMode) return;
+  const ctx = sdk.getState();
+
+  document.querySelectorAll('.np-slot-container[data-np-slot]').forEach(container => {
+    const slotName = container.getAttribute('data-np-slot');
+    const handlers = sdk._slots.get(slotName) || [];
+    container.innerHTML = '';
+    if (!handlers.length) return;
+
+    handlers.forEach(entry => {
+      const mountBox = document.createElement('div');
+      mountBox.dataset.npMod = entry.modId;
+      container.appendChild(mountBox);
+      try {
+        const res = entry.render(mountBox, ctx);
+        if (typeof res === 'string') {
+          mountBox.innerHTML = res;
+        } else if (res && res.nodeType) {
+          mountBox.innerHTML = '';
+          mountBox.appendChild(res);
+        } else if (res && typeof res.then === 'function') {
+          res.then(val => {
+            if (!document.body.contains(mountBox)) return;
+            if (typeof val === 'string') mountBox.innerHTML = val;
+            else if (val && val.nodeType) {
+              mountBox.innerHTML = '';
+              mountBox.appendChild(val);
+            }
+            enhanceSelects(mountBox);
+          }).catch(err => {
+            sdk._recordError(entry.modId, err);
+            mountBox.innerHTML = `<div class="np-maint-banner"><span>Mod <b>${esc(entry.modId)}</b> slot error: ${esc(err.message)}</span></div>`;
+          });
+        }
+      } catch (err) {
+        sdk._recordError(entry.modId, err);
+        mountBox.innerHTML = `<div class="np-maint-banner"><span>Mod <b>${esc(entry.modId)}</b> error: ${esc(err.message)}</span></div>`;
+      }
+    });
+    enhanceSelects(container);
+  });
+
+  const pageRoot = $('#np-mod-page-root');
+  if (pageRoot && S.view === 'mod') {
+    const pageId = pageRoot.getAttribute('data-mod-page') || S.modPageId;
+    const page = sdk._pages.get(pageId);
+    if (page) {
+      pageRoot.innerHTML = '';
+      try {
+        const res = page.render(pageRoot, ctx);
+        if (typeof res === 'string') {
+          pageRoot.innerHTML = res;
+        } else if (res && res.nodeType) {
+          pageRoot.innerHTML = '';
+          pageRoot.appendChild(res);
+        } else if (res && typeof res.then === 'function') {
+          res.then(val => {
+            if (!document.body.contains(pageRoot)) return;
+            if (typeof val === 'string') pageRoot.innerHTML = val;
+            else if (val && val.nodeType) {
+              pageRoot.innerHTML = '';
+              pageRoot.appendChild(val);
+            }
+            enhanceSelects(pageRoot);
+          }).catch(err => {
+            sdk._recordError(page.modId, err);
+            pageRoot.innerHTML = `<div class="card"><div class="np-status-code err">${ic('alert', 14)} MOD ERROR</div><h2>${esc(page.title)}</h2><pre class="mono">${esc(err.message)}</pre></div>`;
+          });
+        }
+      } catch (err) {
+        sdk._recordError(page.modId, err);
+        pageRoot.innerHTML = `<div class="card"><div class="np-status-code err">${ic('alert', 14)} MOD ERROR</div><h2>${esc(page.title)}</h2><pre class="mono">${esc(err.message)}</pre></div>`;
+      }
+      enhanceSelects(pageRoot);
+    }
+  }
+}
+
+async function loadRuntimeMods(forceReload = false) {
+  const sdk = initNeoPanelModSdk();
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('safemode') === '1' || S.modsSafeMode) {
+    S.modsSafeMode = true;
+    S.mods = [];
+    document.querySelectorAll('link[data-np-mod-style]').forEach(el => el.remove());
+    return [];
+  }
+
+  try {
+    const res = await fetch('/api/mods', { cache: 'no-store' });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const list = Array.isArray(data?.mods) ? data.mods : [];
+    S.mods = list;
+    sdk._mods = list;
+
+    const activeIds = new Set(list.map(m => m.id));
+    for (const prevId of Array.from(sdk._loadedModSigs.keys())) {
+      if (!activeIds.has(prevId)) {
+        sdk.clearModRegistrations(prevId);
+        sdk._loadedModSigs.delete(prevId);
+      }
+    }
+
+    document.querySelectorAll('link[data-np-mod-style]').forEach(el => {
+      if (!activeIds.has(el.getAttribute('data-np-mod-style'))) el.remove();
+    });
+
+    for (const mod of list) {
+      const sig = `${mod.updated_at || ''}|${mod.entry_js || ''}|${mod.entry_css || ''}`;
+      if (mod.has_css && mod.css_url) {
+        let link = document.querySelector(`link[data-np-mod-style="${mod.id}"]`);
+        const href = `${mod.css_url}?v=${encodeURIComponent(mod.updated_at || '1')}`;
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.setAttribute('data-np-mod-style', mod.id);
+          document.head.appendChild(link);
+        }
+        if (forceReload || link.getAttribute('href') !== href) {
+          link.href = href;
+        }
+      } else {
+        document.querySelectorAll(`link[data-np-mod-style="${mod.id}"]`).forEach(el => el.remove());
+      }
+
+      if (mod.has_js && mod.js_url) {
+        if (!forceReload && sdk._loadedModSigs.get(mod.id) === sig) continue;
+        sdk.clearModRegistrations(mod.id);
+        sdk._currentLoadingModId = mod.id;
+        try {
+          const urlWithBust = `${mod.js_url}?v=${encodeURIComponent(mod.updated_at || String(Date.now()))}`;
+          const codeRes = await fetch(urlWithBust, { cache: 'no-store' });
+          if (!codeRes.ok) throw new Error(`HTTP ${codeRes.status} loading ${mod.js_url}`);
+          const code = await codeRes.text();
+          const looksModule = /\bexport\s+(default|const|let|var|function|async)\b/.test(code) || /(?:^|\n)\s*import\s+/.test(code);
+          if (looksModule) {
+            const modNs = await import(/* @vite-ignore */ urlWithBust + (forceReload ? '&r=' + Date.now() : ''));
+            if (modNs && typeof modNs.default === 'function') {
+              await modNs.default(sdk, sdk.getState());
+            }
+          } else {
+            const runner = new Function('NP', 'NeoPanelMod', `${code}\n//# sourceURL=${mod.js_url}`);
+            runner(sdk, sdk);
+          }
+          sdk._loadedModSigs.set(mod.id, sig);
+        } catch (err) {
+          sdk._recordError(mod.id, err);
+          toast(`Mod "${mod.name || mod.id}" failed to load: ${err.message}`, 'bad');
+        } finally {
+          sdk._currentLoadingModId = null;
+        }
+      } else {
+        if (sdk._loadedModSigs.has(mod.id)) {
+          sdk.clearModRegistrations(mod.id);
+          sdk._loadedModSigs.delete(mod.id);
+        }
+      }
+    }
+
+    return list;
+  } catch (err) {
+    console.warn('Failed to fetch runtime mods:', err);
+    return [];
+  }
+}
+
+// --- Admin Mods & Extensions Workspace ---
+function getBlankModDraft() {
+  return {
+    isNew: true,
+    id: '',
+    name: '',
+    version: '1.0.0',
+    author: S.user?.username || 'Admin',
+    description: '',
+    enabled: true,
+    entry_js: 'mod.js',
+    entry_css: 'mod.css',
+    js_code: '',
+    css_code: ''
+  };
+}
+
+function startNewModDraft() {
+  S.selectedModId = null;
+  S.modDraft = getBlankModDraft();
+  R();
+}
+
+function selectAdminMod(modId, skipRender = false) {
+  const found = (S.adminMods || []).find(m => m.id === modId);
+  if (!found) return;
+  S.selectedModId = found.id;
+  S.modDraft = {
+    isNew: false,
+    id: found.id,
+    name: found.name || found.id,
+    version: found.version || '1.0.0',
+    author: found.author || '',
+    description: found.description || '',
+    enabled: found.enabled !== false,
+    entry_js: found.entry_js || 'mod.js',
+    entry_css: found.entry_css || 'mod.css',
+    js_code: found.js_code || '',
+    css_code: found.css_code || ''
+  };
+  if (!skipRender) R();
+}
+
+function applyModTemplate(key) {
+  const tpl = MOD_TEMPLATES[key];
+  if (!tpl) return;
+  const cur = S.modDraft || getBlankModDraft();
+  const isNew = cur.isNew !== false && !S.selectedModId;
+  S.modDraft = {
+    ...cur,
+    id: isNew ? tpl.id : (cur.id || tpl.id),
+    name: isNew || !cur.name ? tpl.name : cur.name,
+    version: cur.version || tpl.version,
+    author: cur.author || tpl.author,
+    description: cur.description || tpl.description,
+    enabled: true,
+    js_code: tpl.js || '',
+    css_code: tpl.css || ''
+  };
+  toast(`Applied starter template: ${tpl.name}`);
+  R();
+}
+
+function onModDraftInput(field, val) {
+  if (!S.modDraft) S.modDraft = getBlankModDraft();
+  S.modDraft[field] = val;
+}
+
+async function loadAdminMods(skipRender = false) {
+  try {
+    const res = await api('/api/admin/mods');
+    if (res && Array.isArray(res.mods)) {
+      S.adminMods = res.mods;
+      if (res.mods_dir) S.modsDir = res.mods_dir;
+    }
+    if (!skipRender) R();
+  } catch (err) {
+    toast(err.message || 'Failed to load admin mods', 'bad');
+  }
+}
+
+async function saveAdminMod(e) {
+  if (e) e.preventDefault();
+  const d = S.modDraft || getBlankModDraft();
+  const rawId = String(d.id || d.name || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!rawId || rawId.length < 2) {
+    toast('Mod ID must be at least 2 characters (a-z, 0-9, -, _)', 'bad');
+    return;
+  }
+
+  const btn = $('#mod-save-btn');
+  if (btn) setBtnLoading(btn, true, 'Saving Mod...');
+  try {
+    const endpoint = d.isNew ? '/api/admin/mods' : `/api/admin/mods/${encodeURIComponent(rawId)}`;
+    const method = d.isNew ? 'POST' : 'PUT';
+    const res = await api(endpoint, {
+      method,
+      body: JSON.stringify({
+        id: rawId,
+        name: (d.name || rawId).trim(),
+        version: (d.version || '1.0.0').trim(),
+        author: (d.author || 'Admin').trim(),
+        description: (d.description || '').trim(),
+        enabled: Boolean(d.enabled),
+        entry_js: (d.entry_js || 'mod.js').trim(),
+        entry_css: (d.entry_css || 'mod.css').trim(),
+        js_code: String(d.js_code || ''),
+        css_code: String(d.css_code || '')
+      })
+    });
+    await loadAdminMods(true);
+    selectAdminMod(res?.mod?.id || rawId, true);
+    await loadRuntimeMods(true);
+    toast(res?.message || `Saved mod "${rawId}" and applied live!`, 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to save mod', 'bad');
+  } finally {
+    const curBtn = $('#mod-save-btn');
+    if (curBtn) setBtnLoading(curBtn, false);
+  }
+}
+
+async function toggleAdminModEnabled(modId, enabled) {
+  const target = (S.adminMods || []).find(m => m.id === modId);
+  if (!target) return;
+  try {
+    await api(`/api/admin/mods/${encodeURIComponent(modId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        id: target.id,
+        name: target.name,
+        version: target.version,
+        author: target.author,
+        description: target.description || '',
+        enabled: Boolean(enabled)
+      })
+    });
+    if (S.modDraft && S.modDraft.id === modId) {
+      S.modDraft.enabled = Boolean(enabled);
+    }
+    await loadAdminMods(true);
+    await loadRuntimeMods(true);
+    toast(`Mod "${target.name || modId}" ${enabled ? 'enabled' : 'disabled'}`, 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to update mod state', 'bad');
+  }
+}
+
+async function deleteAdminMod(modId, name) {
+  const ok = await uiConfirm({
+    title: 'Delete Panel Extension',
+    message: `Delete extension <b>${esc(name || modId)}</b> (<code>${esc(modId)}</code>) from disk? Any custom pages, slots, or stylesheets it added will be unloaded.`,
+    confirmText: 'Delete Mod',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'trash'
+  });
+  if (!ok) return;
+
+  try {
+    await api(`/api/admin/mods/${encodeURIComponent(modId)}`, { method: 'DELETE' });
+    if (S.selectedModId === modId) {
+      S.selectedModId = null;
+      S.modDraft = getBlankModDraft();
+    }
+    await loadAdminMods(true);
+    await loadRuntimeMods(true);
+    toast(`Removed mod "${modId}"`, 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to delete mod', 'bad');
+  }
+}
+
+function triggerModPackageUpload() {
+  const inp = $('#mod-pkg-upload');
+  if (!inp) return;
+  inp.value = '';
+  inp.click();
+}
+
+async function handleModPackageUpload(inputEl) {
+  const file = inputEl?.files?.[0];
+  if (inputEl) inputEl.value = '';
+  if (!file) return;
+
+  if (file.size > 20 * 1024 * 1024) {
+    toast('Mod package exceeds 20 MiB limit', 'bad');
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('file', file);
+  toast(`Installing mod package ${file.name}...`);
+  try {
+    const res = await fetch('/api/admin/mods/upload', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + S.token },
+      body: fd
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(data.error || 'Failed to upload mod package', 'bad');
+      return;
+    }
+    await loadAdminMods(true);
+    if (data.mod?.id) selectAdminMod(data.mod.id, true);
+    await loadRuntimeMods(true);
+    toast(data.message || `Installed mod package ${file.name}!`, 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to upload mod package', 'bad');
+  }
+}
+
+function renderAdminModsTabHtml() {
+  const mods = Array.isArray(S.adminMods) ? S.adminMods : [];
+  const draft = S.modDraft || getBlankModDraft();
+  const isNew = draft.isNew !== false && !S.selectedModId;
+  const errCount = Array.isArray(window.NP?._errors) ? window.NP._errors.length : 0;
+  const pageCount = window.NP?._pages?.size || 0;
+  const slotCount = Array.from(window.NP?._slots?.values() || []).reduce((acc, a) => acc + a.length, 0);
+
+  return `
+    <div class="card" style="margin-bottom: 16px;">
+      <div class="row sb" style="gap: 14px; flex-wrap: wrap; align-items: center;">
+        <div>
+          <div class="row" style="gap: 8px; flex-wrap: wrap;">
+            <h2 style="margin: 0; color: var(--tx);">Panel Extensions &amp; Modding Engine</h2>
+            <span class="badge online"><i class="dot"></i>window.NP SDK v${esc(window.NP?.version || '2.0.0')}</span>
+            ${S.modsSafeMode ? `<span class="badge starting"><i class="dot"></i>Safe Mode Active</span>` : ''}
+          </div>
+          <p class="mu" style="font-size: 12.5px; margin: 4px 0 0;">
+            Extend NeoPanel beyond presets: drop bundles into <code class="mono">${esc(S.modsDir || './data/mods')}</code>, upload <code class="mono">.zip/.js/.css</code>, or author extensions live below. Active hooks: <b>${pageCount}</b> page(s), <b>${slotCount}</b> slot(s)${errCount ? `, <span style="color:#f87171;">${errCount} error(s)</span>` : ''}.
+          </p>
+        </div>
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
+          <input type="file" id="mod-pkg-upload" accept=".zip,.js,.mjs,.css" style="display:none" onchange="handleModPackageUpload(this)">
+          <button type="button" class="btn sm" onclick="triggerModPackageUpload()">${ic('upload', 13)} Upload .zip / .js / .css</button>
+          <button type="button" class="btn sm" onclick="loadRuntimeMods(true).then(() => { R(); toast('Reloaded runtime mods', 'ok'); })">${ic('refresh', 13)} Reload Runtime</button>
+          <button type="button" class="btn sm pr" onclick="startNewModDraft()">${ic('plus', 13)} New Mod</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="mod-layout">
+      <div class="card">
+        <div class="row sb" style="margin-bottom: 12px;">
+          <h3 style="margin: 0; font-size: 15px;">Installed Mods (${mods.length})</h3>
+          <a href="${esc(S.modsSafeMode ? '/admin/mods' : '/admin/mods?safemode=1')}" class="mu" style="font-size: 11.5px; text-decoration: none;" title="Append ?safemode=1 to recover from broken mods">${S.modsSafeMode ? 'Exit Safe Mode' : 'Safe Mode (?safemode=1)'}</a>
+        </div>
+        <div class="mod-list">
+          ${mods.length ? mods.map(m => {
+            const isSel = S.selectedModId === m.id && !isNew;
+            const modPageExists = window.NP?._pages?.has(m.id);
+            return `<div class="mod-card ${isSel ? 'on' : ''}" onclick="selectAdminMod('${esc(m.id)}')">
+              <div class="row sb" style="gap: 8px; align-items: flex-start;">
+                <div style="min-width: 0;">
+                  <div class="row" style="gap: 6px; flex-wrap: wrap;">
+                    <b style="color: var(--tx); font-size: 13.5px;">${esc(m.name || m.id)}</b>
+                    <span class="chip mono" style="font-size: 10.5px; padding: 1px 6px;">v${esc(m.version || '1.0.0')}</span>
+                  </div>
+                  <div class="mono mu" style="font-size: 11px; margin-top: 2px;">${esc(m.id)}${m.author ? ` &bull; ${esc(m.author)}` : ''}</div>
+                </div>
+                <label class="sw" onclick="event.stopPropagation();" title="${m.enabled ? 'Enabled' : 'Disabled'}">
+                  <input type="checkbox" ${m.enabled ? 'checked' : ''} onchange="toggleAdminModEnabled('${esc(m.id)}', this.checked)">
+                  <i></i>
+                </label>
+              </div>
+              ${m.description ? `<div class="mu" style="font-size: 12px; margin-top: 6px; line-height: 1.4;">${esc(m.description)}</div>` : ''}
+              <div class="row sb" style="margin-top: 8px; gap: 6px; flex-wrap: wrap;">
+                <div class="row" style="gap: 5px;">
+                  ${m.has_js ? '<span class="chip" style="font-size: 10px; padding: 1px 6px;">JS</span>' : ''}
+                  ${m.has_css ? '<span class="chip" style="font-size: 10px; padding: 1px 6px;">CSS</span>' : ''}
+                  ${!m.enabled ? '<span class="chip" style="font-size: 10px; padding: 1px 6px; color: #f87171;">Disabled</span>' : ''}
+                </div>
+                <div class="row" style="gap: 6px;" onclick="event.stopPropagation();">
+                  ${modPageExists ? `<a href="/mod/${esc(m.id)}" onclick="return handleNavClick(event, 'mod', { modPageId: '${esc(m.id)}' })" class="btn sm" style="text-decoration:none; padding: 3px 8px; font-size: 11px;">Open</a>` : ''}
+                  <button type="button" class="btn sm dg" onclick="deleteAdminMod('${esc(m.id)}', '${esc(m.name || m.id)}')" style="padding: 3px 8px; font-size: 11px;">${ic('trash', 12)}</button>
+                </div>
+              </div>
+            </div>`;
+          }).join('') : `<div class="mu" style="text-align: center; padding: 24px 10px; font-size: 13px;">
+            No panel mods installed yet.<br>Choose a starter template on the right or upload a <code class="mono">.zip/.js/.css</code> bundle.
+          </div>`}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="row sb" style="margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h3 style="margin: 0; font-size: 16px;">${isNew ? 'Create New Panel Mod' : `Editing Mod: ${esc(draft.name || draft.id)}`}</h3>
+            <span class="mu" style="font-size: 12px;">Changes write directly to <code class="mono">${esc(S.modsDir || './data/mods')}/${esc(draft.id || '<mod-id>')}</code> and hot-reload.</span>
+          </div>
+          <div class="row" style="gap: 6px; flex-wrap: wrap;">
+            <span class="mu" style="font-size: 11.5px;">Starter Templates:</span>
+            <button type="button" class="btn sm" onclick="applyModTemplate('custom-page')">Custom Page + Slot</button>
+            <button type="button" class="btn sm" onclick="applyModTemplate('console-widget')">Console Macros</button>
+            <button type="button" class="btn sm" onclick="applyModTemplate('custom-theme')">CSS Theme</button>
+          </div>
+        </div>
+
+        <form onsubmit="saveAdminMod(event)">
+          <div class="grid g3">
+            <label class="f">
+              <span>Mod ID (slug)</span>
+              <input type="text" value="${esc(draft.id || '')}" ${isNew ? '' : 'readonly'} required placeholder="my-custom-mod" oninput="onModDraftInput('id', this.value)">
+            </label>
+            <label class="f">
+              <span>Display Name</span>
+              <input type="text" value="${esc(draft.name || '')}" placeholder="My Custom Extension" oninput="onModDraftInput('name', this.value)">
+            </label>
+            <label class="f">
+              <span>Version &amp; Author</span>
+              <div class="row" style="gap: 6px;">
+                <input type="text" value="${esc(draft.version || '1.0.0')}" placeholder="1.0.0" style="width: 90px;" oninput="onModDraftInput('version', this.value)">
+                <input type="text" value="${esc(draft.author || '')}" placeholder="Author" oninput="onModDraftInput('author', this.value)">
+              </div>
+            </label>
+          </div>
+
+          <div class="row sb" style="gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+            <label class="f" style="flex: 1 1 280px; margin-bottom: 0;">
+              <span>Description</span>
+              <input type="text" value="${esc(draft.description || '')}" placeholder="Short summary of what this extension adds" oninput="onModDraftInput('description', this.value)">
+            </label>
+            <label class="row" style="gap: 8px; cursor: pointer; padding-top: 18px;">
+              <span style="font-size: 13px; color: var(--tx);">Enabled at Runtime</span>
+              <span class="sw">
+                <input type="checkbox" ${draft.enabled !== false ? 'checked' : ''} onchange="onModDraftInput('enabled', this.checked)">
+                <i></i>
+              </span>
+            </label>
+          </div>
+
+          <label class="f">
+            <span>JavaScript Entry (<code class="mono">${esc(draft.entry_js || 'mod.js')}</code>)</span>
+            <textarea class="mod-code-area" rows="10" spellcheck="false" placeholder="// Use window.NP / NP.registerPage, NP.registerSlot, NP.addSidebarItem, NP.addPaletteCommand..." oninput="onModDraftInput('js_code', this.value)">${esc(draft.js_code || '')}</textarea>
+          </label>
+
+          <label class="f" style="margin-top: 12px;">
+            <span>Stylesheet Entry (<code class="mono">${esc(draft.entry_css || 'mod.css')}</code>)</span>
+            <textarea class="mod-code-area" rows="6" spellcheck="false" placeholder="/* Optional custom CSS rules loaded when enabled */" oninput="onModDraftInput('css_code', this.value)">${esc(draft.css_code || '')}</textarea>
+          </label>
+
+          <div class="row sb" style="margin-top: 14px; flex-wrap: wrap; gap: 10px;">
+            <div class="row" style="gap: 8px;">
+              ${!isNew ? `<button type="button" class="btn dg sm" onclick="deleteAdminMod('${esc(draft.id)}', '${esc(draft.name || draft.id)}')">${ic('trash', 13)} Delete Mod</button>` : ''}
+            </div>
+            <div class="row" style="gap: 8px;">
+              ${!isNew && window.NP?._pages?.has(draft.id) ? `<a href="/mod/${esc(draft.id)}" onclick="return handleNavClick(event, 'mod', { modPageId: '${esc(draft.id)}' })" class="btn sm" style="text-decoration:none;">Open Page</a>` : ''}
+              <button type="submit" id="mod-save-btn" class="btn pr">${ic('check', 14)} Save &amp; Apply Live</button>
+            </div>
+          </div>
+        </form>
+
+        <div style="margin-top: 18px; padding: 12px 14px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 9px; font-size: 12px;">
+          <b style="color: var(--tx); display: block; margin-bottom: 6px;">window.NP SDK Reference</b>
+          <div class="mu mono" style="line-height: 1.7;">
+            NP.registerPage({ id, title, icon, scope, render }) &bull; NP.addSidebarItem({ id, label, icon, scope, pageId, url, onClick })<br>
+            NP.registerSlot(slot, (el, ctx) =&gt; ...) &rarr; Slots: <b>nav:bottom</b>, <b>dashboard:top</b>, <b>dashboard:bottom</b>, <b>console:below-stats</b>, <b>console:below-charts</b>, <b>files:top</b>, <b>plugins:top</b>, <b>settings:bottom</b><br>
+            NP.addPaletteCommand({ id, group, label, action }) &bull; NP.on('render'|'route'|'server:switch', fn) &bull; NP.api(url) &bull; NP.srvApi(sub) &bull; NP.injectCSS(id, css) &bull; NP.storage(modId)
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// --- Auth Flow & Setup Screen ---
+function applyLoginOverlayBackground(el) {
+  if (!el) return;
+  const bg = (getBrand('login_bg_url') || '').trim();
+  if (bg) {
+    el.style.backgroundImage = `linear-gradient(rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.85)), url('${bg.replace(/'/g, '%27')}')`;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+  }
+}
+
 async function checkAuth() {
   startPageProgress(22);
   const savedMode = localStorage.getItem('neopanel_mode');
@@ -10364,8 +12291,10 @@ async function checkAuth() {
   if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
   if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
 
-  const route = parseCurrentRoute(window.location.pathname, window.location.hash);
-  S.view = normalizeRoute(route.view || 'dash');
+  const route = parseCurrentRoute(window.location.pathname + window.location.search, window.location.hash);
+  if (route.safeMode) S.modsSafeMode = true;
+  S.view = route.notFoundPath ? 'notfound' : normalizeRoute(route.view || 'dash');
+  if (route.notFoundPath) S.notFoundPath = route.notFoundPath;
   if (route.adminTab !== undefined) S.adminTab = route.adminTab;
   if (route.acctTab !== undefined && S.acct) S.acct.tab = route.acctTab;
   if (route.plugTab !== undefined) S.plugTab = route.plugTab;
@@ -10375,10 +12304,23 @@ async function checkAuth() {
     setPageProgress(42);
     const [, status] = await Promise.all([
       loadPublicBranding().catch(() => {}),
-      fetch('/api/auth/status').then(r => r.json())
+      fetch('/api/auth/status').then(r => r.json()),
+      loadRuntimeMods().catch(() => [])
     ]);
     S.turnstileEnabled = Boolean(status.turnstile_enabled && status.turnstile_site_key);
     S.turnstileSiteKey = S.turnstileEnabled ? status.turnstile_site_key : '';
+    S.maintPublicInfo = {
+      enabled: Boolean(status.maintenance_enabled || S.branding?.maintenance_enabled),
+      title: status.maintenance_title || S.branding?.maintenance_title || 'Scheduled Maintenance',
+      message: status.maintenance_message || S.branding?.maintenance_message || 'We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.',
+      eta: status.maintenance_eta || S.branding?.maintenance_eta || ''
+    };
+    if (status.maintenance_enabled) {
+      S.branding.maintenance_enabled = true;
+      if (status.maintenance_title) S.branding.maintenance_title = status.maintenance_title;
+      if (status.maintenance_message) S.branding.maintenance_message = status.maintenance_message;
+      if (status.maintenance_eta !== undefined) S.branding.maintenance_eta = status.maintenance_eta;
+    }
 
     if (status.needs_setup) {
       finishPageProgress();
@@ -10414,20 +12356,45 @@ async function checkAuth() {
     setPageProgress(65);
     await loadDashboard(true, preferredRef || getSavedActiveServerRef());
 
-    const globalOnlyViews = ['dash', 'bill', 'admin', 'acc'];
-    if (!globalOnlyViews.includes(S.view) && !(S.view === 'act' && route.global)) {
+    const globalOnlyViews = ['dash', 'client', 'admin', 'acc', 'notfound', 'maintenance', 'mod'];
+    if (route.notFoundPath) {
+      S.view = 'notfound';
+      S.notFoundPath = route.notFoundPath;
+    } else if (S.view === 'mod') {
+      const pid = route.modPageId || '';
+      if (!window.NP?._pages?.has(pid)) {
+        S.notFoundPath = window.location.pathname || `/mod/${pid}`;
+        S.view = 'notfound';
+      } else {
+        S.modPageId = pid;
+      }
+    } else if (route.serverId) {
+      const matched = resolveServerByParam(route.serverId, route.nodeId || null);
+      if (!matched) {
+        S.notFoundPath = window.location.pathname;
+        S.view = 'notfound';
+      } else {
+        syncActiveServerState(matched);
+        if (route.canonicalRedirect || route.legacyHash) {
+          try {
+            history.replaceState(null, '', serverRouteUrl(matched.node_id || 'local', matched.id, S.view, { plugTab: S.plugTab }));
+          } catch (e) {}
+        }
+      }
+    } else if (!globalOnlyViews.includes(S.view) && !(S.view === 'act' && route.global)) {
       if (S.servers.length === 0) {
         S.view = 'dash';
-        try { history.replaceState(null, '', '/'); } catch (e) {}
+        try { history.replaceState(null, '', withSafeModeQuery('/')); } catch (e) {}
+      } else if (route.legacyHash) {
+        try { history.replaceState(null, '', routeUrl(S.view, route)); } catch (e) {}
       }
-    }
-    if (route.legacyHash) {
-      try { history.replaceState(null, '', routeUrl(S.view, route)); } catch (e) {}
     }
 
     setPageProgress(82);
-    await loadInitialRouteData(S.view);
-    if (!['plug', 'stp', 'ver'].includes(S.view)) {
+    if (!['notfound', 'maintenance'].includes(S.view)) {
+      await loadInitialRouteData(S.view);
+    }
+    if (!['plug', 'stp', 'ver', 'notfound', 'maintenance'].includes(S.view)) {
       loadVersionsCatalog();
     }
 
@@ -10520,16 +12487,44 @@ async function submitSetup() {
 
 function showLoginScreen() {
   if ($('#login')) return;
+  const maintEnabled = Boolean(S.maintPublicInfo?.enabled || S.branding?.maintenance_enabled);
+  const b = S.branding || DEFAULT_BRANDING;
+  const footTxt = (getBrand('footer_text') || 'Powered by NeoPanel Daemon').trim();
+
+  if (maintEnabled && !S.maintAdminSignInOpen) {
+    const title = (S.maintPublicInfo?.title || b.maintenance_title || 'Scheduled Maintenance').trim();
+    const message = (S.maintPublicInfo?.message || b.maintenance_message || 'We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.').trim();
+    const eta = (S.maintPublicInfo?.eta || b.maintenance_eta || '').trim();
+    const d = document.createElement('div');
+    d.id = 'login';
+    d.className = 'login';
+    d.innerHTML = `<div class="card np-status-card">
+      <div class="llogo" style="margin-bottom:14px;">${brandLogoHtml(true)}</div>
+      <div class="np-status-code warn">${ic('alert', 14)} 503 MAINTENANCE</div>
+      <h1 style="font-size:25px; font-weight:800; margin:0 0 10px; color:var(--tx);">${esc(title)}</h1>
+      <p class="mu" style="font-size:13.5px; line-height:1.65; margin:0;">${esc(message)}</p>
+      ${eta ? `<div class="chip mono" style="margin-top:14px; display:inline-flex;">Estimated return: ${esc(eta)}</div>` : ''}
+      <div class="row" style="justify-content:center; gap:10px; margin-top:24px; flex-wrap:wrap;">
+        <button type="button" class="btn pr" onclick="$('#login')?.remove(); checkAuth();">${ic('refresh', 14)} Check Status</button>
+        <button type="button" class="btn" onclick="enterAdminLoginFromMaint()">${ic('shield', 14)} Administrator Sign In</button>
+      </div>
+      <div class="lsm foot" style="margin-top:18px;">${esc(footTxt)}</div>
+    </div>`;
+    applyLoginOverlayBackground(d);
+    document.body.appendChild(d);
+    return;
+  }
+
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const brandName = (getBrand('brand_name') || 'NeoPanel').trim() || 'NeoPanel';
-  const footTxt = (getBrand('footer_text') || 'Powered by NeoPanel Daemon').trim();
 
   const d = document.createElement('div');
   d.id = 'login';
   d.className = 'login';
   d.innerHTML = `<div class="lbox">
     <div class="llogo">${brandLogoHtml(true)}</div>
+    ${maintEnabled ? `<div class="np-status-code warn" style="margin-bottom:10px;">${ic('alert', 13)} MAINTENANCE MODE &bull; ADMIN LOGIN</div>` : ''}
     <div class="lg">${greeting}</div>
     <h1 class="lt">Log in to ${esc(brandName)}</h1>
     <label class="lf">
@@ -10546,6 +12541,7 @@ function showLoginScreen() {
     ${S.turnstileEnabled ? '<div id="turnstile-login" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitLogin()">Login</button>
+    ${maintEnabled ? `<button type="button" class="btn sm" style="width:100%; margin-top:10px; justify-content:center;" onclick="S.maintAdminSignInOpen=false; $('#login')?.remove(); showLoginScreen();">Back to Maintenance Notice</button>` : ''}
     <div class="lsm foot">${esc(footTxt)}</div>
   </div>`;
   applyLoginOverlayBackground(d);
@@ -10585,6 +12581,7 @@ async function submitLogin() {
     if (res.token) {
       S.token = res.token;
       S.turnstileToken = '';
+      S.maintAdminSignInOpen = false;
       localStorage.setItem('neopanel_token', res.token);
       $('#login')?.remove();
       toast('Signed in successfully');
@@ -10617,6 +12614,7 @@ async function logout() {
   S.activeServerId = null;
   S.activeNodeId = null;
   S.wsState = 'disconnected';
+  S.maintAdminSignInOpen = false;
   localStorage.removeItem('neopanel_token');
   clearTimeout(S.wsReconnectTimer);
   S.wsReconnectTimer = null;
@@ -10665,6 +12663,7 @@ window.togglePlugin = togglePlugin;
 window.searchModrinthDebounced = searchModrinthDebounced;
 window.searchModrinth = searchModrinth;
 window.installPlugin = installPlugin;
+window.setPlugSkipConfirm = setPlugSkipConfirm;
 window.createBackup = createBackup;
 window.downloadBackup = downloadBackup;
 window.deleteBackup = deleteBackup;
@@ -10687,6 +12686,7 @@ window.handleCreateServer = handleCreateServer;
 window.submitSetup = submitSetup;
 window.submitLogin = submitLogin;
 window.logout = logout;
+window.checkAuth = checkAuth;
 window.loadDashboard = loadDashboard;
 window.updateDashLiveStats = updateDashLiveStats;
 window.refreshServerStatus = refreshServerStatus;
@@ -10791,14 +12791,43 @@ window.onDaemonInputChange = onDaemonInputChange;
 window.discardBrandDraft = discardBrandDraft;
 window.saveBrandingAndDaemon = saveBrandingAndDaemon;
 window.resetBrandingDefaults = resetBrandingDefaults;
+window.triggerBrandingUpload = triggerBrandingUpload;
+window.handleBrandingFileSelect = handleBrandingFileSelect;
+window.clearBrandingMedia = clearBrandingMedia;
+window.toggleMaintPreview = toggleMaintPreview;
+window.enterAdminLoginFromMaint = enterAdminLoginFromMaint;
+window.loadRuntimeMods = loadRuntimeMods;
+window.mountPanelModHooks = mountPanelModHooks;
+window.loadAdminMods = loadAdminMods;
+window.selectAdminMod = selectAdminMod;
+window.startNewModDraft = startNewModDraft;
+window.applyModTemplate = applyModTemplate;
+window.onModDraftInput = onModDraftInput;
+window.saveAdminMod = saveAdminMod;
+window.toggleAdminModEnabled = toggleAdminModEnabled;
+window.deleteAdminMod = deleteAdminMod;
+window.triggerModPackageUpload = triggerModPackageUpload;
+window.handleModPackageUpload = handleModPackageUpload;
 window.onCreateNodeChange = onCreateNodeChange;
 window.handleNavClick = handleNavClick;
 window.handleServerCardClick = handleServerCardClick;
+window.applyRoute = applyRoute;
+window.navigateToUrl = navigateToUrl;
+window.shortServerId = shortServerId;
+window.resolveServerByParam = resolveServerByParam;
+window.copyServerAddress = copyServerAddress;
+window.onChartMouseMove = onChartMouseMove;
+window.onChartMouseLeave = onChartMouseLeave;
+window.updateChartHoverDom = updateChartHoverDom;
+window.detectFaviconMime = detectFaviconMime;
 window.setViewMode = setViewMode;
 window.getViewMode = getViewMode;
 window.routeUrl = routeUrl;
 window.serverRouteUrl = serverRouteUrl;
+window.setCreateRam = setCreateRam;
+window.syncCreateJavaFromVersion = syncCreateJavaFromVersion;
 window.onCreateVersionInput = onCreateVersionInput;
+window.setCreateEngine = setCreateEngine;
 window.setCreateVersion = setCreateVersion;
 window.onReinstallEngineChange = onReinstallEngineChange;
 window.setReinstallVersion = setReinstallVersion;
@@ -10806,13 +12835,69 @@ window.syncReinstallSelectFromInput = syncReinstallSelectFromInput;
 window.refreshOpenVersionSelects = refreshOpenVersionSelects;
 window.renderModrinthHitsHtml = renderModrinthHitsHtml;
 
-// --- Custom Glassmorphic Selects System ---
+// --- Custom Glassmorphic Selects System (Portaled to document.body to prevent clipping) ---
 function closeAllCustomSelects() {
+  document.querySelectorAll('.cselect-menu.cselect-portaled').forEach(menu => {
+    menu.classList.remove('cselect-portaled', 'cselect-up');
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.bottom = '';
+    menu.style.width = '';
+    menu.style.minWidth = '';
+    menu.style.maxHeight = '';
+    const home = menu._homeWrap;
+    if (home && document.body.contains(home)) {
+      home.appendChild(menu);
+    } else if (menu.parentNode === document.body) {
+      menu.remove();
+    }
+  });
   document.querySelectorAll('.cselect-wrap.open').forEach(el => {
-    el.classList.remove('open');
+    el.classList.remove('open', 'cselect-up');
     const trigger = el.querySelector('.cselect-trigger');
     if (trigger) trigger.setAttribute('aria-expanded', 'false');
   });
+}
+
+function positionPortaledMenu(wrap, trigger, menu) {
+  const rect = trigger.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return;
+
+  menu._homeWrap = wrap;
+  const hasSearch = Boolean(menu.querySelector('.cselect-search'));
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const spaceAbove = rect.top;
+  const threshold = hasSearch ? 280 : 210;
+  const openUp = spaceBelow < threshold && spaceAbove > spaceBelow;
+
+  const width = Math.min(Math.max(rect.width, 175), window.innerWidth - 16);
+  let left = rect.left;
+  if (left + width > window.innerWidth - 8) {
+    left = window.innerWidth - width - 8;
+  }
+  left = Math.max(8, left);
+
+  menu.classList.add('cselect-portaled');
+  menu.classList.toggle('cselect-up', openUp);
+  wrap.classList.toggle('cselect-up', openUp);
+
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.width = `${Math.round(width)}px`;
+  menu.style.minWidth = `${Math.round(width)}px`;
+
+  if (openUp) {
+    menu.style.top = 'auto';
+    menu.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
+    menu.style.maxHeight = `${Math.max(140, Math.min(310, Math.floor(spaceAbove - 14)))}px`;
+  } else {
+    menu.style.bottom = 'auto';
+    menu.style.top = `${Math.round(rect.bottom + 4)}px`;
+    menu.style.maxHeight = `${Math.max(140, Math.min(310, Math.floor(spaceBelow - 14)))}px`;
+  }
+
+  if (menu.parentNode !== document.body) {
+    document.body.appendChild(menu);
+  }
 }
 
 function enhanceSelects(root = document) {
@@ -10856,6 +12941,7 @@ function enhanceSelects(root = document) {
     const menu = document.createElement('div');
     menu.className = 'cselect-menu';
     menu.setAttribute('role', 'listbox');
+    menu._homeWrap = wrap;
 
     function rebuildOptions() {
       menu.innerHTML = '';
@@ -10966,16 +13052,9 @@ function enhanceSelects(root = document) {
       closeAllCustomSelects();
       if (!isOpen) {
         if (typeof menu._resetSearch === 'function') menu._resetSearch();
-        const rect = wrap.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - rect.bottom;
-        const hasSearch = Boolean(menu.querySelector('.cselect-search'));
-        if (spaceBelow < (hasSearch ? 300 : 220) && rect.top > (hasSearch ? 280 : 220)) {
-          wrap.classList.add('cselect-up');
-        } else {
-          wrap.classList.remove('cselect-up');
-        }
         wrap.classList.add('open');
         trigger.setAttribute('aria-expanded', 'true');
+        positionPortaledMenu(wrap, trigger, menu);
         const active = menu.querySelector('.cselect-opt.on');
         if (active) active.scrollIntoView({ block: 'nearest' });
         const searchInp = menu.querySelector('.cselect-search');
@@ -11033,7 +13112,7 @@ function enhanceSelects(root = document) {
 }
 
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.cselect-wrap')) {
+  if (!e.target.closest('.cselect-wrap') && !e.target.closest('.cselect-menu')) {
     closeAllCustomSelects();
   }
   if (S.cmenu && !e.target.closest('.cmenu')) {
@@ -11041,6 +13120,14 @@ document.addEventListener('click', (e) => {
     R();
   }
 });
+
+window.addEventListener('resize', closeAllCustomSelects);
+document.addEventListener('scroll', (e) => {
+  if (e.target && e.target.closest && e.target.closest('.cselect-menu')) return;
+  if (document.querySelector('.cselect-wrap.open, .cselect-menu.cselect-portaled')) {
+    closeAllCustomSelects();
+  }
+}, true);
 
 let _enhanceTimeout = null;
 const globalSelectObserver = (typeof MutationObserver !== 'undefined') ? new MutationObserver((mutations) => {

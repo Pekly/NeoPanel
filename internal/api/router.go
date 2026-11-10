@@ -31,6 +31,7 @@ type Router struct {
 	players        *PlayerHandler
 	software       *SoftwareHandler
 	branding       *BrandingHandler
+	mods           *ModsHandler
 	databases      *DatabaseHandler
 	nodes          *NodeHandler
 	embeddedStatic fs.FS
@@ -47,6 +48,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	playerHandler := NewPlayerHandler(db, manager)
 	softwareHandler := NewSoftwareHandler(db, manager)
 	brandingHandler := NewBrandingHandler(db, cfg)
+	modsHandler := NewModsHandler(db, cfg)
 	databaseHandler := NewDatabaseHandler(cfg, db)
 	nodeHandler := NewNodeHandler(cfg, db, authHandler, manager)
 
@@ -63,6 +65,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		players:        playerHandler,
 		software:       softwareHandler,
 		branding:       brandingHandler,
+		mods:           modsHandler,
 		databases:      databaseHandler,
 		nodes:          nodeHandler,
 		embeddedStatic: embeddedStatic,
@@ -82,11 +85,14 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) registerRoutes(db *database.DB) {
-	// Public auth & branding routes
+	// Public auth, branding & mods runtime routes
 	r.mux.HandleFunc("GET /api/auth/status", r.auth.Status)
 	r.mux.HandleFunc("POST /api/auth/setup", r.auth.Setup)
 	r.mux.HandleFunc("POST /api/auth/login", r.auth.Login)
 	r.mux.HandleFunc("GET /api/branding", r.branding.GetPublicBranding)
+	r.mux.HandleFunc("GET /branding/{filename}", r.branding.ServeBrandingAsset)
+	r.mux.HandleFunc("GET /api/mods", r.mods.ListRuntimeMods)
+	r.mux.HandleFunc("GET /mods/{id}/{path...}", r.mods.ServeModAsset)
 
 	// Protected auth routes
 	r.mux.HandleFunc("GET /api/auth/me", r.requireAuth(r.auth.Me))
@@ -203,7 +209,13 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAuth(r.auth.UpdateTurnstileConfig))
 	r.mux.HandleFunc("GET /api/admin/branding", r.requireAuth(r.branding.GetAdminBranding))
 	r.mux.HandleFunc("PUT /api/admin/branding", r.requireAuth(r.branding.UpdateAdminBranding))
+	r.mux.HandleFunc("POST /api/admin/branding/upload", r.requireAuth(r.branding.UploadBrandingAsset))
 	r.mux.HandleFunc("POST /api/admin/branding/reset", r.requireAuth(r.branding.ResetAdminBranding))
+	r.mux.HandleFunc("GET /api/admin/mods", r.requireAuth(r.mods.ListAdminMods))
+	r.mux.HandleFunc("POST /api/admin/mods", r.requireAuth(r.mods.SaveAdminMod))
+	r.mux.HandleFunc("POST /api/admin/mods/upload", r.requireAuth(r.mods.UploadAdminMod))
+	r.mux.HandleFunc("PUT /api/admin/mods/{id}", r.requireAuth(r.mods.SaveAdminMod))
+	r.mux.HandleFunc("DELETE /api/admin/mods/{id}", r.requireAuth(r.mods.DeleteAdminMod))
 	r.mux.HandleFunc("GET /api/admin/users", r.requireAuth(r.auth.ListUsers))
 	r.mux.HandleFunc("POST /api/admin/users", r.requireAuth(r.auth.AdminCreateUser))
 	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAuth(r.auth.AdminDeleteUser))

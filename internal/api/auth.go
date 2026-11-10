@@ -151,14 +151,19 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	if !tsActive {
 		tsSiteKey = ""
 	}
+	branding := LoadBrandingConfig(h.db)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"needs_setup":        count == 0,
-		"version":            "1.0.0",
-		"role":               "panel",
-		"node_mode":          false,
-		"turnstile_enabled":  tsActive,
-		"turnstile_site_key": tsSiteKey,
+		"needs_setup":         count == 0,
+		"version":             "1.0.0",
+		"role":                "panel",
+		"node_mode":           false,
+		"turnstile_enabled":   tsActive,
+		"turnstile_site_key":  tsSiteKey,
+		"maintenance_enabled": branding.MaintenanceEnabled,
+		"maintenance_title":   branding.MaintenanceTitle,
+		"maintenance_message": branding.MaintenanceMessage,
+		"maintenance_eta":     branding.MaintenanceETA,
 	})
 }
 

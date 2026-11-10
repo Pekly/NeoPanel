@@ -1,11 +1,18 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -16,31 +23,53 @@ const (
 	panelSettingDaemonKey   = "daemon_settings_json"
 )
 
-var hexColorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+var (
+	hexColorRe     = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+	safeAssetRe    = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,96}$`)
+	brandingExtsCT = map[string]string{
+		".png":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".webp": "image/webp",
+		".svg":  "image/svg+xml; charset=utf-8",
+		".ico":  "image/x-icon",
+		".gif":  "image/gif",
+	}
+)
 
 type PanelBrandingConfig struct {
-	BrandName        string `json:"brand_name"`
-	BrandSubtitle    string `json:"brand_subtitle"`
-	LogoURL          string `json:"logo_url"`
-	FaviconURL       string `json:"favicon_url"`
-	LoginBgURL       string `json:"login_bg_url"`
-	ServerHeroURL    string `json:"server_hero_url"`
-	CardCoverURL     string `json:"card_cover_url"`
-	DefaultAvatarURL string `json:"default_avatar_url"`
-	FooterText       string `json:"footer_text"`
-	Preset           string `json:"preset"`
-	AccentColor      string `json:"accent_color"`
-	AccentHover      string `json:"accent_hover"`
-	BgDeep           string `json:"bg_deep"`
-	BgCanvas         string `json:"bg_canvas"`
-	CardBg           string `json:"card_bg"`
-	NavBg            string `json:"nav_bg"`
-	TextColor        string `json:"text_color"`
-	CardOpacity      int    `json:"card_opacity"`
-	BorderRadiusPx   int    `json:"border_radius_px"`
-	GlassBlurPx      int    `json:"glass_blur_px"`
-	DefaultTheme     string `json:"default_theme"`
-	CustomCSS        string `json:"custom_css"`
+	BrandName           string `json:"brand_name"`
+	BrandSubtitle       string `json:"brand_subtitle"`
+	LogoURL             string `json:"logo_url"`
+	FaviconURL          string `json:"favicon_url"`
+	LoginBgURL          string `json:"login_bg_url"`
+	ServerHeroURL       string `json:"server_hero_url"`
+	CardCoverURL        string `json:"card_cover_url"`
+	DefaultAvatarURL    string `json:"default_avatar_url"`
+	FooterText          string `json:"footer_text"`
+	Preset              string `json:"preset"`
+	AccentColor         string `json:"accent_color"`
+	AccentHover         string `json:"accent_hover"`
+	BgDeep              string `json:"bg_deep"`
+	BgCanvas            string `json:"bg_canvas"`
+	CardBg              string `json:"card_bg"`
+	NavBg               string `json:"nav_bg"`
+	TextColor           string `json:"text_color"`
+	CardOpacity         int    `json:"card_opacity"`
+	BorderRadiusPx      int    `json:"border_radius_px"`
+	GlassBlurPx         int    `json:"glass_blur_px"`
+	DefaultTheme        string `json:"default_theme"`
+	CustomCSS           string `json:"custom_css"`
+	MaintenanceEnabled  bool   `json:"maintenance_enabled"`
+	MaintenanceTitle    string `json:"maintenance_title"`
+	MaintenanceMessage  string `json:"maintenance_message"`
+	MaintenanceETA      string `json:"maintenance_eta"`
+	ClientAreaEnabled   bool   `json:"client_area_enabled"`
+	ClientAreaAvailable bool   `json:"client_area_available"`
+	ClientAreaLabel     string `json:"client_area_label"`
+	ClientAreaURL       string `json:"client_area_url"`
+	ClientAreaOpenMode  string `json:"client_area_open_mode"`
+	ClientAreaSubtitle  string `json:"client_area_subtitle"`
 }
 
 type DaemonSettingsConfig struct {
@@ -66,28 +95,38 @@ func NewBrandingHandler(db *database.DB, cfg *config.Config) *BrandingHandler {
 
 func defaultPanelBranding() PanelBrandingConfig {
 	return PanelBrandingConfig{
-		BrandName:        "NeoPanel",
-		BrandSubtitle:    "Ultra-Lightweight Minecraft Server Manager",
-		LogoURL:          "",
-		FaviconURL:       "",
-		LoginBgURL:       "",
-		ServerHeroURL:    "https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg",
-		CardCoverURL:     "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MC-Downloadables_Image-0_15th-Anniversary_1110x624.jpg",
-		DefaultAvatarURL: "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MCV_SummerDrop_Hero_DotNet_Downloadable_Wallpaper_r414x414.png",
-		FooterText:       "Powered by NeoPanel Daemon",
-		Preset:           "obsidian",
-		AccentColor:      "#387aff",
-		AccentHover:      "#4f8aff",
-		BgDeep:           "",
-		BgCanvas:         "",
-		CardBg:           "",
-		NavBg:            "",
-		TextColor:        "",
-		CardOpacity:      72,
-		BorderRadiusPx:   14,
-		GlassBlurPx:      16,
-		DefaultTheme:     "dark",
-		CustomCSS:        "",
+		BrandName:           "NeoPanel",
+		BrandSubtitle:       "Ultra-Lightweight Minecraft Server Manager",
+		LogoURL:             "",
+		FaviconURL:          "",
+		LoginBgURL:          "",
+		ServerHeroURL:       "https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg",
+		CardCoverURL:        "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MC-Downloadables_Image-0_15th-Anniversary_1110x624.jpg",
+		DefaultAvatarURL:    "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MCV_SummerDrop_Hero_DotNet_Downloadable_Wallpaper_r414x414.png",
+		FooterText:          "Powered by NeoPanel Daemon",
+		Preset:              "obsidian",
+		AccentColor:         "#387aff",
+		AccentHover:         "#4f8aff",
+		BgDeep:              "",
+		BgCanvas:            "",
+		CardBg:              "",
+		NavBg:               "",
+		TextColor:           "",
+		CardOpacity:         72,
+		BorderRadiusPx:      14,
+		GlassBlurPx:         16,
+		DefaultTheme:        "dark",
+		CustomCSS:           "",
+		MaintenanceEnabled:  false,
+		MaintenanceTitle:    "Scheduled Maintenance",
+		MaintenanceMessage:  "We are upgrading NeoPanel nodes. Running game servers stay online during panel maintenance.",
+		MaintenanceETA:      "",
+		ClientAreaEnabled:   false,
+		ClientAreaAvailable: true,
+		ClientAreaLabel:     "Client Area",
+		ClientAreaURL:       "",
+		ClientAreaOpenMode:  "tab",
+		ClientAreaSubtitle:  "Purchase servers, manage subscriptions, and view invoices in your storefront.",
 	}
 }
 
@@ -105,12 +144,12 @@ func (h *BrandingHandler) defaultDaemonSettings() DaemonSettingsConfig {
 	}
 }
 
-func (h *BrandingHandler) loadBranding() PanelBrandingConfig {
+func LoadBrandingConfig(db *database.DB) PanelBrandingConfig {
 	def := defaultPanelBranding()
-	if h.db == nil {
+	if db == nil {
 		return def
 	}
-	raw, err := h.db.GetPanelSetting(panelSettingBrandingKey)
+	raw, err := db.GetPanelSetting(panelSettingBrandingKey)
 	if err != nil || strings.TrimSpace(raw) == "" {
 		return def
 	}
@@ -119,6 +158,10 @@ func (h *BrandingHandler) loadBranding() PanelBrandingConfig {
 		return def
 	}
 	return sanitizeBrandingConfig(stored, def)
+}
+
+func (h *BrandingHandler) loadBranding() PanelBrandingConfig {
+	return LoadBrandingConfig(h.db)
 }
 
 func (h *BrandingHandler) loadDaemonSettings() DaemonSettingsConfig {
@@ -158,12 +201,29 @@ func sanitizeMediaURL(val, fallback string) string {
 		strings.HasPrefix(lower, "http://") ||
 		strings.HasPrefix(lower, "/") ||
 		strings.HasPrefix(lower, "data:image/") {
+		if len(val) > 4096 {
+			return val[:4096]
+		}
+		return val
+	}
+	return fallback
+}
+
+func sanitizeClientAreaURL(val string) string {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return ""
+	}
+	lower := strings.ToLower(val)
+	if strings.HasPrefix(lower, "https://") ||
+		strings.HasPrefix(lower, "http://") ||
+		strings.HasPrefix(lower, "/") {
 		if len(val) > 1024 {
 			return val[:1024]
 		}
 		return val
 	}
-	return fallback
+	return ""
 }
 
 func sanitizeBrandingConfig(in, def PanelBrandingConfig) PanelBrandingConfig {
@@ -242,6 +302,49 @@ func sanitizeBrandingConfig(in, def PanelBrandingConfig) PanelBrandingConfig {
 		css = css[:16384]
 	}
 	out.CustomCSS = css
+
+	// Maintenance mode configuration
+	out.MaintenanceEnabled = in.MaintenanceEnabled
+	if mt := strings.TrimSpace(in.MaintenanceTitle); mt != "" {
+		if len(mt) > 96 {
+			mt = mt[:96]
+		}
+		out.MaintenanceTitle = mt
+	}
+	if mm := strings.TrimSpace(in.MaintenanceMessage); mm != "" {
+		if len(mm) > 512 {
+			mm = mm[:512]
+		}
+		out.MaintenanceMessage = mm
+	}
+	eta := strings.TrimSpace(in.MaintenanceETA)
+	if len(eta) > 96 {
+		eta = eta[:96]
+	}
+	out.MaintenanceETA = eta
+
+	// Client Area / External Storefront integration
+	out.ClientAreaEnabled = in.ClientAreaEnabled
+	out.ClientAreaAvailable = in.ClientAreaAvailable
+	if lbl := strings.TrimSpace(in.ClientAreaLabel); lbl != "" {
+		if len(lbl) > 48 {
+			lbl = lbl[:48]
+		}
+		out.ClientAreaLabel = lbl
+	}
+	out.ClientAreaURL = sanitizeClientAreaURL(in.ClientAreaURL)
+	switch strings.ToLower(strings.TrimSpace(in.ClientAreaOpenMode)) {
+	case "tab", "embed":
+		out.ClientAreaOpenMode = strings.ToLower(strings.TrimSpace(in.ClientAreaOpenMode))
+	}
+	if sub := strings.TrimSpace(in.ClientAreaSubtitle); sub != "" {
+		if len(sub) > 200 {
+			sub = sub[:200]
+		}
+		out.ClientAreaSubtitle = sub
+	} else {
+		out.ClientAreaSubtitle = ""
+	}
 	return out
 }
 
@@ -386,4 +489,119 @@ func (h *BrandingHandler) ResetAdminBranding(w http.ResponseWriter, r *http.Requ
 		"branding": def,
 		"daemon":   daemon,
 	})
+}
+
+func (h *BrandingHandler) brandingDir() string {
+	dataDir := "./data"
+	if h.cfg != nil && strings.TrimSpace(h.cfg.Paths.DataDir) != "" {
+		dataDir = strings.TrimSpace(h.cfg.Paths.DataDir)
+	}
+	return filepath.Join(dataDir, "branding")
+}
+
+func sanitizeAssetStem(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	var b strings.Builder
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		} else if r == ' ' || r == '.' {
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), "-_")
+	if out == "" {
+		return "asset"
+	}
+	if len(out) > 32 {
+		out = out[:32]
+	}
+	return out
+}
+
+func (h *BrandingHandler) UploadBrandingAsset(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	if claims == nil || claims.Role != "admin" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Admin privileges are required"})
+		return
+	}
+
+	const maxUploadBytes = 12 << 20 // 12 MiB
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+4096)
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Upload too large (max 12 MiB) or invalid multipart body"})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Missing image/icon file in multipart field 'file'"})
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if _, ok := brandingExtsCT[ext]; !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Unsupported file type. Allowed: .png, .jpg, .jpeg, .webp, .svg, .ico, .gif"})
+		return
+	}
+
+	dir := h.brandingDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to prepare branding storage directory"})
+		return
+	}
+
+	fieldHint := sanitizeAssetStem(r.FormValue("field"))
+	var rnd [4]byte
+	_, _ = rand.Read(rnd[:])
+	safeName := fmt.Sprintf("%s-%d-%s%s", fieldHint, time.Now().Unix(), hex.EncodeToString(rnd[:]), ext)
+	destPath := filepath.Join(dir, safeName)
+
+	dst, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save uploaded branding asset"})
+		return
+	}
+	written, copyErr := io.Copy(dst, io.LimitReader(file, maxUploadBytes+1))
+	closeErr := dst.Close()
+	if copyErr != nil || closeErr != nil || written > maxUploadBytes {
+		_ = os.Remove(destPath)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed saving file or size exceeded 12 MiB limit"})
+		return
+	}
+
+	publicURL := "/branding/" + safeName
+	logAudit(h.db, r, "admin_branding_upload", fmt.Sprintf("Uploaded branding asset %s (%d bytes)", safeName, written))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"url":      publicURL,
+		"filename": safeName,
+		"size":     written,
+	})
+}
+
+func (h *BrandingHandler) ServeBrandingAsset(w http.ResponseWriter, r *http.Request) {
+	rawName := filepath.Base(strings.TrimSpace(getURLParam(r, "filename")))
+	if rawName == "" || rawName == "." || rawName == ".." || !safeAssetRe.MatchString(rawName) {
+		http.NotFound(w, r)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(rawName))
+	ct, ok := brandingExtsCT[ext]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	fullPath := filepath.Join(h.brandingDir(), rawName)
+	info, err := os.Stat(fullPath)
+	if err != nil || info.IsDir() {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeFile(w, r, fullPath)
 }
