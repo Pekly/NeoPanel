@@ -609,6 +609,7 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := make([]archiveSource, 0, len(sources))
+	seen := make(map[string]bool)
 	for _, raw := range sources {
 		srcRel := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
 		if srcRel == "" || srcRel == "/" || srcRel == "." {
