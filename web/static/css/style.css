@@ -951,6 +951,7 @@ h2 {
   background-size: cover;
   background-position: center 35%;
   background-color: #121827;
+  background-clip: padding-box;
   padding: 24px 28px;
   border-radius: 14px;
   display: flex;
@@ -964,7 +965,7 @@ h2 {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: inherit;
+  border-radius: 13px;
   background: linear-gradient(90deg, rgba(11, 15, 25, 0.95) 42%, rgba(11, 15, 25, 0.72) 100%);
   z-index: 1;
 }
