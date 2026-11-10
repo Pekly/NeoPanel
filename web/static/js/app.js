@@ -471,7 +471,325 @@ async function syncPlayersList(btnEl) {
   }
 }
 
-// --- Unified Settings Helpers (Identity + Live Startup Command) ---
+// --- Unified Settings Helpers (Identity, Live Startup Command & Real-Time Auto-Save) ---
+let _settingsAutoTimer = null;
+let _settingsSaveInFlight = false;
+let _settingsSaveQueued = null;
+let _settingsLastSaved = {};
+let _settingsUiState = { status: 'saved', text: 'Real-time auto-save active' };
+
+function clearSettingsAutoSaveTimer() {
+  if (_settingsAutoTimer) {
+    clearTimeout(_settingsAutoTimer);
+    _settingsAutoTimer = null;
+  }
+}
+
+function setSettingsSaveStatus(status = 'saved', text = '') {
+  const fallback = status === 'saving'
+    ? 'Saving changes...'
+    : status === 'warn'
+      ? 'Enter a valid value to save'
+      : status === 'error'
+        ? 'Auto-save failed — check values'
+        : 'All changes saved automatically';
+  const msg = text || fallback;
+  _settingsUiState = { status, text: msg };
+  const classes = ['is-saved', 'is-saving', 'is-warn', 'is-error'];
+  for (const id of ['set-autosave-pill', 'set-autosave-status']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.classList.remove(...classes);
+    el.classList.add(`is-${status}`);
+    const labelEl = el.querySelector('.settings-autosave-text');
+    if (labelEl) labelEl.textContent = msg;
+    else el.innerHTML = `<span class="settings-autosave-dot"></span><span class="settings-autosave-text">${esc(msg)}</span>`;
+  }
+}
+
+function getSettingsSnapshotKey(srv) {
+  return `${srv?.node_id || 'local'}:${srv?.id || ''}`;
+}
+
+function buildSettingsSnapshots(srv, data) {
+  const propsPayload = {
+    'motd': data.motd,
+    'server-port': String(data.port),
+    'max-players': String(data.max),
+    'difficulty': data.diff,
+    'gamemode': data.mode,
+    'pvp': String(data.pvp),
+    'white-list': String(data.wl),
+    'enable-command-block': String(data.cmd)
+  };
+  const srvPayload = {
+    name: data.name,
+    description: data.desc,
+    type: srv?.type || 'paper',
+    version: data.ver,
+    jar_file: data.jar,
+    port: data.port,
+    memory_min: Math.min(1024, data.ram),
+    memory_max: data.ram,
+    java_path: data.javaPath,
+    java_args: data.args,
+    auto_restart: data.autoRestart
+  };
+  return {
+    propsPayload,
+    srvPayload,
+    propsJson: JSON.stringify(propsPayload),
+    srvJson: JSON.stringify(srvPayload)
+  };
+}
+
+function collectSettingsFormPayload(srv) {
+  if (!srv) return { ok: false, reason: 'No active server selected' };
+
+  const nameEl = $('#set-srv-name');
+  const descEl = $('#set-srv-desc');
+  const verEl = $('#prop-ver');
+  const jarEl = $('#prop-jar');
+  const argsEl = $('#prop-args');
+  const portEl = $('#prop-port');
+  const maxEl = $('#prop-max');
+  const ramEl = $('#prop-ram');
+  const javaSelEl = $('#prop-java');
+  const javaCustomEl = $('#prop-java-custom');
+  const motdEl = $('#prop-motd');
+  const diffEl = $('#prop-diff');
+  const modeEl = $('#prop-mode');
+  const autoRestartEl = $('#prop-autorestart');
+  const pvpEl = $('#prop-sw-pvp');
+  const wlEl = $('#prop-sw-wl');
+  const cmdEl = $('#prop-sw-cmd');
+
+  const name = nameEl ? nameEl.value.trim() : (srv.name || 'Minecraft Server');
+  if (!name) return { ok: false, reason: 'Server name cannot be empty' };
+
+  const desc = descEl ? descEl.value.trim() : (srv.description || '');
+  const ver = verEl ? verEl.value.trim() : (srv.version || '1.21.4');
+  if (!ver) return { ok: false, reason: 'Minecraft version cannot be empty' };
+
+  const jar = jarEl ? jarEl.value.trim() : (srv.jar_file || 'server.jar');
+  if (!jar) return { ok: false, reason: 'Executable JAR filename cannot be empty' };
+
+  const args = argsEl ? argsEl.value.trim() : (srv.java_args !== undefined && srv.java_args !== null ? srv.java_args : '-XX:+UseG1GC');
+
+  let port = Number(srv.port) || 25565;
+  if (portEl) {
+    const rawPort = String(portEl.value ?? '').trim();
+    if (!/^\d+$/.test(rawPort)) return { ok: false, reason: 'Port must be between 1024 and 65535' };
+    port = parseInt(rawPort, 10);
+    if (port < 1024 || port > 65535) return { ok: false, reason: 'Port must be between 1024 and 65535' };
+  }
+
+  let max = Number(S.props.max) || 20;
+  if (maxEl) {
+    const rawMax = String(maxEl.value ?? '').trim();
+    if (!/^\d+$/.test(rawMax)) return { ok: false, reason: 'Max players must be at least 1' };
+    max = parseInt(rawMax, 10);
+    if (max < 1 || max > 100000) return { ok: false, reason: 'Max players must be 1–100000' };
+    S.props.max = max;
+  }
+
+  const ram = ramEl ? (parseInt(ramEl.value, 10) || getServerMaxRamMB(srv)) : getServerMaxRamMB(srv);
+
+  let javaPath = srv.java_path || '';
+  if (javaSelEl) {
+    if (javaSelEl.value === 'custom') {
+      const customPath = (javaCustomEl?.value || '').trim();
+      if (!customPath) return { ok: false, reason: 'Enter a custom Java binary path' };
+      javaPath = customPath;
+    } else if (javaSelEl.value) {
+      javaPath = javaSelEl.value;
+    }
+  }
+
+  const motd = motdEl ? motdEl.value : (S.props.motd ?? srv.motd ?? 'A Minecraft Server');
+  S.props.motd = motd;
+  const diff = diffEl ? diffEl.value : (S.props.diff || 'normal');
+  S.props.diff = diff;
+  const mode = modeEl ? modeEl.value : (S.props.mode || 'survival');
+  S.props.mode = mode;
+
+  const pvp = pvpEl ? Boolean(pvpEl.checked) : Boolean(S.props.pvp);
+  const wl = wlEl ? Boolean(wlEl.checked) : Boolean(S.props.wl);
+  const cmd = cmdEl ? Boolean(cmdEl.checked) : Boolean(S.props.cmd);
+  S.props.pvp = pvp;
+  S.props.wl = wl;
+  S.props.cmd = cmd;
+
+  const autoRestart = autoRestartEl ? Boolean(autoRestartEl.checked) : (srv.auto_restart !== false);
+
+  return {
+    ok: true,
+    data: { name, desc, ver, jar, args, port, max, ram, javaPath, motd, diff, mode, pvp, wl, cmd, autoRestart }
+  };
+}
+
+function seedSettingsSavedSnapshot(srv) {
+  if (!srv) return;
+  const res = collectSettingsFormPayload(srv);
+  if (!res.ok) return;
+  const snaps = buildSettingsSnapshots(srv, res.data);
+  _settingsLastSaved[getSettingsSnapshotKey(srv)] = {
+    propsJson: snaps.propsJson,
+    srvJson: snaps.srvJson
+  };
+}
+
+function syncHeroFromSavedServer(targetSrv) {
+  const active = curServer();
+  if (!active || !targetSrv) return;
+  if (active.id !== targetSrv.id || (active.node_id || 'local') !== (targetSrv.node_id || 'local')) return;
+
+  const heroName = $('#srv-hero-name');
+  if (heroName) heroName.textContent = targetSrv.name || 'Minecraft Server';
+
+  const heroDesc = $('#srv-hero-desc');
+  if (heroDesc) {
+    const descTxt = String(targetSrv.description || '').trim();
+    heroDesc.textContent = descTxt;
+    heroDesc.style.display = descTxt ? 'block' : 'none';
+  }
+
+  const heroTitle = $('#srv-hero-title');
+  if (heroTitle) {
+    const trimmed = String(targetSrv.motd || '').trim();
+    if (!trimmed) {
+      heroTitle.style.display = 'none';
+      heroTitle.innerHTML = '';
+    } else {
+      heroTitle.style.display = 'block';
+      heroTitle.innerHTML = renderMinecraftTextHtml(trimmed, { allowNewlines: true });
+    }
+  }
+
+  const engPill = $('#srv-hero-engine');
+  if (engPill) {
+    const srvType = targetSrv.type || S.core || 'paper';
+    const eng = engineMeta(srvType);
+    engPill.innerHTML = `${engineIcon(srvType, 13)} ${esc(eng.label)}${targetSrv.version ? ` ${esc(targetSrv.version)}` : ''}`;
+  }
+
+  const hst = $('#hst');
+  if (hst) {
+    const activeStat = S.status === 'online' || S.status === 'starting';
+    const c = activeStat ? (S.cpu.at(-1) || 0) : 0;
+    const maxRamMB = S.memMaxMB || getServerMaxRamMB(targetSrv);
+    const m = activeStat ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
+    const hostAddr = `${srvHost(targetSrv)}:${targetSrv.port || 25565}`;
+    hst.innerHTML = `<span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
+  }
+
+  updateSettingsCmdPreview();
+}
+
+function scheduleSettingsAutoSave(delay = 550) {
+  if (S.view !== 'set') return;
+  clearSettingsAutoSaveTimer();
+  const srv = curServer();
+  if (!srv) return;
+  const check = collectSettingsFormPayload(srv);
+  if (!check.ok) {
+    setSettingsSaveStatus('warn', check.reason);
+    return;
+  }
+  setSettingsSaveStatus('saving', 'Pending sync...');
+  _settingsAutoTimer = setTimeout(() => {
+    _settingsAutoTimer = null;
+    void saveProperties({ autoSave: true, skipRender: true });
+  }, delay);
+}
+
+function saveSettingsAutoNow() {
+  clearSettingsAutoSaveTimer();
+  if (S.view !== 'set') return;
+  void saveProperties({ autoSave: true, skipRender: true });
+}
+
+function flushSettingsAutoSave() {
+  const hadPending = Boolean(_settingsAutoTimer);
+  clearSettingsAutoSaveTimer();
+  const srv = curServer();
+  if (!srv || S.view !== 'set') return;
+  const collected = collectSettingsFormPayload(srv);
+  if (!collected.ok) {
+    if (hadPending) setSettingsSaveStatus('warn', collected.reason);
+    return;
+  }
+  const key = getSettingsSnapshotKey(srv);
+  const prev = _settingsLastSaved[key];
+  const snaps = buildSettingsSnapshots(srv, collected.data);
+  const changed = !prev || prev.propsJson !== snaps.propsJson || prev.srvJson !== snaps.srvJson;
+  if (hadPending || changed) {
+    void persistSettingsPayload(srv, collected, { autoSave: true, skipRender: true });
+  }
+}
+
+function flushPendingSettingsBeforeLeave() {
+  if (S.view !== 'set') {
+    clearSettingsAutoSaveTimer();
+    return;
+  }
+  const hadPending = Boolean(_settingsAutoTimer);
+  clearSettingsAutoSaveTimer();
+  const srv = curServer();
+  if (!srv) return;
+  const collected = collectSettingsFormPayload(srv);
+  if (!collected.ok) return;
+  const key = getSettingsSnapshotKey(srv);
+  const prev = _settingsLastSaved[key];
+  const snaps = buildSettingsSnapshots(srv, collected.data);
+  if (hadPending || !prev || prev.propsJson !== snaps.propsJson || prev.srvJson !== snaps.srvJson) {
+    void persistSettingsPayload(srv, collected, { autoSave: true, skipRender: true, fromDom: false });
+  }
+}
+
+function onSettingsRuleToggle(key, checked) {
+  S.props[key] = Boolean(checked);
+  saveSettingsAutoNow();
+}
+
+function onSettingsMaxPlayersInput(val) {
+  const raw = String(val ?? '').trim();
+  if (/^\d+$/.test(raw)) {
+    const n = parseInt(raw, 10);
+    if (n >= 1 && n <= 100000) S.props.max = n;
+  }
+  scheduleSettingsAutoSave(550);
+}
+
+function onPropJavaChange(val) {
+  toggleCustomPropJava(val);
+  updateSettingsCmdPreview();
+  if (val === 'custom') {
+    const customEl = $('#prop-java-custom');
+    if (!customEl || !customEl.value.trim()) {
+      setSettingsSaveStatus('warn', 'Enter a custom Java binary path');
+      if (customEl) setTimeout(() => customEl.focus(), 20);
+      return;
+    }
+  }
+  saveSettingsAutoNow();
+}
+
+function onPropVersionSelectChange(val) {
+  const inp = $('#prop-ver');
+  if (inp) inp.value = val;
+  saveSettingsAutoNow();
+}
+
+function onPropVersionInput(val) {
+  const sel = $('#prop-ver-sel');
+  if (sel && Array.from(sel.options).some(o => o.value === val)) {
+    sel.value = val;
+    if (sel._cselectRebuild) sel._cselectRebuild();
+  }
+  scheduleSettingsAutoSave(550);
+}
+
 function onServerIdentityInput() {
   const srv = curServer();
   const nameVal = $('#set-srv-name')?.value ?? '';
@@ -486,6 +804,7 @@ function onServerIdentityInput() {
     heroDesc.textContent = descVal.trim();
     heroDesc.style.display = descVal.trim() ? 'block' : 'none';
   }
+  scheduleSettingsAutoSave(500);
 }
 
 function updateSettingsCmdPreview() {
@@ -500,8 +819,9 @@ function updateSettingsCmdPreview() {
   const memMax = parseInt($('#prop-ram')?.value, 10) || getServerMaxRamMB(srv) || 2048;
   const memMin = Math.min(1024, memMax);
   const jar = $('#prop-jar')?.value?.trim() || srv?.jar_file || 'server.jar';
-  const args = $('#prop-args')?.value?.trim() || srv?.java_args || '-XX:+UseG1GC';
-  el.textContent = `${javaCmd} -Xms${memMin}M -Xmx${memMax}M ${args} -jar ${jar} nogui`;
+  const argsEl = $('#prop-args');
+  const args = argsEl ? argsEl.value.trim() : (srv?.java_args !== undefined && srv?.java_args !== null ? srv.java_args : '-XX:+UseG1GC');
+  el.textContent = `${javaCmd} -Xms${memMin}M -Xmx${memMax}M ${args ? args + ' ' : ''}-jar ${jar} nogui`;
 }
 
 // --- Selectors & Shortcuts ---
@@ -1261,6 +1581,8 @@ function syncActiveServerState(srv) {
   S.core = engineMeta(srv.type || 'paper').label;
 
   if (changed) {
+    clearSettingsAutoSaveTimer();
+    _settingsUiState = { status: 'saved', text: 'Real-time auto-save active' };
     S.log = [];
     S.ports = [];
     S.databases = [];
@@ -1309,6 +1631,7 @@ function syncActiveServerState(srv) {
 
 function applyRoute(urlStr, opts = {}) {
   const { replace = false, fromPopState = false } = opts;
+  flushPendingSettingsBeforeLeave();
   const prevPath = window.location.pathname;
   const prevView = S.view;
   const prevAdminTab = S.adminTab || 0;
@@ -2661,14 +2984,15 @@ async function computeGravatarHash(email) {
 
 // --- API Client ---
 async function api(endpoint, options = {}) {
-  const headers = options.headers || {};
+  const { suppressToast, ...fetchOpts } = options || {};
+  const headers = { ...(fetchOpts.headers || {}) };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
-  if (!headers['Content-Type'] && !(options.body instanceof FormData)) {
+  if (!headers['Content-Type'] && !(fetchOpts.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   }
 
   try {
-    const res = await fetch(endpoint, { ...options, headers });
+    const res = await fetch(endpoint, { ...fetchOpts, headers });
     if (res.status === 401) {
       logout();
       throw new Error('Session expired. Please sign in again.');
@@ -2679,7 +3003,7 @@ async function api(endpoint, options = {}) {
     }
     return data;
   } catch (err) {
-    if (err.message && !err.message.includes('Session expired')) {
+    if (!suppressToast && err.message && !err.message.includes('Session expired')) {
       toast(err.message, 'error');
     }
     throw err;
@@ -4425,7 +4749,7 @@ function srvh() {
       <div id="srv-hero-title" class="srv-hero-sub" style="display:${rawMotd ? 'block' : 'none'};">${rawMotd ? renderMinecraftTextHtml(rawMotd, { allowNewlines: true }) : ''}</div>
       <div id="srv-hero-desc" class="srv-hero-sub" style="display:${panelDesc ? 'block' : 'none'};">${esc(panelDesc)}</div>
       <div class="row" style="gap: 10px 14px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
-        <span class="eng-pill" title="Server Software Engine">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
+        <span id="srv-hero-engine" class="eng-pill" title="Server Software Engine">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
         <div id="hst" class="row hst" style="margin-top: 0;">
           <span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span>
           <span class="mono mu">CPU ${c.toFixed(1)}%</span>
@@ -6680,7 +7004,7 @@ const V = {
     const sw = (k, l) => `<label class="row sb" style="padding:7px 0; border-bottom:1px solid var(--ln);">
       <span>${l}</span>
       <span class="sw">
-        <input type="checkbox" ${p[k] ? 'checked' : ''} onchange="S.props.${k}=this.checked;">
+        <input type="checkbox" id="prop-sw-${k}" ${p[k] ? 'checked' : ''} onchange="onSettingsRuleToggle('${k}', this.checked)">
         <i></i>
       </span>
     </label>`;
@@ -6690,7 +7014,7 @@ const V = {
     const isCustom = curJava === 'custom';
     const curMem = getServerMaxRamMB(srv);
     const memMin = srv?.memory_min || Math.min(1024, curMem);
-    const jvmFlags = srv?.java_args || '-XX:+UseG1GC';
+    const jvmFlags = (srv?.java_args !== undefined && srv?.java_args !== null) ? srv.java_args : '-XX:+UseG1GC';
     const jarName = srv?.jar_file || 'server.jar';
     const javaCmd = isCustom ? (rawJava || 'java') : `java (OpenJDK ${curJava})`;
     const editName = (S.activeServerId === srv?.id && S.editSrvName !== '') ? S.editSrvName : (srv?.name || '');
@@ -6698,25 +7022,33 @@ const V = {
     const curV = srv?.version || '1.21.4';
     const allV = getAllMcVersions(srv?.type || S.core || '');
     const verList = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
+    const saveStatus = _settingsUiState?.status || 'saved';
+    const saveText = _settingsUiState?.text || 'Real-time auto-save active';
 
     return `${srvh()}
     <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 16px;">
       <!-- Top Row: Panel Identity & Active Startup Command / Java Runtime -->
       <div class="stp-top-grid">
         <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 16px; margin-bottom: 12px;">Server Identity &amp; Startup Command</h2>
+          <div class="row sb" style="margin-bottom: 12px; gap: 10px; flex-wrap: wrap; align-items: center;">
+            <h2 style="font-size: 16px; margin: 0;">Server Identity &amp; Startup Command</h2>
+            <span id="set-autosave-pill" class="settings-autosave-pill is-${esc(saveStatus)}" aria-live="polite">
+              <span class="settings-autosave-dot"></span>
+              <span class="settings-autosave-text">${esc(saveText)}</span>
+            </span>
+          </div>
           <div class="grid g2" style="gap: 10px; margin-bottom: 12px;">
             <label class="f" style="margin-bottom: 0;">
               <span>Server Panel Name</span>
-              <input type="text" id="set-srv-name" value="${esc(editName)}" placeholder="e.g. Survival SMP" oninput="onServerIdentityInput()">
+              <input type="text" id="set-srv-name" value="${esc(editName)}" placeholder="e.g. Survival SMP" oninput="onServerIdentityInput()" onblur="flushSettingsAutoSave()">
             </label>
             <label class="f" style="margin-bottom: 0;">
               <span>Description / Tagline</span>
-              <input type="text" id="set-srv-desc" value="${esc(editDesc)}" placeholder="Optional short panel note" oninput="onServerIdentityInput()">
+              <input type="text" id="set-srv-desc" value="${esc(editDesc)}" placeholder="Optional short panel note" oninput="onServerIdentityInput()" onblur="flushSettingsAutoSave()">
             </label>
           </div>
           <div class="mu" style="font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;">Active Startup Command</div>
-          <div id="set-cmd-preview" class="mono" style="background: var(--con-bg); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.55; word-break: break-all;">${esc(javaCmd)} -Xms${memMin}M -Xmx${curMem}M ${esc(jvmFlags)} -jar ${esc(jarName)} nogui</div>
+          <div id="set-cmd-preview" class="mono" style="background: var(--con-bg); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.55; word-break: break-all;">${esc(javaCmd)} -Xms${memMin}M -Xmx${curMem}M ${jvmFlags ? esc(jvmFlags) + ' ' : ''}-jar ${esc(jarName)} nogui</div>
           <span class="mu" style="font-size: 11.5px; margin-top: 8px; display: block;">Auto-restart automatically times out after 2 consecutive startup failures.</span>
         </div>
 
@@ -6724,12 +7056,12 @@ const V = {
           <h2 style="font-size: 16px; margin-bottom: 12px;">Java Runtime Environment</h2>
           <label class="f" style="margin-bottom: 8px;">
             <span>Java Runtime Version</span>
-            <select id="prop-java" onchange="toggleCustomPropJava(this.value); updateSettingsCmdPreview();">
+            <select id="prop-java" onchange="onPropJavaChange(this.value)">
               ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type, srv?.node_id || 'local')}
             </select>
           </label>
           <div id="prop-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
-            <input type="text" id="prop-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;" oninput="updateSettingsCmdPreview()">
+            <input type="text" id="prop-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
           </div>
           ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
           <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Choose Java 25, 21, 17, 8, or a custom JVM binary path for this server.</span>
@@ -6742,7 +7074,7 @@ const V = {
           <h2>Server Properties (<code>server.properties</code>)</h2>
           <label class="f">
             <span>Server Message (MOTD)</span>
-            <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="onMotdInput(this.value)" placeholder="e.g. &lt;gradient:#00f5a0:#00d9f5&gt;&lt;bold&gt;My Server&lt;/bold&gt;&lt;/gradient&gt; or §bWelcome!">
+            <input type="text" id="prop-motd" value="${esc(p.motd)}" oninput="onMotdInput(this.value)" onblur="flushSettingsAutoSave()" placeholder="e.g. &lt;gradient:#00f5a0:#00d9f5&gt;&lt;bold&gt;My Server&lt;/bold&gt;&lt;/gradient&gt; or §bWelcome!">
           </label>
           <div class="motd-preview-box">
             <div class="row sb" style="margin-bottom:6px; gap:8px;">
@@ -6754,21 +7086,21 @@ const V = {
           <div class="grid g2">
             <label class="f">
               <span>Server Game Port</span>
-              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}">
+              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}" oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()">
             </label>
             <label class="f">
               <span>Max Players</span>
-              <input type="number" min="1" max="1000" id="prop-max" value="${p.max}" oninput="S.props.max=+this.value||1;">
+              <input type="number" min="1" max="100000" id="prop-max" value="${p.max}" oninput="onSettingsMaxPlayersInput(this.value)" onblur="flushSettingsAutoSave()">
             </label>
           </div>
           <div class="grid g2">
             <label class="f">
               <span>Game Difficulty</span>
-              <select id="prop-diff" onchange="S.props.diff=this.value">${o(p.diff, ['peaceful', 'easy', 'normal', 'hard'])}</select>
+              <select id="prop-diff" onchange="S.props.diff=this.value; saveSettingsAutoNow();">${o(p.diff, ['peaceful', 'easy', 'normal', 'hard'])}</select>
             </label>
             <label class="f">
               <span>Default Gamemode</span>
-              <select id="prop-mode" onchange="S.props.mode=this.value">${o(p.mode, ['survival', 'creative', 'adventure'])}</select>
+              <select id="prop-mode" onchange="S.props.mode=this.value; saveSettingsAutoNow();">${o(p.mode, ['survival', 'creative', 'adventure'])}</select>
             </label>
           </div>
           <h3 style="font-size: 14px; font-weight: 700; margin: 14px 0 6px; color: var(--tx);">Game Rules &amp; Protection</h3>
@@ -6782,7 +7114,7 @@ const V = {
           <div class="grid g2">
             <label class="f">
               <span>Allocated Memory (-Xmx)</span>
-              <select id="prop-ram" onchange="updateSettingsCmdPreview()">
+              <select id="prop-ram" onchange="updateSettingsCmdPreview(); saveSettingsAutoNow();">
                 <option value="1024" ${curMem === 1024 ? 'selected' : ''}>1 GB (1024 MB)</option>
                 <option value="2048" ${curMem === 2048 ? 'selected' : ''}>2 GB (2048 MB)</option>
                 <option value="4096" ${curMem === 4096 ? 'selected' : ''}>4 GB (4096 MB)</option>
@@ -6793,21 +7125,21 @@ const V = {
             </label>
             <label class="f">
               <span>Server Executable JAR</span>
-              <input type="text" id="prop-jar" value="${esc(jarName)}" placeholder="server.jar" oninput="updateSettingsCmdPreview()">
+              <input type="text" id="prop-jar" value="${esc(jarName)}" placeholder="server.jar" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
             </label>
           </div>
           <div class="f" style="margin-bottom: 12px;">
             <span style="display:block; margin-bottom:6px; font-size:12.5px; color:var(--tx-muted); font-weight:600;">Minecraft / Release Version</span>
             <div style="display: grid; grid-template-columns: minmax(135px, 165px) 1fr; gap: 8px;">
-              <select id="prop-ver-sel" data-searchable="1" onchange="const inp=$('#prop-ver'); if(inp) inp.value=this.value;">
+              <select id="prop-ver-sel" data-searchable="1" onchange="onPropVersionSelectChange(this.value)">
                 ${verList.map(v => `<option value="${esc(v)}" ${v === curV ? 'selected' : ''}>${esc(v)}</option>`).join('')}
               </select>
-              <input type="text" id="prop-ver" value="${esc(curV)}" style="font-weight: 600;" oninput="const sel=$('#prop-ver-sel'); if(sel && Array.from(sel.options).some(o=>o.value===this.value)){ sel.value=this.value; if(sel._cselectRebuild) sel._cselectRebuild(); }">
+              <input type="text" id="prop-ver" value="${esc(curV)}" style="font-weight: 600;" oninput="onPropVersionInput(this.value)" onblur="flushSettingsAutoSave()">
             </div>
           </div>
           <label class="f">
             <span>Custom JVM Flags (JAVA_ARGS)</span>
-            <input type="text" id="prop-args" value="${esc(jvmFlags)}" placeholder="-XX:+UseG1GC" oninput="updateSettingsCmdPreview()">
+            <input type="text" id="prop-args" value="${esc(jvmFlags)}" placeholder="-XX:+UseG1GC" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
           </label>
           <label class="row sb" style="padding: 10px 0; border-top: 1px solid var(--ln); border-bottom: 1px solid var(--ln); margin-bottom: 14px;">
             <div>
@@ -6815,13 +7147,13 @@ const V = {
               <span class="mu" style="font-size: 11.5px;">Halts automatically after 2 consecutive startup failures</span>
             </div>
             <span class="sw">
-              <input type="checkbox" id="prop-autorestart" ${srv?.auto_restart !== false ? 'checked' : ''}>
+              <input type="checkbox" id="prop-autorestart" ${srv?.auto_restart !== false ? 'checked' : ''} onchange="saveSettingsAutoNow()">
               <i></i>
             </span>
           </label>
-          <div class="row" style="gap: 10px; flex-wrap: wrap;">
-            <button type="button" class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save All Settings</button>
-            <button type="button" class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
+          <div id="set-autosave-status" class="settings-autosave-footer is-${esc(saveStatus)}" aria-live="polite">
+            <span class="settings-autosave-dot"></span>
+            <span class="settings-autosave-text">${esc(saveText)}</span>
           </div>
         </div>
       </div>
@@ -10292,6 +10624,18 @@ function onMotdInput(val) {
       heroTitle.innerHTML = renderMinecraftTextHtml(trimmed, { allowNewlines: true });
     }
   }
+  scheduleSettingsAutoSave(500);
+}
+
+function shouldSkipSettingsBgRender() {
+  if (S.view !== 'set') return false;
+  if (_settingsAutoTimer || _settingsSaveInFlight) return true;
+  const act = document.activeElement;
+  const main = $('#main');
+  if (act && main && main.contains && main.contains(act) && ['INPUT', 'TEXTAREA', 'SELECT'].includes(act.tagName)) {
+    return true;
+  }
+  return false;
 }
 
 async function loadProperties(skipRender = false) {
@@ -10299,6 +10643,7 @@ async function loadProperties(skipRender = false) {
   if (!srv) return;
   try {
     const props = await api(srvApiPath(srv, '/properties'));
+    if (shouldSkipSettingsBgRender()) return;
     S.props._srvId = srv.id;
     S.props.motd = props['motd'] || srv.motd || srv.name || 'A Minecraft Server';
     srv.motd = S.props.motd;
@@ -10308,89 +10653,129 @@ async function loadProperties(skipRender = false) {
     S.props.pvp = props['pvp'] !== 'false';
     S.props.wl = props['white-list'] === 'true';
     S.props.cmd = props['enable-command-block'] === 'true';
-    if (!skipRender) R();
+    if (!skipRender && !shouldSkipSettingsBgRender()) R();
+    seedSettingsSavedSnapshot(srv);
   } catch (e) {}
 }
 
-async function saveProperties() {
-  const srv = curServer();
-  if (!srv) return;
-  const newName = ($('#set-srv-name')?.value ?? srv.name ?? '').trim() || srv.name || 'Minecraft Server';
-  const newDesc = ($('#set-srv-desc')?.value ?? srv.description ?? '').trim();
-  const newVer = ($('#prop-ver')?.value ?? srv.version ?? '1.21.4').trim() || srv.version || '1.21.4';
-  const newJar = ($('#prop-jar')?.value ?? srv.jar_file ?? 'server.jar').trim() || srv.jar_file || 'server.jar';
-  const newArgs = ($('#prop-args')?.value ?? srv.java_args ?? '-XX:+UseG1GC').trim() || srv.java_args || '-XX:+UseG1GC';
-  const autoRestartEl = $('#prop-autorestart');
-  const newAutoRestart = autoRestartEl ? Boolean(autoRestartEl.checked) : (srv.auto_restart !== false);
-  const newPort = parseInt($('#prop-port')?.value) || srv.port || 25565;
-  const newRam = parseInt($('#prop-ram')?.value) || getServerMaxRamMB(srv);
-  let newJava = $('#prop-java')?.value;
-  if (newJava === 'custom') {
-    newJava = $('#prop-java-custom')?.value.trim();
+async function persistSettingsPayload(targetSrv, collected, opts = {}) {
+  const { autoSave = false, skipRender = false, force = false } = opts || {};
+  if (!targetSrv || !collected || !collected.ok) return;
+
+  if (_settingsSaveInFlight) {
+    _settingsSaveQueued = { targetSrv, collected, opts, fromDom: opts.fromDom !== false };
+    return;
   }
 
-  const payload = {
-    'motd': S.props.motd,
-    'server-port': String(newPort),
-    'max-players': String(S.props.max),
-    'difficulty': S.props.diff,
-    'gamemode': S.props.mode,
-    'pvp': String(S.props.pvp),
-    'white-list': String(S.props.wl),
-    'enable-command-block': String(S.props.cmd)
-  };
+  const snaps = buildSettingsSnapshots(targetSrv, collected.data);
+  const key = getSettingsSnapshotKey(targetSrv);
+  const prev = _settingsLastSaved[key];
+  const sendProps = force || !prev || prev.propsJson !== snaps.propsJson;
+  const sendSrv = force || !prev || prev.srvJson !== snaps.srvJson;
+
+  if (!sendProps && !sendSrv) {
+    setSettingsSaveStatus('saved', 'All changes saved automatically');
+    return;
+  }
+
+  _settingsSaveInFlight = true;
+  setSettingsSaveStatus('saving', 'Saving changes...');
+
+  const d = collected.data;
+  const nodeId = targetSrv.node_id || 'local';
 
   try {
-    // 1. Write server.properties file
-    await api(srvApiPath(srv, '/properties'), {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
+    if (sendProps) {
+      await api(srvApiPath(targetSrv, '/properties'), {
+        method: 'POST',
+        suppressToast: autoSave,
+        body: JSON.stringify(snaps.propsPayload)
+      });
+    }
 
-    // 2. Persist identity, port, memory, java runtime & startup flags to SQLite DB and process runner
-    await api(srvApiPath(srv, ''), {
-      method: 'PUT',
-      body: JSON.stringify({
-        name: newName,
-        description: newDesc,
-        type: srv.type,
-        version: newVer,
-        jar_file: newJar,
-        port: newPort,
-        memory_min: Math.min(1024, newRam),
-        memory_max: newRam,
-        java_path: newJava || srv.java_path,
-        java_args: newArgs,
-        auto_restart: newAutoRestart
-      })
-    });
+    if (sendSrv) {
+      await api(srvApiPath(targetSrv, ''), {
+        method: 'PUT',
+        suppressToast: autoSave,
+        body: JSON.stringify(snaps.srvPayload)
+      });
+    }
 
-    srv.name = newName;
-    srv.description = newDesc;
-    srv.version = newVer;
-    srv.jar_file = newJar;
-    srv.java_args = newArgs;
-    srv.auto_restart = newAutoRestart;
-    srv.port = newPort;
-    srv.memory_max = newRam;
-    srv.memory_min = Math.min(1024, newRam);
-    srv.motd = S.props.motd;
-    S.ver = newVer;
-    S.editSrvName = newName;
-    S.editSrvDesc = newDesc;
-    S.props._srvId = srv.id;
-    if (newJava) srv.java_path = newJava;
+    targetSrv.name = d.name;
+    targetSrv.description = d.desc;
+    targetSrv.version = d.ver;
+    targetSrv.jar_file = d.jar;
+    targetSrv.java_args = d.args;
+    targetSrv.auto_restart = d.autoRestart;
+    targetSrv.port = d.port;
+    targetSrv.memory_max = d.ram;
+    targetSrv.memory_min = Math.min(1024, d.ram);
+    targetSrv.motd = d.motd;
+    if (d.javaPath) targetSrv.java_path = d.javaPath;
 
-    toast('Server settings, identity & startup configuration saved!', 'ok');
-    R();
+    _settingsLastSaved[key] = {
+      propsJson: snaps.propsJson,
+      srvJson: snaps.srvJson
+    };
+
+    const stillActive = curServer()?.id === targetSrv.id && (curServer()?.node_id || 'local') === nodeId;
+    if (stillActive) {
+      S.ver = d.ver;
+      S.editSrvName = d.name;
+      S.editSrvDesc = d.desc;
+      S.props._srvId = targetSrv.id;
+      S.memMaxMB = d.ram;
+      syncHeroFromSavedServer(targetSrv);
+    }
+
+    setSettingsSaveStatus('saved', `Saved at ${clock()}`);
+
+    if (!autoSave) {
+      toast('Server settings, identity & startup configuration saved!', 'ok');
+      if (!skipRender) R();
+    }
   } catch (e) {
+    setSettingsSaveStatus('error', e.message || 'Auto-save failed');
     toast(e.message || 'Failed to save server settings', 'bad');
-    uiAlert({
-      title: 'Failed to Save Settings',
-      message: `Could not save server properties: ${esc(e.message || 'Validation error')}`,
-      type: 'error'
-    });
+    if (!autoSave) {
+      uiAlert({
+        title: 'Failed to Save Settings',
+        message: `Could not save server properties: ${esc(e.message || 'Validation error')}`,
+        type: 'error'
+      });
+    }
+  } finally {
+    _settingsSaveInFlight = false;
+    if (_settingsSaveQueued) {
+      const next = _settingsSaveQueued;
+      _settingsSaveQueued = null;
+      let nextCollected = next.collected;
+      if (next.fromDom && curServer()?.id === next.targetSrv.id && S.view === 'set') {
+        const fresh = collectSettingsFormPayload(next.targetSrv);
+        if (fresh.ok) nextCollected = fresh;
+        else {
+          setSettingsSaveStatus('warn', fresh.reason);
+          return;
+        }
+      }
+      void persistSettingsPayload(next.targetSrv, nextCollected, next.opts);
+    }
   }
+}
+
+async function saveProperties(opts = {}) {
+  clearSettingsAutoSaveTimer();
+  const srv = curServer();
+  if (!srv) return;
+  const collected = collectSettingsFormPayload(srv);
+  if (!collected.ok) {
+    setSettingsSaveStatus('warn', collected.reason);
+    if (!opts?.autoSave) {
+      toast(collected.reason || 'Check server settings values', 'bad');
+    }
+    return;
+  }
+  return persistSettingsPayload(srv, collected, opts);
 }
 
 async function loadSFTPDetails(skipRender = false) {
@@ -10399,7 +10784,7 @@ async function loadSFTPDetails(skipRender = false) {
   try {
     const data = await api(srvApiPath(srv, '/sftp'));
     S.sftp = data;
-    if (!skipRender) R();
+    if (!skipRender && !shouldSkipSettingsBgRender()) R();
   } catch (e) {}
 }
 
@@ -10583,6 +10968,7 @@ function toggleTheme() {
 function switchServer(index) {
   const srv = S.servers[index];
   if (!srv) return;
+  flushPendingSettingsBeforeLeave();
   syncActiveServerState(srv);
 
   const serverViews = ['con', 'set', 'act', 'fi', 'db', 'bk', 'sc', 'net', 'sub', 'stp', 'pl', 'plug', 'ver'];
@@ -13342,6 +13728,8 @@ async function logout() {
   S.token = '';
   S.activeServerId = null;
   S.activeNodeId = null;
+  clearSettingsAutoSaveTimer();
+  _settingsSaveQueued = null;
   S.wsState = 'disconnected';
   S.maintAdminSignInOpen = false;
   localStorage.removeItem('neopanel_token');
@@ -13583,6 +13971,15 @@ window.verifySubdomainDNS = verifySubdomainDNS;
 window.syncPlayersList = syncPlayersList;
 window.onServerIdentityInput = onServerIdentityInput;
 window.updateSettingsCmdPreview = updateSettingsCmdPreview;
+window.scheduleSettingsAutoSave = scheduleSettingsAutoSave;
+window.saveSettingsAutoNow = saveSettingsAutoNow;
+window.flushSettingsAutoSave = flushSettingsAutoSave;
+window.onSettingsRuleToggle = onSettingsRuleToggle;
+window.onSettingsMaxPlayersInput = onSettingsMaxPlayersInput;
+window.onPropJavaChange = onPropJavaChange;
+window.onPropVersionSelectChange = onPropVersionSelectChange;
+window.onPropVersionInput = onPropVersionInput;
+window.setSettingsSaveStatus = setSettingsSaveStatus;
 
 // --- Custom Glassmorphic Selects System (Portaled to document.body to prevent clipping) ---
 function closeAllCustomSelects() {

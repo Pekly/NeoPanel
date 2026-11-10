@@ -5515,3 +5515,103 @@ html[data-theme="light"] .eng-pill {
   background: rgba(15, 23, 42, 0.06);
   border-color: rgba(15, 23, 42, 0.14);
 }
+
+/* Real-Time Server Settings Auto-Save Status */
+@keyframes npPulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+.settings-autosave-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.settings-autosave-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tx-muted);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.settings-autosave-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 13px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--tx-muted);
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.settings-autosave-pill.is-saved,
+.settings-autosave-footer.is-saved {
+  background: rgba(63, 185, 80, 0.1);
+  border-color: rgba(63, 185, 80, 0.3);
+  color: #4ade80;
+}
+
+.settings-autosave-pill.is-saving,
+.settings-autosave-footer.is-saving {
+  background: rgba(56, 122, 255, 0.12);
+  border-color: rgba(56, 122, 255, 0.35);
+  color: #93c5fd;
+}
+
+.settings-autosave-pill.is-saving .settings-autosave-dot,
+.settings-autosave-footer.is-saving .settings-autosave-dot {
+  animation: npPulseDot 1s ease-in-out infinite;
+}
+
+.settings-autosave-pill.is-warn,
+.settings-autosave-footer.is-warn {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #fcd34d;
+}
+
+.settings-autosave-pill.is-error,
+.settings-autosave-footer.is-error {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+  color: #f87171;
+}
+
+html[data-theme="light"] .settings-autosave-pill.is-saved,
+html[data-theme="light"] .settings-autosave-footer.is-saved {
+  color: #15803d;
+}
+
+html[data-theme="light"] .settings-autosave-pill.is-saving,
+html[data-theme="light"] .settings-autosave-footer.is-saving {
+  color: #1d4ed8;
+}
+
+html[data-theme="light"] .settings-autosave-pill.is-warn,
+html[data-theme="light"] .settings-autosave-footer.is-warn {
+  color: #b45309;
+}
+
+html[data-theme="light"] .settings-autosave-pill.is-error,
+html[data-theme="light"] .settings-autosave-footer.is-error {
+  color: #b91c1c;
+}
