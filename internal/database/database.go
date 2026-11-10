@@ -114,6 +114,40 @@ func (db *DB) migrate() error {
 
 	CREATE INDEX IF NOT EXISTS idx_server_ports_srv ON server_ports(server_id);
 	CREATE INDEX IF NOT EXISTS idx_server_ports_port ON server_ports(port);
+
+	CREATE TABLE IF NOT EXISTS nodes (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		base_url TEXT NOT NULL,
+		api_token TEXT NOT NULL DEFAULT '',
+		fqdn TEXT NOT NULL DEFAULT '',
+		location TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS server_databases (
+		id TEXT PRIMARY KEY,
+		server_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		engine TEXT NOT NULL DEFAULT 'sqlite',
+		username TEXT NOT NULL DEFAULT '',
+		password TEXT NOT NULL DEFAULT '',
+		host TEXT NOT NULL DEFAULT '127.0.0.1',
+		port INTEGER NOT NULL DEFAULT 0,
+		file_path TEXT NOT NULL DEFAULT '',
+		max_connections INTEGER NOT NULL DEFAULT 25,
+		created_at DATETIME NOT NULL,
+		UNIQUE(server_id, name)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_server_databases_srv ON server_databases(server_id);
+
+	CREATE TABLE IF NOT EXISTS panel_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
 	`
 	_, err := db.conn.Exec(schema)
 	return err
@@ -563,3 +597,154 @@ func (db *DB) DeleteAllServerPorts(serverID string) error {
 	return err
 }
 
+// --- API Key Lookup ---
+
+func (db *DB) GetUserByAPIKeyHash(keyHash string) (*User, error) {
+	row := db.conn.QueryRow(`
+		SELECT u.id, u.username, u.password_hash, u.role, u.created_at
+		FROM api_keys ak
+		JOIN users u ON u.id = ak.user_id
+		WHERE ak.key_hash = ?
+		LIMIT 1`, keyHash)
+	user := &User{}
+	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// --- Cluster Nodes ---
+
+func (db *DB) ListNodes() ([]*ClusterNode, error) {
+	rows, err := db.conn.Query(`SELECT id, name, base_url, api_token, fqdn, location, created_at, updated_at FROM nodes ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []*ClusterNode
+	for rows.Next() {
+		n := &ClusterNode{}
+		if err := rows.Scan(&n.ID, &n.Name, &n.BaseURL, &n.APIToken, &n.FQDN, &n.Location, &n.CreatedAt, &n.UpdatedAt); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if nodes == nil {
+		nodes = []*ClusterNode{}
+	}
+	return nodes, nil
+}
+
+func (db *DB) GetNode(id string) (*ClusterNode, error) {
+	row := db.conn.QueryRow(`SELECT id, name, base_url, api_token, fqdn, location, created_at, updated_at FROM nodes WHERE id = ?`, id)
+	n := &ClusterNode{}
+	if err := row.Scan(&n.ID, &n.Name, &n.BaseURL, &n.APIToken, &n.FQDN, &n.Location, &n.CreatedAt, &n.UpdatedAt); err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
+func (db *DB) CreateNode(n *ClusterNode) error {
+	now := time.Now().UTC()
+	n.CreatedAt = now
+	n.UpdatedAt = now
+	_, err := db.conn.Exec(`INSERT INTO nodes (id, name, base_url, api_token, fqdn, location, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		n.ID, n.Name, n.BaseURL, n.APIToken, n.FQDN, n.Location, n.CreatedAt, n.UpdatedAt)
+	return err
+}
+
+func (db *DB) UpdateNode(n *ClusterNode) error {
+	n.UpdatedAt = time.Now().UTC()
+	_, err := db.conn.Exec(`UPDATE nodes SET name = ?, base_url = ?, api_token = ?, fqdn = ?, location = ?, updated_at = ? WHERE id = ?`,
+		n.Name, n.BaseURL, n.APIToken, n.FQDN, n.Location, n.UpdatedAt, n.ID)
+	return err
+}
+
+func (db *DB) DeleteNode(id string) error {
+	_, err := db.conn.Exec(`DELETE FROM nodes WHERE id = ?`, id)
+	return err
+}
+
+// --- Server Databases ---
+
+func (db *DB) ListServerDatabases(serverID string) ([]*ServerDatabase, error) {
+	rows, err := db.conn.Query(`SELECT id, server_id, name, engine, username, password, host, port, file_path, max_connections, created_at FROM server_databases WHERE server_id = ? ORDER BY created_at DESC`, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var dbs []*ServerDatabase
+	for rows.Next() {
+		d := &ServerDatabase{}
+		if err := rows.Scan(&d.ID, &d.ServerID, &d.Name, &d.Engine, &d.Username, &d.Password, &d.Host, &d.Port, &d.FilePath, &d.MaxConnections, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		dbs = append(dbs, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if dbs == nil {
+		dbs = []*ServerDatabase{}
+	}
+	return dbs, nil
+}
+
+func (db *DB) GetServerDatabase(serverID, dbID string) (*ServerDatabase, error) {
+	row := db.conn.QueryRow(`SELECT id, server_id, name, engine, username, password, host, port, file_path, max_connections, created_at FROM server_databases WHERE server_id = ? AND id = ?`, serverID, dbID)
+	d := &ServerDatabase{}
+	if err := row.Scan(&d.ID, &d.ServerID, &d.Name, &d.Engine, &d.Username, &d.Password, &d.Host, &d.Port, &d.FilePath, &d.MaxConnections, &d.CreatedAt); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (db *DB) CreateServerDatabase(d *ServerDatabase) error {
+	now := time.Now().UTC()
+	d.CreatedAt = now
+	_, err := db.conn.Exec(`INSERT INTO server_databases (id, server_id, name, engine, username, password, host, port, file_path, max_connections, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.ServerID, d.Name, d.Engine, d.Username, d.Password, d.Host, d.Port, d.FilePath, d.MaxConnections, d.CreatedAt)
+	return err
+}
+
+func (db *DB) UpdateServerDatabasePassword(serverID, dbID, newPassword string) error {
+	_, err := db.conn.Exec(`UPDATE server_databases SET password = ? WHERE server_id = ? AND id = ?`, newPassword, serverID, dbID)
+	return err
+}
+
+func (db *DB) DeleteServerDatabase(serverID, dbID string) error {
+	_, err := db.conn.Exec(`DELETE FROM server_databases WHERE server_id = ? AND id = ?`, serverID, dbID)
+	return err
+}
+
+func (db *DB) DeleteAllServerDatabases(serverID string) error {
+	_, err := db.conn.Exec(`DELETE FROM server_databases WHERE server_id = ?`, serverID)
+	return err
+}
+
+// --- Panel Settings ---
+
+func (db *DB) GetPanelSetting(key string) (string, error) {
+	var val string
+	err := db.conn.QueryRow(`SELECT value FROM panel_settings WHERE key = ?`, key).Scan(&val)
+	if err != nil {
+		return "", err
+	}
+	return val, nil
+}
+
+func (db *DB) SetPanelSetting(key, value string) error {
+	now := time.Now().UTC()
+	_, err := db.conn.Exec(`INSERT INTO panel_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`, key, value, now)
+	return err
+}
+
+func (db *DB) DeletePanelSetting(key string) error {
+	_, err := db.conn.Exec(`DELETE FROM panel_settings WHERE key = ?`, key)
+	return err
+}

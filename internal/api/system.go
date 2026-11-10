@@ -29,7 +29,7 @@ type SystemInfo struct {
 	Goroutines  int    `json:"goroutines"`
 }
 
-func HandleSystemInfo(w http.ResponseWriter, r *http.Request) {
+func collectSystemInfo() SystemInfo {
 	info := SystemInfo{
 		OS:          runtime.GOOS,
 		Arch:        runtime.GOARCH,
@@ -45,8 +45,11 @@ func HandleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	if runtime.GOOS == "linux" {
 		readLinuxMemInfo(&info)
 	}
+	return info
+}
 
-	writeJSON(w, http.StatusOK, info)
+func HandleSystemInfo(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, collectSystemInfo())
 }
 
 func HandleRunGC(w http.ResponseWriter, r *http.Request) {

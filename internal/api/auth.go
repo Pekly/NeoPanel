@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -86,6 +88,28 @@ func (h *AuthHandler) ValidateToken(tokenStr string) (*JWTClaims, error) {
 	return nil, jwt.ErrSignatureInvalid
 }
 
+// ValidateAuthToken validates either a signed JWT session token or a raw "neo_..." API key.
+func (h *AuthHandler) ValidateAuthToken(tokenStr string) (*JWTClaims, error) {
+	tokenStr = strings.TrimSpace(tokenStr)
+	if tokenStr == "" {
+		return nil, jwt.ErrTokenMalformed
+	}
+	if strings.HasPrefix(tokenStr, "neo_") {
+		sum := sha256.Sum256([]byte(tokenStr))
+		keyHash := hex.EncodeToString(sum[:])
+		user, err := h.db.GetUserByAPIKeyHash(keyHash)
+		if err != nil || user == nil {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return &JWTClaims{
+			UserID:   user.ID,
+			Username: user.Username,
+			Role:     user.Role,
+		}, nil
+	}
+	return h.ValidateToken(tokenStr)
+}
+
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	count, err := h.db.GetUserCount()
 	if err != nil {
@@ -118,10 +142,10 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Username         string `json:"username"`
-		Password         string `json:"password"`
-		TurnstileResp    string `json:"cf-turnstile-response"`
-		TurnstileToken   string `json:"turnstile_token"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		TurnstileResp  string `json:"cf-turnstile-response"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid input"})
@@ -363,4 +387,3 @@ func (h *AuthHandler) UpdateTurnstileConfig(w http.ResponseWriter, r *http.Reque
 		"has_secret_key": hasSecret,
 	})
 }
-

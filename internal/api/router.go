@@ -30,19 +30,25 @@ type Router struct {
 	backups        *BackupHandler
 	players        *PlayerHandler
 	software       *SoftwareHandler
+	branding       *BrandingHandler
+	databases      *DatabaseHandler
+	nodes          *NodeHandler
 	embeddedStatic fs.FS
 }
 
 func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManager, embeddedStatic fs.FS) *Router {
 	authHandler := NewAuthHandler(db, cfg)
 	accountHandler := NewAccountHandler(db, authHandler)
-	serverHandler := NewServerHandler(db, manager)
+	serverHandler := NewServerHandler(cfg, db, manager)
 	consoleHandler := NewConsoleHandler(db, authHandler, manager)
 	fileHandler := NewFileHandler(db, manager)
 	pluginHandler := NewPluginHandler(db, manager)
 	backupHandler := NewBackupHandler(cfg, db, manager)
 	playerHandler := NewPlayerHandler(db, manager)
 	softwareHandler := NewSoftwareHandler(db, manager)
+	brandingHandler := NewBrandingHandler(db, cfg)
+	databaseHandler := NewDatabaseHandler(cfg, db)
+	nodeHandler := NewNodeHandler(cfg, db, authHandler, manager)
 
 	r := &Router{
 		mux:            http.NewServeMux(),
@@ -56,6 +62,9 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		backups:        backupHandler,
 		players:        playerHandler,
 		software:       softwareHandler,
+		branding:       brandingHandler,
+		databases:      databaseHandler,
+		nodes:          nodeHandler,
 		embeddedStatic: embeddedStatic,
 	}
 
@@ -73,10 +82,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) registerRoutes(db *database.DB) {
-	// Public auth routes
+	// Public auth & branding routes
 	r.mux.HandleFunc("GET /api/auth/status", r.auth.Status)
 	r.mux.HandleFunc("POST /api/auth/setup", r.auth.Setup)
 	r.mux.HandleFunc("POST /api/auth/login", r.auth.Login)
+	r.mux.HandleFunc("GET /api/branding", r.branding.GetPublicBranding)
 
 	// Protected auth routes
 	r.mux.HandleFunc("GET /api/auth/me", r.requireAuth(r.auth.Me))
@@ -133,6 +143,15 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/servers/{id}/properties", r.requireAuth(r.software.GetProperties))
 	r.mux.HandleFunc("POST /api/servers/{id}/properties", r.requireAuth(r.software.SaveProperties))
 
+	// Per-server SQLite Databases routes
+	r.mux.HandleFunc("GET /api/servers/{id}/databases", r.requireAuth(r.databases.List))
+	r.mux.HandleFunc("POST /api/servers/{id}/databases", r.requireAuth(r.databases.Create))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/databases/{dbId}", r.requireAuth(r.databases.Delete))
+	r.mux.HandleFunc("POST /api/servers/{id}/databases/{dbId}/rotate", r.requireAuth(r.databases.RotatePassword))
+	r.mux.HandleFunc("GET /api/servers/{id}/databases/{dbId}/tables", r.requireAuth(r.databases.Tables))
+	r.mux.HandleFunc("POST /api/servers/{id}/databases/{dbId}/query", r.requireAuth(r.databases.Query))
+	r.mux.HandleFunc("GET /api/servers/{id}/databases/{dbId}/export", r.requireAuth(r.databases.Export))
+
 	// SFTP details endpoint
 	r.mux.HandleFunc("GET /api/servers/{id}/sftp", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		serverID := getURLParam(req, "id")
@@ -146,10 +165,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 		if userClaims != nil && userClaims.Username != "" {
 			username = userClaims.Username
 		}
-		host := req.Host
-		if strings.Contains(host, ":") {
-			host = strings.Split(host, ":")[0]
-		}
+		host := r.nodes.resolveLocalFQDN(req.Host)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"enabled":     r.cfg.SFTP.Enabled,
 			"port":        r.cfg.SFTP.Port,
@@ -181,9 +197,23 @@ func (r *Router) registerRoutes(db *database.DB) {
 	}))
 	r.mux.HandleFunc("GET /api/admin/turnstile", r.requireAuth(r.auth.GetTurnstileConfig))
 	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAuth(r.auth.UpdateTurnstileConfig))
+	r.mux.HandleFunc("GET /api/admin/branding", r.requireAuth(r.branding.GetAdminBranding))
+	r.mux.HandleFunc("PUT /api/admin/branding", r.requireAuth(r.branding.UpdateAdminBranding))
+	r.mux.HandleFunc("POST /api/admin/branding/reset", r.requireAuth(r.branding.ResetAdminBranding))
 	r.mux.HandleFunc("GET /api/admin/users", r.requireAuth(r.auth.ListUsers))
 	r.mux.HandleFunc("POST /api/admin/users", r.requireAuth(r.auth.AdminCreateUser))
 	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAuth(r.auth.AdminDeleteUser))
+
+	// Multi-node cluster & proxy routes
+	r.mux.HandleFunc("GET /api/cluster/servers", r.requireAuth(r.nodes.ListClusterServers))
+	r.mux.HandleFunc("GET /api/nodes", r.requireAuth(r.nodes.ListNodes))
+	r.mux.HandleFunc("POST /api/nodes", r.requireAuth(r.nodes.CreateNode))
+	r.mux.HandleFunc("POST /api/nodes/test", r.requireAuth(r.nodes.TestNodePayload))
+	r.mux.HandleFunc("POST /api/nodes/{id}/test", r.requireAuth(r.nodes.TestNodeByID))
+	r.mux.HandleFunc("PUT /api/nodes/{id}", r.requireAuth(r.nodes.UpdateNode))
+	r.mux.HandleFunc("DELETE /api/nodes/{id}", r.requireAuth(r.nodes.DeleteNode))
+	r.mux.HandleFunc("/api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.nodes.Proxy))
+	r.mux.HandleFunc("GET /api/nodes/{id}/ws/{serverId}", r.nodes.ProxyWS)
 
 	// Embedded Static & SPA routes
 	if r.embeddedStatic != nil {
@@ -218,12 +248,19 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 
+		// 3. Check ?token= query fallback (used for browser downloads across proxied nodes)
+		if tokenStr == "" {
+			if qt := strings.TrimSpace(req.URL.Query().Get("token")); qt != "" {
+				tokenStr = qt
+			}
+		}
+
 		if tokenStr == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized: missing token"})
 			return
 		}
 
-		claims, err := r.auth.ValidateToken(tokenStr)
+		claims, err := r.auth.ValidateAuthToken(tokenStr)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized: invalid or expired token"})
 			return

@@ -77,3 +77,28 @@ type ServerPort struct {
 	IsPrimary bool      `json:"is_primary"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type ClusterNode struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	BaseURL   string    `json:"base_url"`
+	APIToken  string    `json:"-"`
+	FQDN      string    `json:"fqdn"`
+	Location  string    `json:"location"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ServerDatabase struct {
+	ID             string    `json:"id"`
+	ServerID       string    `json:"server_id"`
+	Name           string    `json:"name"`
+	Engine         string    `json:"engine"` // "sqlite" or "mariadb"
+	Username       string    `json:"username"`
+	Password       string    `json:"password"`
+	Host           string    `json:"host"`
+	Port           int       `json:"port"`
+	FilePath       string    `json:"file_path"`
+	MaxConnections int       `json:"max_connections"`
+	CreatedAt      time.Time `json:"created_at"`
+}

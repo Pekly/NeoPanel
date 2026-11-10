@@ -482,5 +482,3 @@ func extractTarReader(tr *tar.Reader, destDir string) (int, error) {
 	}
 	return count, nil
 }
-
-

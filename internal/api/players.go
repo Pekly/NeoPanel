@@ -151,4 +151,3 @@ func (h *PlayerHandler) Action(w http.ResponseWriter, r *http.Request) {
 		"message": "Player action executed: " + cmd,
 	})
 }
-

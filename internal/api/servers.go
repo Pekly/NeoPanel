@@ -13,18 +13,21 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/downloader"
 	"github.com/Pekly/NeoPanel/internal/runner"
 )
 
 type ServerHandler struct {
+	cfg     *config.Config
 	db      *database.DB
 	manager *runner.ServerManager
 }
 
-func NewServerHandler(db *database.DB, manager *runner.ServerManager) *ServerHandler {
+func NewServerHandler(cfg *config.Config, db *database.DB, manager *runner.ServerManager) *ServerHandler {
 	return &ServerHandler{
+		cfg:     cfg,
 		db:      db,
 		manager: manager,
 	}
@@ -70,13 +73,13 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 type CreateServerRequest struct {
 	Name         string `json:"name"`
 	Description  string `json:"description"`
-	Type         string `json:"type"`        // paper, purpur, vanilla, fabric, custom
-	Version      string `json:"version"`     // e.g. 1.20.4, 1.21
-	Port         int    `json:"port"`        // default 25565
-	MemoryMinMB  int    `json:"memory_min"`  // e.g. 1024
-	MemoryMaxMB  int    `json:"memory_max"`  // e.g. 2048
-	JavaArgs     string `json:"java_args"`   // custom flags
-	JavaPath     string `json:"java_path"`   // custom java path
+	Type         string `json:"type"`       // paper, purpur, vanilla, fabric, custom
+	Version      string `json:"version"`    // e.g. 1.20.4, 1.21
+	Port         int    `json:"port"`       // default 25565
+	MemoryMinMB  int    `json:"memory_min"` // e.g. 1024
+	MemoryMaxMB  int    `json:"memory_max"` // e.g. 2048
+	JavaArgs     string `json:"java_args"`  // custom flags
+	JavaPath     string `json:"java_path"`  // custom java path
 	AutoRestart  bool   `json:"auto_restart"`
 	AutoDownload bool   `json:"auto_download"` // true to download jar immediately
 }
@@ -234,6 +237,13 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	// Remove server working directory files
 	workingDir := h.manager.GetWorkingDir(serverID)
 	_ = os.RemoveAll(workingDir)
+
+	// Remove per-server databases on disk and metadata
+	if h.cfg != nil && h.cfg.Paths.DataDir != "" {
+		dbDir := filepath.Join(h.cfg.Paths.DataDir, "databases", serverID)
+		_ = os.RemoveAll(dbDir)
+	}
+	_ = h.db.DeleteAllServerDatabases(serverID)
 
 	// Remove all port allocations associated with this server
 	_ = h.db.DeleteAllServerPorts(serverID)
@@ -487,4 +497,3 @@ func (h *ServerHandler) updateServerPropertiesPort(serverID string, port int) {
 	}
 	_ = os.WriteFile(propsPath, []byte(strings.Join(lines, "\n")), 0644)
 }
-

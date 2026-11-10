@@ -68,7 +68,7 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	claims, err := h.auth.ValidateToken(token)
+	claims, err := h.auth.ValidateAuthToken(token)
 	if err != nil {
 		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
 		return

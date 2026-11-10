@@ -90,6 +90,130 @@ const DEFAULT_USER_AVATAR_URL = 'https://www.minecraft.net/content/dam/minecraft
 const MINECRAFT_COVER_URL = 'https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MC-Downloadables_Image-0_15th-Anniversary_1110x624.jpg';
 const SERVER_HERO_URL = 'https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg';
 
+const DEFAULT_BRANDING = {
+  brand_name: 'NeoPanel',
+  brand_subtitle: 'Ultra-Lightweight Minecraft Server Manager',
+  logo_url: '',
+  favicon_url: '',
+  login_bg_url: '',
+  server_hero_url: SERVER_HERO_URL,
+  card_cover_url: MINECRAFT_COVER_URL,
+  default_avatar_url: DEFAULT_USER_AVATAR_URL,
+  footer_text: 'Powered by NeoPanel Daemon',
+  preset: 'obsidian',
+  accent_color: '#387aff',
+  accent_hover: '#4f8aff',
+  bg_deep: '',
+  bg_canvas: '',
+  card_bg: '',
+  nav_bg: '',
+  text_color: '',
+  card_opacity: 72,
+  border_radius_px: 14,
+  glass_blur_px: 16,
+  default_theme: 'dark',
+  custom_css: ''
+};
+
+const BRAND_PRESETS = [
+  {
+    id: 'obsidian',
+    name: 'Obsidian Navy',
+    desc: 'Signature slate glass',
+    accent_color: '#387aff',
+    accent_hover: '#4f8aff',
+    bg_deep: '',
+    bg_canvas: '',
+    card_bg: '',
+    nav_bg: '',
+    text_color: '',
+    card_opacity: 72,
+    border_radius_px: 14,
+    glass_blur_px: 16,
+    swatches: ['#0a0d14', '#121826', '#387aff']
+  },
+  {
+    id: 'emerald',
+    name: 'Emerald Craft',
+    desc: 'Creeper green & moss',
+    accent_color: '#10b981',
+    accent_hover: '#34d399',
+    bg_deep: '#07120e',
+    bg_canvas: '#0b1914',
+    card_bg: '#0f231b',
+    nav_bg: '#060f0c',
+    text_color: '#ecfdf5',
+    card_opacity: 78,
+    border_radius_px: 14,
+    glass_blur_px: 16,
+    swatches: ['#07120e', '#0f231b', '#10b981']
+  },
+  {
+    id: 'amethyst',
+    name: 'Amethyst Violet',
+    desc: 'End crystal glow',
+    accent_color: '#8b5cf6',
+    accent_hover: '#a78bfa',
+    bg_deep: '#0c0916',
+    bg_canvas: '#120e21',
+    card_bg: '#19142c',
+    nav_bg: '#090712',
+    text_color: '#f3f0ff',
+    card_opacity: 76,
+    border_radius_px: 16,
+    glass_blur_px: 18,
+    swatches: ['#0c0916', '#19142c', '#8b5cf6']
+  },
+  {
+    id: 'crimson',
+    name: 'Crimson Forge',
+    desc: 'Redstone ember dark',
+    accent_color: '#f43f5e',
+    accent_hover: '#fb7185',
+    bg_deep: '#12080c',
+    bg_canvas: '#1a0c12',
+    card_bg: '#231118',
+    nav_bg: '#0e0609',
+    text_color: '#fff1f2',
+    card_opacity: 78,
+    border_radius_px: 12,
+    glass_blur_px: 16,
+    swatches: ['#12080c', '#231118', '#f43f5e']
+  },
+  {
+    id: 'amber',
+    name: 'Solar Gold',
+    desc: 'Blaze bronze & gold',
+    accent_color: '#f59e0b',
+    accent_hover: '#fbbf24',
+    bg_deep: '#110d07',
+    bg_canvas: '#1a130a',
+    card_bg: '#241b0e',
+    nav_bg: '#0c0905',
+    text_color: '#fffbeb',
+    card_opacity: 78,
+    border_radius_px: 14,
+    glass_blur_px: 16,
+    swatches: ['#110d07', '#241b0e', '#f59e0b']
+  },
+  {
+    id: 'nordic',
+    name: 'Cyber Cyan',
+    desc: 'Diamond ice & slate',
+    accent_color: '#06b6d4',
+    accent_hover: '#22d3ee',
+    bg_deep: '#071016',
+    bg_canvas: '#0b1821',
+    card_bg: '#0f212d',
+    nav_bg: '#050c11',
+    text_color: '#ecfeff',
+    card_opacity: 76,
+    border_radius_px: 14,
+    glass_blur_px: 16,
+    swatches: ['#071016', '#0f212d', '#06b6d4']
+  }
+];
+
 // --- Global Application State ---
 window.S = {
   token: localStorage.getItem('neopanel_token') || '',
@@ -101,7 +225,8 @@ window.S = {
     plugins: false,
     backups: false,
     players: false,
-    activity: false
+    activity: false,
+    databases: false
   },
   flyConOpen: false,
   flyConTall: false,
@@ -141,6 +266,24 @@ window.S = {
   fileMenuOpen: null,
   adminTab: 0,
   adminUsers: [],
+  nodes: [],
+  nodeFilter: 'all',
+  clusterNodeErrors: {},
+  databases: [],
+  dbCapabilities: null,
+  dbRevealIds: new Set(),
+  sqlStudio: null,
+  branding: { ...DEFAULT_BRANDING },
+  brandDraft: null,
+  brandingLoaded: false,
+  brandingDaemon: {
+    fqdn: '',
+    sftp_port: 2022,
+    max_upload_mb: 500,
+    default_ram_mb: 2048,
+    auto_restart_policy: true
+  },
+  daemonDraft: null,
   adminTurnstile: {
     enabled: false,
     site_key: '',
@@ -190,6 +333,7 @@ window.S = {
   sftp: null,
   system: null,
   javaRuntimes: null,
+  javaRuntimesMap: {},
   installingJava: null,
   startupFailures: 0,
   startupHalted: false,
@@ -217,6 +361,7 @@ window.S = {
   },
   activeWs: null,
   activeServerId: null,
+  activeNodeId: null,
   wsState: 'disconnected',
   wsAttempts: 0,
   wsReconnectTimer: null,
@@ -619,11 +764,658 @@ function setBtnLoading(btn, isLoading, loadingText = 'Loading...') {
 function av(s) {
   const letter = (S.acct.fn ? S.acct.fn[0] : (S.acct.un ? S.acct.un[0] : 'A')).toUpperCase();
   const hasCustomGravatar = S.acct.h && S.acct.em && S.acct.em.toLowerCase() !== 'admin@neopanel.internal';
+  const defAvatar = (typeof getBrand === 'function' ? getBrand('default_avatar_url') : '') || DEFAULT_USER_AVATAR_URL;
   return `<span class="av" style="width:${s}px;height:${s}px;font-size:${s * 0.4}px">
     ${esc(letter)}
-    <img src="${DEFAULT_USER_AVATAR_URL}" alt="" onerror="this.remove()">
+    <img src="${esc(defAvatar)}" alt="" onerror="this.remove()">
     ${hasCustomGravatar ? `<img src="https://gravatar.com/avatar/${S.acct.h}?s=${s * 2}&d=404" alt="" onerror="this.remove()">` : ''}
   </span>`;
+}
+
+// --- Branding, Theme Presets & Multi-Node Helpers ---
+function getBrand(key) {
+  const active = (S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : (S.branding || DEFAULT_BRANDING);
+  const val = active && active[key] !== undefined ? active[key] : DEFAULT_BRANDING[key];
+  if ((key === 'server_hero_url' || key === 'card_cover_url' || key === 'default_avatar_url' || key === 'brand_name') && !String(val || '').trim()) {
+    return DEFAULT_BRANDING[key];
+  }
+  return val;
+}
+
+function hexToRgbStr(hex) {
+  const m = /^#([0-9a-fA-F]{6})$/.exec(String(hex || '').trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
+function brandLogoHtml(forLogin = false, override = null) {
+  const b = override || ((S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : (S.branding || DEFAULT_BRANDING));
+  const name = (b.brand_name || 'NeoPanel').trim() || 'NeoPanel';
+  const logo = (b.logo_url || '').trim();
+  const iconHtml = logo
+    ? `<img src="${esc(logo)}" class="brand-logo-img" alt="" onerror="this.outerHTML='<i class=\\'cube\\'></i>'">`
+    : `<i class="cube"></i>`;
+  if (forLogin) {
+    if (name === 'NeoPanel') {
+      return `${iconHtml}<b>Neo</b><span>Panel</span>`;
+    }
+    return `${iconHtml}<b>${esc(name)}</b>`;
+  }
+  return `${iconHtml}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(name)}</span>`;
+}
+
+function applyBranding(raw) {
+  const b = { ...DEFAULT_BRANDING, ...(raw || {}) };
+  const root = document.documentElement;
+  const isLight = root.dataset.theme === 'light';
+  const isOled = root.classList.contains('oled');
+
+  const acRgb = hexToRgbStr(b.accent_color);
+  if (b.accent_color && acRgb && (b.accent_color.toLowerCase() !== '#387aff' || b.preset !== 'obsidian')) {
+    root.style.setProperty('--ac', b.accent_color);
+    root.style.setProperty('--ac-hover', b.accent_hover || b.accent_color);
+    root.style.setProperty('--ac-glow', `rgba(${acRgb}, 0.25)`);
+    root.style.setProperty('--ac-subtle', `rgba(${acRgb}, 0.12)`);
+    root.style.setProperty('--acs', `rgba(${acRgb}, 0.14)`);
+    root.style.setProperty('--border-accent', `rgba(${acRgb}, 0.42)`);
+  } else {
+    ['--ac', '--ac-hover', '--ac-glow', '--ac-subtle', '--acs', '--border-accent'].forEach(p => root.style.removeProperty(p));
+  }
+
+  if (b.bg_deep && hexToRgbStr(b.bg_deep)) {
+    root.style.setProperty('--bg-deep', b.bg_deep);
+  } else {
+    root.style.removeProperty('--bg-deep');
+  }
+
+  if (b.bg_canvas && hexToRgbStr(b.bg_canvas)) {
+    root.style.setProperty('--bg-canvas', b.bg_canvas);
+  } else {
+    root.style.removeProperty('--bg-canvas');
+  }
+
+  const navRgb = hexToRgbStr(b.nav_bg);
+  if (navRgb) {
+    root.style.setProperty('--nav-bg', `rgba(${navRgb}, 0.88)`);
+  } else {
+    root.style.removeProperty('--nav-bg');
+  }
+
+  if (b.text_color && hexToRgbStr(b.text_color)) {
+    root.style.setProperty('--tx', b.text_color);
+  } else {
+    root.style.removeProperty('--tx');
+  }
+
+  const cardRgb = hexToRgbStr(b.card_bg);
+  const opacityNum = Number(b.card_opacity);
+  const opacityVal = !isNaN(opacityNum) ? Math.max(0.35, Math.min(1, opacityNum / 100)) : 0.72;
+  if (cardRgb) {
+    root.style.setProperty('--card-bg', `rgba(${cardRgb}, ${opacityVal.toFixed(2)})`);
+    root.style.setProperty('--card-bg-solid', b.card_bg);
+  } else if (!isNaN(opacityNum) && Math.round(opacityNum) !== 72) {
+    const fallbackRgb = isLight ? '255, 255, 255' : (isOled ? '8, 10, 14' : '18, 24, 38');
+    root.style.setProperty('--card-bg', `rgba(${fallbackRgb}, ${opacityVal.toFixed(2)})`);
+    root.style.removeProperty('--card-bg-solid');
+  } else {
+    root.style.removeProperty('--card-bg');
+    root.style.removeProperty('--card-bg-solid');
+  }
+
+  const rad = Number(b.border_radius_px);
+  if (!isNaN(rad) && rad >= 0 && rad <= 28) {
+    root.style.setProperty('--np-radius', `${rad}px`);
+  } else {
+    root.style.removeProperty('--np-radius');
+  }
+
+  const blur = Number(b.glass_blur_px);
+  if (!isNaN(blur) && blur >= 0 && blur <= 32) {
+    root.style.setProperty('--np-blur', `${blur}px`);
+  } else {
+    root.style.removeProperty('--np-blur');
+  }
+
+  const brandName = (b.brand_name || 'NeoPanel').trim() || 'NeoPanel';
+  const brandSub = (b.brand_subtitle || 'Minecraft Server Manager').trim();
+  document.title = brandSub ? `${brandName} — ${brandSub}` : brandName;
+
+  const favEl = $('#app-favicon');
+  if (favEl) {
+    favEl.href = (b.favicon_url || '').trim() || '/favicon.svg';
+  }
+
+  const cssEl = $('#custom-brand-css');
+  if (cssEl) {
+    cssEl.textContent = b.custom_css || '';
+  }
+
+  const navBrand = document.querySelector('#nav .brand');
+  if (navBrand) {
+    navBrand.innerHTML = brandLogoHtml(false, b);
+  }
+
+  const loginOverlay = $('#login');
+  if (loginOverlay) {
+    if ((b.login_bg_url || '').trim()) {
+      loginOverlay.style.backgroundImage = `linear-gradient(rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.85)), url('${b.login_bg_url.trim().replace(/'/g, '%27')}')`;
+      loginOverlay.style.backgroundSize = 'cover';
+      loginOverlay.style.backgroundPosition = 'center';
+    } else {
+      loginOverlay.style.backgroundImage = '';
+    }
+    const loginLogo = loginOverlay.querySelector('.llogo');
+    if (loginLogo) loginLogo.innerHTML = brandLogoHtml(true, b);
+  }
+}
+
+async function loadPublicBranding() {
+  try {
+    const res = await fetch('/api/branding');
+    if (!res.ok) return;
+    const data = await res.json().catch(() => null);
+    if (data && data.branding) {
+      S.branding = { ...DEFAULT_BRANDING, ...data.branding };
+      S.brandingLoaded = true;
+      if (data.daemon) {
+        S.brandingDaemon = { ...S.brandingDaemon, ...data.daemon };
+      }
+      if (!localStorage.getItem('neopanel_mode') && S.branding.default_theme) {
+        const dt = S.branding.default_theme.toLowerCase();
+        const mapped = dt === 'light' ? 'Light' : dt === 'oled' ? 'Oled' : dt === 'auto' ? 'Auto' : 'Dark';
+        S.acct.mode = mapped;
+        const d = document.documentElement;
+        d.classList.toggle('oled', mapped === 'Oled');
+        if (mapped === 'Auto') {
+          const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+          d.dataset.theme = prefersLight ? 'light' : 'dark';
+        } else {
+          d.dataset.theme = mapped === 'Light' ? 'light' : 'dark';
+        }
+      }
+      applyBranding(S.branding);
+    }
+  } catch (e) {}
+}
+
+function getNodeById(nodeId = 'local') {
+  const id = nodeId || 'local';
+  return (S.nodes || []).find(n => n.id === id) || null;
+}
+
+function findServerRef(srvId, nodeId = null) {
+  if (!srvId) return null;
+  if (nodeId) {
+    return (S.servers || []).find(s => s.id === srvId && (s.node_id || 'local') === nodeId) || null;
+  }
+  const cur = curServer();
+  if (cur && cur.id === srvId) return cur;
+  return (S.servers || []).find(s => s.id === srvId) || null;
+}
+
+function nodeApiPath(nodeId, apiPath) {
+  const id = nodeId || 'local';
+  const clean = apiPath.startsWith('/') ? apiPath : `/${apiPath}`;
+  if (id === 'local') return clean;
+  return `/api/nodes/${encodeURIComponent(id)}/proxy${clean}`;
+}
+
+function srvApiPath(srv, suffix = '') {
+  if (!srv || !srv.id) return suffix;
+  const nid = srv.node_id || 'local';
+  const base = `/api/servers/${encodeURIComponent(srv.id)}${suffix || ''}`;
+  if (nid === 'local') return base;
+  return `/api/nodes/${encodeURIComponent(nid)}/proxy${base}`;
+}
+
+function srvHost(srv) {
+  if (srv?.node_fqdn) return srv.node_fqdn;
+  const node = getNodeById(srv?.node_id || 'local');
+  if (node?.fqdn) return node.fqdn;
+  return S.brandingDaemon?.fqdn || S.adminDaemonCfg?.fqdn || window.location.hostname;
+}
+
+function copyDbText(val, label = 'Value') {
+  if (!val) return;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(val).then(() => {
+      toast(`${label} copied to clipboard!`, 'ok');
+    }).catch(() => {
+      uiPrompt({ title: `Copy ${label}`, message: 'Copy the value below:', defaultValue: val, confirmText: 'Done' });
+    });
+  } else {
+    uiPrompt({ title: `Copy ${label}`, message: 'Copy the value below:', defaultValue: val, confirmText: 'Done' });
+  }
+}
+
+async function loadDatabases(silent = false) {
+  const srv = curServer();
+  if (!srv) return;
+  if (!S.loading) S.loading = {};
+  if (!silent) {
+    S.loading.databases = true;
+    if (S.view === 'db') R();
+  }
+  try {
+    const res = await api(srvApiPath(srv, '/databases'));
+    S.databases = Array.isArray(res?.databases) ? res.databases : [];
+    S.dbCapabilities = res?.capabilities || null;
+  } catch (e) {
+    S.databases = [];
+  } finally {
+    S.loading.databases = false;
+    if (S.view === 'db') R();
+  }
+}
+
+function toggleDbPasswordReveal(dbId) {
+  if (!S.dbRevealIds) S.dbRevealIds = new Set();
+  if (S.dbRevealIds.has(dbId)) S.dbRevealIds.delete(dbId);
+  else S.dbRevealIds.add(dbId);
+  if (S.view === 'db') R();
+}
+
+function openCreateDatabaseModal() {
+  const srv = curServer();
+  if (!srv) return;
+  const container = $('#modal-container');
+  if (!container) return;
+
+  const caps = S.dbCapabilities || { sqlite: true, engines_label: 'Built-in SQLite (pure Go)' };
+  const suggestedName = `mc_${(srv.name || 'server').toLowerCase().replace(/[^a-z0-9_]/g, '_').replace(/^[^a-z]+/, '').slice(0, 16) || 'main'}`;
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:500px;">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:20px; margin:0; display:flex; align-items:center; gap:8px;">
+          ${ic('database', 18)} Create Server Database
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+      <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
+        Provision an isolated database for <b>${esc(srv.name)}</b> using <b>${esc(caps.engines_label || 'Built-in SQLite')}</b>.
+      </p>
+      <form onsubmit="submitCreateDatabase(event)">
+        <label class="f" style="margin-bottom:12px;">
+          <span>Database Name <span class="mu">(letters, numbers, underscore)</span></span>
+          <input type="text" id="db-new-name" required pattern="[A-Za-z][A-Za-z0-9_]{1,40}" value="${esc(suggestedName)}" placeholder="e.g. mc_coreprotect, luckperms_db">
+        </label>
+        <div class="grid g2" style="margin-bottom:16px;">
+          <label class="f" style="margin-bottom:0;">
+            <span>Engine</span>
+            <select id="db-new-engine">
+              <option value="sqlite" selected>SQLite 3 (Built-in pure Go)</option>
+            </select>
+          </label>
+          <label class="f" style="margin-bottom:0;">
+            <span>Max Connections</span>
+            <input type="number" id="db-new-maxconn" min="1" max="500" value="25" required>
+          </label>
+        </div>
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="db-create-btn" class="btn pr">${ic('plus', 14)} Create Database</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+  enhanceSelects(container);
+  setTimeout(() => $('#db-new-name')?.focus(), 40);
+}
+
+async function submitCreateDatabase(e) {
+  e.preventDefault();
+  const srv = curServer();
+  if (!srv) return;
+  const btn = $('#db-create-btn');
+  if (btn) setBtnLoading(btn, true, 'Creating...');
+
+  const name = $('#db-new-name')?.value.trim() || '';
+  const engine = $('#db-new-engine')?.value || 'sqlite';
+  const maxConnections = parseInt($('#db-new-maxconn')?.value, 10) || 25;
+
+  try {
+    const created = await api(srvApiPath(srv, '/databases'), {
+      method: 'POST',
+      body: JSON.stringify({ name, engine, max_connections: maxConnections })
+    });
+    closeModal();
+    toast(`Database "${created?.name || name}" created!`, 'ok');
+    await loadDatabases(true);
+    if (S.view === 'db') R();
+  } catch (err) {
+    if (btn) setBtnLoading(btn, false);
+  }
+}
+
+async function rotateDatabasePassword(dbId, name) {
+  const srv = curServer();
+  if (!srv) return;
+  const ok = await uiConfirm({
+    title: 'Rotate Database Password',
+    message: `Generate a new credential password for database <b>${esc(name)}</b>?`,
+    confirmText: 'Rotate Password',
+    cancelText: 'Cancel',
+    isDanger: false,
+    icon: 'key'
+  });
+  if (!ok) return;
+
+  try {
+    await api(srvApiPath(srv, `/databases/${encodeURIComponent(dbId)}/rotate`), { method: 'POST' });
+    if (!S.dbRevealIds) S.dbRevealIds = new Set();
+    S.dbRevealIds.add(dbId);
+    toast(`Password rotated for ${name}`, 'ok');
+    await loadDatabases(true);
+  } catch (e) {}
+}
+
+async function deleteServerDatabase(dbId, name) {
+  const srv = curServer();
+  if (!srv) return;
+  const ok = await uiConfirm({
+    title: 'Delete Database Permanently',
+    message: `Delete database <b>${esc(name)}</b> and remove its SQLite file from <b>${esc(srv.name)}</b>? All tables and data will be permanently lost.`,
+    confirmText: 'Delete Database',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'trash'
+  });
+  if (!ok) return;
+
+  try {
+    await api(srvApiPath(srv, `/databases/${encodeURIComponent(dbId)}`), { method: 'DELETE' });
+    toast(`Database "${name}" deleted`, 'ok');
+    await loadDatabases(true);
+  } catch (e) {}
+}
+
+function exportServerDatabase(dbId, format = 'sql') {
+  const srv = curServer();
+  if (!srv) return;
+  const baseUrl = srvApiPath(srv, `/databases/${encodeURIComponent(dbId)}/export?format=${encodeURIComponent(format)}`);
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  window.open(`${baseUrl}${sep}token=${encodeURIComponent(S.token)}`, '_blank');
+}
+
+function renderSQLStudioSchema() {
+  const el = $('#sql-studio-schema');
+  const studio = S.sqlStudio;
+  if (!el || !studio) return;
+
+  if (studio.loadingTables) {
+    el.innerHTML = loaderHtml('Inspecting tables...');
+    return;
+  }
+  const tables = Array.isArray(studio.tables) ? studio.tables : [];
+  if (tables.length === 0) {
+    el.innerHTML = `<div class="mu" style="font-size:12px; line-height:1.5; padding:8px 4px;">
+      No tables yet in <b>${esc(studio.db.name)}</b>.<br><br>
+      Click <b>+ Sample Table</b> above to create a demo table, or run any <code>CREATE TABLE ...</code> SQL query on the right.
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = tables.map(t => {
+    const isSel = studio.selectedTable === t.name;
+    const cols = Array.isArray(t.columns) ? t.columns : [];
+    return `<div class="db-schema-item ${isSel ? 'on' : ''}" data-table="${esc(t.name)}" onclick="selectSQLStudioTable(this.dataset.table, true)">
+      <div class="row sb" style="gap:6px; flex-wrap:nowrap;">
+        <b class="mono" style="font-size:12.5px; color:var(--tx); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(t.name)}</b>
+        <span class="chip" style="font-size:10.5px; padding:1px 6px; flex-shrink:0;">${Number(t.row_count) || 0} rows</span>
+      </div>
+      ${cols.length ? `<div class="db-schema-cols">
+        ${cols.map(c => `<div class="db-col-row">
+          <span style="color:var(--tx); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${esc(c.name)}</span>
+          <span class="row" style="gap:4px; flex-shrink:0;">
+            <span class="mu" style="font-size:10.5px;">${esc(c.type || 'ANY')}</span>
+            ${c.primary_key ? '<span class="db-col-badge">PK</span>' : ''}
+            ${!c.primary_key && c.not_null ? '<span class="db-col-badge">NN</span>' : ''}
+          </span>
+        </div>`).join('')}
+      </div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function renderSQLStudioResults() {
+  const el = $('#sql-studio-results');
+  const studio = S.sqlStudio;
+  if (!el || !studio) return;
+
+  if (studio.running) {
+    el.innerHTML = loaderHtml('Executing SQL statement...');
+    return;
+  }
+  if (studio.error) {
+    el.innerHTML = `<div class="node-error-note" style="font-family:var(--font-mono);">${esc(studio.error)}</div>`;
+    return;
+  }
+  if (!studio.result) {
+    el.innerHTML = `<div class="mu" style="padding:18px; text-align:center; border:1px dashed var(--border); border-radius:10px; font-size:12.5px;">
+      Press <b>Run Query</b> (or <kbd>Ctrl+Enter</kbd>) to inspect tables or modify data.
+    </div>`;
+    return;
+  }
+
+  const r = studio.result;
+  if (r.mode === 'exec') {
+    el.innerHTML = `<div class="card" style="padding:12px 14px; border-color:rgba(63,185,80,0.35); background:rgba(63,185,80,0.08);">
+      <div class="row sb" style="flex-wrap:wrap; gap:8px;">
+        <b style="color:var(--ok); font-size:13px;">Statement executed successfully</b>
+        <span class="mu mono" style="font-size:11.5px;">${r.duration_ms ?? 0} ms</span>
+      </div>
+      <div class="mu mono" style="font-size:12px; margin-top:4px;">
+        Rows affected: <b>${r.rows_affected ?? 0}</b>${r.last_insert_id ? ` &bull; Last Insert ID: <b>${r.last_insert_id}</b>` : ''}
+      </div>
+    </div>`;
+    return;
+  }
+
+  const cols = Array.isArray(r.columns) ? r.columns : [];
+  const rows = Array.isArray(r.rows) ? r.rows : [];
+  el.innerHTML = `<div class="row sb" style="margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+      <span class="mu mono" style="font-size:12px;">
+        Returned <b>${r.row_count ?? rows.length}</b> row${(r.row_count ?? rows.length) === 1 ? '' : 's'}
+        ${r.truncated ? ' (capped at 500 rows)' : ''}
+      </span>
+      <span class="mu mono" style="font-size:11.5px;">${r.duration_ms ?? 0} ms</span>
+    </div>
+    ${cols.length === 0 ? `<div class="mu" style="padding:14px;">Query returned no columns.</div>` : `
+      <div class="db-result-grid">
+        <table>
+          <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${rows.length ? rows.map(row => `<tr>${cols.map((_, idx) => {
+              const val = Array.isArray(row) ? row[idx] : null;
+              if (val === null || val === undefined) return `<td><span class="db-null">NULL</span></td>`;
+              return `<td title="${esc(String(val))}">${esc(String(val))}</td>`;
+            }).join('')}</tr>`).join('') : `<tr><td colspan="${cols.length}" class="mu" style="text-align:center; padding:18px;">0 rows returned</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `}`;
+}
+
+async function loadSQLStudioTables() {
+  const srv = curServer();
+  const studio = S.sqlStudio;
+  if (!srv || !studio?.db?.id) return;
+  studio.loadingTables = true;
+  renderSQLStudioSchema();
+  try {
+    const res = await api(srvApiPath(srv, `/databases/${encodeURIComponent(studio.db.id)}/tables`));
+    studio.tables = Array.isArray(res?.tables) ? res.tables : [];
+    const first = studio.tables[0]?.name || '';
+    if (!studio.selectedTable && first) {
+      studio.selectedTable = first;
+      const inp = $('#db-sql-input');
+      if (inp && !inp.value.trim()) {
+        inp.value = `SELECT * FROM "${first.replace(/"/g, '""')}" LIMIT 100;`;
+        studio.query = inp.value;
+      }
+    }
+  } catch (e) {
+    studio.tables = [];
+  } finally {
+    studio.loadingTables = false;
+    renderSQLStudioSchema();
+  }
+}
+
+function selectSQLStudioTable(tableName, autoRun = false) {
+  if (!S.sqlStudio) return;
+  S.sqlStudio.selectedTable = tableName;
+  const escapedName = String(tableName || '').replace(/"/g, '""');
+  const sql = `SELECT * FROM "${escapedName}" LIMIT 100;`;
+  S.sqlStudio.query = sql;
+  const inp = $('#db-sql-input');
+  if (inp) inp.value = sql;
+  renderSQLStudioSchema();
+  if (autoRun) runSQLStudioQuery();
+}
+
+function insertSQLSnippet(kind) {
+  const inp = $('#db-sql-input');
+  if (!inp) return;
+  const curTable = S.sqlStudio?.selectedTable || 'player_stats';
+  const safeTable = curTable.replace(/"/g, '""');
+  const snippets = {
+    create: `CREATE TABLE IF NOT EXISTS player_stats (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  username TEXT NOT NULL UNIQUE,\n  balance INTEGER NOT NULL DEFAULT 0,\n  updated_at TEXT DEFAULT CURRENT_TIMESTAMP\n);`,
+    insert: `INSERT INTO "${safeTable}" (username, balance) VALUES ('Steve', 250);`,
+    select: `SELECT * FROM "${safeTable}" LIMIT 100;`,
+    schema: `SELECT name, type, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name;`
+  };
+  inp.value = snippets[kind] || snippets.select;
+  if (S.sqlStudio) S.sqlStudio.query = inp.value;
+  inp.focus();
+}
+
+async function runSQLStudioQuery() {
+  const srv = curServer();
+  const studio = S.sqlStudio;
+  if (!srv || !studio?.db?.id) return;
+  const inp = $('#db-sql-input');
+  const sql = (inp ? inp.value : studio.query || '').trim();
+  if (!sql) {
+    toast('Enter a SQL query first', 'bad');
+    return;
+  }
+  studio.query = sql;
+  studio.running = true;
+  studio.error = '';
+  renderSQLStudioResults();
+
+  const btn = $('#sql-run-btn');
+  if (btn) setBtnLoading(btn, true, 'Running...');
+
+  try {
+    const res = await fetch(srvApiPath(srv, `/databases/${encodeURIComponent(studio.db.id)}/query`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(S.token ? { 'Authorization': `Bearer ${S.token}` } : {})
+      },
+      body: JSON.stringify({ sql })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    studio.result = data;
+    studio.error = '';
+    if (data.mode === 'exec') {
+      await loadSQLStudioTables();
+      loadDatabases(true);
+    }
+  } catch (err) {
+    studio.result = null;
+    studio.error = err.message || 'SQL execution error';
+  } finally {
+    studio.running = false;
+    if (btn) setBtnLoading(btn, false);
+    renderSQLStudioResults();
+  }
+}
+
+async function openSQLStudioModal(dbId) {
+  const srv = curServer();
+  const db = (S.databases || []).find(d => d.id === dbId);
+  const container = $('#modal-container');
+  if (!srv || !db || !container) return;
+
+  S.sqlStudio = {
+    db,
+    tables: [],
+    selectedTable: '',
+    loadingTables: true,
+    running: false,
+    query: `SELECT name, type, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name;`,
+    result: null,
+    error: ''
+  };
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="pbox db-studio-modal">
+      <div class="db-studio-head">
+        <div class="row" style="gap:10px; align-items:center;">
+          ${ic('database', 18)}
+          <div>
+            <b style="color:var(--tx); font-size:15.5px;">SQL Studio &mdash; ${esc(db.name)}</b>
+            <div class="mu mono" style="font-size:11.5px;">${esc(db.jdbc_url || db.file_path || '')}</div>
+          </div>
+        </div>
+        <div class="row" style="gap:8px;">
+          <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(db.id)}', 'sql')">${ic('download', 13)} Export .sql</button>
+          <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(db.id)}', 'db')">${ic('download', 13)} Export .db</button>
+          <button type="button" class="btn sm" onclick="closeModal()" aria-label="Close SQL Studio">&times;</button>
+        </div>
+      </div>
+      <div class="db-studio-body">
+        <div class="db-schema-panel">
+          <div class="row sb" style="margin-bottom:2px;">
+            <b style="font-size:12px; text-transform:uppercase; letter-spacing:0.05em; color:var(--tx-muted);">Tables &amp; Schema</b>
+            <button type="button" class="btn-ico" onclick="loadSQLStudioTables()" title="Refresh Schema">${ic('refresh', 13)}</button>
+          </div>
+          <div id="sql-studio-schema">${loaderHtml('Inspecting tables...')}</div>
+        </div>
+        <div class="db-query-panel">
+          <div class="row sb" style="gap:8px; flex-wrap:wrap;">
+            <div class="row" style="gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn sm" onclick="insertSQLSnippet('create')">+ Sample Table</button>
+              <button type="button" class="btn sm" onclick="insertSQLSnippet('insert')">+ Insert Row</button>
+              <button type="button" class="btn sm" onclick="insertSQLSnippet('select')">Select 100</button>
+              <button type="button" class="btn sm" onclick="insertSQLSnippet('schema')">Schema SQL</button>
+            </div>
+            <button type="button" id="sql-run-btn" class="btn sm pr" onclick="runSQLStudioQuery()">
+              ${ic('play', 13)} Run Query (Ctrl+Enter)
+            </button>
+          </div>
+          <textarea id="db-sql-input" class="db-sql-editor" spellcheck="false" placeholder="Write SQLite SQL query (SELECT, INSERT, UPDATE, CREATE TABLE...) and press Ctrl+Enter...">${esc(S.sqlStudio.query)}</textarea>
+          <div id="sql-studio-results"></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  const inp = $('#db-sql-input');
+  if (inp) {
+    inp.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        runSQLStudioQuery();
+      }
+    });
+    setTimeout(() => inp.focus(), 40);
+  }
+
+  renderSQLStudioResults();
+  await loadSQLStudioTables();
+  if (S.sqlStudio.tables.length > 0 && S.sqlStudio.selectedTable) {
+    selectSQLStudioTable(S.sqlStudio.selectedTable, true);
+  }
 }
 
 async function computeGravatarHash(email) {
@@ -1066,7 +1858,7 @@ function toggleFlyConsole(forceOpen) {
   const next = typeof forceOpen === 'boolean' ? forceOpen : !S.flyConOpen;
   S.flyConOpen = next;
   if (next && (!S.activeWs || S.activeWs.readyState !== WebSocket.OPEN)) {
-    connectWs(srv.id, true);
+    connectWs(srv.id, true, srv.node_id || 'local');
   }
   renderFlyConsole();
 }
@@ -1094,7 +1886,8 @@ function renderFlyConsole() {
     return;
   }
 
-  const sig = `${srv.id}|${S.flyConOpen ? 1 : 0}|${S.flyConTall ? 1 : 0}`;
+  const nodeId = srv.node_id || 'local';
+  const sig = `${nodeId}|${srv.id}|${S.flyConOpen ? 1 : 0}|${S.flyConTall ? 1 : 0}`;
   if (root.dataset.flySig === sig && root.children.length > 0) {
     syncFlyConsoleState();
     return;
@@ -1153,14 +1946,21 @@ function renderFlyConsole() {
 }
 
 // --- WebSocket Connection (Auto-Reconnect + Cloudflare Keepalive Heartbeat) ---
-function connectWs(serverId, isReconnect = false) {
+function connectWs(serverId, isReconnect = false, nodeId = null) {
   if (!serverId || !S.token) return;
+
+  const targetNodeId = nodeId || curServer()?.node_id || 'local';
 
   clearTimeout(S.wsReconnectTimer);
   S.wsReconnectTimer = null;
 
-  // If already connected or connecting to this server, do not recreate WebSocket
-  if (S.activeWs && S.activeServerId === serverId && (S.activeWs.readyState === WebSocket.OPEN || S.activeWs.readyState === WebSocket.CONNECTING)) {
+  // If already connected or connecting to this server on this node, do not recreate WebSocket
+  if (
+    S.activeWs &&
+    S.activeServerId === serverId &&
+    (S.activeNodeId || 'local') === targetNodeId &&
+    (S.activeWs.readyState === WebSocket.OPEN || S.activeWs.readyState === WebSocket.CONNECTING)
+  ) {
     return;
   }
 
@@ -1179,11 +1979,15 @@ function connectWs(serverId, isReconnect = false) {
   }
 
   S.activeServerId = serverId;
+  S.activeNodeId = targetNodeId;
   S.wsState = isReconnect ? 'reconnecting' : 'connecting';
   updateWsLivePill();
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${protocol}//${window.location.host}/api/servers/${serverId}/ws?token=${encodeURIComponent(S.token)}`;
+  const wsPath = targetNodeId === 'local'
+    ? `/api/servers/${encodeURIComponent(serverId)}/ws`
+    : `/api/nodes/${encodeURIComponent(targetNodeId)}/ws/${encodeURIComponent(serverId)}`;
+  const wsUrl = `${protocol}//${window.location.host}${wsPath}?token=${encodeURIComponent(S.token)}`;
 
   try {
     const ws = new WebSocket(wsUrl);
@@ -1261,13 +2065,13 @@ function connectWs(serverId, isReconnect = false) {
       if (S.activeWs === ws) {
         S.activeWs = null;
       }
-      if (S.token && S.activeServerId === serverId) {
+      if (S.token && S.activeServerId === serverId && (S.activeNodeId || 'local') === targetNodeId) {
         S.wsState = 'reconnecting';
         updateWsLivePill();
         const delay = Math.min(1000 * Math.pow(1.5, S.wsAttempts), 8000);
         S.wsAttempts++;
         S.wsReconnectTimer = setTimeout(() => {
-          connectWs(serverId, true);
+          connectWs(serverId, true, targetNodeId);
         }, delay);
       }
     };
@@ -1280,14 +2084,14 @@ function connectWs(serverId, isReconnect = false) {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && S.token && S.activeServerId) {
     if (!S.activeWs || S.activeWs.readyState === WebSocket.CLOSED) {
-      connectWs(S.activeServerId, true);
+      connectWs(S.activeServerId, true, S.activeNodeId || 'local');
     }
   }
 });
 
 window.addEventListener('online', () => {
   if (S.token && S.activeServerId && (!S.activeWs || S.activeWs.readyState === WebSocket.CLOSED)) {
-    connectWs(S.activeServerId, true);
+    connectWs(S.activeServerId, true, S.activeNodeId || 'local');
   }
 });
 
@@ -1368,7 +2172,7 @@ async function power(action, skipConfirm = false) {
   }
 
   try {
-    const res = await api(`/api/servers/${srv.id}/power`, {
+    const res = await api(srvApiPath(srv, '/power'), {
       method: 'POST',
       body: JSON.stringify({ action })
     });
@@ -1435,7 +2239,7 @@ async function refreshServerStatus() {
   const srv = curServer();
   if (!srv) return;
   try {
-    const data = await api(`/api/servers/${srv.id}`);
+    const data = await api(srvApiPath(srv, ''));
     applyServerStatsSnapshot(srv, data.stats, false);
     S.ver = data.version || S.ver;
     S.core = (data.type || 'paper').charAt(0).toUpperCase() + (data.type || 'paper').slice(1);
@@ -1455,7 +2259,7 @@ async function runCmd(cmd) {
     S.activeWs.send(JSON.stringify({ event: 'command', data: cmd }));
   } else {
     try {
-      await api(`/api/servers/${srv.id}/command`, {
+      await api(srvApiPath(srv, '/command'), {
         method: 'POST',
         body: JSON.stringify({ command: cmd })
       });
@@ -1557,18 +2361,20 @@ function resolveJavaSelectValue(rawVal, mcVer = '', engine = '') {
   return 'custom';
 }
 
-function getPremadeJavaStatusMap() {
+function getPremadeJavaStatusMap(nodeId = null) {
+  const nid = nodeId || curServer()?.node_id || 'local';
+  const data = (S.javaRuntimesMap && S.javaRuntimesMap[nid]) || (nid === 'local' ? S.javaRuntimes : null);
   const map = new Map();
-  const list = S.javaRuntimes?.premade || [];
+  const list = data?.premade || [];
   for (const item of list) {
     if (item && item.version) map.set(String(item.version), item);
   }
   return map;
 }
 
-function renderJavaSelectOptions(selectedVal, includeCustom = true, fallbackMcVer = '', engine = '') {
+function renderJavaSelectOptions(selectedVal, includeCustom = true, fallbackMcVer = '', engine = '', nodeId = null) {
   const cur = resolveJavaSelectValue(selectedVal, fallbackMcVer, engine);
-  const statusMap = getPremadeJavaStatusMap();
+  const statusMap = getPremadeJavaStatusMap(nodeId);
   const opts = PREMADE_JAVA_VERSIONS.map(item => {
     const info = statusMap.get(item.value);
     const suffix = info ? (info.installed ? ' [Installed]' : ' [Not Installed]') : '';
@@ -1578,14 +2384,16 @@ function renderJavaSelectOptions(selectedVal, includeCustom = true, fallbackMcVe
   return opts + `<option value="custom" ${cur === 'custom' ? 'selected' : ''}>Custom Binary Path...</option>`;
 }
 
-function renderJavaAvailabilityStrip() {
-  if (!S.javaRuntimes || !Array.isArray(S.javaRuntimes.premade)) {
-    return `<div class="java-status-strip"><span class="java-status-chip">Checking installed Java 25, 21, 17 &amp; 8 runtimes...</span></div>`;
+function renderJavaAvailabilityStrip(nodeId = null) {
+  const nid = nodeId || curServer()?.node_id || 'local';
+  const data = (S.javaRuntimesMap && S.javaRuntimesMap[nid]) || (nid === 'local' ? S.javaRuntimes : null);
+  if (!data || !Array.isArray(data.premade)) {
+    return `<div class="java-status-strip" data-node-id="${esc(nid)}"><span class="java-status-chip">Checking installed Java 25, 21, 17 &amp; 8 runtimes...</span></div>`;
   }
-  const canInstall = Boolean(S.javaRuntimes.can_auto_install) && (S.user?.role === 'admin');
-  return `<div class="java-status-strip">
-    ${S.javaRuntimes.premade.map(item => {
-      const busy = S.installingJava === item.version;
+  const canInstall = Boolean(data.can_auto_install) && (S.user?.role === 'admin');
+  return `<div class="java-status-strip" data-node-id="${esc(nid)}">
+    ${data.premade.map(item => {
+      const busy = S.installingJava === `${nid}:${item.version}` || S.installingJava === item.version;
       if (item.installed) {
         return `<span class="java-status-chip is-ok" title="${esc(item.path || 'Installed')}">
           <span class="java-status-dot"></span>Java ${esc(item.version)} Ready
@@ -1593,24 +2401,27 @@ function renderJavaAvailabilityStrip() {
       }
       return `<span class="java-status-chip is-missing" title="Not detected in /usr/lib/jvm">
         <span class="java-status-dot"></span>Java ${esc(item.version)} Missing
-        ${canInstall ? `<button type="button" class="btn sm pr java-install-inline ${busy ? 'is-loading' : ''}" onclick="installJavaRuntime('${esc(item.version)}', this)" ${busy || S.installingJava ? 'disabled' : ''}>${busy ? '<span class="np-spinner-sm"></span> Installing...' : 'Install'}</button>` : ''}
+        ${canInstall ? `<button type="button" class="btn sm pr java-install-inline ${busy ? 'is-loading' : ''}" onclick="installJavaRuntime('${esc(item.version)}', this, '${esc(nid)}')" ${busy || S.installingJava ? 'disabled' : ''}>${busy ? '<span class="np-spinner-sm"></span> Installing...' : 'Install'}</button>` : ''}
       </span>`;
     }).join('')}
   </div>`;
 }
 
-function refreshJavaUIStrips() {
-  const stripHtml = renderJavaAvailabilityStrip();
+function refreshJavaUIStrips(nodeId = null) {
+  const defaultNid = nodeId || curServer()?.node_id || 'local';
   document.querySelectorAll('.java-status-strip').forEach(el => {
+    const elNid = el.dataset.nodeId || defaultNid;
+    const stripHtml = renderJavaAvailabilityStrip(elNid);
     const tmp = document.createElement('div');
     tmp.innerHTML = stripHtml;
     if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild);
   });
 
-  const statusMap = getPremadeJavaStatusMap();
-  for (const id of ['stp-java', 'prop-java', 'cs-java']) {
+  const csNodeVal = $('#cs-node')?.value || defaultNid;
+  for (const [id, nid] of [['stp-java', curServer()?.node_id || defaultNid], ['prop-java', curServer()?.node_id || defaultNid], ['cs-java', csNodeVal]]) {
     const sel = document.getElementById(id);
     if (!sel) continue;
+    const statusMap = getPremadeJavaStatusMap(nid);
     for (const opt of Array.from(sel.options)) {
       const def = PREMADE_JAVA_VERSIONS.find(x => x.value === opt.value);
       if (def) {
@@ -1623,54 +2434,62 @@ function refreshJavaUIStrips() {
   }
 }
 
-async function loadJavaRuntimes(force = false) {
-  if (!S.token) return S.javaRuntimes;
-  if (S.javaRuntimes && !force) {
-    refreshJavaUIStrips();
-    return S.javaRuntimes;
+async function loadJavaRuntimes(force = false, nodeId = null) {
+  if (!S.token) return null;
+  const nid = nodeId || curServer()?.node_id || 'local';
+  if (!S.javaRuntimesMap) S.javaRuntimesMap = {};
+  const cached = S.javaRuntimesMap[nid] || (nid === 'local' ? S.javaRuntimes : null);
+  if (cached && !force) {
+    refreshJavaUIStrips(nid);
+    return cached;
   }
   try {
-    const data = await api('/api/system/java?matrix=1');
+    const data = await api(nodeApiPath(nid, '/api/system/java?matrix=1'));
     if (data && Array.isArray(data.premade)) {
-      S.javaRuntimes = data;
-      refreshJavaUIStrips();
+      S.javaRuntimesMap[nid] = data;
+      if (nid === 'local') S.javaRuntimes = data;
+      refreshJavaUIStrips(nid);
       if (S.view === 'admin' && (S.adminTab || 0) === 0) R();
     }
-    return S.javaRuntimes;
+    return data;
   } catch (e) {
     return null;
   }
 }
 
-async function installJavaRuntime(ver, btnEl) {
+async function installJavaRuntime(ver, btnEl, nodeId = null) {
+  const nid = nodeId || curServer()?.node_id || 'local';
   if (S.installingJava) {
-    toast(`Already installing Java ${S.installingJava}...`);
+    toast(`Already installing Java runtime...`);
     return;
   }
-  S.installingJava = ver;
+  S.installingJava = `${nid}:${ver}`;
   if (btnEl) setBtnLoading(btnEl, true, 'Installing...');
-  refreshJavaUIStrips();
+  refreshJavaUIStrips(nid);
   toast(`Downloading and installing Java ${ver} (Eclipse Temurin)...`);
   try {
-    const res = await api('/api/system/java/install', {
+    const res = await api(nodeApiPath(nid, '/api/system/java/install'), {
       method: 'POST',
       body: JSON.stringify({ version: ver })
     });
     if (res && Array.isArray(res.premade)) {
-      S.javaRuntimes = {
+      const next = {
         installed: res.installed || [],
         premade: res.premade,
         can_auto_install: Boolean(res.can_auto_install)
       };
+      if (!S.javaRuntimesMap) S.javaRuntimesMap = {};
+      S.javaRuntimesMap[nid] = next;
+      if (nid === 'local') S.javaRuntimes = next;
     } else {
-      await loadJavaRuntimes(true);
+      await loadJavaRuntimes(true, nid);
     }
     toast(`Java ${ver} installed and ready!`, 'ok');
   } catch (e) {
     toast(e.message || `Failed to install Java ${ver}`, 'bad');
   } finally {
     S.installingJava = null;
-    refreshJavaUIStrips();
+    refreshJavaUIStrips(nid);
     if (S.view === 'admin' && (S.adminTab || 0) === 0) R();
   }
 }
@@ -1684,17 +2503,21 @@ function srvh() {
   const c = active ? (S.cpu.at(-1) || 0) : 0;
   const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
   const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
-  const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
+  const hostAddr = `${srvHost(srv)}:${srv ? srv.port : 25565}`;
+  const nodeId = srv?.node_id || 'local';
+  const nodeLabel = srv?.node_name || getNodeById(nodeId)?.name || (nodeId === 'local' ? 'Local Master Node' : nodeId);
+  const heroUrl = getBrand('server_hero_url');
 
-  return `<div class="card srvh" style="background-image: url('${SERVER_HERO_URL}'), url('/img/banner.jpg');">
+  return `<div class="card srvh" style="background-image: url('${esc(heroUrl)}'), url('/img/banner.jpg');">
     <div>
       <div class="row">
         <h1>${esc(S.props.motd || srv?.name || 'Minecraft Server')}</h1>
         <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st] || 'Offline'}</span>
+        ${((S.nodes && S.nodes.length > 1) || nodeId !== 'local') ? `<span class="chip srv-node-badge" title="Running on node ${esc(nodeLabel)}">${ic('network', 11)} ${esc(nodeLabel)}</span>` : ''}
         <span id="srv-halt-badge" class="badge halted" style="display:${st === 'offline' && S.startupHalted ? 'inline-flex' : 'none'};" title="Auto-restart stopped after 2 consecutive startup failures">Start Halted (2/2)</span>
       </div>
       <div id="hst" class="row hst">
-        <span class="mono mu pv">${hostAddr}</span>
+        <span class="mono mu pv">${esc(hostAddr)}</span>
         <span class="mono mu">CPU ${c.toFixed(1)}%</span>
         <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
       </div>
@@ -1706,7 +2529,7 @@ function srvh() {
         ${CMDS.map(([label, cmd]) => `<button role="menuitem" onclick="execQuickCmd('${cmd}')">${label}</button>`).join('')}
         <button role="menuitem" onclick="S.cmenu=false; toggleFlyConsole();">${ic('terminal', 13)} Toggle Live Console (Ctrl+\`)</button>
         <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
-        <button role="menuitem" style="color: #ef4444;" onclick="S.cmenu=false; openDeleteServerModal('${srv?.id}', '${esc(srv?.name || '')}');">${ic('trash', 13)} Delete Server</button>
+        <button role="menuitem" style="color: #ef4444;" data-srv-id="${esc(srv?.id || '')}" data-srv-name="${esc(srv?.name || '')}" data-node-id="${esc(nodeId)}" onclick="S.cmenu=false; openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);">${ic('trash', 13)} Delete Server</button>
       </div>` : ''}
       <button class="btn pr" data-power-btn="start" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
@@ -1735,7 +2558,7 @@ function statsHtml() {
   const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
   const netIn = active ? (S.ni.at(-1) || 0) : 0;
   const netOut = active ? (S.no.at(-1) || 0) : 0;
-  const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
+  const hostAddr = `${srvHost(srv)}:${srv ? srv.port : 25565}`;
 
   const row = (i, l, v, s) => `<div class="srow">
     <span class="sic" aria-hidden="true">${i}</span>
@@ -1745,7 +2568,7 @@ function statsHtml() {
     </div>
   </div>`;
 
-  return row(ic('network', 16), 'Address', `<span class="pv">${hostAddr}</span>`) +
+  return row(ic('network', 16), 'Address', `<span class="pv">${esc(hostAddr)}</span>`) +
     row(ic('clock', 16), 'Uptime', up()) +
     row(ic('cpu', 16), 'CPU load', `${c.toFixed(1)}%`, '/ 100%') +
     row(ic('layers', 16), 'Memory', `${m.toFixed(0)} MiB`, `/ ${(maxRamMB / 1024).toFixed(1)} GiB`) +
@@ -1787,8 +2610,8 @@ function liveCon() {
     const c = active ? (S.cpu.at(-1) || 0) : 0;
     const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
     const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
-    const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
-    hst.innerHTML = `<span class="mono mu pv">${hostAddr}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
+    const hostAddr = `${srvHost(srv)}:${srv ? srv.port : 25565}`;
+    hst.innerHTML = `<span class="mono mu pv">${esc(hostAddr)}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
   }
 }
 
@@ -1815,7 +2638,8 @@ function updateDashLiveStats() {
     totalRamUsedMB += mVal;
     totalDiskMB += dVal;
 
-    const card = document.getElementById(`dash-srv-${s.id}`);
+    const nid = s.node_id || 'local';
+    const card = document.getElementById(`dash-srv-${nid}-${s.id}`) || document.getElementById(`dash-srv-${s.id}`);
     if (!card) continue;
     const badge = card.querySelector('[data-role="badge"]');
     if (badge) {
@@ -1907,8 +2731,17 @@ const ACTIVITY_META_MAP = {
   admin_user_create: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Created Panel User' },
   admin_user_delete: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Deleted Panel User' },
   admin_turnstile: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Updated Turnstile' },
+  admin_branding: { category: 'admin', badgeLabel: 'Theme', cls: 'act-cat-admin', title: 'Updated Panel Look' },
   admin_java_install: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Installed Java Runtime' },
-  admin_gc: { category: 'admin', badgeLabel: 'System', cls: 'act-cat-admin', title: 'Garbage Collection' }
+  admin_gc: { category: 'admin', badgeLabel: 'System', cls: 'act-cat-admin', title: 'Garbage Collection' },
+  db_create: { category: 'databases', badgeLabel: 'Database', cls: 'act-cat-databases', title: 'Created Database' },
+  db_delete: { category: 'databases', badgeLabel: 'Database', cls: 'act-cat-databases', title: 'Deleted Database' },
+  db_rotate: { category: 'databases', badgeLabel: 'Database', cls: 'act-cat-databases', title: 'Rotated DB Credentials' },
+  db_query: { category: 'databases', badgeLabel: 'SQL', cls: 'act-cat-databases', title: 'Executed SQL Query' },
+  db_export: { category: 'databases', badgeLabel: 'Export', cls: 'act-cat-databases', title: 'Exported Database' },
+  node_add: { category: 'nodes', badgeLabel: 'Nodes', cls: 'act-cat-nodes', title: 'Connected Cluster Node' },
+  node_update: { category: 'nodes', badgeLabel: 'Nodes', cls: 'act-cat-nodes', title: 'Updated Cluster Node' },
+  node_delete: { category: 'nodes', badgeLabel: 'Nodes', cls: 'act-cat-nodes', title: 'Removed Cluster Node' }
 };
 
 const ACTIVITY_CATEGORIES = [
@@ -1916,6 +2749,8 @@ const ACTIVITY_CATEGORIES = [
   ['power', 'Power'],
   ['console', 'Console'],
   ['files', 'Files'],
+  ['databases', 'Databases'],
+  ['nodes', 'Cluster Nodes'],
   ['plugins', 'Plugins'],
   ['software', 'Software & Config'],
   ['backups', 'Backups'],
@@ -1930,6 +2765,8 @@ function getActivityMeta(action) {
   if (ACTIVITY_META_MAP[key]) return ACTIVITY_META_MAP[key];
   if (key.startsWith('power_')) return { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: key.replace(/_/g, ' ') };
   if (key.startsWith('file_')) return { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('db_')) return { category: 'databases', badgeLabel: 'Database', cls: 'act-cat-databases', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('node_')) return { category: 'nodes', badgeLabel: 'Nodes', cls: 'act-cat-nodes', title: key.replace(/_/g, ' ') };
   if (key.startsWith('plugin_')) return { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: key.replace(/_/g, ' ') };
   if (key.startsWith('backup_')) return { category: 'backups', badgeLabel: 'Backups', cls: 'act-cat-backups', title: key.replace(/_/g, ' ') };
   if (key.startsWith('port_')) return { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: key.replace(/_/g, ' ') };
@@ -2025,6 +2862,8 @@ function buildActivityStatsHtml(scope = 'all') {
     ['power', 'Power', counts.power || 0],
     ['console', 'Console', counts.console || 0],
     ['files', 'Files', counts.files || 0],
+    ['databases', 'Databases', counts.databases || 0],
+    ['nodes', 'Nodes', counts.nodes || 0],
     ['plugins', 'Plugins', counts.plugins || 0],
     ['software', 'Software', counts.software || 0],
     ['backups', 'Backups', counts.backups || 0],
@@ -2183,7 +3022,7 @@ async function loadActivityLog(limit = S.actFilter?.limit || 200) {
     } else if ($('#dash-recent-activity')) {
       const box = $('#dash-recent-activity');
       if (box) box.innerHTML = renderDashRecentActivityHtml();
-    } else if (S.view === 'act' || (S.view === 'admin' && S.adminTab === 4) || (S.view === 'acc' && S.acct.tab === 4)) {
+    } else if (S.view === 'act' || (S.view === 'admin' && S.adminTab === 5) || (S.view === 'acc' && S.acct.tab === 4)) {
       R();
     }
   }
@@ -2228,6 +3067,49 @@ function exportActivityLogs(scope = 'all') {
   toast(`Exported ${rows.length} activity event${rows.length === 1 ? '' : 's'}`);
 }
 
+function renderBrandPreviewMarkup(b) {
+  const brand = { ...DEFAULT_BRANDING, ...(b || {}) };
+  const ac = brand.accent_color || '#387aff';
+  const bgDeep = brand.bg_deep || '#0a0d14';
+  const bgCanvas = brand.bg_canvas || '#101521';
+  const cardHex = brand.card_bg || '#121826';
+  const navHex = brand.nav_bg || '#0d121d';
+  const tx = brand.text_color || '#e6edf3';
+  const op = Math.max(0.35, Math.min(1, (Number(brand.card_opacity) || 72) / 100));
+  const cardRgb = hexToRgbStr(cardHex) || '18, 24, 38';
+  const navRgb = hexToRgbStr(navHex) || '13, 18, 29';
+  const rad = Number(brand.border_radius_px) >= 0 ? Number(brand.border_radius_px) : 14;
+  const blur = Number(brand.glass_blur_px) >= 0 ? Number(brand.glass_blur_px) : 16;
+  const hero = (brand.server_hero_url || SERVER_HERO_URL).trim();
+
+  return `<div class="brand-mini-app" style="background: radial-gradient(circle at top right, ${ac}22, transparent 55%), linear-gradient(145deg, ${bgDeep}, ${bgCanvas}); border-radius:${rad}px; color:${tx};">
+    <div class="brand-mini-nav" style="background: rgba(${navRgb}, 0.9);">
+      <div class="row" style="gap: 6px; font-weight: 700; font-size: 11px; color: ${tx};">
+        ${brand.logo_url ? `<img src="${esc(brand.logo_url)}" style="width:16px;height:16px;border-radius:4px;object-fit:cover;" alt="">` : `<span style="width:14px;height:14px;border-radius:4px;background:${ac};display:inline-block;"></span>`}
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(brand.brand_name || 'NeoPanel')}</span>
+      </div>
+      <div style="height:20px;border-radius:6px;background:${ac}28;border:1px solid ${ac}66;display:flex;align-items:center;padding:0 7px;font-size:10px;font-weight:600;color:${tx};margin-top:4px;">Servers</div>
+      <div style="height:18px;border-radius:6px;display:flex;align-items:center;padding:0 7px;font-size:10px;opacity:0.65;">Console</div>
+      <div style="height:18px;border-radius:6px;display:flex;align-items:center;padding:0 7px;font-size:10px;opacity:0.65;">Databases</div>
+    </div>
+    <div class="brand-mini-main">
+      <div class="brand-mini-banner" style="background-image:url('${esc(hero)}'); border-radius:${Math.max(4, rad - 4)}px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+          <b style="font-size:11.5px;color:#fff;">Survival SMP</b>
+          <span style="background:${ac};color:#fff;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:6px;">Start</span>
+        </div>
+        <div style="font-size:9.5px;color:rgba(255,255,255,0.75);margin-top:3px;">play.example.com:25565</div>
+      </div>
+      <div style="background: rgba(${cardRgb}, ${op.toFixed(2)}); backdrop-filter: blur(${blur}px); border:1px solid rgba(255,255,255,0.1); border-radius:${Math.max(4, rad - 3)}px; padding:9px 10px;">
+        <div style="font-size:10px;opacity:0.75;margin-bottom:4px;">Glass Card Preview (${Math.round(op * 100)}% &bull; ${rad}px &bull; ${blur}px blur)</div>
+        <div style="height:6px;border-radius:99px;background:rgba(255,255,255,0.12);overflow:hidden;">
+          <div style="width:68%;height:100%;background:${ac};"></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 // --- Views Implementation (V) ---
 const V = {
   dash() {
@@ -2247,26 +3129,60 @@ const V = {
     const totalDiskMB = S.servers.reduce((sum, s, i) => sum + (i === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0)), 0);
     const diskQuotaMB = Math.max(20480, totalCount * 10240);
 
+    const nodesList = Array.isArray(S.nodes) ? S.nodes : [];
+    const nodeErrs = S.clusterNodeErrors || {};
+    const errEntries = Object.entries(nodeErrs);
+    const showNodeBar = nodesList.length > 1 || errEntries.length > 0;
+    const activeNodeFilter = S.nodeFilter || 'all';
+
+    const indexedServers = S.servers.map((s, origIdx) => ({ s, origIdx }));
+    const visibleServers = activeNodeFilter === 'all'
+      ? indexedServers
+      : indexedServers.filter(({ s }) => (s.node_id || 'local') === activeNodeFilter);
+    const coverUrl = getBrand('card_cover_url');
+
     return `
-    <div class="row sb" style="margin-bottom: 24px; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
+    <div class="row sb" style="margin-bottom: 20px; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
       <div>
         <h1 style="font-size: 26px; font-weight: 800; color: var(--tx); margin-bottom: 4px; letter-spacing: -0.02em;">Servers</h1>
-        <span id="dash-running-summary" class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} &bull; ${totalCount} running</span>
+        <span id="dash-running-summary" class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} &bull; ${totalCount} running${nodesList.length > 1 ? ` &bull; ${nodesList.filter(n => n.online).length}/${nodesList.length} nodes online` : ''}</span>
       </div>
       <div class="row" style="gap: 10px; flex-wrap: wrap;">
         <div style="position: relative;">
           <input type="text" id="srv-filter" placeholder="Filter by name or address" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
         </div>
-        <div class="row" style="gap: 2px; background: rgba(255,255,255,0.04); padding: 3px; border-radius: 8px; border: 1px solid var(--border);">
-          <button class="btn sm pr" style="height: 28px; padding: 0 12px;">Mine</button>
-          <button class="btn sm" style="height: 28px; padding: 0 12px; border: 0; background: transparent;">Others</button>
-        </div>
+        ${S.user?.role === 'admin' ? `<button class="btn" onclick="S.adminTab=1; go('admin');" style="height: 36px; padding: 0 14px; font-size: 13px;">${ic('network', 14)} Nodes (${Math.max(1, nodesList.length)})</button>` : ''}
         <button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
           ${ic('plus', 14)} Create server
         </button>
       </div>
     </div>
+
+    ${showNodeBar ? `
+      <div class="node-filter-bar">
+        <button type="button" class="node-filter-pill ${activeNodeFilter === 'all' ? 'on' : ''}" onclick="setNodeFilter('all')">
+          ${ic('layers', 13)}
+          <span>All Nodes</span>
+          <span class="mu mono" style="font-size: 11px;">${totalCount}</span>
+        </button>
+        ${nodesList.map(n => {
+          const cnt = S.servers.filter(x => (x.node_id || 'local') === n.id).length;
+          return `<button type="button" class="node-filter-pill ${activeNodeFilter === n.id ? 'on' : ''}" onclick="setNodeFilter('${esc(n.id)}')">
+            <span class="node-status-dot ${n.online ? 'online' : 'offline'}"></span>
+            <span>${esc(n.name)}</span>
+            <span class="mu mono" style="font-size: 11px;">${cnt}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    ` : ''}
+
+    ${errEntries.length > 0 ? `
+      <div class="node-error-note" style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <span><b>Cluster Sync Warning:</b> ${errEntries.map(([nid, msg]) => `${esc(getNodeById(nid)?.name || nid)} (${esc(msg)})`).join(' &bull; ')}</span>
+        ${S.user?.role === 'admin' ? `<button type="button" class="btn sm" onclick="S.adminTab=1; go('admin');">Inspect Nodes</button>` : ''}
+      </div>
+    ` : ''}
 
     <div class="dash-grid">
       <!-- Left Column: Server Cards Grid -->
@@ -2280,24 +3196,29 @@ const V = {
               <div class="np-skeleton" style="height: 28px; width: 100%; margin-top: 6px;"></div>
             </div>
           </div>
-        `).join('') : S.servers.map((s, i) => {
-          const st = i === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
+        `).join('') : visibleServers.map(({ s, origIdx }) => {
+          const nid = s.node_id || 'local';
+          const nodeName = s.node_name || getNodeById(nid)?.name || (nid === 'local' ? 'Local Master Node' : nid);
+          const st = origIdx === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
           const isRun = st === 'online' || st === 'starting';
           const maxRam = getServerMaxRamMB(s);
-          const cVal = isRun ? (i === S.cs ? (S.cpu.at(-1) || 0) : (Number(s.stats?.cpu_usage) || 0)) : 0;
-          const mVal = isRun ? (i === S.cs ? (S.memUsedMB || Number(s.stats?.memory_mb) || 0) : (Number(s.stats?.memory_mb) || 0)) : 0;
-          const dVal = i === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0);
-          const upSec = i === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
-          const host = `${window.location.hostname}:${s.port || 25565}`;
+          const cVal = isRun ? (origIdx === S.cs ? (S.cpu.at(-1) || 0) : (Number(s.stats?.cpu_usage) || 0)) : 0;
+          const mVal = isRun ? (origIdx === S.cs ? (S.memUsedMB || Number(s.stats?.memory_mb) || 0) : (Number(s.stats?.memory_mb) || 0)) : 0;
+          const dVal = origIdx === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0);
+          const upSec = origIdx === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
+          const host = `${srvHost(s)}:${s.port || 25565}`;
           const coreLabel = (s.type || 'paper').charAt(0).toUpperCase() + (s.type || 'paper').slice(1);
 
           return `
-          <div id="dash-srv-${s.id}" class="sift-server-card" onclick="switchServer(${i}); go('con');" data-name="${esc(s.name)}" data-addr="${host}">
-            <div class="srv-card-banner" style="background-image: url('${MINECRAFT_COVER_URL}'), url('/img/banner.jpg');">
-              <span class="srv-card-badge">Minecraft - ${esc(coreLabel)}</span>
+          <div id="dash-srv-${nid}-${s.id}" class="sift-server-card" onclick="switchServer(${origIdx}); go('con');" data-name="${esc(s.name)}" data-addr="${esc(host)}">
+            <div class="srv-card-banner" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
+              <div class="srv-card-badges-left">
+                <span class="srv-card-badge">Minecraft - ${esc(coreLabel)}</span>
+                ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
+              </div>
               <div class="srv-card-actions">
-                <span class="srv-card-action-btn" onclick="event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">↻</span>
-                <span class="srv-card-action-btn danger" onclick="event.stopPropagation(); openDeleteServerModal('${s.id}', '${esc(s.name)}');" title="Delete Server">${ic('trash', 13)}</span>
+                <span class="srv-card-action-btn" onclick="event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
+                <span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>
               </div>
             </div>
             <div class="srv-card-body">
@@ -2308,7 +3229,7 @@ const V = {
                   ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
                 </span>
               </div>
-              <div class="srv-card-addr">${host}</div>
+              <div class="srv-card-addr">${esc(host)}</div>
               <div class="srv-meters-row">
                 <div class="srv-meter">
                   <div class="srv-meter-head">
@@ -2727,6 +3648,7 @@ const V = {
   ver() {
     const sel = S.sel || S.core || 'Paper';
     const isProxy = ['Velocity', 'Waterfall', 'BungeeCord'].includes(sel);
+    const srv = curServer();
     return `${srvh()}
     <div class="card hero" style="margin-top:14px">
       <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 12px;">
@@ -2735,7 +3657,7 @@ const V = {
           <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
           <span class="mu">Java 25, 21, 17 &amp; 8 supported &bull; Direct installer for all server engines &amp; Minecraft versions</span>
         </div>
-        <button class="btn pr" onclick="openReinstallModal('${curServer()?.id}')">
+        <button class="btn pr" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">
           ${ic('refresh', 14)} Reinstall Server (mcjarfiles.com)
         </button>
       </div>
@@ -2754,30 +3676,32 @@ const V = {
       `).join('')}
     </div>
 
-    <div class="row sb" style="margin-top:22px; margin-bottom:12px; flex-wrap: wrap; gap: 10px;">
-      <h2 style="margin:0">2. Select ${esc(sel)} Version</h2>
-      <span class="mu" style="font-size:12.5px;">Click any release to confirm installation &amp; optional world backup</span>
-    </div>
-
-    <div class="row" style="margin-top:0; margin-bottom:12px; gap:10px; flex-wrap: wrap;">
-      <div style="position: relative; flex: 1; min-width: 220px; max-width: 320px;">
-        <input type="text" placeholder="Search versions (e.g. 1.21.4, 1.20.1)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
-        <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
+    <div class="card ver-section-card" style="margin-top:22px;">
+      <div class="ver-section-head">
+        <h2>2. Select ${esc(sel)} Version</h2>
+        <span class="mu" style="font-size:12.5px;">Click any release to confirm installation &amp; optional world backup</span>
       </div>
-      ${!isProxy ? `
-        <select onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
-          <option value="All Families" ${(S.vf === 'All Families' || S.vf === 'All') ? 'selected' : ''}>All Release Families</option>
-          <option value="Popular" ${S.vf === 'Popular' ? 'selected' : ''}>Popular / Recommended</option>
-          ${FAM.map(f => `<option value="${f[0]}" ${S.vf === f[0] ? 'selected' : ''}>${f[0]} — ${f[1]} (${f[2]})</option>`).join('')}
-        </select>
-      ` : ''}
-    </div>
 
-    <div class="card tw">
-      <table>
-        <thead><tr><th>Version</th><th>Release / Notes</th><th>Java</th><th>Engine</th><th style="text-align:right">Action</th></tr></thead>
-        <tbody id="vres">${versionRowsHtml()}</tbody>
-      </table>
+      <div class="ver-toolbar">
+        <div class="ver-search-wrap">
+          <input type="text" placeholder="Search versions (e.g. 1.21.4, 1.20.1)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
+          <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted); pointer-events: none;">${ic('search', 15)}</span>
+        </div>
+        ${!isProxy ? `
+          <select onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
+            <option value="All Families" ${(S.vf === 'All Families' || S.vf === 'All') ? 'selected' : ''}>All Release Families</option>
+            <option value="Popular" ${S.vf === 'Popular' ? 'selected' : ''}>Popular / Recommended</option>
+            ${FAM.map(f => `<option value="${f[0]}" ${S.vf === f[0] ? 'selected' : ''}>${f[0]} — ${f[1]} (${f[2]})</option>`).join('')}
+          </select>
+        ` : ''}
+      </div>
+
+      <div class="tw">
+        <table>
+          <thead><tr><th>Version</th><th>Release / Notes</th><th>Java</th><th>Engine</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody id="vres">${versionRowsHtml()}</tbody>
+        </table>
+      </div>
     </div>`;
   },
 
@@ -2834,7 +3758,7 @@ const V = {
 
   net() {
     const srv = curServer();
-    const host = window.location.hostname;
+    const host = srvHost(srv);
     const sftpUser = S.sftp ? S.sftp.username : `admin.${srv?.id || 'server'}`;
     const sftpPort = S.sftp ? S.sftp.port : 2022;
     const ports = (S.ports && S.ports.length > 0) ? S.ports : [
@@ -2946,15 +3870,102 @@ const V = {
   },
 
   db() {
+    const srv = curServer();
+    const list = Array.isArray(S.databases) ? S.databases : [];
+    const caps = S.dbCapabilities || { sqlite: true, engines_label: 'Built-in SQLite (pure Go)' };
+
     return `${srvh()}
-    <div class="card tw" style="margin-top:14px">
-      <table>
-        <thead><tr><th>Database</th><th>Username</th><th>Connections</th><th>Size</th></tr></thead>
-        <tbody>
-          <tr><td class="mono">mc_survival</td><td class="mono">u_survival</td><td>2</td><td>48 MiB</td></tr>
-          <tr><td class="mono">mc_coreprotect</td><td class="mono">u_cp</td><td>1</td><td>212 MiB</td></tr>
-        </tbody>
-      </table>
+    <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 14px;">
+      <div class="card" style="padding: 18px 20px;">
+        <div class="row sb" style="flex-wrap: wrap; gap: 12px;">
+          <div>
+            <div class="row" style="gap: 10px; align-items: center;">
+              <h2 style="margin: 0; font-size: 18px;">Server Databases</h2>
+              <span class="chip">${list.length} database${list.length === 1 ? '' : 's'}</span>
+              <span class="badge online" style="font-size: 11px;"><i class="dot"></i>${esc(caps.engines_label || 'Built-in SQLite (pure Go)')}</span>
+            </div>
+            <div class="mu" style="font-size: 12.5px; margin-top: 4px;">
+              Real isolated per-server SQLite databases stored directly on <b>${esc(srv?.node_name || 'this node')}</b> with built-in SQL Studio &amp; binary/SQL exports.
+            </div>
+          </div>
+          <div class="row" style="gap: 8px;">
+            <button type="button" class="btn sm" onclick="loadDatabases()">${ic('refresh', 13)} Refresh</button>
+            <button type="button" class="btn sm pr" onclick="openCreateDatabaseModal()">${ic('plus', 14)} Create Database</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card tw">
+        <table>
+          <thead>
+            <tr>
+              <th>Database &amp; File</th>
+              <th>Credentials</th>
+              <th>JDBC / DSN</th>
+              <th>Tables &amp; Size</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${S.loading?.databases ? `<tr><td colspan="5">${loaderHtml('Loading server databases...')}</td></tr>` :
+              list.length ? list.map(d => {
+                const revealed = S.dbRevealIds && S.dbRevealIds.has(d.id);
+                const jdbcUrl = d.jdbc_url || (d.file_path ? `jdbc:sqlite:${d.file_path}` : '');
+                const dsnPath = d.sqlite_dsn || d.file_path || '';
+                return `<tr>
+                  <td>
+                    <div style="font-weight: 700; color: var(--tx);">${esc(d.name)}</div>
+                    <div class="row" style="gap: 5px; margin-top: 4px;">
+                      <span class="chip" style="font-size: 10.5px;">${esc((d.engine || 'sqlite').toUpperCase())}</span>
+                      <span class="mu mono" style="font-size: 11px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${esc(dsnPath)}">${esc(dsnPath)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      <div class="db-cred-row">
+                        <span class="mu" style="font-size: 11px; width: 34px;">User</span>
+                        <span class="db-secret-chip">${esc(d.username || 'u_db')}</span>
+                        <button type="button" class="btn-ico" data-val="${esc(d.username || '')}" onclick="copyDbText(this.dataset.val, 'Username')" title="Copy Username">${ic('copy', 12)}</button>
+                      </div>
+                      <div class="db-cred-row">
+                        <span class="mu" style="font-size: 11px; width: 34px;">Pass</span>
+                        <span class="db-secret-chip">${revealed ? esc(d.password || '') : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;'}</span>
+                        <button type="button" class="btn-ico" onclick="toggleDbPasswordReveal('${esc(d.id)}')" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
+                        <button type="button" class="btn-ico" data-val="${esc(d.password || '')}" onclick="copyDbText(this.dataset.val, 'Password')" title="Copy Password">${ic('copy', 12)}</button>
+                        <button type="button" class="btn-ico" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="rotateDatabasePassword(this.dataset.id, this.dataset.name)" title="Rotate Password">${ic('key', 12)}</button>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="row" style="gap: 6px; flex-wrap: wrap;">
+                      <button type="button" class="btn sm" data-val="${esc(jdbcUrl)}" onclick="copyDbText(this.dataset.val, 'JDBC URL')" title="${esc(jdbcUrl)}">${ic('copy', 12)} Copy JDBC</button>
+                      <button type="button" class="btn sm" data-val="${esc(dsnPath)}" onclick="copyDbText(this.dataset.val, 'SQLite Path')" title="${esc(dsnPath)}">${ic('copy', 12)} Copy Path</button>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="mono" style="font-weight: 600; color: var(--tx);">${Number(d.table_count) || 0} table${Number(d.table_count) === 1 ? '' : 's'}</div>
+                    <div class="mu mono" style="font-size: 11.5px; margin-top: 2px;">${formatBytes(d.size_bytes || 0)} &bull; max ${d.max_connections || 25}</div>
+                  </td>
+                  <td style="text-align: right;">
+                    <div class="row" style="justify-content: flex-end; gap: 6px; flex-wrap: wrap;">
+                      <button type="button" class="btn sm pr" onclick="openSQLStudioModal('${esc(d.id)}')">${ic('code', 13)} SQL Studio</button>
+                      <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'sql')" title="Download SQL Dump">${ic('download', 12)} .sql</button>
+                      <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'db')" title="Download SQLite Binary">${ic('download', 12)} .db</button>
+                      <button type="button" class="btn sm dg" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="deleteServerDatabase(this.dataset.id, this.dataset.name)" title="Delete Database">${ic('trash', 13)}</button>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join('') : `<tr><td colspan="5" style="text-align: center; padding: 36px 20px;">
+                <div style="max-width: 440px; margin: 0 auto;">
+                  <div style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 6px;">No databases provisioned for ${esc(srv?.name || 'this server')}</div>
+                  <div class="mu" style="font-size: 13px; margin-bottom: 16px;">Create an isolated SQLite database for LuckPerms, CoreProtect, Economy plugins, or custom data — inspect schemas and run live SQL queries right in the browser.</div>
+                  <button type="button" class="btn pr" onclick="openCreateDatabaseModal()">${ic('plus', 14)} Create First Database</button>
+                </div>
+              </td></tr>`
+            }
+          </tbody>
+        </table>
+      </div>
     </div>`;
   },
 
@@ -2999,12 +4010,12 @@ const V = {
         <div class="card" style="padding: 20px;">
           <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 12px;">Java Runtime Environment</h2>
           <select id="stp-java" onchange="toggleCustomJavaInput(this.value)" style="margin-bottom: 8px;">
-            ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type)}
+            ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type, srv?.node_id || 'local')}
           </select>
           <div id="stp-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
             <input type="text" id="stp-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;">
           </div>
-          ${renderJavaAvailabilityStrip()}
+          ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
           <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Select which premade Java runtime executes your server JAR (Java 25, 21, 17, or 8).</span>
         </div>
       </div>
@@ -3146,13 +4157,13 @@ const V = {
         <label class="f" style="margin-top: 10px;">
           <span>Java Runtime Version</span>
           <select id="prop-java" onchange="toggleCustomPropJava(this.value)">
-            ${renderJavaSelectOptions(srv?.java_path || '', true, srv?.version, srv?.type)}
+            ${renderJavaSelectOptions(srv?.java_path || '', true, srv?.version, srv?.type, srv?.node_id || 'local')}
           </select>
         </label>
         <div id="prop-custom-wrap" style="${isStandardJavaChoice(srv?.java_path) ? 'display: none;' : ''} margin-top: 6px;">
           <input type="text" id="prop-java-custom" value="${esc(!isStandardJavaChoice(srv?.java_path) ? srv?.java_path : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;">
         </div>
-        ${renderJavaAvailabilityStrip()}
+        ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
         <div class="row" style="margin-top:14px;">
           <button class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save Properties</button>
           <button class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
@@ -3171,7 +4182,7 @@ const V = {
             Re-download and deploy a fresh Minecraft server binary (Paper, Purpur, Leaf, Folia, Fabric, Vanilla, Velocity) via <b>mcjarfiles.com</b> API. You can choose to preserve world data, configs, and plugins.
           </p>
         </div>
-        <button class="btn" onclick="openReinstallModal('${srv?.id}')" style="height: 38px; padding: 0 18px; font-weight: 600;">
+        <button class="btn" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
           ${ic('refresh', 14)} Reinstall Server
         </button>
       </div>
@@ -3188,7 +4199,7 @@ const V = {
             Permanently destroy this Minecraft server instance (<b>${esc(srv?.name || '')}</b>). All files, worlds, player data, plugins, configs, and allocated ports will be erased. This action cannot be reversed.
           </p>
         </div>
-        <button class="btn dg" onclick="openDeleteServerModal('${srv?.id}', '${esc(srv?.name || '')}')" style="height: 38px; padding: 0 18px; font-weight: 600;">
+        <button class="btn dg" data-srv-id="${esc(srv?.id || '')}" data-srv-name="${esc(srv?.name || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
           ${ic('trash', 14)} Delete Server
         </button>
       </div>
@@ -3212,18 +4223,40 @@ const V = {
 
   // Dedicated Admin Area View
   admin() {
-    const sys = S.system || { os: 'linux', arch: 'amd64', cpus: 2, total_ram_mb: 4096, free_ram_mb: 2048, version: '1.0.0', go_version: 'go1.23.0', goroutines: 24 };
+    const sys = S.system || { os: 'linux', arch: 'amd64', cpus: 2, total_ram_mb: 4096, free_ram_mb: 2048, version: '1.0.0', go_version: 'go1.27.0', goroutines: 24 };
     const usedRam = (sys.total_ram_mb - sys.free_ram_mb) || 0;
-    const ramPct = Math.round((usedRam / sys.total_ram_mb) * 100) || 50;
+    const ramPct = Math.round((usedRam / (sys.total_ram_mb || 1)) * 100) || 50;
     const t = S.adminTab || 0;
-    const cfg = S.adminDaemonCfg || { brandName: 'NeoPanel', fqdn: '127.0.0.1', sftpPort: 2022, maxUploadMB: 500, defaultRamMB: 2048, autoRestartPolicy: true };
+    const nodesList = (Array.isArray(S.nodes) && S.nodes.length > 0) ? S.nodes : [{
+      id: 'local',
+      name: 'Local Master Node',
+      location: 'Primary Host',
+      fqdn: S.brandingDaemon?.fqdn || window.location.hostname,
+      is_local: true,
+      online: true,
+      latency_ms: 0,
+      server_count: S.servers.filter(x => (x.node_id || 'local') === 'local').length,
+      system: sys,
+      token_prefix: 'local'
+    }];
+    const onlineNodesCount = nodesList.filter(n => n.online).length;
+
+    const draft = S.brandDraft || { ...DEFAULT_BRANDING, ...S.branding };
+    const daemonDraft = S.daemonDraft || {
+      fqdn: S.brandingDaemon?.fqdn || '',
+      sftp_port: S.brandingDaemon?.sftp_port || S.adminDaemonCfg?.sftpPort || 2022,
+      max_upload_mb: S.brandingDaemon?.max_upload_mb || S.adminDaemonCfg?.maxUploadMB || 500,
+      default_ram_mb: S.brandingDaemon?.default_ram_mb || S.adminDaemonCfg?.defaultRamMB || 2048,
+      auto_restart_policy: S.brandingDaemon?.auto_restart_policy !== undefined ? Boolean(S.brandingDaemon.auto_restart_policy) : true
+    };
 
     const tabs = [
       ['Cluster & Health', 0],
-      ['Managed Servers', 1],
-      ['Users & Roles', 2],
-      ['Daemon Customization', 3],
-      ['Audit Logs', 4]
+      ['Cluster Nodes', 1],
+      ['Managed Servers', 2],
+      ['Users & Roles', 3],
+      ['Panel Look & Branding', 4],
+      ['Audit Logs', 5]
     ];
 
     let content = '';
@@ -3242,13 +4275,13 @@ const V = {
             <div class="bar"><i style="width:${ramPct}%"></i></div>
           </div>
           <div class="card stat">
-            <span>Goroutines / Threads</span>
-            <b style="font-size:18px; padding:6px 0;">${sys.goroutines || 24} Active</b>
-            <span class="mu">Zero-overhead runtime</span>
+            <span>Cluster Nodes</span>
+            <b style="font-size:18px; padding:6px 0;">${onlineNodesCount} / ${nodesList.length} Online</b>
+            <span class="mu"><a href="#admin" onclick="event.preventDefault(); selectAdminTab(1);" style="color:var(--ac);text-decoration:none;">Manage linked daemons &rarr;</a></span>
           </div>
           <div class="card stat">
             <span>SFTP Daemon</span>
-            <b style="font-size:18px; padding:6px 0;">Port ${cfg.sftpPort || 2022}</b>
+            <b style="font-size:18px; padding:6px 0;">Port ${daemonDraft.sftp_port || 2022}</b>
             <span class="badge online"><i class="dot"></i>Active</span>
           </div>
         </div>
@@ -3256,7 +4289,7 @@ const V = {
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:#fff;">System Optimization &amp; Garbage Collection</h2>
+              <h2 style="margin:0 0 4px; color:var(--tx);">System Optimization &amp; Garbage Collection</h2>
               <span class="mu" style="font-size:13px;">Manage host process memory, reclaim unused buffers, and inspect runtime allocations.</span>
             </div>
             <button class="btn pr" onclick="triggerAdminGC()">${ic('refresh', 14)} Run Garbage Collection (runtime.GC)</button>
@@ -3264,19 +4297,19 @@ const V = {
           <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px;">
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
               <span class="mu">Daemon Binary Version</span>
-              <span class="mono" style="color:#fff;">NeoPanel v${esc(sys.version || '1.0.0')} (Target: Ubuntu 24.04 LTS)</span>
+              <span class="mono" style="color:var(--tx);">NeoPanel v${esc(sys.version || '1.0.0')} (Target: Ubuntu 24.04 LTS)</span>
             </div>
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
               <span class="mu">Go Compiler Version</span>
-              <span class="mono" style="color:#fff;">${esc(sys.go_version || 'go1.23.0')}</span>
+              <span class="mono" style="color:var(--tx);">${esc(sys.go_version || 'go1.27.0')}</span>
             </div>
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
               <span class="mu">Active Goroutines</span>
-              <span class="mono" style="color:#fff;">${sys.goroutines || 24}</span>
+              <span class="mono" style="color:var(--tx);">${sys.goroutines || 24}</span>
             </div>
             <div class="row sb" style="padding:6px 0;">
               <span class="mu">Process Architecture</span>
-              <span class="mono" style="color:#fff;">${esc(sys.arch)} on ${esc(sys.os)}</span>
+              <span class="mono" style="color:var(--tx);">${esc(sys.arch)} on ${esc(sys.os)}</span>
             </div>
           </div>
         </div>
@@ -3284,21 +4317,99 @@ const V = {
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:10px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:var(--tx);">Java Runtimes (25, 21, 17 &amp; 8)</h2>
-              <span class="mu" style="font-size:13px;">Monitor detected OpenJDK / Eclipse Temurin runtimes and install missing premade versions.</span>
+              <h2 style="margin:0 0 4px; color:var(--tx);">Local Java Runtimes (25, 21, 17 &amp; 8)</h2>
+              <span class="mu" style="font-size:13px;">Monitor detected OpenJDK / Eclipse Temurin runtimes on the master host and install missing premade versions.</span>
             </div>
-            <button class="btn sm" onclick="loadJavaRuntimes(true)">${ic('refresh', 13)} Refresh</button>
+            <button class="btn sm" onclick="loadJavaRuntimes(true, 'local')">${ic('refresh', 13)} Refresh</button>
           </div>
-          ${renderJavaAvailabilityStrip()}
+          ${renderJavaAvailabilityStrip('local')}
         </div>
       `;
     } else if (t === 1) {
       content = `
+        <div class="node-callout">
+          <b>How to link another NeoPanel node:</b> Install NeoPanel on your secondary VPS, sign in there, open <b>Account Settings &rarr; API Keys</b> to generate a <code>neo_...</code> key, and click <b>+ Connect Node</b> below. Servers across all linked nodes appear unified on the Dashboard.
+        </div>
+
+        <div class="row sb" style="margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+          <div class="row" style="gap: 8px;">
+            <h2 style="margin: 0;">Connected Nodes</h2>
+            <span class="chip">${onlineNodesCount} online &bull; ${nodesList.length} total</span>
+          </div>
+          <div class="row" style="gap: 8px;">
+            <button type="button" class="btn sm" onclick="loadAdminNodes(true)">${ic('refresh', 13)} Refresh Nodes</button>
+            <button type="button" class="btn sm pr" onclick="openNodeModal()">${ic('plus', 14)} Connect Node</button>
+          </div>
+        </div>
+
+        <div class="node-grid">
+          ${nodesList.map(n => {
+            const sysInfo = n.system || {};
+            const totalGb = sysInfo.total_ram_mb ? (sysInfo.total_ram_mb / 1024).toFixed(1) + ' GB' : '—';
+            const usedNodeRam = sysInfo.total_ram_mb && sysInfo.free_ram_mb !== undefined
+              ? ((sysInfo.total_ram_mb - sysInfo.free_ram_mb) / 1024).toFixed(1) + ' GB'
+              : '—';
+            return `<div class="card node-card">
+              <div class="row sb" style="align-items: flex-start; gap: 10px;">
+                <div style="min-width: 0;">
+                  <div class="row" style="gap: 8px; align-items: center;">
+                    <span class="node-status-dot ${n.online ? 'online' : 'offline'}"></span>
+                    <b style="font-size: 16px; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(n.name)}</b>
+                    ${n.is_local ? '<span class="chip" style="font-size:10.5px;">Local Master</span>' : ''}
+                  </div>
+                  <div class="mu mono" style="font-size: 11.5px; margin-top: 3px;">
+                    ${esc(n.location || 'Unspecified Region')} &bull; ${esc(n.fqdn || window.location.hostname)}
+                  </div>
+                </div>
+                <span class="badge ${n.online ? 'online' : 'offline'}">
+                  <i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}
+                </span>
+              </div>
+
+              <div class="node-meta-grid">
+                <div class="node-meta-item">
+                  <span>Servers</span>
+                  <b>${Number(n.server_count) || 0} instance${Number(n.server_count) === 1 ? '' : 's'}</b>
+                </div>
+                <div class="node-meta-item">
+                  <span>Hardware</span>
+                  <b>${sysInfo.cpus ? `${sysInfo.cpus} vCPU &bull; ${totalGb}` : 'Unavailable'}</b>
+                </div>
+                <div class="node-meta-item">
+                  <span>Memory Used</span>
+                  <b>${usedNodeRam !== '—' ? `${usedNodeRam} / ${totalGb}` : '—'}</b>
+                </div>
+                <div class="node-meta-item">
+                  <span>Endpoint</span>
+                  <b class="mono" title="${esc(n.base_url || 'Local Host')}">${esc(n.is_local ? 'Internal Direct' : (n.base_url || n.fqdn))}</b>
+                </div>
+              </div>
+
+              ${!n.online && n.error ? `<div class="node-error-note">${esc(n.error)}</div>` : ''}
+
+              <div class="row sb" style="margin-top: auto; padding-top: 4px;">
+                <span class="mu mono" style="font-size: 11px;">${n.is_local ? 'id: local' : `key: ${esc(n.token_prefix || 'neo_...')}`}</span>
+                <div class="row" style="gap: 6px;">
+                  <button type="button" class="btn sm" onclick="testClusterNode('${esc(n.id)}', this)">${ic('refresh', 12)} Test</button>
+                  ${n.is_local
+                    ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Configure Host</button>`
+                    : `
+                      <button type="button" class="btn sm" onclick="openNodeModal('${esc(n.id)}')">${ic('edit', 12)} Edit</button>
+                      <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Disconnect</button>
+                    `}
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      `;
+    } else if (t === 2) {
+      content = `
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:#fff;">All Cluster Servers (${S.servers.length})</h2>
-              <span class="mu" style="font-size:13px;">Overview and controls for all server instances on this daemon.</span>
+              <h2 style="margin:0 0 4px; color:var(--tx);">All Cluster Servers (${S.servers.length})</h2>
+              <span class="mu" style="font-size:13px;">Overview and controls for all server instances across local and linked remote nodes.</span>
             </div>
             <div class="row" style="gap:8px;">
               <button class="btn sm" onclick="bulkRestartServers()">${ic('refresh', 14)} Restart All</button>
@@ -3307,34 +4418,40 @@ const V = {
             </div>
           </div>
           <table>
-            <thead><tr><th>Server</th><th>Port</th><th>Engine</th><th>RAM Limit</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+            <thead><tr><th>Server</th><th>Node</th><th>Port</th><th>Engine</th><th>RAM Limit</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
-              ${S.servers.length ? S.servers.map((s, idx) => `
+              ${S.servers.length ? S.servers.map((s, idx) => {
+                const nid = s.node_id || 'local';
+                const nodeName = s.node_name || getNodeById(nid)?.name || (nid === 'local' ? 'Local Master' : nid);
+                const normSt = normalizeServerStatus(s.stats?.status || s.status);
+                const isRun = normSt === 'online' || normSt === 'starting';
+                return `
                 <tr>
-                  <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${s.id})</span></td>
+                  <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${esc(s.id)})</span></td>
+                  <td><span class="chip srv-node-badge">${esc(nodeName)}</span></td>
                   <td class="mono">${s.port}</td>
                   <td><span class="chip">${esc(s.type)} ${esc(s.version)}</span></td>
                   <td class="mono">${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</td>
-                  <td><span class="badge ${(s.stats?.status || s.status) === 'running' ? 'online' : 'offline'}"><i class="dot"></i>${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'}</span></td>
+                  <td><span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span></td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
                       <button class="btn sm" onclick="switchServer(${idx}); go('con');">Manage</button>
-                      <button class="btn sm" onclick="openReinstallModal('${s.id}')">${ic('refresh', 12)} Reinstall</button>
-                      <button class="btn sm dg" onclick="openDeleteServerModal('${s.id}', '${esc(s.name)}')">${ic('trash', 12)} Delete</button>
+                      <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">${ic('refresh', 12)} Reinstall</button>
+                      <button class="btn sm dg" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)">${ic('trash', 12)} Delete</button>
                     </div>
                   </td>
-                </tr>
-              `).join('') : '<tr><td colspan="6" class="mu" style="text-align:center; padding:24px;">No server instances deployed yet.</td></tr>'}
+                </tr>`;
+              }).join('') : '<tr><td colspan="7" class="mu" style="text-align:center; padding:24px;">No server instances deployed yet.</td></tr>'}
             </tbody>
           </table>
         </div>
       `;
-    } else if (t === 2) {
+    } else if (t === 3) {
       content = `
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:#fff;">Panel Users &amp; Permissions</h2>
+              <h2 style="margin:0 0 4px; color:var(--tx);">Panel Users &amp; Permissions</h2>
               <span class="mu" style="font-size:13px;">Manage operators, administrators, and client user accounts.</span>
             </div>
             <button class="btn pr" onclick="openAddUserModal()">+ Create User</button>
@@ -3350,7 +4467,7 @@ const V = {
                   <td class="mu">${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
                   <td style="text-align:right">
                     ${u.username !== S.acct.un ? `
-                      <button class="btn sm dg" onclick="deleteAdminUser(${u.id}, '${esc(u.username)}')">${ic('trash', 12)} Delete</button>
+                      <button class="btn sm dg" data-id="${u.id}" data-name="${esc(u.username)}" onclick="deleteAdminUser(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Delete</button>
                     ` : '<span class="mu" style="font-size:12px;">Current Account</span>'}
                   </td>
                 </tr>
@@ -3367,52 +4484,230 @@ const V = {
           </table>
         </div>
       `;
-    } else if (t === 3) {
+    } else if (t === 4) {
       content = `
+        <div class="brand-layout-grid" style="margin-bottom: 18px;">
+          <div class="card">
+            <div class="row sb" style="margin-bottom: 6px; flex-wrap: wrap; gap: 10px;">
+              <div>
+                <h2 style="margin: 0; color: var(--tx);">Panel Look, Theme Presets &amp; Branding</h2>
+                <span class="mu" style="font-size: 13px; display: block; margin-top: 3px;">
+                  Persist global visual styles, colors, glass surface properties, artwork &amp; custom CSS for all users.
+                </span>
+              </div>
+              <div class="row" style="gap: 8px;">
+                <button type="button" class="btn sm" onclick="discardBrandDraft()">Discard</button>
+                <button type="button" class="btn sm dg" onclick="resetBrandingDefaults()">Reset Defaults</button>
+                <button type="button" id="brand-save-btn" class="btn sm pr" onclick="saveBrandingAndDaemon()">${ic('check', 13)} Save Look</button>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 8px;">Theme Presets</div>
+              <div class="brand-preset-grid">
+                ${BRAND_PRESETS.map(p => `
+                  <button type="button" class="brand-preset-card ${draft.preset === p.id ? 'on' : ''}" onclick="selectBrandPreset('${p.id}')">
+                    <div class="brand-swatch-row">
+                      ${p.swatches.map(sw => `<span class="brand-swatch-dot" style="background:${sw};"></span>`).join('')}
+                    </div>
+                    <div>
+                      <b style="display:block; font-size:13px; color:var(--tx);">${esc(p.name)}</b>
+                      <span class="mu" style="font-size:11px;">${esc(p.desc)}</span>
+                    </div>
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+
+            <div class="grid g2" style="margin-top: 18px;">
+              <label class="f" style="margin-bottom: 0;">
+                <span>Panel Brand Title</span>
+                <input type="text" value="${esc(draft.brand_name || '')}" maxlength="48" oninput="onBrandInputChange('brand_name', this.value)" placeholder="NeoPanel">
+              </label>
+              <label class="f" style="margin-bottom: 0;">
+                <span>Brand Subtitle / Page Title Suffix</span>
+                <input type="text" value="${esc(draft.brand_subtitle || '')}" maxlength="120" oninput="onBrandInputChange('brand_subtitle', this.value)" placeholder="Ultra-Lightweight Minecraft Server Manager">
+              </label>
+              <label class="f" style="margin-bottom: 0;">
+                <span>Footer / Login Subtext</span>
+                <input type="text" value="${esc(draft.footer_text || '')}" maxlength="120" oninput="onBrandInputChange('footer_text', this.value)" placeholder="Powered by NeoPanel Daemon">
+              </label>
+              <label class="f" style="margin-bottom: 0;">
+                <span>Default Color Mode (New Browsers)</span>
+                <select onchange="onBrandInputChange('default_theme', this.value)">
+                  <option value="dark" ${(draft.default_theme || 'dark') === 'dark' ? 'selected' : ''}>Dark Glass (Default)</option>
+                  <option value="oled" ${draft.default_theme === 'oled' ? 'selected' : ''}>OLED Pure Black</option>
+                  <option value="light" ${draft.default_theme === 'light' ? 'selected' : ''}>Light Daylight</option>
+                  <option value="auto" ${draft.default_theme === 'auto' ? 'selected' : ''}>Match OS Preference</option>
+                </select>
+              </label>
+            </div>
+
+            <div style="margin-top: 18px;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 10px;">Custom Colors &amp; Surfaces</div>
+              <div class="grid g3">
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Accent Color</span>
+                  <div class="brand-color-row">
+                    <input type="color" class="brand-color-picker" value="${esc(draft.accent_color || '#387aff')}" oninput="onBrandInputChange('accent_color', this.value, this)">
+                    <input type="text" value="${esc(draft.accent_color || '#387aff')}" placeholder="#387aff" oninput="onBrandInputChange('accent_color', this.value, this)">
+                  </div>
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Accent Hover</span>
+                  <div class="brand-color-row">
+                    <input type="color" class="brand-color-picker" value="${esc(draft.accent_hover || '#4f8aff')}" oninput="onBrandInputChange('accent_hover', this.value, this)">
+                    <input type="text" value="${esc(draft.accent_hover || '#4f8aff')}" placeholder="#4f8aff" oninput="onBrandInputChange('accent_hover', this.value, this)">
+                  </div>
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Text Color (optional)</span>
+                  <div class="brand-color-row">
+                    <input type="color" class="brand-color-picker" value="${esc(draft.text_color || '#e6edf3')}" oninput="onBrandInputChange('text_color', this.value, this)">
+                    <input type="text" value="${esc(draft.text_color || '')}" placeholder="Theme default" oninput="onBrandInputChange('text_color', this.value, this)">
+                  </div>
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Deep Backdrop</span>
+                  <div class="brand-color-row">
+                    <input type="color" class="brand-color-picker" value="${esc(draft.bg_deep || '#0a0d14')}" oninput="onBrandInputChange('bg_deep', this.value, this)">
+                    <input type="text" value="${esc(draft.bg_deep || '')}" placeholder="Theme default" oninput="onBrandInputChange('bg_deep', this.value, this)">
+                  </div>
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Card Surface Tint</span>
+                  <div class="brand-color-row">
+                    <input type="color" class="brand-color-picker" value="${esc(draft.card_bg || '#121826')}" oninput="onBrandInputChange('card_bg', this.value, this)">
+                    <input type="text" value="${esc(draft.card_bg || '')}" placeholder="Theme default" oninput="onBrandInputChange('card_bg', this.value, this)">
+                  </div>
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Sidebar Background</span>
+                  <div class="brand-color-row">
+                    <input type="color" class="brand-color-picker" value="${esc(draft.nav_bg || '#0d121d')}" oninput="onBrandInputChange('nav_bg', this.value, this)">
+                    <input type="text" value="${esc(draft.nav_bg || '')}" placeholder="Theme default" oninput="onBrandInputChange('nav_bg', this.value, this)">
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div class="grid g3" style="margin-top: 16px;">
+              <label class="f" style="margin-bottom: 0;">
+                <span>Card Opacity (<b id="lbl-card-opacity">${draft.card_opacity ?? 72}</b>%)</span>
+                <div class="brand-range-row">
+                  <input type="range" min="35" max="100" value="${draft.card_opacity ?? 72}" oninput="$('#lbl-card-opacity').textContent=this.value; onBrandInputChange('card_opacity', Number(this.value));">
+                </div>
+              </label>
+              <label class="f" style="margin-bottom: 0;">
+                <span>Border Radius (<b id="lbl-border-radius">${draft.border_radius_px ?? 14}</b>px)</span>
+                <div class="brand-range-row">
+                  <input type="range" min="0" max="28" value="${draft.border_radius_px ?? 14}" oninput="$('#lbl-border-radius').textContent=this.value; onBrandInputChange('border_radius_px', Number(this.value));">
+                </div>
+              </label>
+              <label class="f" style="margin-bottom: 0;">
+                <span>Glass Blur (<b id="lbl-glass-blur">${draft.glass_blur_px ?? 16}</b>px)</span>
+                <div class="brand-range-row">
+                  <input type="range" min="0" max="32" value="${draft.glass_blur_px ?? 16}" oninput="$('#lbl-glass-blur').textContent=this.value; onBrandInputChange('glass_blur_px', Number(this.value));">
+                </div>
+              </label>
+            </div>
+
+            <div style="margin-top: 18px;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 10px;">Media &amp; Artwork URLs</div>
+              <div class="grid g2">
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Sidebar Logo URL (blank = 3D Cube)</span>
+                  <input type="text" value="${esc(draft.logo_url || '')}" oninput="onBrandInputChange('logo_url', this.value)" placeholder="https://example.com/logo.png">
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Favicon URL (blank = default SVG)</span>
+                  <input type="text" value="${esc(draft.favicon_url || '')}" oninput="onBrandInputChange('favicon_url', this.value)" placeholder="https://example.com/favicon.ico">
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Login Screen Wallpaper URL</span>
+                  <input type="text" value="${esc(draft.login_bg_url || '')}" oninput="onBrandInputChange('login_bg_url', this.value)" placeholder="https://example.com/login-bg.jpg">
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Server Workspace Hero URL</span>
+                  <input type="text" value="${esc(draft.server_hero_url || '')}" oninput="onBrandInputChange('server_hero_url', this.value)" placeholder="${esc(SERVER_HERO_URL)}">
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Dashboard Card Cover URL</span>
+                  <input type="text" value="${esc(draft.card_cover_url || '')}" oninput="onBrandInputChange('card_cover_url', this.value)" placeholder="${esc(MINECRAFT_COVER_URL)}">
+                </label>
+                <label class="f" style="margin-bottom: 0;">
+                  <span>Default User Avatar URL</span>
+                  <input type="text" value="${esc(draft.default_avatar_url || '')}" oninput="onBrandInputChange('default_avatar_url', this.value)" placeholder="${esc(DEFAULT_USER_AVATAR_URL)}">
+                </label>
+              </div>
+            </div>
+
+            <div style="margin-top: 16px;">
+              <label class="f" style="margin-bottom: 0;">
+                <span>Custom CSS Injection</span>
+                <textarea rows="4" spellcheck="false" style="font-family:var(--font-mono); font-size:12.5px;" placeholder="/* e.g. .sift-server-card { border-width: 2px; } */" oninput="onBrandInputChange('custom_css', this.value)">${esc(draft.custom_css || '')}</textarea>
+              </label>
+            </div>
+          </div>
+
+          <div class="card brand-preview-card">
+            <div class="row sb" style="margin-bottom: 12px;">
+              <h2 style="margin: 0; font-size: 16px;">Live Panel Preview</h2>
+              <span class="chip">${esc(draft.preset || 'custom')}</span>
+            </div>
+            <div id="brand-live-preview">
+              ${renderBrandPreviewMarkup(draft)}
+            </div>
+            <p class="mu" style="font-size: 12px; line-height: 1.5; margin: 12px 0;">
+              Changes apply live as you edit so you can inspect colors, glass blur, typography, and banners before saving to SQLite.
+            </p>
+            <div class="row" style="gap: 8px; flex-wrap: wrap;">
+              <button type="button" class="btn pr" style="flex: 1;" onclick="saveBrandingAndDaemon()">${ic('check', 14)} Save Global Look</button>
+              <button type="button" class="btn" onclick="discardBrandDraft()">Discard</button>
+            </div>
+          </div>
+        </div>
+
         <div class="card" style="margin-bottom:18px;">
-          <h2 style="margin:0 0 6px; color:#fff;">Daemon &amp; Panel Customization</h2>
+          <h2 style="margin:0 0 6px; color:var(--tx);">Daemon Network &amp; Cluster Defaults</h2>
           <span class="mu" style="font-size:13px; display:block; margin-bottom:18px;">
-            Customize your installation branding, public network hostnames, SFTP settings, and resource quotas.
+            Persisted host FQDN, SFTP port, default instance memory, and auto-restart policy for the local master daemon.
           </span>
           <form onsubmit="saveAdminDaemonSettings(event)">
             <div class="grid g2">
               <label class="f">
-                <span>Panel Brand Title</span>
-                <input type="text" id="adm-brand" value="${esc(cfg.brandName || 'NeoPanel')}" required>
+                <span>Public Host IP / FQDN (Connect Address &amp; SFTP Host)</span>
+                <input type="text" id="adm-fqdn" value="${esc(daemonDraft.fqdn || '')}" placeholder="${esc(window.location.hostname || 'play.example.com')}" oninput="onDaemonInputChange('fqdn', this.value)">
               </label>
-              <label class="f">
-                <span>Public Host IP / FQDN</span>
-                <input type="text" id="adm-fqdn" value="${esc(cfg.fqdn || window.location.hostname || '127.0.0.1')}" required>
-              </label>
-            </div>
-            <div class="grid g3" style="margin-top:12px;">
               <label class="f">
                 <span>SFTP Daemon Port</span>
-                <input type="number" id="adm-sftp" value="${cfg.sftpPort || 2022}" min="1" max="65535" required>
+                <input type="number" id="adm-sftp" value="${daemonDraft.sftp_port || 2022}" min="1" max="65535" required oninput="onDaemonInputChange('sftp_port', Number(this.value))">
               </label>
+            </div>
+            <div class="grid g2" style="margin-top:4px;">
               <label class="f">
                 <span>Max Upload Size (MB)</span>
-                <input type="number" id="adm-upload" value="${cfg.maxUploadMB || 500}" min="10" max="10000" required>
+                <input type="number" id="adm-upload" value="${daemonDraft.max_upload_mb || 500}" min="10" max="25000" required oninput="onDaemonInputChange('max_upload_mb', Number(this.value))">
               </label>
               <label class="f">
                 <span>Default Instance RAM (MB)</span>
-                <input type="number" id="adm-ram" value="${cfg.defaultRamMB || 2048}" min="512" max="65536" required>
+                <input type="number" id="adm-ram" value="${daemonDraft.default_ram_mb || 2048}" min="256" max="131072" required oninput="onDaemonInputChange('default_ram_mb', Number(this.value))">
               </label>
             </div>
-            <div style="margin-top:16px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px;">
+            <div style="margin-top:8px; padding:12px 14px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px;">
               <label class="row sb" style="cursor:pointer;">
                 <div>
-                  <b style="color:#fff; display:block;">Auto-Restart Policy</b>
-                  <span class="mu" style="font-size:12.5px;">Automatically restart crashed server processes without operator intervention</span>
+                  <b style="color:var(--tx); display:block;">Auto-Restart Policy</b>
+                  <span class="mu" style="font-size:12.5px;">Automatically restart crashed server processes (times out after 2 consecutive startup failures)</span>
                 </div>
                 <span class="sw">
-                  <input type="checkbox" id="adm-autorestart" ${cfg.autoRestartPolicy ? 'checked' : ''}>
+                  <input type="checkbox" id="adm-autorestart" ${daemonDraft.auto_restart_policy ? 'checked' : ''} onchange="onDaemonInputChange('auto_restart_policy', this.checked)">
                   <i></i>
                 </span>
               </label>
             </div>
             <div class="row" style="justify-content:flex-end; margin-top:18px;">
-              <button type="submit" class="btn pr">${ic('download', 14)} Save Configuration</button>
+              <button type="submit" class="btn pr">${ic('download', 14)} Save Daemon Settings</button>
             </div>
           </form>
         </div>
@@ -3456,11 +4751,11 @@ const V = {
           </form>
         </div>
       `;
-    } else if (t === 4) {
+    } else if (t === 5) {
       content = renderActivityLogSection({
         scope: 'all',
         title: 'Global Daemon Audit Log',
-        subtitle: 'Cluster-wide security, user management, power, console, file & software audit events',
+        subtitle: 'Cluster-wide security, node connections, databases, user management, power, console, file & software audit events',
         showActor: true
       });
     }
@@ -3474,7 +4769,7 @@ const V = {
 
     <div class="tabs" style="margin-top: 16px; margin-bottom: 16px;">
       ${tabs.map(([lbl, idx]) => `
-        <button class="${t === idx ? 'active' : ''}" onclick="S.adminTab=${idx}; R(); ${idx === 4 ? 'loadActivityLog();' : ''}">${lbl}</button>
+        <button class="${t === idx ? 'active' : ''}" onclick="selectAdminTab(${idx})">${lbl}</button>
       `).join('')}
     </div>
 
@@ -3488,7 +4783,7 @@ const V = {
 
     if (t === 0) {
       tabContent = `<div class="card prof">
-        <div class="banner" style="background-image: url('${MINECRAFT_COVER_URL}'), url('/img/banner.jpg'); background-size: cover; background-position: center;">
+        <div class="banner" style="background-image: url('${esc(getBrand('card_cover_url'))}'), url('/img/banner.jpg'); background-size: cover; background-position: center;">
           <span class="avb">${av(64)}</span>
           <button class="btn sm" onclick="$('#aem').focus()">Change Gravatar</button>
         </div>
@@ -3730,7 +5025,7 @@ function navHtml() {
   if (isDash) {
     return `
     <div class="brand" onclick="go('dash')" style="cursor:pointer;">
-      <i class="cube"></i>NeoPanel
+      ${brandLogoHtml(false)}
     </div>
     
     <button class="nsearch" onclick="openPalette(1)" aria-label="Search (Ctrl+K)">
@@ -3779,7 +5074,7 @@ function navHtml() {
   let group = '';
   return `
   <div class="brand" onclick="go('dash')" style="cursor:pointer;">
-    <i class="cube"></i>NeoPanel
+    ${brandLogoHtml(false)}
   </div>
   
   <button class="nsearch" onclick="openPalette(1)" aria-label="Search (Ctrl+K)">
@@ -3834,6 +5129,9 @@ function normalizeRoute(view) {
 
 window.go = function(view) {
   const target = normalizeRoute(view);
+  if (S.view === 'admin' && target !== 'admin' && (S.adminTab || 0) === 4) {
+    applyBranding(S.branding);
+  }
   S.view = target;
   window.location.hash = '#' + target;
   R();
@@ -3904,13 +5202,14 @@ function bindEditorTabKey() {
 window.onEnterView = function(view) {
   if (view === 'pl') loadPlayersData();
   else if (view === 'fi') loadFileList(S.currentDir);
+  else if (view === 'db') loadDatabases();
   else if (view === 'plug') {
     loadPluginsList();
     if ((S.plugTab || 'browse') === 'browse') searchModrinth();
   }
   else if (view === 'bk') loadBackupsList();
-  else if (view === 'set') { loadProperties(); loadJavaRuntimes(); }
-  else if (view === 'stp' || view === 'ver') { loadJavaRuntimes(); }
+  else if (view === 'set') { loadProperties(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
+  else if (view === 'stp' || view === 'ver') { loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
   else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
   else if (view === 'act') loadActivityLog();
   else if (view === 'admin') loadAdminData();
@@ -3918,24 +5217,51 @@ window.onEnterView = function(view) {
   else if (view === 'dash') loadDashboard();
 };
 
+function setNodeFilter(nodeId) {
+  S.nodeFilter = nodeId || 'all';
+  R();
+}
+
 // --- Backend Data Loaders ---
 async function loadDashboard() {
   if (!S.loading) S.loading = {};
   if (S.servers.length === 0) S.loading.dash = true;
+  const prevCur = curServer();
+  const prevId = prevCur?.id || S.activeServerId;
+  const prevNodeId = prevCur?.node_id || S.activeNodeId || 'local';
+
   try {
-    const [srvs, act] = await Promise.all([
-      api('/api/servers'),
+    const [clusterRes, nodesRes, act] = await Promise.all([
+      api('/api/cluster/servers').catch(() => null),
+      api('/api/nodes').catch(() => null),
       api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null)
     ]);
-    S.servers = srvs || [];
+
+    if (clusterRes && Array.isArray(clusterRes.servers)) {
+      S.servers = clusterRes.servers.map(s => ({ ...s, node_id: s.node_id || 'local' }));
+      S.clusterNodeErrors = clusterRes.node_errors || {};
+    } else {
+      const srvs = await api('/api/servers').catch(() => []);
+      S.servers = (Array.isArray(srvs) ? srvs : []).map(s => ({ ...s, node_id: s.node_id || 'local' }));
+      S.clusterNodeErrors = {};
+    }
+
+    if (Array.isArray(nodesRes)) {
+      S.nodes = nodesRes;
+    }
     if (Array.isArray(act)) S.acct.act = act;
+
     if (S.servers.length > 0) {
-      if (S.cs >= S.servers.length) S.cs = 0;
+      let idx = prevId ? S.servers.findIndex(s => s.id === prevId && (s.node_id || 'local') === prevNodeId) : -1;
+      if (idx === -1) idx = 0;
+      S.cs = idx;
       const cur = curServer();
       applyServerStatsSnapshot(cur, cur.stats, false);
       S.ver = cur.version || S.ver;
       S.core = (cur.type || 'paper').charAt(0).toUpperCase() + (cur.type || 'paper').slice(1);
-      connectWs(cur.id);
+      connectWs(cur.id, false, cur.node_id || 'local');
+    } else {
+      S.cs = 0;
     }
   } catch (e) {} finally {
     S.loading.dash = false;
@@ -3943,60 +5269,244 @@ async function loadDashboard() {
   }
 }
 
+async function loadAdminNodes(toastOnDone = false) {
+  try {
+    const nodes = await api('/api/nodes');
+    if (Array.isArray(nodes)) {
+      S.nodes = nodes;
+    }
+    if (toastOnDone) toast('Cluster node status refreshed', 'ok');
+  } catch (e) {}
+  if (S.view === 'admin' || S.view === 'dash') R();
+}
+
+function selectAdminTab(idx) {
+  const prev = S.adminTab || 0;
+  if (prev === 4 && idx !== 4) {
+    applyBranding(S.branding);
+  }
+  S.adminTab = idx;
+  if (idx === 4) {
+    if (!S.brandDraft) S.brandDraft = { ...DEFAULT_BRANDING, ...S.branding };
+    if (!S.daemonDraft) S.daemonDraft = { ...S.brandingDaemon };
+    applyBranding(S.brandDraft);
+  }
+  R();
+  if (idx === 1) loadAdminNodes();
+  else if (idx === 5) loadActivityLog();
+}
+
 async function loadAdminData() {
-  try {
-    const sys = await api('/api/system');
-    S.system = sys;
-  } catch (e) {}
-  try {
-    const users = await api('/api/admin/users');
-    S.adminUsers = users || [];
-  } catch (e) {}
-  try {
-    const ts = await api('/api/admin/turnstile');
-    if (ts) S.adminTurnstile = ts;
-  } catch (e) {}
-  try {
-    const act = await api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`);
-    if (Array.isArray(act)) S.acct.act = act;
-  } catch (e) {}
-  await loadJavaRuntimes(true);
+  const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes] = await Promise.all([
+    api('/api/system').catch(() => null),
+    api('/api/admin/users').catch(() => null),
+    api('/api/admin/turnstile').catch(() => null),
+    api('/api/nodes').catch(() => null),
+    api('/api/admin/branding').catch(() => null),
+    api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null)
+  ]);
+
+  if (sysRes) S.system = sysRes;
+  if (usersRes) S.adminUsers = usersRes || [];
+  if (tsRes) S.adminTurnstile = tsRes;
+  if (Array.isArray(nodesRes)) S.nodes = nodesRes;
+  if (brandRes && brandRes.branding) {
+    S.branding = { ...DEFAULT_BRANDING, ...brandRes.branding };
+    S.brandingLoaded = true;
+    S.brandDraft = { ...DEFAULT_BRANDING, ...S.branding };
+  }
+  if (brandRes && brandRes.daemon) {
+    S.brandingDaemon = { ...S.brandingDaemon, ...brandRes.daemon };
+    S.daemonDraft = { ...S.brandingDaemon };
+    S.adminDaemonCfg = {
+      brandName: S.branding.brand_name || 'NeoPanel',
+      fqdn: S.brandingDaemon.fqdn || window.location.hostname || '127.0.0.1',
+      sftpPort: S.brandingDaemon.sftp_port || 2022,
+      maxUploadMB: S.brandingDaemon.max_upload_mb || 500,
+      defaultRamMB: S.brandingDaemon.default_ram_mb || 2048,
+      autoRestartPolicy: Boolean(S.brandingDaemon.auto_restart_policy)
+    };
+  }
+  if (Array.isArray(actRes)) S.acct.act = actRes;
+
+  applyBranding((S.adminTab || 0) === 4 && S.brandDraft ? S.brandDraft : S.branding);
+  await loadJavaRuntimes(true, 'local');
   R();
 }
 
-async function saveAdminTurnstileSettings(e) {
-  if (e) e.preventDefault();
-  const enabled = Boolean($('#adm-ts-enabled')?.checked);
-  const siteKey = $('#adm-ts-site')?.value.trim() || '';
-  const secretKey = $('#adm-ts-secret')?.value.trim() || '';
+function openNodeModal(nodeId = null) {
+  const container = $('#modal-container');
+  if (!container) return;
+  const existing = nodeId ? getNodeById(nodeId) : null;
+  const isEdit = Boolean(existing && !existing.is_local);
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:540px; max-height:90vh; overflow-y:auto;">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:20px; margin:0; display:flex; align-items:center; gap:8px;">
+          ${ic('network', 18)} ${isEdit ? `Edit Cluster Node: ${esc(existing.name)}` : 'Connect Remote NeoPanel Node'}
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
+        Enter the reachable HTTP/HTTPS URL of another NeoPanel daemon along with an API key (<code>neo_...</code>) generated in that node's <b>Account &rarr; API Keys</b> tab.
+      </p>
+
+      <form onsubmit="submitNodeModal(event, '${isEdit ? esc(existing.id) : ''}')">
+        <div class="grid g2">
+          <label class="f">
+            <span>Node Name</span>
+            <input type="text" id="nm-name" required value="${esc(existing?.name || '')}" placeholder="e.g. EU-Frankfurt-01">
+          </label>
+          <label class="f">
+            <span>Region / Location</span>
+            <input type="text" id="nm-loc" value="${esc(existing?.location || '')}" placeholder="e.g. Frankfurt, DE">
+          </label>
+        </div>
+
+        <label class="f">
+          <span>Daemon API Base URL</span>
+          <input type="url" id="nm-url" required value="${esc(existing?.base_url || '')}" placeholder="http://192.168.1.50:8080 or https://node2.example.com">
+        </label>
+
+        <label class="f">
+          <span>Public Game IP / FQDN <span class="mu">(displayed to players, optional)</span></span>
+          <input type="text" id="nm-fqdn" value="${esc(existing?.fqdn || '')}" placeholder="e.g. eu1.example.com (defaults to URL host)">
+        </label>
+
+        <label class="f">
+          <span>Node API Token ${isEdit ? '<span class="mu">(leave blank to keep current)</span>' : ''}</span>
+          <input type="password" id="nm-token" ${isEdit ? '' : 'required'} autocomplete="new-password" placeholder="${isEdit ? `Saved (${esc(existing.token_prefix || 'neo_...')})` : 'neo_xxxxxxxxxxxxxxxxxxxxxxxx'}">
+        </label>
+
+        <div id="node-modal-test-res" style="margin-bottom: 14px;"></div>
+
+        <div class="row sb" style="gap:10px; margin-top:6px;">
+          <button type="button" id="nm-test-btn" class="btn" onclick="testNodeModalConnection('${isEdit ? esc(existing.id) : ''}')">
+            ${ic('refresh', 14)} Test Connection
+          </button>
+          <div class="row" style="gap:8px;">
+            <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+            <button type="submit" id="nm-submit-btn" class="btn pr">
+              ${ic('check', 14)} ${isEdit ? 'Save Node' : 'Connect Node'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+  setTimeout(() => $('#nm-name')?.focus(), 40);
+}
+
+async function testNodeModalConnection(nodeId = '') {
+  const base_url = $('#nm-url')?.value.trim() || '';
+  const api_token = $('#nm-token')?.value.trim() || '';
+  const box = $('#node-modal-test-res');
+  const btn = $('#nm-test-btn');
+  if (!base_url) {
+    toast('Enter the Node API Base URL first', 'bad');
+    return;
+  }
+  if (!api_token && !nodeId) {
+    toast('Enter the Node API Token (neo_...)', 'bad');
+    return;
+  }
+
+  if (btn) setBtnLoading(btn, true, 'Testing...');
+  if (box) box.innerHTML = loaderHtml('Probing remote NeoPanel daemon...');
+  try {
+    const res = await api('/api/nodes/test', {
+      method: 'POST',
+      body: JSON.stringify({ id: nodeId || '', base_url, api_token })
+    });
+    if (res.online) {
+      const sys = res.system || {};
+      const ramGb = sys.total_ram_mb ? (sys.total_ram_mb / 1024).toFixed(1) + ' GB RAM' : '';
+      box.innerHTML = `<div class="node-callout" style="margin:0; border-color: rgba(63,185,80,0.45); background: rgba(63,185,80,0.1);">
+        <b style="color:var(--ok);">Connected!</b> Reachable in <b>${res.latency_ms ?? 0}ms</b> &bull; ${res.server_count ?? 0} server(s)
+        ${sys.cpus ? `<div class="mu mono" style="font-size:11.5px; margin-top:3px;">${esc(sys.os || 'linux')}/${esc(sys.arch || 'amd64')} &bull; ${sys.cpus} vCPU &bull; ${ramGb}</div>` : ''}
+      </div>`;
+    } else {
+      box.innerHTML = `<div class="node-error-note"><b>Connection Failed:</b> ${esc(res.error || 'Unreachable node')}</div>`;
+    }
+  } catch (err) {
+    if (box) box.innerHTML = `<div class="node-error-note">${esc(err.message || 'Test failed')}</div>`;
+  } finally {
+    if (btn) setBtnLoading(btn, false);
+  }
+}
+
+async function submitNodeModal(e, nodeId = '') {
+  e.preventDefault();
+  const btn = $('#nm-submit-btn');
+  if (btn) setBtnLoading(btn, true, nodeId ? 'Saving...' : 'Connecting...');
+
+  const payload = {
+    name: $('#nm-name')?.value.trim() || '',
+    location: $('#nm-loc')?.value.trim() || '',
+    base_url: $('#nm-url')?.value.trim() || '',
+    fqdn: $('#nm-fqdn')?.value.trim() || '',
+    api_token: $('#nm-token')?.value.trim() || ''
+  };
 
   try {
-    const res = await api('/api/admin/turnstile', {
-      method: 'POST',
-      body: JSON.stringify({
-        enabled,
-        site_key: siteKey,
-        secret_key: secretKey
-      })
+    const isEdit = Boolean(nodeId);
+    const res = await api(isEdit ? `/api/nodes/${encodeURIComponent(nodeId)}` : '/api/nodes', {
+      method: isEdit ? 'PUT' : 'POST',
+      body: JSON.stringify(payload)
     });
-    S.adminTurnstile = {
-      enabled: Boolean(res.enabled),
-      site_key: res.site_key || siteKey,
-      has_secret_key: Boolean(res.has_secret_key)
-    };
-    S.turnstileEnabled = Boolean(res.enabled);
-    S.turnstileSiteKey = res.enabled ? (res.site_key || siteKey) : '';
-    toast(res.message || 'Turnstile settings updated', 'ok');
-    R();
+    closeModal();
+    if (res && res.online) {
+      toast(`Node "${res.name}" connected (${res.latency_ms ?? 0}ms)!`, 'ok');
+    } else {
+      toast(`Saved node "${res?.name || payload.name}"${res?.error ? ` — warning: ${res.error}` : ''}`);
+    }
+    await Promise.all([loadDashboard(), loadAdminNodes()]);
   } catch (err) {
-    toast(err.message || 'Failed to save Turnstile settings', 'bad');
+    if (btn) setBtnLoading(btn, false);
   }
+}
+
+async function testClusterNode(nodeId, btnEl) {
+  if (btnEl) setBtnLoading(btnEl, true, 'Testing...');
+  try {
+    const res = await api(`/api/nodes/${encodeURIComponent(nodeId)}/test`, { method: 'POST' });
+    if (res.online) {
+      toast(`Node online (${res.latency_ms ?? 0}ms, ${res.server_count ?? 0} servers)`, 'ok');
+    } else {
+      toast(`Node offline: ${res.error || 'Unreachable'}`, 'bad');
+    }
+    await loadAdminNodes();
+  } catch (e) {} finally {
+    if (btnEl) setBtnLoading(btnEl, false);
+  }
+}
+
+async function deleteClusterNode(nodeId, name) {
+  const ok = await uiConfirm({
+    title: 'Disconnect Cluster Node',
+    message: `Remove remote node <b>${esc(name)}</b> from this NeoPanel cluster? Servers hosted on that remote daemon will keep running there untouched, and will simply disappear from this master dashboard.`,
+    confirmText: 'Disconnect Node',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'network'
+  });
+  if (!ok) return;
+
+  try {
+    await api(`/api/nodes/${encodeURIComponent(nodeId)}`, { method: 'DELETE' });
+    if (S.nodeFilter === nodeId) S.nodeFilter = 'all';
+    toast(`Disconnected node "${name}"`, 'ok');
+    await Promise.all([loadDashboard(), loadAdminNodes()]);
+  } catch (e) {}
 }
 
 async function bulkRestartServers() {
   toast('Restarting all cluster instances...');
   for (const s of S.servers) {
-    await api(`/api/servers/${s.id}/power`, { method: 'POST', body: JSON.stringify({ action: 'restart' }) }).catch(() => {});
+    await api(srvApiPath(s, '/power'), { method: 'POST', body: JSON.stringify({ action: 'restart' }) }).catch(() => {});
   }
   toast('All servers restarted');
 }
@@ -4016,7 +5526,7 @@ async function bulkStopServers() {
 
   toast('Stopping all cluster instances...');
   for (const s of S.servers) {
-    await api(`/api/servers/${s.id}/power`, { method: 'POST', body: JSON.stringify({ action: 'stop' }) }).catch(() => {});
+    await api(srvApiPath(s, '/power'), { method: 'POST', body: JSON.stringify({ action: 'stop' }) }).catch(() => {});
   }
   toast('All servers stopped');
 }
@@ -4028,7 +5538,7 @@ async function loadPlayersData() {
   S.loading.players = true;
   if (S.view === 'pl') R();
   try {
-    const data = await api(`/api/servers/${srv.id}/players`);
+    const data = await api(srvApiPath(srv, '/players'));
     S.wl = data.whitelist || [];
     S.bans = data.bans || [];
     S.ops = data.ops || [];
@@ -4100,7 +5610,7 @@ async function playerAction(action, player, reason = '') {
   }
 
   try {
-    await api(`/api/servers/${srv.id}/players/action`, {
+    await api(srvApiPath(srv, '/players/action'), {
       method: 'POST',
       body: JSON.stringify({ action, player, reason })
     });
@@ -4124,7 +5634,7 @@ async function loadFileList(path = '') {
   S.loading.files = true;
   if (S.view === 'fi') R();
   try {
-    const data = await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`);
+    const data = await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`));
     S.fileList = data || [];
     S.currentDir = path;
   } catch (e) {} finally {
@@ -4248,7 +5758,7 @@ async function saveStartupSettings() {
   const newRam = parseInt($('#stp-ram')?.value, 10) || srv.memory_max || 2048;
 
   try {
-    await api(`/api/servers/${srv.id}`, {
+    await api(srvApiPath(srv, ''), {
       method: 'PUT',
       body: JSON.stringify({
         name: srv.name,
@@ -4292,7 +5802,7 @@ async function openFile(name) {
   S.editingFile = filePath;
   S.ftab = filePath;
   try {
-    const data = await api(`/api/servers/${srv.id}/files/content?path=${encodeURIComponent(filePath)}`);
+    const data = await api(srvApiPath(srv, `/files/content?path=${encodeURIComponent(filePath)}`));
     S.files[filePath] = data.content != null ? data.content : data;
     R();
   } catch (e) {
@@ -4314,7 +5824,7 @@ async function saveActiveFile() {
   if (!ed) return;
   const content = ed.value;
   try {
-    await api(`/api/servers/${srv.id}/files/content`, {
+    await api(srvApiPath(srv, '/files/content'), {
       method: 'POST',
       body: JSON.stringify({ path: filePath, content })
     });
@@ -4333,7 +5843,9 @@ async function saveActiveFile() {
 function downloadFileItem(path) {
   const srv = curServer();
   if (!srv) return;
-  window.open(`/api/servers/${srv.id}/files/download?path=${encodeURIComponent(path)}&token=${encodeURIComponent(S.token)}`, '_blank');
+  const baseUrl = srvApiPath(srv, `/files/download?path=${encodeURIComponent(path)}`);
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  window.open(`${baseUrl}${sep}token=${encodeURIComponent(S.token)}`, '_blank');
 }
 
 function isArchiveFile(filename) {
@@ -4357,7 +5869,7 @@ async function unzipFileItem(path) {
 
   toast(`Extracting ${fileName}...`);
   try {
-    const res = await api(`/api/servers/${srv.id}/files/unzip`, {
+    const res = await api(srvApiPath(srv, '/files/unzip'), {
       method: 'POST',
       body: JSON.stringify({ path: path, destination: dest.trim() })
     });
@@ -4394,7 +5906,7 @@ async function promptRenameFile(oldPath) {
   const srv = curServer();
   if (!srv) return;
   try {
-    await api(`/api/servers/${srv.id}/files/rename`, {
+    await api(srvApiPath(srv, '/files/rename'), {
       method: 'POST',
       body: JSON.stringify({ old_path: oldPath, new_path: newPath })
     });
@@ -4424,7 +5936,7 @@ async function deleteFileItem(path) {
   const srv = curServer();
   if (!srv) return;
   try {
-    await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+    await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`), { method: 'DELETE' });
     toast(`Deleted ${baseName}`, 'ok');
     loadFileList(S.currentDir);
   } catch (e) {
@@ -4449,7 +5961,7 @@ async function promptNewFile() {
   if (!srv) return;
   const target = S.currentDir ? `${S.currentDir}/${name}` : name;
   try {
-    await api(`/api/servers/${srv.id}/files/create`, {
+    await api(srvApiPath(srv, '/files/create'), {
       method: 'POST',
       body: JSON.stringify({ path: target, is_dir: false })
     });
@@ -4478,7 +5990,7 @@ async function promptNewFolder() {
   if (!srv) return;
   const target = S.currentDir ? `${S.currentDir}/${name}` : name;
   try {
-    await api(`/api/servers/${srv.id}/files/create`, {
+    await api(srvApiPath(srv, '/files/create'), {
       method: 'POST',
       body: JSON.stringify({ path: target, is_dir: true })
     });
@@ -4551,7 +6063,7 @@ async function deleteSelectedFiles() {
   let failed = 0;
   for (const path of paths) {
     try {
-      await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+      await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`), { method: 'DELETE' });
     } catch (e) {
       failed++;
     }
@@ -4723,7 +6235,7 @@ async function uploadFilesWithProgress(files) {
         resolve();
       };
 
-      xhr.open('POST', `/api/servers/${srv.id}/files/upload`);
+      xhr.open('POST', srvApiPath(srv, '/files/upload'));
       if (S.token) {
         xhr.setRequestHeader('Authorization', `Bearer ${S.token}`);
       }
@@ -4783,7 +6295,7 @@ async function loadPluginsList() {
   S.loading.plugins = true;
   if (S.view === 'plug' && (S.plugTab || 'browse') === 'installed') R();
   try {
-    const data = await api(`/api/servers/${srv.id}/plugins`);
+    const data = await api(srvApiPath(srv, '/plugins'));
     const list = Array.isArray(data) ? data : (data?.plugins || []);
     S.plugins = list.map(p => {
       if (typeof p === 'string') return [p, 'installed', true, ''];
@@ -4816,7 +6328,7 @@ async function deletePlugin(name) {
   if (!ok) return;
 
   try {
-    await api(`/api/servers/${srv.id}/plugins?filename=${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await api(srvApiPath(srv, `/plugins?filename=${encodeURIComponent(name)}`), { method: 'DELETE' });
     toast(`Removed plugin ${name}`);
     loadPluginsList();
   } catch (e) {}
@@ -4929,7 +6441,7 @@ async function installPlugin(projectSlug, title, btnEl) {
   }
   toast(`Downloading & installing ${title || projectSlug}...`);
   try {
-    await api(`/api/servers/${srv.id}/plugins/install`, {
+    await api(srvApiPath(srv, '/plugins/install'), {
       method: 'POST',
       body: JSON.stringify({ slug: projectSlug, project_id: projectSlug })
     });
@@ -4960,7 +6472,7 @@ async function loadBackupsList() {
   S.loading.backups = true;
   if (S.view === 'bk') R();
   try {
-    const list = await api(`/api/servers/${srv.id}/backups`);
+    const list = await api(srvApiPath(srv, '/backups'));
     S.bk = list || [];
   } catch (e) {} finally {
     S.loading.backups = false;
@@ -4983,7 +6495,7 @@ async function createBackup() {
 
   toast('Creating full server archive (.tar.gz)...');
   try {
-    await api(`/api/servers/${srv.id}/backups`, {
+    await api(srvApiPath(srv, '/backups'), {
       method: 'POST',
       body: JSON.stringify({ name: '' })
     });
@@ -4995,8 +6507,9 @@ async function createBackup() {
 function downloadBackup(name) {
   const srv = curServer();
   if (!srv) return;
-  const url = `/api/servers/${srv.id}/backups/download?name=${encodeURIComponent(name)}&token=${encodeURIComponent(S.token)}`;
-  window.open(url, '_blank');
+  const baseUrl = srvApiPath(srv, `/backups/download?name=${encodeURIComponent(name)}`);
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  window.open(`${baseUrl}${sep}token=${encodeURIComponent(S.token)}`, '_blank');
 }
 
 async function deleteBackup(name) {
@@ -5013,7 +6526,7 @@ async function deleteBackup(name) {
   if (!ok) return;
 
   try {
-    await api(`/api/servers/${srv.id}/backups?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await api(srvApiPath(srv, `/backups?name=${encodeURIComponent(name)}`), { method: 'DELETE' });
     toast(`Backup ${name} deleted`);
     loadBackupsList();
   } catch (e) {}
@@ -5030,7 +6543,7 @@ function askInstallSoftwareModal(srv, software, version) {
     const recJava = getRecommendedJavaForMcVersion(version, software);
     const curJava = resolveJavaSelectValue(srv.java_path || '', srv.version || '', srv.type || '');
     const needsJavaSwitch = curJava !== recJava;
-    const javaInfo = getPremadeJavaStatusMap().get(recJava);
+    const javaInfo = getPremadeJavaStatusMap(srv?.node_id || 'local').get(recJava);
     const javaMissingNote = javaInfo && !javaInfo.installed
       ? `<span class="mu" style="font-size: 11.5px; display: block; margin-top: 4px; color: #fbbf24;">Note: Java ${esc(recJava)} is not installed yet — install it from Startup Settings or Admin Area before starting.</span>`
       : '';
@@ -5106,12 +6619,12 @@ async function installSoftware(software, version, btnEl) {
     if (choice.backup) {
       if (curBtn) setBtnLoading(curBtn, true, 'Backing up...');
       toast('Creating world & server backup prior to upgrade...');
-      await api(`/api/servers/${srv.id}/backups`, { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
+      await api(srvApiPath(srv, '/backups'), { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
     }
     curBtn = findBtn();
     if (curBtn) setBtnLoading(curBtn, true, 'Installing...');
     toast(`Downloading ${software} ${version} server jar...`);
-    const softRes = await api(`/api/servers/${srv.id}/software`, {
+    const softRes = await api(srvApiPath(srv, '/software'), {
       method: 'POST',
       body: JSON.stringify({ software, version })
     });
@@ -5120,7 +6633,7 @@ async function installSoftware(software, version, btnEl) {
     if (softRes?.jar_file) srv.jar_file = softRes.jar_file;
 
     if (choice.syncJava && choice.recJava) {
-      await api(`/api/servers/${srv.id}`, {
+      await api(srvApiPath(srv, ''), {
         method: 'PUT',
         body: JSON.stringify({
           name: srv.name,
@@ -5166,7 +6679,7 @@ async function loadProperties() {
   const srv = curServer();
   if (!srv) return;
   try {
-    const props = await api(`/api/servers/${srv.id}/properties`);
+    const props = await api(srvApiPath(srv, '/properties'));
     S.props.motd = props['motd'] || S.props.motd;
     S.props.max = parseInt(props['max-players'] || '20');
     S.props.diff = props['difficulty'] || S.props.diff;
@@ -5201,13 +6714,13 @@ async function saveProperties() {
 
   try {
     // 1. Write server.properties file
-    await api(`/api/servers/${srv.id}/properties`, {
+    await api(srvApiPath(srv, '/properties'), {
       method: 'POST',
       body: JSON.stringify(payload)
     });
 
     // 2. Persist port, memory, and java runtime to SQLite DB and process runner
-    await api(`/api/servers/${srv.id}`, {
+    await api(srvApiPath(srv, ''), {
       method: 'PUT',
       body: JSON.stringify({
         name: srv.name,
@@ -5245,7 +6758,7 @@ async function loadSFTPDetails() {
   const srv = curServer();
   if (!srv) return;
   try {
-    const data = await api(`/api/servers/${srv.id}/sftp`);
+    const data = await api(srvApiPath(srv, '/sftp'));
     S.sftp = data;
     R();
   } catch (e) {}
@@ -5395,6 +6908,7 @@ function setAppearanceMode(mode) {
   } else {
     d.dataset.theme = mode === 'Light' ? 'light' : 'dark';
   }
+  applyBranding((S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : S.branding);
   R();
 }
 
@@ -5431,16 +6945,34 @@ function switchServer(index) {
   S.cs = index;
   const srv = S.servers[index];
   if (!srv) return;
+  const nodeId = srv.node_id || 'local';
   applyServerStatsSnapshot(srv, srv.stats, false);
   S.ver = srv.version || S.ver;
   S.core = (srv.type || 'paper').charAt(0).toUpperCase() + (srv.type || 'paper').slice(1);
-  if (S.activeServerId !== srv.id) {
+  if (S.activeServerId !== srv.id || (S.activeNodeId || 'local') !== nodeId) {
     S.log = [];
     S.ports = [];
-    connectWs(srv.id);
+    S.databases = [];
+    S.dbRevealIds = new Set();
+    S.sqlStudio = null;
+    S.fileList = [];
+    S.currentDir = '';
+    S.editingFile = null;
+    S.selectedFiles = new Set();
+    S.bk = [];
+    S.plugins = [];
+    S.sftp = null;
+    S.startupFailures = Number(srv.stats?.startup_failures) || 0;
+    S.startupHalted = Boolean(srv.stats?.startup_halted);
+    connectWs(srv.id, false, nodeId);
     loadServerPorts();
   }
   R();
+  if (S.view === 'net') {
+    loadSFTPDetails();
+  } else if (S.view && !['dash', 'con', 'admin', 'acc'].includes(S.view)) {
+    onEnterView(S.view);
+  }
   toast(`Switched to ${srv.name}`);
 }
 
@@ -5607,14 +7139,17 @@ window.setCreateVersion = function(ver) {
   syncCreateJavaFromVersion(ver);
 };
 
-function getNextSuggestedPort() {
+function getNextSuggestedPort(targetNodeId = null) {
+  const nid = targetNodeId || curServer()?.node_id || 'local';
   const usedPorts = new Set();
   (S.servers || []).forEach(s => {
-    if (s.port) usedPorts.add(s.port);
+    if ((s.node_id || 'local') === nid && s.port) usedPorts.add(s.port);
   });
-  (S.ports || []).forEach(p => {
-    if (p.port) usedPorts.add(p.port);
-  });
+  if ((curServer()?.node_id || 'local') === nid) {
+    (S.ports || []).forEach(p => {
+      if (p.port) usedPorts.add(p.port);
+    });
+  }
   let candidate = 25565;
   while (usedPorts.has(candidate)) {
     candidate++;
@@ -5622,11 +7157,32 @@ function getNextSuggestedPort() {
   return candidate;
 }
 
+function onCreateNodeChange(nodeId) {
+  const nid = nodeId || 'local';
+  const portInp = $('#cs-port');
+  if (portInp) portInp.value = getNextSuggestedPort(nid);
+  const strip = document.querySelector('#modal-container .java-status-strip');
+  if (strip) {
+    strip.dataset.nodeId = nid;
+    if (!S.javaRuntimesMap?.[nid]) {
+      strip.innerHTML = '<span class="java-status-chip">Checking installed Java 25, 21, 17 &amp; 8 runtimes...</span>';
+    }
+  }
+  loadJavaRuntimes(false, nid);
+}
+
 function openCreateServerModal() {
   const container = $('#modal-container');
   if (!container) return;
 
-  const nextPort = getNextSuggestedPort();
+  const nodesList = (Array.isArray(S.nodes) && S.nodes.length > 0)
+    ? S.nodes
+    : [{ id: 'local', name: 'Local Master Node', location: 'Primary Host', online: true }];
+  const defaultNodeId = (S.nodeFilter && S.nodeFilter !== 'all' && nodesList.some(n => n.id === S.nodeFilter))
+    ? S.nodeFilter
+    : (nodesList.find(n => n.id === 'local')?.id || nodesList[0].id);
+  const nextPort = getNextSuggestedPort(defaultNodeId);
+  const defaultRam = Number(S.brandingDaemon?.default_ram_mb) || Number(S.adminDaemonCfg?.defaultRamMB) || 2048;
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:620px; max-height:88vh; overflow-y:auto;">
@@ -5639,11 +7195,20 @@ function openCreateServerModal() {
       </div>
 
       <form onsubmit="handleCreateServer(event)">
-        <!-- Instance Name -->
-        <label class="f">
-          <span>Server Instance Name</span>
-          <input type="text" id="cs-name" required placeholder="e.g. Survival SMP, Proxy Network, Minigames" value="Survival Server">
-        </label>
+        <!-- Instance Name & Target Node -->
+        <div class="${nodesList.length > 1 ? 'grid g2' : ''}" style="margin-bottom:14px;">
+          <label class="f" style="margin-bottom:0;">
+            <span>Server Instance Name</span>
+            <input type="text" id="cs-name" required placeholder="e.g. Survival SMP, Proxy Network, Minigames" value="Survival Server">
+          </label>
+          ${nodesList.length > 1 ? `
+          <label class="f" style="margin-bottom:0;">
+            <span>Target Cluster Node</span>
+            <select id="cs-node" onchange="onCreateNodeChange(this.value)">
+              ${nodesList.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNodeId ? 'selected' : ''}>${esc(n.name)}${n.location ? ` (${esc(n.location)})` : ''}${n.online ? '' : ' [Offline]'}</option>`).join('')}
+            </select>
+          </label>` : `<input type="hidden" id="cs-node" value="${esc(defaultNodeId)}">`}
+        </div>
 
         <!-- Category: Game Server vs Network Proxy -->
         <div style="margin-bottom:14px;">
@@ -5706,12 +7271,12 @@ function openCreateServerModal() {
           <label class="f" style="margin-bottom:0;">
             <span>Java Runtime</span>
             <select id="cs-java" onchange="this.dataset.userPicked='1'">
-              ${renderJavaSelectOptions('21', false, '1.21.4', 'paper')}
+              ${renderJavaSelectOptions('21', false, '1.21.4', 'paper', defaultNodeId)}
             </select>
           </label>
         </div>
         <div style="margin-bottom:14px;">
-          ${renderJavaAvailabilityStrip()}
+          ${renderJavaAvailabilityStrip(defaultNodeId)}
         </div>
 
         <!-- Memory Allocation Pills -->
@@ -5719,13 +7284,13 @@ function openCreateServerModal() {
           <div class="row sb" style="margin-bottom:6px;">
             <span class="mu" style="font-size:13px; font-weight:600;">Memory Allocation</span>
             <div class="row" style="gap:4px;">
-              <button type="button" class="btn sm ram-pill" data-ram="1024" onclick="setCreateRam(1024)">1 GB</button>
-              <button type="button" class="btn sm ram-pill pr" data-ram="2048" onclick="setCreateRam(2048)">2 GB</button>
-              <button type="button" class="btn sm ram-pill" data-ram="4096" onclick="setCreateRam(4096)">4 GB</button>
-              <button type="button" class="btn sm ram-pill" data-ram="8192" onclick="setCreateRam(8192)">8 GB</button>
+              <button type="button" class="btn sm ram-pill ${defaultRam === 1024 ? 'pr' : ''}" data-ram="1024" onclick="setCreateRam(1024)">1 GB</button>
+              <button type="button" class="btn sm ram-pill ${defaultRam === 2048 ? 'pr' : ''}" data-ram="2048" onclick="setCreateRam(2048)">2 GB</button>
+              <button type="button" class="btn sm ram-pill ${defaultRam === 4096 ? 'pr' : ''}" data-ram="4096" onclick="setCreateRam(4096)">4 GB</button>
+              <button type="button" class="btn sm ram-pill ${defaultRam === 8192 ? 'pr' : ''}" data-ram="8192" onclick="setCreateRam(8192)">8 GB</button>
             </div>
           </div>
-          <input type="number" id="cs-mem" value="2048" min="512" max="65536" step="512" required placeholder="RAM in MB">
+          <input type="number" id="cs-mem" value="${defaultRam}" min="512" max="65536" step="512" required placeholder="RAM in MB">
         </div>
 
         <!-- EULA & Optimization Flags -->
@@ -5753,7 +7318,7 @@ function openCreateServerModal() {
   </div>`;
 
   enhanceSelects(container);
-  loadJavaRuntimes();
+  loadJavaRuntimes(false, defaultNodeId);
   setTimeout(() => $('#cs-name')?.focus(), 50);
 }
 
@@ -5775,6 +7340,7 @@ async function handleCreateServer(e) {
     btn.textContent = 'Provisioning server...';
   }
 
+  const targetNodeId = $('#cs-node')?.value || 'local';
   const name = $('#cs-name')?.value.trim() || 'Minecraft Server';
   const type = $('#cs-type')?.value || 'paper';
   const version = $('#cs-ver')?.value.trim() || '1.21.4';
@@ -5793,7 +7359,7 @@ async function handleCreateServer(e) {
   toast(`Creating and configuring ${name}...`);
 
   try {
-    const res = await api('/api/servers', {
+    const res = await api(nodeApiPath(targetNodeId, '/api/servers'), {
       method: 'POST',
       body: JSON.stringify({
         name,
@@ -5814,7 +7380,10 @@ async function handleCreateServer(e) {
 
     await loadDashboard();
 
-    const newIdx = S.servers.findIndex(s => s.id === res.id || s.name === name);
+    let newIdx = S.servers.findIndex(s => s.id === res.id && (s.node_id || 'local') === targetNodeId);
+    if (newIdx === -1) {
+      newIdx = S.servers.findIndex(s => s.name === name && (s.node_id || 'local') === targetNodeId);
+    }
     if (newIdx !== -1) {
       switchServer(newIdx);
     }
@@ -5842,7 +7411,7 @@ async function loadServerPorts() {
   const srv = curServer();
   if (!srv) return;
   try {
-    const list = await api(`/api/servers/${srv.id}/ports`);
+    const list = await api(srvApiPath(srv, '/ports'));
     if (Array.isArray(list)) {
       S.ports = list;
       if (S.view === 'net') R();
@@ -5857,7 +7426,7 @@ function openAddPortModal() {
   if (!container) return;
 
   const srv = curServer();
-  const nextPort = getNextSuggestedPort();
+  const nextPort = getNextSuggestedPort(srv?.node_id || 'local');
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:520px;">
@@ -5946,7 +7515,7 @@ async function submitAddPort(e) {
   }
 
   try {
-    await api(`/api/servers/${srv.id}/ports`, {
+    await api(srvApiPath(srv, '/ports'), {
       method: 'POST',
       body: JSON.stringify({ port, protocol, notes, is_primary: isPrimary })
     });
@@ -5982,7 +7551,7 @@ async function deletePort(portId, portNum) {
   if (!ok) return;
 
   try {
-    await api(`/api/servers/${srv.id}/ports/${portId}`, { method: 'DELETE' });
+    await api(srvApiPath(srv, `/ports/${portId}`), { method: 'DELETE' });
     toast(`Port ${portNum} deleted`, 'ok');
     await loadServerPorts();
     R();
@@ -6005,7 +7574,7 @@ async function setPrimaryPort(portId) {
   if (!ok) return;
 
   try {
-    const res = await api(`/api/servers/${srv.id}/ports/${portId}/primary`, { method: 'POST' });
+    const res = await api(srvApiPath(srv, `/ports/${portId}/primary`), { method: 'POST' });
     if (res && res.port) {
       srv.port = res.port;
     }
@@ -6018,9 +7587,13 @@ async function setPrimaryPort(portId) {
 }
 
 // --- Server Deletion Management ---
-function openDeleteServerModal(srvId, srvName) {
+function openDeleteServerModal(srvId, srvName, nodeId = null) {
   const container = $('#modal-container');
   if (!container) return;
+
+  const targetSrv = findServerRef(srvId, nodeId);
+  const targetNodeId = nodeId || targetSrv?.node_id || 'local';
+  const resolvedName = srvName || targetSrv?.name || srvId;
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:520px; border:1px solid rgba(239, 68, 68, 0.4);">
@@ -6032,7 +7605,7 @@ function openDeleteServerModal(srvId, srvName) {
       </div>
 
       <p style="font-size:13.5px; color:#e2e8f0; line-height:1.6; margin-bottom:14px;">
-        You are about to permanently delete <b style="color:#fff;">${esc(srvName)}</b> (<code>${esc(srvId)}</code>).
+        You are about to permanently delete <b style="color:#fff;">${esc(resolvedName)}</b> (<code>${esc(srvId)}</code>)${targetNodeId !== 'local' ? ` on node <code>${esc(targetNodeId)}</code>` : ''}.
       </p>
 
       <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:13px; color:#fca5a5; line-height:1.5;">
@@ -6040,13 +7613,13 @@ function openDeleteServerModal(srvId, srvName) {
       </div>
 
       <label class="f" style="margin-bottom:20px;">
-        <span style="font-size:13px; color:#cbd5e1;">To confirm, type <b style="color:#fff;">${esc(srvName)}</b> below:</span>
-        <input type="text" id="del-srv-confirm" placeholder="Type server name to confirm" autocomplete="off" oninput="checkDeleteServerConfirm('${esc(srvName).replace(/'/g, "\\'")}')">
+        <span style="font-size:13px; color:#cbd5e1;">To confirm, type <b style="color:#fff;">${esc(resolvedName)}</b> below:</span>
+        <input type="text" id="del-srv-confirm" placeholder="Type server name to confirm" autocomplete="off" data-expected="${esc(resolvedName)}" oninput="checkDeleteServerConfirm(this.dataset.expected)">
       </label>
 
       <div class="row" style="justify-content:flex-end; gap:10px;">
         <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-        <button type="button" id="del-srv-btn" class="btn dg" disabled onclick="executeDeleteServer('${srvId}')">
+        <button type="button" id="del-srv-btn" class="btn dg" disabled data-srv-id="${esc(srvId)}" data-node-id="${esc(targetNodeId)}" onclick="executeDeleteServer(this.dataset.srvId, this.dataset.nodeId)">
           ${ic('trash', 14)} Delete Server Permanently
         </button>
       </div>
@@ -6064,7 +7637,8 @@ function checkDeleteServerConfirm(expectedName) {
   btn.disabled = !match;
 }
 
-async function executeDeleteServer(srvId) {
+async function executeDeleteServer(srvId, nodeId = 'local') {
+  const targetNodeId = nodeId || 'local';
   const btn = $('#del-srv-btn');
   if (btn) {
     btn.disabled = true;
@@ -6072,25 +7646,28 @@ async function executeDeleteServer(srvId) {
   }
 
   try {
-    clearTimeout(S.wsReconnectTimer);
-    S.wsReconnectTimer = null;
-    if (S.wsPingTimer) {
-      clearInterval(S.wsPingTimer);
-      S.wsPingTimer = null;
-    }
-    if (S.activeServerId === srvId) S.activeServerId = null;
-    if (S.activeWs) {
-      try {
-        S.activeWs.onopen = null;
-        S.activeWs.onmessage = null;
-        S.activeWs.onerror = null;
-        S.activeWs.onclose = null;
-        S.activeWs.close();
-      } catch (e) {}
-      S.activeWs = null;
+    if (S.activeServerId === srvId && (S.activeNodeId || 'local') === targetNodeId) {
+      clearTimeout(S.wsReconnectTimer);
+      S.wsReconnectTimer = null;
+      if (S.wsPingTimer) {
+        clearInterval(S.wsPingTimer);
+        S.wsPingTimer = null;
+      }
+      S.activeServerId = null;
+      S.activeNodeId = null;
+      if (S.activeWs) {
+        try {
+          S.activeWs.onopen = null;
+          S.activeWs.onmessage = null;
+          S.activeWs.onerror = null;
+          S.activeWs.onclose = null;
+          S.activeWs.close();
+        } catch (e) {}
+        S.activeWs = null;
+      }
     }
 
-    await api(`/api/servers/${srvId}`, { method: 'DELETE' });
+    await api(nodeApiPath(targetNodeId, `/api/servers/${encodeURIComponent(srvId)}`), { method: 'DELETE' });
     toast('Server deleted successfully', 'ok');
     closeModal();
 
@@ -6114,14 +7691,15 @@ function updateReinstallJavaPreview() {
   if (el) el.textContent = `Java ${getRecommendedJavaForMcVersion(ver, sw)}`;
 }
 
-function openReinstallModal(srvId) {
+function openReinstallModal(srvId, nodeId = null) {
   const container = $('#modal-container');
   if (!container) return;
 
-  const targetSrv = (S.servers || []).find(s => s.id === srvId) || curServer();
+  const targetSrv = findServerRef(srvId, nodeId) || curServer();
   if (!targetSrv) return;
 
   const targetId = targetSrv.id;
+  const targetNodeId = nodeId || targetSrv.node_id || 'local';
   const targetName = targetSrv.name || 'Server';
   const curType = (targetSrv.type || 'paper').toLowerCase();
   const curVer = targetSrv.version || '1.21.4';
@@ -6140,7 +7718,7 @@ function openReinstallModal(srvId) {
         Reinstalls the server software from <b>mcjarfiles.com</b> official upstream distribution. This will replace the server executable JAR.
       </p>
 
-      <form id="reinstall-form" onsubmit="submitReinstall(event, '${targetId}')">
+      <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
         <label class="f" style="margin-bottom:12px;">
           <span>Minecraft Engine / Server Software</span>
           <select id="reinst-software" style="height:38px;" onchange="updateReinstallJavaPreview()">
@@ -6200,8 +7778,9 @@ function openReinstallModal(srvId) {
   enhanceSelects(container);
 }
 
-async function submitReinstall(e, srvId) {
+async function submitReinstall(e, srvId, nodeId = 'local') {
   e.preventDefault();
+  const targetNodeId = nodeId || 'local';
   const btn = $('#reinst-submit-btn');
   if (btn) {
     btn.disabled = true;
@@ -6218,7 +7797,7 @@ async function submitReinstall(e, srvId) {
   toast(`Initiating reinstallation of ${software} ${version}...`);
 
   try {
-    const res = await api(`/api/servers/${srvId}/reinstall`, {
+    const res = await api(nodeApiPath(targetNodeId, `/api/servers/${encodeURIComponent(srvId)}/reinstall`), {
       method: 'POST',
       body: JSON.stringify({
         software,
@@ -6229,7 +7808,7 @@ async function submitReinstall(e, srvId) {
       })
     });
 
-    const targetSrv = (S.servers || []).find(s => s.id === srvId) || curServer();
+    const targetSrv = findServerRef(srvId, targetNodeId) || curServer();
     if (targetSrv) {
       targetSrv.type = software;
       targetSrv.version = version;
@@ -6239,7 +7818,7 @@ async function submitReinstall(e, srvId) {
     if (syncJava && targetSrv) {
       const recJava = getRecommendedJavaForMcVersion(version, software);
       if (resolveJavaSelectValue(targetSrv.java_path || '', targetSrv.version || '', targetSrv.type || '') !== recJava) {
-        await api(`/api/servers/${srvId}`, {
+        await api(nodeApiPath(targetNodeId, `/api/servers/${encodeURIComponent(srvId)}`), {
           method: 'PUT',
           body: JSON.stringify({
             name: targetSrv.name,
@@ -6263,7 +7842,7 @@ async function submitReinstall(e, srvId) {
     toast(`Server reinstalled successfully (${software} ${version})!`, 'ok');
 
     const cur = curServer();
-    if (cur && cur.id === srvId) {
+    if (cur && cur.id === srvId && (cur.node_id || 'local') === targetNodeId) {
       S.ver = version;
       S.core = software.charAt(0).toUpperCase() + software.slice(1);
     }
@@ -6404,28 +7983,212 @@ async function triggerAdminGC() {
   }
 }
 
-function saveAdminDaemonSettings(e) {
-  if (e) e.preventDefault();
-  const brandName = $('#adm-brand')?.value.trim() || 'NeoPanel';
-  const fqdn = $('#adm-fqdn')?.value.trim() || '127.0.0.1';
-  const sftpPort = parseInt($('#adm-sftp')?.value, 10) || 2022;
-  const maxUploadMB = parseInt($('#adm-upload')?.value, 10) || 500;
-  const defaultRamMB = parseInt($('#adm-ram')?.value, 10) || 2048;
-  const autoRestart = $('#adm-autorestart')?.checked ?? true;
-
-  S.adminDaemonCfg = {
-    brandName,
-    fqdn,
-    sftpPort,
-    maxUploadMB,
-    defaultRamMB,
-    autoRestartPolicy: autoRestart
+function selectBrandPreset(presetId) {
+  const p = BRAND_PRESETS.find(x => x.id === presetId);
+  if (!p) return;
+  S.brandDraft = {
+    ...DEFAULT_BRANDING,
+    ...(S.brandDraft || S.branding),
+    preset: p.id,
+    accent_color: p.accent_color,
+    accent_hover: p.accent_hover,
+    bg_deep: p.bg_deep,
+    bg_canvas: p.bg_canvas,
+    card_bg: p.card_bg,
+    nav_bg: p.nav_bg,
+    text_color: p.text_color,
+    card_opacity: p.card_opacity,
+    border_radius_px: p.border_radius_px,
+    glass_blur_px: p.glass_blur_px
   };
-
-  localStorage.setItem('neopanel_admin_cfg', JSON.stringify(S.adminDaemonCfg));
-  document.title = `${brandName} — Minecraft Server Manager`;
-  toast('Daemon & panel customization saved!', 'ok');
+  applyBranding(S.brandDraft);
   R();
+}
+
+function updateBrandLivePreview() {
+  const draft = S.brandDraft || S.branding;
+  const prevEl = $('#brand-live-preview');
+  if (prevEl) prevEl.innerHTML = renderBrandPreviewMarkup(draft);
+  const chipEl = document.querySelector('.brand-preview-card .chip');
+  if (chipEl) chipEl.textContent = draft?.preset || 'custom';
+}
+
+function onBrandInputChange(field, val, srcEl = null) {
+  if (!S.brandDraft) S.brandDraft = { ...DEFAULT_BRANDING, ...S.branding };
+  S.brandDraft[field] = val;
+
+  if (srcEl) {
+    const row = srcEl.closest('.brand-color-row');
+    if (row) {
+      if (srcEl.type === 'color') {
+        const txt = row.querySelector('input[type="text"]');
+        if (txt) txt.value = val;
+      } else if (srcEl.type === 'text' && /^#[0-9a-fA-F]{6}$/.test(String(val || '').trim())) {
+        const pick = row.querySelector('input[type="color"]');
+        if (pick) pick.value = String(val).trim().toLowerCase();
+      }
+    }
+  }
+
+  if (['accent_color', 'accent_hover', 'bg_deep', 'bg_canvas', 'card_bg', 'nav_bg', 'text_color', 'card_opacity', 'border_radius_px', 'glass_blur_px'].includes(field)) {
+    S.brandDraft.preset = 'custom';
+    document.querySelectorAll('.brand-preset-card.on').forEach(el => el.classList.remove('on'));
+  }
+
+  applyBranding(S.brandDraft);
+  updateBrandLivePreview();
+}
+
+function onDaemonInputChange(field, val) {
+  if (!S.daemonDraft) S.daemonDraft = { ...S.brandingDaemon };
+  S.daemonDraft[field] = val;
+}
+
+function discardBrandDraft() {
+  S.brandDraft = { ...DEFAULT_BRANDING, ...S.branding };
+  applyBranding(S.branding);
+  toast('Reverted unsaved panel look changes');
+  R();
+}
+
+async function saveBrandingAndDaemon() {
+  const btn = $('#brand-save-btn');
+  if (btn) setBtnLoading(btn, true, 'Saving...');
+
+  const draft = { ...DEFAULT_BRANDING, ...(S.brandDraft || S.branding) };
+  const daemonDraft = { ...S.brandingDaemon, ...(S.daemonDraft || {}) };
+
+  try {
+    const res = await api('/api/admin/branding', {
+      method: 'PUT',
+      body: JSON.stringify({ branding: draft, daemon: daemonDraft })
+    });
+    if (res && res.branding) {
+      S.branding = { ...DEFAULT_BRANDING, ...res.branding };
+      S.brandDraft = { ...DEFAULT_BRANDING, ...S.branding };
+    } else {
+      S.branding = { ...draft };
+      S.brandDraft = { ...draft };
+    }
+    if (res && res.daemon) {
+      S.brandingDaemon = { ...S.brandingDaemon, ...res.daemon };
+      S.daemonDraft = { ...S.brandingDaemon };
+      S.adminDaemonCfg = {
+        brandName: S.branding.brand_name || 'NeoPanel',
+        fqdn: S.brandingDaemon.fqdn || window.location.hostname || '127.0.0.1',
+        sftpPort: S.brandingDaemon.sftp_port || 2022,
+        maxUploadMB: S.brandingDaemon.max_upload_mb || 500,
+        defaultRamMB: S.brandingDaemon.default_ram_mb || 2048,
+        autoRestartPolicy: Boolean(S.brandingDaemon.auto_restart_policy)
+      };
+      localStorage.setItem('neopanel_admin_cfg', JSON.stringify(S.adminDaemonCfg));
+    }
+    applyBranding(S.branding);
+    toast(res?.message || 'Panel look & branding saved globally!', 'ok');
+    loadAdminNodes();
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to save panel branding', 'bad');
+  } finally {
+    const curBtn = $('#brand-save-btn');
+    if (curBtn) setBtnLoading(curBtn, false);
+  }
+}
+
+async function resetBrandingDefaults() {
+  const ok = await uiConfirm({
+    title: 'Reset Panel Look to Defaults',
+    message: 'Reset all custom theme presets, colors, glass settings, media URLs, and custom CSS back to factory NeoPanel defaults?',
+    confirmText: 'Reset to Defaults',
+    cancelText: 'Cancel',
+    isDanger: true,
+    icon: 'refresh'
+  });
+  if (!ok) return;
+
+  try {
+    const res = await api('/api/admin/branding/reset', { method: 'POST' });
+    if (res && res.branding) {
+      S.branding = { ...DEFAULT_BRANDING, ...res.branding };
+      S.brandDraft = { ...DEFAULT_BRANDING, ...S.branding };
+    } else {
+      S.branding = { ...DEFAULT_BRANDING };
+      S.brandDraft = { ...DEFAULT_BRANDING };
+    }
+    applyBranding(S.branding);
+    toast(res?.message || 'Panel look reset to factory defaults', 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to reset panel branding', 'bad');
+  }
+}
+
+async function saveAdminDaemonSettings(e) {
+  if (e) e.preventDefault();
+  const fqdn = $('#adm-fqdn')?.value.trim() || '';
+  const sftp_port = parseInt($('#adm-sftp')?.value, 10) || 2022;
+  const max_upload_mb = parseInt($('#adm-upload')?.value, 10) || 500;
+  const default_ram_mb = parseInt($('#adm-ram')?.value, 10) || 2048;
+  const auto_restart_policy = $('#adm-autorestart')?.checked ?? true;
+
+  const daemonPayload = { fqdn, sftp_port, max_upload_mb, default_ram_mb, auto_restart_policy };
+  S.daemonDraft = { ...daemonPayload };
+
+  try {
+    const res = await api('/api/admin/branding', {
+      method: 'PUT',
+      body: JSON.stringify({ daemon: daemonPayload })
+    });
+    if (res && res.daemon) {
+      S.brandingDaemon = { ...S.brandingDaemon, ...res.daemon };
+      S.daemonDraft = { ...S.brandingDaemon };
+    } else {
+      S.brandingDaemon = { ...daemonPayload };
+    }
+    S.adminDaemonCfg = {
+      brandName: S.branding.brand_name || 'NeoPanel',
+      fqdn: S.brandingDaemon.fqdn || window.location.hostname || '127.0.0.1',
+      sftpPort: S.brandingDaemon.sftp_port || 2022,
+      maxUploadMB: S.brandingDaemon.max_upload_mb || 500,
+      defaultRamMB: S.brandingDaemon.default_ram_mb || 2048,
+      autoRestartPolicy: Boolean(S.brandingDaemon.auto_restart_policy)
+    };
+    localStorage.setItem('neopanel_admin_cfg', JSON.stringify(S.adminDaemonCfg));
+    toast('Daemon network & cluster defaults saved!', 'ok');
+    loadAdminNodes();
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to save daemon settings', 'bad');
+  }
+}
+
+async function saveAdminTurnstileSettings(e) {
+  if (e) e.preventDefault();
+  const enabled = Boolean($('#adm-ts-enabled')?.checked);
+  const siteKey = $('#adm-ts-site')?.value.trim() || '';
+  const secretKey = $('#adm-ts-secret')?.value.trim() || '';
+
+  try {
+    const res = await api('/api/admin/turnstile', {
+      method: 'POST',
+      body: JSON.stringify({
+        enabled,
+        site_key: siteKey,
+        secret_key: secretKey
+      })
+    });
+    S.adminTurnstile = {
+      enabled: Boolean(res.enabled),
+      site_key: res.site_key || siteKey,
+      has_secret_key: Boolean(res.has_secret_key)
+    };
+    S.turnstileEnabled = Boolean(res.enabled);
+    S.turnstileSiteKey = res.enabled ? (res.site_key || siteKey) : '';
+    toast(res.message || 'Turnstile settings updated', 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to save Turnstile settings', 'bad');
+  }
 }
 
 // --- Cloudflare Turnstile Explicit SPA Integration ---
@@ -6480,6 +8243,16 @@ function resetTurnstileWidget() {
 }
 
 // --- Auth Flow & Setup Screen ---
+function applyLoginOverlayBackground(el) {
+  if (!el) return;
+  const bg = (getBrand('login_bg_url') || '').trim();
+  if (bg) {
+    el.style.backgroundImage = `linear-gradient(rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.85)), url('${bg.replace(/'/g, '%27')}')`;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
+  }
+}
+
 async function checkAuth() {
   const savedMode = localStorage.getItem('neopanel_mode');
   if (savedMode) setAppearanceMode(savedMode);
@@ -6487,7 +8260,10 @@ async function checkAuth() {
   if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
 
   try {
-    const status = await (await fetch('/api/auth/status')).json();
+    const [, status] = await Promise.all([
+      loadPublicBranding().catch(() => {}),
+      fetch('/api/auth/status').then(r => r.json())
+    ]);
     S.turnstileEnabled = Boolean(status.turnstile_enabled && status.turnstile_site_key);
     S.turnstileSiteKey = S.turnstileEnabled ? status.turnstile_site_key : '';
 
@@ -6511,6 +8287,7 @@ async function checkAuth() {
     S.acct.h = await computeGravatarHash(S.acct.em);
 
     await loadDashboard();
+    applyBranding(S.branding);
 
     // Respect URL hash if present
     const rawHash = window.location.hash.replace('#', '');
@@ -6527,11 +8304,12 @@ async function checkAuth() {
 
 function showSetupScreen() {
   $('#login')?.remove();
+  const footTxt = (getBrand('footer_text') || 'Powered by NeoPanel Daemon').trim();
   const d = document.createElement('div');
   d.id = 'login';
   d.className = 'login';
   d.innerHTML = `<div class="lbox">
-    <div class="llogo"><i class="cube"></i><b>Neo</b><span>Panel</span></div>
+    <div class="llogo">${brandLogoHtml(true)}</div>
     <div class="lg">First-Time Initialization</div>
     <h1 class="lt">Create Admin Master Account</h1>
     <label class="lf">
@@ -6548,8 +8326,9 @@ function showSetupScreen() {
     ${S.turnstileEnabled ? '<div id="turnstile-setup" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitSetup()">Initialize &amp; Launch</button>
-    <div class="lsm foot">&copy; 2026 NeoPanel &bull; Ultra-Lightweight</div>
+    <div class="lsm foot">${esc(footTxt)}</div>
   </div>`;
+  applyLoginOverlayBackground(d);
   document.body.appendChild(d);
   if (S.turnstileEnabled) mountTurnstileWidget('#turnstile-setup');
   $('#su-name')?.focus();
@@ -6585,7 +8364,7 @@ async function submitSetup() {
       S.turnstileToken = '';
       localStorage.setItem('neopanel_token', res.token);
       $('#login')?.remove();
-      toast('Setup complete! Welcome to NeoPanel.');
+      toast(`Setup complete! Welcome to ${getBrand('brand_name') || 'NeoPanel'}.`);
       checkAuth();
     } else {
       setBtnLoading(btn, false);
@@ -6603,14 +8382,16 @@ function showLoginScreen() {
   if ($('#login')) return;
   const hour = new Date().getHours();
   const greeting = hour < 5 ? 'Good evening' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const brandName = (getBrand('brand_name') || 'NeoPanel').trim() || 'NeoPanel';
+  const footTxt = (getBrand('footer_text') || 'Powered by NeoPanel Daemon').trim();
 
   const d = document.createElement('div');
   d.id = 'login';
   d.className = 'login';
   d.innerHTML = `<div class="lbox">
-    <div class="llogo"><i class="cube"></i><b>Neo</b><span>Panel</span></div>
+    <div class="llogo">${brandLogoHtml(true)}</div>
     <div class="lg">${greeting}</div>
-    <h1 class="lt">Log in to NeoPanel</h1>
+    <h1 class="lt">Log in to ${esc(brandName)}</h1>
     <label class="lf">
       ${ic('user', 16)}
       <input id="lu" type="text" placeholder="Username or email" autocomplete="username" onkeydown="if(event.key==='Enter')submitLogin()">
@@ -6625,8 +8406,9 @@ function showLoginScreen() {
     ${S.turnstileEnabled ? '<div id="turnstile-login" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitLogin()">Login</button>
-    <div class="lsm foot">&copy; 2026 NeoPanel &bull; Ultra-Lightweight</div>
+    <div class="lsm foot">${esc(footTxt)}</div>
   </div>`;
+  applyLoginOverlayBackground(d);
   document.body.appendChild(d);
   if (S.turnstileEnabled) mountTurnstileWidget('#turnstile-login');
   $('#lu')?.focus();
@@ -6680,9 +8462,10 @@ async function submitLogin() {
 }
 
 async function logout() {
+  const brandName = (getBrand('brand_name') || 'NeoPanel').trim() || 'NeoPanel';
   const ok = await uiConfirm({
-    title: 'Sign Out of NeoPanel',
-    message: 'Are you sure you want to log out of your current NeoPanel session?',
+    title: `Sign Out of ${brandName}`,
+    message: `Are you sure you want to log out of your current ${esc(brandName)} session?`,
     confirmText: 'Log Out',
     cancelText: 'Stay Signed In',
     isDanger: false,
@@ -6692,6 +8475,7 @@ async function logout() {
 
   S.token = '';
   S.activeServerId = null;
+  S.activeNodeId = null;
   S.wsState = 'disconnected';
   localStorage.removeItem('neopanel_token');
   clearTimeout(S.wsReconnectTimer);
@@ -6827,6 +8611,34 @@ window.exportActivityLogs = exportActivityLogs;
 window.loadJavaRuntimes = loadJavaRuntimes;
 window.installJavaRuntime = installJavaRuntime;
 window.updateReinstallJavaPreview = updateReinstallJavaPreview;
+window.setNodeFilter = setNodeFilter;
+window.selectAdminTab = selectAdminTab;
+window.loadAdminNodes = loadAdminNodes;
+window.openNodeModal = openNodeModal;
+window.testNodeModalConnection = testNodeModalConnection;
+window.submitNodeModal = submitNodeModal;
+window.testClusterNode = testClusterNode;
+window.deleteClusterNode = deleteClusterNode;
+window.loadDatabases = loadDatabases;
+window.openCreateDatabaseModal = openCreateDatabaseModal;
+window.submitCreateDatabase = submitCreateDatabase;
+window.toggleDbPasswordReveal = toggleDbPasswordReveal;
+window.rotateDatabasePassword = rotateDatabasePassword;
+window.deleteServerDatabase = deleteServerDatabase;
+window.exportServerDatabase = exportServerDatabase;
+window.openSQLStudioModal = openSQLStudioModal;
+window.loadSQLStudioTables = loadSQLStudioTables;
+window.selectSQLStudioTable = selectSQLStudioTable;
+window.insertSQLSnippet = insertSQLSnippet;
+window.runSQLStudioQuery = runSQLStudioQuery;
+window.copyDbText = copyDbText;
+window.selectBrandPreset = selectBrandPreset;
+window.onBrandInputChange = onBrandInputChange;
+window.onDaemonInputChange = onDaemonInputChange;
+window.discardBrandDraft = discardBrandDraft;
+window.saveBrandingAndDaemon = saveBrandingAndDaemon;
+window.resetBrandingDefaults = resetBrandingDefaults;
+window.onCreateNodeChange = onCreateNodeChange;
 
 // --- Custom Glassmorphic Selects System ---
 function closeAllCustomSelects() {
