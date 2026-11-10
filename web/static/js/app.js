@@ -50,11 +50,22 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 }[c]));
 
+const DEFAULT_USER_AVATAR_URL = 'https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MCV_SummerDrop_Hero_DotNet_Downloadable_Wallpaper_r414x414.png';
+const MINECRAFT_COVER_URL = 'https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MC-Downloadables_Image-0_15th-Anniversary_1110x624.jpg';
+const SERVER_HERO_URL = 'https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg';
+
 // --- Global Application State ---
 window.S = {
   token: localStorage.getItem('neopanel_token') || '',
   user: null,
-  view: 'dash',              // active view: dash, con, set, act, fi, db, bk, sc, net, sub, stp, pl, plug, store, ver, all, admin, acc
+  view: 'dash',              // active view: dash, con, set, act, fi, db, bk, sc, net, sub, stp, pl, plug, ver, admin, acc
+  loading: {
+    dash: true,
+    files: false,
+    plugins: false,
+    backups: false,
+    players: false
+  },
   status: 'offline',         // online, offline, starting, stopping
   start: Date.now(),
   uptimeSec: 0,
@@ -520,11 +531,35 @@ function head(name) {
   return `<span class="head" style="background:hsl(${h} 45% 48%);box-shadow:inset 0 -9px 0 hsl(${h} 35% 30%)"></span>`;
 }
 
+function loaderHtml(label = 'Loading...') {
+  return `<div class="np-loader-box" role="status" aria-live="polite">
+    <div class="np-spinner"></div>
+    <span>${esc(label)}</span>
+  </div>`;
+}
+
+function setBtnLoading(btn, isLoading, loadingText = 'Loading...') {
+  if (!btn) return;
+  if (isLoading) {
+    if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span class="np-spinner-sm"></span> ${esc(loadingText)}`;
+  } else {
+    btn.disabled = false;
+    if (btn.dataset.origHtml) {
+      btn.innerHTML = btn.dataset.origHtml;
+      delete btn.dataset.origHtml;
+    }
+  }
+}
+
 function av(s) {
   const letter = (S.acct.fn ? S.acct.fn[0] : (S.acct.un ? S.acct.un[0] : 'A')).toUpperCase();
+  const hasCustomGravatar = S.acct.h && S.acct.em && S.acct.em.toLowerCase() !== 'admin@neopanel.internal';
   return `<span class="av" style="width:${s}px;height:${s}px;font-size:${s * 0.4}px">
     ${esc(letter)}
-    ${S.acct.h ? `<img src="https://gravatar.com/avatar/${S.acct.h}?s=${s * 2}&d=404" alt="" onerror="this.remove()">` : ''}
+    <img src="${DEFAULT_USER_AVATAR_URL}" alt="" onerror="this.remove()">
+    ${hasCustomGravatar ? `<img src="https://gravatar.com/avatar/${S.acct.h}?s=${s * 2}&d=404" alt="" onerror="this.remove()">` : ''}
   </span>`;
 }
 
@@ -1197,7 +1232,7 @@ function srvh() {
   const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
   const hostAddr = `${window.location.hostname}:${srv ? srv.port : 25565}`;
 
-  return `<div class="card srvh">
+  return `<div class="card srvh" style="background-image: url('${SERVER_HERO_URL}'), url('/img/banner.jpg');">
     <div>
       <div class="row">
         <h1>${esc(S.props.motd || srv?.name || 'Minecraft Server')}</h1>
@@ -1411,7 +1446,16 @@ const V = {
     <div class="dash-grid">
       <!-- Left Column: Server Cards Grid -->
       <div id="srv-card-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;">
-        ${S.servers.map((s, i) => {
+        ${S.loading?.dash && S.servers.length === 0 ? [1, 2, 3].map(() => `
+          <div class="np-skeleton-card">
+            <div class="np-skeleton" style="height: 120px; border-radius: 0;"></div>
+            <div style="padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px;">
+              <div class="np-skeleton" style="height: 18px; width: 65%;"></div>
+              <div class="np-skeleton" style="height: 12px; width: 45%;"></div>
+              <div class="np-skeleton" style="height: 28px; width: 100%; margin-top: 6px;"></div>
+            </div>
+          </div>
+        `).join('') : S.servers.map((s, i) => {
           const st = i === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
           const isRun = st === 'online' || st === 'starting';
           const maxRam = getServerMaxRamMB(s);
@@ -1424,7 +1468,7 @@ const V = {
 
           return `
           <div id="dash-srv-${s.id}" class="sift-server-card" onclick="switchServer(${i}); go('con');" data-name="${esc(s.name)}" data-addr="${host}">
-            <div class="srv-card-banner" style="background-image: url('/img/banner.jpg');">
+            <div class="srv-card-banner" style="background-image: url('${MINECRAFT_COVER_URL}'), url('/img/banner.jpg');">
               <span class="srv-card-badge">Minecraft - ${esc(coreLabel)}</span>
               <div class="srv-card-actions">
                 <span class="srv-card-action-btn" onclick="event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">↻</span>
@@ -1574,7 +1618,7 @@ const V = {
       body = `<table>
         <thead><tr><th>Player</th><th>Ping</th><th>Playtime</th><th>IP</th><th style="text-align:right">Actions</th></tr></thead>
         <tbody>
-          ${S.players.length ? S.players.map((p, i) => `
+          ${S.loading?.players ? `<tr><td colspan="5">${loaderHtml('Loading player lists...')}</td></tr>` : S.players.length ? S.players.map((p, i) => `
             <tr>
               <td>${head(p.n)}<b>${esc(p.n)}</b> ${p.op ? '<span class="badge" style="margin-left:6px;">Operator</span>' : ''}</td>
               <td class="mono">${p.ping || 32} ms</td>
@@ -1743,7 +1787,7 @@ const V = {
                 </td>
               </tr>`;
             }).join('')}
-            ${!S.fileList.length && !isSubdir ? '<tr><td colspan="6" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
+            ${S.loading?.files ? `<tr><td colspan="6">${loaderHtml('Loading directory contents...')}</td></tr>` : !S.fileList.length && !isSubdir ? '<tr><td colspan="6" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
           </tbody>
         </table>
       </div>
@@ -1830,7 +1874,7 @@ const V = {
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 10px;" id="store-grid">
-          <div class="mu" style="padding: 24px; text-align: center;">Loading top plugins from Modrinth...</div>
+          ${loaderHtml('Loading top plugins from Modrinth...')}
         </div>
       ` : `
         <!-- Installed Plugins Filter & List -->
@@ -1846,7 +1890,7 @@ const V = {
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          ${filteredInstalled.map(({ p, i }) => `
+          ${S.loading?.plugins ? `<div class="card">${loaderHtml('Loading installed plugins...')}</div>` : filteredInstalled.map(({ p, i }) => `
             <div class="plugin-card">
               <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
                 <div style="width: 44px; height: 44px; border-radius: 8px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 20px; flex-shrink: 0;">
@@ -1945,7 +1989,7 @@ const V = {
       <table>
         <thead><tr><th>Archive Name</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead>
         <tbody>
-          ${S.bk.length ? S.bk.map((b, i) => `
+          ${S.loading?.backups ? `<tr><td colspan="4">${loaderHtml('Loading server backups...')}</td></tr>` : S.bk.length ? S.bk.map((b, i) => `
             <tr>
               <td class="mono"><b>${esc(b.name || b[0])}</b></td>
               <td>${formatBytes(b.size) || b[1]}</td>
@@ -2662,7 +2706,7 @@ const V = {
 
     if (t === 0) {
       tabContent = `<div class="card prof">
-        <div class="banner">
+        <div class="banner" style="background-image: url('${MINECRAFT_COVER_URL}'), url('/img/banner.jpg'); background-size: cover; background-position: center;">
           <span class="avb">${av(64)}</span>
           <button class="btn sm" onclick="$('#aem').focus()">Change Gravatar</button>
         </div>
@@ -3089,6 +3133,8 @@ window.onEnterView = function(view) {
 
 // --- Backend Data Loaders ---
 async function loadDashboard() {
+  if (!S.loading) S.loading = {};
+  if (S.servers.length === 0) S.loading.dash = true;
   try {
     const srvs = await api('/api/servers');
     S.servers = srvs || [];
@@ -3100,8 +3146,10 @@ async function loadDashboard() {
       S.core = (cur.type || 'paper').charAt(0).toUpperCase() + (cur.type || 'paper').slice(1);
       connectWs(cur.id);
     }
+  } catch (e) {} finally {
+    S.loading.dash = false;
     R();
-  } catch (e) {}
+  }
 }
 
 async function loadAdminData() {
@@ -3168,13 +3216,18 @@ async function bulkStopServers() {
 async function loadPlayersData() {
   const srv = curServer();
   if (!srv) return;
+  if (!S.loading) S.loading = {};
+  S.loading.players = true;
+  if (S.view === 'pl') R();
   try {
     const data = await api(`/api/servers/${srv.id}/players`);
     S.wl = data.whitelist || [];
     S.bans = data.bans || [];
     S.ops = data.ops || [];
+  } catch (e) {} finally {
+    S.loading.players = false;
     R();
-  } catch (e) {}
+  }
 }
 
 async function playerAction(action, player, reason = '') {
@@ -3201,12 +3254,17 @@ function addWhitelistPlayer() {
 async function loadFileList(path = '') {
   const srv = curServer();
   if (!srv) return;
+  if (!S.loading) S.loading = {};
+  S.loading.files = true;
+  if (S.view === 'fi') R();
   try {
     const data = await api(`/api/servers/${srv.id}/files?path=${encodeURIComponent(path)}`);
     S.fileList = data || [];
     S.currentDir = path;
+  } catch (e) {} finally {
+    S.loading.files = false;
     R();
-  } catch (e) {}
+  }
 }
 
 function browseFolder(dirName) {
@@ -3844,6 +3902,9 @@ function initDragAndDrop() {
 async function loadPluginsList() {
   const srv = curServer();
   if (!srv) return;
+  if (!S.loading) S.loading = {};
+  S.loading.plugins = true;
+  if (S.view === 'plug' && (S.plugTab || 'browse') === 'installed') R();
   try {
     const data = await api(`/api/servers/${srv.id}/plugins`);
     const list = Array.isArray(data) ? data : (data?.plugins || []);
@@ -3853,13 +3914,15 @@ async function loadPluginsList() {
       const meta = p.size ? formatFileSize(p.size) : (p.version || 'installed');
       return [fname, meta, true, p.modified || ''];
     });
+  } catch (e) {} finally {
+    S.loading.plugins = false;
     if (S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
       const cnt = $('#plug-installed-count');
       if (cnt) cnt.textContent = String(S.plugins.length);
     } else {
       R();
     }
-  } catch (e) {}
+  }
 }
 
 async function deletePlugin(name) {
@@ -3886,6 +3949,7 @@ function searchModrinthDebounced() {
 async function searchModrinth() {
   const grid = $('#store-grid');
   if (!grid) return;
+  grid.innerHTML = loaderHtml('Searching Modrinth plugins...');
   const q = S.q || '';
   const loader = S.plugLoader || '';
   const ver = S.plugVer || '';
@@ -3972,11 +4036,16 @@ async function installPlugin(projectSlug, title, btnEl) {
 async function loadBackupsList() {
   const srv = curServer();
   if (!srv) return;
+  if (!S.loading) S.loading = {};
+  S.loading.backups = true;
+  if (S.view === 'bk') R();
   try {
     const list = await api(`/api/servers/${srv.id}/backups`);
     S.bk = list || [];
+  } catch (e) {} finally {
+    S.loading.backups = false;
     R();
-  } catch (e) {}
+  }
 }
 
 async function createBackup() {
@@ -5333,6 +5402,8 @@ async function submitSetup() {
     if (err) err.textContent = 'Please complete the Cloudflare Turnstile security check.';
     return;
   }
+  const btn = $('#login .lbtn');
+  setBtnLoading(btn, true, 'Initializing...');
   try {
     const res = await (await fetch('/api/auth/setup', {
       method: 'POST',
@@ -5352,10 +5423,12 @@ async function submitSetup() {
       toast('Setup complete! Welcome to NeoPanel.');
       checkAuth();
     } else {
+      setBtnLoading(btn, false);
       resetTurnstileWidget();
       if (err) err.textContent = res.error || 'Setup failed.';
     }
   } catch (e) {
+    setBtnLoading(btn, false);
     resetTurnstileWidget();
     if (err) err.textContent = 'Connection error.';
   }
@@ -5409,6 +5482,8 @@ async function submitLogin() {
     return;
   }
 
+  const btn = $('#login .lbtn');
+  setBtnLoading(btn, true, 'Signing in...');
   try {
     const res = await (await fetch('/api/auth/login', {
       method: 'POST',
@@ -5428,10 +5503,12 @@ async function submitLogin() {
       toast('Signed in successfully');
       checkAuth();
     } else {
+      setBtnLoading(btn, false);
       resetTurnstileWidget();
       if (err) err.textContent = res.error || 'Invalid credentials.';
     }
   } catch (e) {
+    setBtnLoading(btn, false);
     resetTurnstileWidget();
     if (err) err.textContent = 'Connection error.';
   }

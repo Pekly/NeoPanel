@@ -948,9 +948,9 @@ h2 {
 .srvh {
   position: relative;
   background-size: cover;
-  background-position: center;
+  background-position: center 35%;
   background-color: #121827;
-  padding: 22px 28px;
+  padding: 24px 28px;
   border-radius: 14px;
   overflow: hidden;
   display: flex;
@@ -964,7 +964,7 @@ h2 {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, rgba(14, 18, 29, 0.95) 45%, rgba(14, 18, 29, 0.65) 100%);
+  background: linear-gradient(90deg, rgba(11, 15, 25, 0.92) 38%, rgba(11, 15, 25, 0.52) 100%);
   z-index: 1;
 }
 
@@ -2866,4 +2866,78 @@ html[data-theme="light"] .seg {
   background: rgba(255, 255, 255, 0.02);
   width: 100%;
   text-align: center;
+}
+
+/* =============================================================================
+   LOADERS, SPINNERS & SKELETON SHIMMERS
+   ============================================================================= */
+@keyframes np-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes np-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.np-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(56, 122, 255, 0.2);
+  border-top-color: var(--ac);
+  animation: np-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.np-spinner-sm {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: currentColor;
+  animation: np-spin 0.65s linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.np-page-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 60vh;
+  color: var(--tx-muted);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.np-loader-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 28px 18px;
+  color: var(--tx-muted);
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.np-skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.03) 25%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.03) 75%);
+  background-size: 800px 100%;
+  animation: np-shimmer 1.4s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+.np-skeleton-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  min-height: 230px;
+  display: flex;
+  flex-direction: column;
 }
