@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -156,6 +157,8 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logAuditUser(h.db, user.ID, r, "auth_setup", fmt.Sprintf("Initialized NeoPanel admin account '%s'", user.Username))
+
 	token, _ := h.GenerateToken(user)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Admin user created successfully",
@@ -189,6 +192,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.db.GetUserByUsername(req.Username)
 	if err != nil || !h.CheckPasswordHash(req.Password, user.PasswordHash) {
+		logAuditUser(h.db, 0, r, "auth_login_failed", fmt.Sprintf("Failed sign-in attempt for '%s'", truncateAuditText(strings.TrimSpace(req.Username), 64)))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid username or password"})
 		return
 	}
@@ -198,6 +202,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate token"})
 		return
 	}
+
+	logAuditUser(h.db, user.ID, r, "auth_login", fmt.Sprintf("Signed in to NeoPanel (%s)", user.Role))
 
 	// Set HTTP-only cookie as well for easy SPA access
 	http.SetCookie(w, &http.Cookie{
@@ -257,6 +263,8 @@ func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logAudit(h.db, r, "admin_user_create", fmt.Sprintf("Created panel user '%s' (role: %s)", user.Username, user.Role))
+
 	writeJSON(w, http.StatusCreated, user)
 }
 
@@ -274,10 +282,17 @@ func (h *AuthHandler) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	targetUser, _ := h.db.GetUserByID(id)
 	if err := h.db.DeleteUser(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete user"})
 		return
 	}
+
+	targetDesc := fmt.Sprintf("ID %d", id)
+	if targetUser != nil && targetUser.Username != "" {
+		targetDesc = fmt.Sprintf("'%s' (ID %d)", targetUser.Username, id)
+	}
+	logAudit(h.db, r, "admin_user_delete", fmt.Sprintf("Deleted panel user %s", targetDesc))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "User deleted successfully"})
 }
@@ -334,6 +349,12 @@ func (h *AuthHandler) UpdateTurnstileConfig(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Updated in memory, but failed to write config.yaml: " + saveErr.Error()})
 		return
 	}
+
+	tsState := "disabled"
+	if enabled {
+		tsState = "enabled"
+	}
+	logAudit(h.db, r, "admin_turnstile", fmt.Sprintf("Cloudflare Turnstile protection %s", tsState))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":        "Cloudflare Turnstile settings saved",

@@ -160,6 +160,8 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	// Record default primary port allocation in database
 	_, _ = h.db.AddServerPort(server.ID, server.Port, "tcp/udp", "Primary Game Port", true)
 
+	logAudit(h.db, r, "server_create", fmt.Sprintf("Created server '%s' (%s %s, port %d, %d MiB RAM)", server.Name, server.Type, server.Version, server.Port, server.MemoryMaxMB))
+
 	writeJSON(w, http.StatusCreated, ServerWithStats{
 		Server: server,
 		Stats:  h.manager.GetStats(server),
@@ -213,6 +215,8 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 
 	h.manager.UpdateInstanceServer(server)
 
+	logAudit(h.db, r, "server_update", fmt.Sprintf("Updated settings for server '%s' (%s)", server.Name, server.ID))
+
 	writeJSON(w, http.StatusOK, server)
 }
 
@@ -238,6 +242,8 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete from database"})
 		return
 	}
+
+	logAudit(h.db, r, "server_delete", fmt.Sprintf("Deleted server '%s' (%s)", server.Name, server.ID))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Server deleted successfully"})
 }
@@ -278,6 +284,8 @@ func (h *ServerHandler) PowerAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logAudit(h.db, r, "power_"+req.Action, fmt.Sprintf("Triggered %s on server '%s' (%s)", req.Action, server.Name, server.ID))
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":  "ok",
 		"action":  req.Action,
@@ -299,6 +307,8 @@ func (h *ServerHandler) SendCommand(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+
+	logAudit(h.db, r, "console_command", fmt.Sprintf("Executed command on %s: %s", auditServerLabel(h.db, serverID), truncateAuditText(req.Command, 120)))
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "command sent"})
 }
@@ -352,6 +362,8 @@ func (h *ServerHandler) AddServerPort(w http.ResponseWriter, r *http.Request) {
 	// Open port in host Linux firewall if UFW is active
 	allowHostPort(req.Port, req.Protocol)
 
+	logAudit(h.db, r, "port_add", fmt.Sprintf("Assigned port %d (%s) to %s", req.Port, port.Protocol, auditServerLabel(h.db, serverID)))
+
 	writeJSON(w, http.StatusCreated, port)
 }
 
@@ -383,6 +395,8 @@ func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request)
 		removeHostPort(portNum)
 	}
 
+	logAudit(h.db, r, "port_delete", fmt.Sprintf("Removed port %d allocation (ID %d) from %s", portNum, portID, auditServerLabel(h.db, serverID)))
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Port allocation deleted successfully"})
 }
 
@@ -408,6 +422,8 @@ func (h *ServerHandler) SetPrimaryPort(w http.ResponseWriter, r *http.Request) {
 	if srv, err := h.db.GetServer(serverID); err == nil {
 		h.manager.UpdateInstanceServer(srv)
 	}
+
+	logAudit(h.db, r, "port_primary", fmt.Sprintf("Set port %d as primary game port on %s", newPort, auditServerLabel(h.db, serverID)))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Primary port updated",

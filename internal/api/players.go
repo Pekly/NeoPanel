@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -143,6 +144,8 @@ func (h *PlayerHandler) Action(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to dispatch command: " + err.Error()})
 		return
 	}
+
+	logAudit(h.db, r, "player_"+req.Action, fmt.Sprintf("Executed '%s' on %s", cmd, auditServerLabel(h.db, serverID)))
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Player action executed: " + cmd,

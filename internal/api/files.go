@@ -13,15 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/runner"
 )
 
 type FileHandler struct {
+	db      *database.DB
 	manager *runner.ServerManager
 }
 
-func NewFileHandler(manager *runner.ServerManager) *FileHandler {
-	return &FileHandler{manager: manager}
+func NewFileHandler(db *database.DB, manager *runner.ServerManager) *FileHandler {
+	return &FileHandler{db: db, manager: manager}
 }
 
 type FileItem struct {
@@ -136,6 +138,8 @@ func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logAudit(h.db, r, "file_save", fmt.Sprintf("Saved file '%s' on %s (%s)", req.Path, auditServerLabel(h.db, serverID), formatBytesAudit(int64(len(req.Content)))))
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "File saved successfully"})
 }
 
@@ -174,6 +178,12 @@ func (h *FileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		_ = f.Close()
 	}
 
+	kind := "file"
+	if req.IsDir {
+		kind = "directory"
+	}
+	logAudit(h.db, r, "file_create", fmt.Sprintf("Created %s '%s' on %s", kind, req.Path, auditServerLabel(h.db, serverID)))
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Created successfully"})
 }
 
@@ -195,6 +205,8 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete file/folder"})
 		return
 	}
+
+	logAudit(h.db, r, "file_delete", fmt.Sprintf("Deleted '%s' on %s", reqPath, auditServerLabel(h.db, serverID)))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Deleted successfully"})
 }
@@ -227,10 +239,13 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer dst.Close()
 
-	if _, err := io.Copy(dst, file); err != nil {
+	written, err := io.Copy(dst, file)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write file"})
 		return
 	}
+
+	logAudit(h.db, r, "file_upload", fmt.Sprintf("Uploaded '%s' (%s) to %s", filepath.ToSlash(destRel), formatBytesAudit(written), auditServerLabel(h.db, serverID)))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "File uploaded successfully", "name": handler.Filename})
 }
@@ -248,6 +263,7 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "File not found or is a directory", http.StatusNotFound)
 		return
 	}
+	logAudit(h.db, r, "file_download", fmt.Sprintf("Downloaded '%s' (%s) from %s", reqPath, formatBytesAudit(info.Size()), auditServerLabel(h.db, serverID)))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(fullPath)))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, fullPath)
@@ -277,6 +293,7 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to rename: " + err.Error()})
 		return
 	}
+	logAudit(h.db, r, "file_rename", fmt.Sprintf("Renamed '%s' -> '%s' on %s", req.OldPath, req.NewPath, auditServerLabel(h.db, serverID)))
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Renamed successfully"})
 }
 
@@ -336,6 +353,8 @@ func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to extract archive: " + err.Error()})
 		return
 	}
+
+	logAudit(h.db, r, "file_unzip", fmt.Sprintf("Extracted %d file(s) from '%s' on %s", count, req.Path, auditServerLabel(h.db, serverID)))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": fmt.Sprintf("Successfully extracted %d file(s)", count),

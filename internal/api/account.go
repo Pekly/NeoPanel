@@ -96,7 +96,7 @@ func (h *AccountHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "password_change", "Updated master account password", r.RemoteAddr)
+	_ = h.db.LogActivity(user.ID, "password_change", "Updated master account password", extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Password updated successfully"})
 }
@@ -172,7 +172,7 @@ func (h *AccountHandler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "ssh_key_add", fmt.Sprintf("Added SSH key '%s' (%s)", req.Name, fingerprint), r.RemoteAddr)
+	_ = h.db.LogActivity(user.ID, "ssh_key_add", fmt.Sprintf("Added SSH key '%s' (%s)", req.Name, fingerprint), extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, key)
 }
@@ -202,7 +202,7 @@ func (h *AccountHandler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "ssh_key_delete", fmt.Sprintf("Deleted SSH key ID %d", keyID), r.RemoteAddr)
+	_ = h.db.LogActivity(user.ID, "ssh_key_delete", fmt.Sprintf("Deleted SSH key ID %d", keyID), extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "SSH key removed"})
 }
@@ -271,7 +271,7 @@ func (h *AccountHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "api_key_create", fmt.Sprintf("Created API key '%s' (%s)", req.Name, keyPrefix), r.RemoteAddr)
+	_ = h.db.LogActivity(user.ID, "api_key_create", fmt.Sprintf("Created API key '%s' (%s)", req.Name, keyPrefix), extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":         apiKey.ID,
@@ -307,7 +307,7 @@ func (h *AccountHandler) DeleteAPIKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "api_key_delete", fmt.Sprintf("Deleted API key ID %d", keyID), r.RemoteAddr)
+	_ = h.db.LogActivity(user.ID, "api_key_delete", fmt.Sprintf("Deleted API key ID %d", keyID), extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "API key deleted"})
 }
@@ -327,14 +327,15 @@ func (h *AccountHandler) ListActivity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
+	limit := 200
 	if lStr := r.URL.Query().Get("limit"); lStr != "" {
 		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
 			limit = l
 		}
 	}
 
-	logs, err := h.db.ListActivity(user.ID, limit)
+	includeAll := strings.EqualFold(user.Role, "admin") && r.URL.Query().Get("scope") != "mine"
+	logs, err := h.db.ListActivity(user.ID, includeAll, limit)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load activity logs"})
 		return

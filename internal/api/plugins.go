@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -139,6 +140,8 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logAudit(h.db, r, "plugin_install", fmt.Sprintf("Installed plugin '%s' (%s) on %s (%s)", filename, slug, srv.Name, serverID))
+
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message":  "Plugin installed successfully",
 		"filename": filename,
@@ -169,6 +172,8 @@ func (h *PluginHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to remove plugin: " + err.Error()})
 		return
 	}
+
+	logAudit(h.db, r, "plugin_delete", fmt.Sprintf("Uninstalled plugin '%s' from %s (%s)", filename, srv.Name, serverID))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Plugin removed successfully"})
 }

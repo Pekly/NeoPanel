@@ -68,6 +68,8 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	logAudit(h.db, r, "software_install", fmt.Sprintf("Installed %s %s (%s) on %s (%s)", req.Software, req.Version, jarName, srv.Name, serverID))
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":  fmt.Sprintf("Installed %s %s successfully", req.Software, req.Version),
 		"software": req.Software,
@@ -119,6 +121,8 @@ func (h *SoftwareHandler) SaveProperties(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save server.properties: " + err.Error()})
 		return
 	}
+
+	logAudit(h.db, r, "properties_save", fmt.Sprintf("Saved server.properties (%d settings) on %s", len(newProps), auditServerLabel(h.db, serverID)))
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "server.properties saved successfully"})
 }
@@ -214,6 +218,8 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server record: " + err.Error()})
 		return
 	}
+
+	logAudit(h.db, r, "server_reinstall", fmt.Sprintf("Reinstalled %s %s on %s (%s)", req.Software, req.Version, srv.Name, serverID))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":  fmt.Sprintf("Server reinstalled successfully to %s %s", req.Software, req.Version),

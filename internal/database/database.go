@@ -135,6 +135,16 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 	return user, nil
 }
 
+func (db *DB) GetUserByID(id int) (*User, error) {
+	row := db.conn.QueryRow("SELECT id, username, password_hash, role, created_at FROM users WHERE id = ?", id)
+	user := &User{}
+	err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 func (db *DB) CreateUser(username, passwordHash, role string) (*User, error) {
 	now := time.Now().UTC()
 	res, err := db.conn.Exec("INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
@@ -367,20 +377,42 @@ func (db *DB) LogActivity(userID int, action, details, ip string) error {
 	return err
 }
 
-func (db *DB) ListActivity(userID int, limit int) ([]*ActivityLog, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 50
+func (db *DB) ListActivity(userID int, includeAll bool, limit int) ([]*ActivityLog, error) {
+	if limit <= 0 {
+		limit = 200
+	} else if limit > 500 {
+		limit = 500
 	}
-	rows, err := db.conn.Query("SELECT id, user_id, action, details, ip_address, created_at FROM activity_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", userID, limit)
+
+	var rows *sql.Rows
+	var err error
+	if includeAll {
+		rows, err = db.conn.Query(`
+			SELECT a.id, a.user_id, COALESCE(u.username, CASE WHEN a.user_id = 0 THEN 'system' ELSE 'deleted-user' END),
+			       a.action, a.details, a.ip_address, a.created_at
+			FROM activity_logs a
+			LEFT JOIN users u ON u.id = a.user_id
+			ORDER BY a.created_at DESC, a.id DESC
+			LIMIT ?`, limit)
+	} else {
+		rows, err = db.conn.Query(`
+			SELECT a.id, a.user_id, COALESCE(u.username, CASE WHEN a.user_id = 0 THEN 'system' ELSE 'deleted-user' END),
+			       a.action, a.details, a.ip_address, a.created_at
+			FROM activity_logs a
+			LEFT JOIN users u ON u.id = a.user_id
+			WHERE a.user_id = ?
+			ORDER BY a.created_at DESC, a.id DESC
+			LIMIT ?`, userID, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var logs []*ActivityLog
+	logs := []*ActivityLog{}
 	for rows.Next() {
 		l := &ActivityLog{}
-		if err := rows.Scan(&l.ID, &l.UserID, &l.Action, &l.Details, &l.IPAddress, &l.CreatedAt); err != nil {
+		if err := rows.Scan(&l.ID, &l.UserID, &l.Username, &l.Action, &l.Details, &l.IPAddress, &l.CreatedAt); err != nil {
 			return nil, err
 		}
 		logs = append(logs, l)

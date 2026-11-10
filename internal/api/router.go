@@ -37,8 +37,8 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	authHandler := NewAuthHandler(db, cfg)
 	accountHandler := NewAccountHandler(db, authHandler)
 	serverHandler := NewServerHandler(db, manager)
-	consoleHandler := NewConsoleHandler(authHandler, manager)
-	fileHandler := NewFileHandler(manager)
+	consoleHandler := NewConsoleHandler(db, authHandler, manager)
+	fileHandler := NewFileHandler(db, manager)
 	pluginHandler := NewPluginHandler(db, manager)
 	backupHandler := NewBackupHandler(cfg, db, manager)
 	playerHandler := NewPlayerHandler(db, manager)
@@ -174,7 +174,10 @@ func (r *Router) registerRoutes(db *database.DB) {
 	// System info & Admin tools
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))
 	r.mux.HandleFunc("GET /api/system/java", r.requireAuth(HandleGetJavaRuntimes))
-	r.mux.HandleFunc("POST /api/admin/gc", r.requireAuth(HandleRunGC))
+	r.mux.HandleFunc("POST /api/admin/gc", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+		logAudit(db, req, "admin_gc", "Triggered manual Go runtime garbage collection")
+		HandleRunGC(w, req)
+	}))
 	r.mux.HandleFunc("GET /api/admin/turnstile", r.requireAuth(r.auth.GetTurnstileConfig))
 	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAuth(r.auth.UpdateTurnstileConfig))
 	r.mux.HandleFunc("GET /api/admin/users", r.requireAuth(r.auth.ListUsers))

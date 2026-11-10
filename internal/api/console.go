@@ -2,9 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/runner"
 	"github.com/gorilla/websocket"
 )
@@ -18,12 +21,14 @@ var upgrader = websocket.Upgrader{
 }
 
 type ConsoleHandler struct {
+	db      *database.DB
 	auth    *AuthHandler
 	manager *runner.ServerManager
 }
 
-func NewConsoleHandler(auth *AuthHandler, manager *runner.ServerManager) *ConsoleHandler {
+func NewConsoleHandler(db *database.DB, auth *AuthHandler, manager *runner.ServerManager) *ConsoleHandler {
 	return &ConsoleHandler{
+		db:      db,
 		auth:    auth,
 		manager: manager,
 	}
@@ -61,7 +66,7 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_, err := h.auth.ValidateToken(token)
+	claims, err := h.auth.ValidateToken(token)
 	if err != nil {
 		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
 		return
@@ -209,7 +214,16 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		if err := json.Unmarshal(msgBytes, &incoming); err == nil {
 			switch incoming.Event {
 			case "command":
-				_ = h.manager.SendCommand(serverID, incoming.Data)
+				cmd := strings.TrimSpace(incoming.Data)
+				if cmd != "" {
+					if err := h.manager.SendCommand(serverID, incoming.Data); err == nil {
+						uid := 0
+						if claims != nil {
+							uid = claims.UserID
+						}
+						logAuditUser(h.db, uid, r, "console_command", fmt.Sprintf("Executed command on %s: %s", auditServerLabel(h.db, serverID), truncateAuditText(cmd, 120)))
+					}
+				}
 			case "ping":
 				select {
 				case pongReplyCh <- struct{}{}:

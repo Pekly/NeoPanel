@@ -100,7 +100,17 @@ window.S = {
     files: false,
     plugins: false,
     backups: false,
-    players: false
+    players: false,
+    activity: false
+  },
+  flyConOpen: false,
+  flyConTall: false,
+  installingPlugins: new Set(),
+  installingSoftware: null,
+  actFilter: {
+    q: '',
+    category: 'all',
+    limit: 200
   },
   status: 'offline',         // online, offline, starting, stopping
   start: Date.now(),
@@ -579,9 +589,13 @@ function setBtnLoading(btn, isLoading, loadingText = 'Loading...') {
   if (isLoading) {
     if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
     btn.disabled = true;
+    btn.classList.add('is-loading');
+    btn.setAttribute('aria-busy', 'true');
     btn.innerHTML = `<span class="np-spinner-sm"></span> ${esc(loadingText)}`;
   } else {
     btn.disabled = false;
+    btn.classList.remove('is-loading');
+    btn.removeAttribute('aria-busy');
     if (btn.dataset.origHtml) {
       btn.innerHTML = btn.dataset.origHtml;
       delete btn.dataset.origHtml;
@@ -866,22 +880,34 @@ function formatLogLine(raw) {
 }
 
 function updateInputState() {
-  const inp = $('#cmd');
-  if (!inp) return;
   const isOnline = S.status === 'online';
-  inp.disabled = !isOnline;
-  inp.placeholder = isOnline ? 'Type a command, try help...' : 'Server is offline';
+  const placeholder = isOnline ? 'Type a command, try help...' : 'Server is offline';
+  for (const id of ['#cmd', '#fly-cmd']) {
+    const inp = $(id);
+    if (inp) {
+      inp.disabled = !isOnline;
+      inp.placeholder = placeholder;
+    }
+  }
+  const sendBtn = $('#fly-send-btn');
+  if (sendBtn) sendBtn.disabled = !isOnline;
 }
 
 function updateHeaderBadge() {
-  const badge = $('#srv-badge');
-  if (!badge) return;
-  badge.className = `badge ${S.status}`;
-  badge.innerHTML = `<i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[S.status] || 'Offline'}`;
+  const label = { online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[S.status] || 'Offline';
+  const badgeHtml = `<i class="dot"></i>${label}`;
+  for (const id of ['#srv-badge', '#fly-con-badge']) {
+    const badge = $(id);
+    if (badge) {
+      badge.className = `badge ${S.status}`;
+      badge.innerHTML = badgeHtml;
+    }
+  }
+  const fabDot = $('#fly-con-fab .fly-con-dot');
+  if (fabDot) fabDot.className = `fly-con-dot ${S.status}`;
 }
 
-function updateWsLivePill() {
-  const pill = $('#ws-live-pill');
+function applyWsPillState(pill) {
   if (!pill) return;
   if (S.wsState === 'connected') {
     pill.className = 'con-live-pill live';
@@ -895,9 +921,35 @@ function updateWsLivePill() {
   }
 }
 
+function updateWsLivePill() {
+  applyWsPillState($('#ws-live-pill'));
+  applyWsPillState($('#fly-ws-pill'));
+}
+
 function updateConBufferCount() {
+  const txt = `${S.log.length} lines`;
   const el = $('#con-buf-count');
-  if (el) el.textContent = `${S.log.length} lines`;
+  if (el) el.textContent = txt;
+  const flyEl = $('#fly-con-buf-count');
+  if (flyEl) flyEl.textContent = txt;
+  const fabCnt = $('#fly-fab-count');
+  if (fabCnt) {
+    fabCnt.textContent = S.log.length > 0 ? String(S.log.length) : '';
+    fabCnt.style.display = S.log.length > 0 ? 'inline-block' : 'none';
+  }
+}
+
+function appendLogToEl(el, html) {
+  if (!el) return;
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 90;
+  const row = document.createElement('div');
+  row.className = 'con-line';
+  row.innerHTML = html;
+  el.appendChild(row);
+  while (el.children.length > 800) {
+    el.removeChild(el.firstChild);
+  }
+  if (atBottom) el.scrollTop = el.scrollHeight;
 }
 
 function addLog(line) {
@@ -914,28 +966,167 @@ function addLog(line) {
   if (S.log.length > 800) S.log.shift();
 
   if (S.view === 'con') {
-    const l = $('#log');
-    if (l) {
-      const atBottom = l.scrollHeight - l.scrollTop - l.clientHeight < 90;
-      const row = document.createElement('div');
-      row.className = 'con-line';
-      row.innerHTML = html;
-      l.appendChild(row);
-      while (l.children.length > 800) {
-        l.removeChild(l.firstChild);
-      }
-      updateConBufferCount();
-      if (atBottom) l.scrollTop = l.scrollHeight;
-    }
+    appendLogToEl($('#log'), html);
   }
+  appendLogToEl($('#fly-log'), html);
+  updateConBufferCount();
+}
+
+function paintTargetLog(l) {
+  if (!l) return;
+  l.innerHTML = S.log.length
+    ? S.log.map(line => `<div class="con-line">${line}</div>`).join('')
+    : `<div class="con-line dim">No console output buffered yet. Start the server or type a command below.</div>`;
+  l.scrollTop = l.scrollHeight;
+}
+
+function paintFlyConsole() {
+  paintTargetLog($('#fly-log'));
+  updateConBufferCount();
 }
 
 function paintLog() {
-  const l = $('#log');
-  if (!l) return;
-  l.innerHTML = S.log.map(line => `<div class="con-line">${line}</div>`).join('');
+  paintTargetLog($('#log'));
+  paintTargetLog($('#fly-log'));
   updateConBufferCount();
-  l.scrollTop = l.scrollHeight;
+}
+
+function syncFlyConsoleState() {
+  updateHeaderBadge();
+  updateWsLivePill();
+  updateConBufferCount();
+  updateInputState();
+  const fab = $('#fly-con-fab');
+  if (fab) fab.classList.toggle('is-open', Boolean(S.flyConOpen));
+}
+
+function bindFlyConsoleInput() {
+  const inp = $('#fly-cmd');
+  if (!inp || inp.dataset.bound === '1') return;
+  inp.dataset.bound = '1';
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && inp.value.trim()) {
+      e.preventDefault();
+      runFlyCmd();
+    } else if (e.key === 'ArrowUp' && S.hi > 0) {
+      e.preventDefault();
+      inp.value = S.hist[--S.hi] || '';
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      inp.value = S.hist[++S.hi] || '';
+    }
+  });
+}
+
+function runFlyCmd() {
+  const inp = $('#fly-cmd');
+  if (!inp || !inp.value.trim()) return;
+  const c = inp.value.trim();
+  runCmd(c);
+  S.hist.push(c);
+  S.hi = S.hist.length;
+  inp.value = '';
+}
+
+function toggleFlyConsole(forceOpen) {
+  const srv = curServer();
+  if (!srv) {
+    toast('Select or create a server first');
+    return;
+  }
+  if (S.view === 'con') {
+    const cmdInp = $('#cmd');
+    if (cmdInp && !cmdInp.disabled) cmdInp.focus();
+    else toast('Already viewing full Console');
+    return;
+  }
+  const next = typeof forceOpen === 'boolean' ? forceOpen : !S.flyConOpen;
+  S.flyConOpen = next;
+  if (next && (!S.activeWs || S.activeWs.readyState !== WebSocket.OPEN)) {
+    connectWs(srv.id, true);
+  }
+  renderFlyConsole();
+}
+
+function toggleFlyConsoleSize() {
+  S.flyConTall = !S.flyConTall;
+  renderFlyConsole();
+}
+
+function closeFlyConsole() {
+  if (!S.flyConOpen) return;
+  S.flyConOpen = false;
+  renderFlyConsole();
+}
+
+function renderFlyConsole() {
+  const root = $('#fly-console-root');
+  if (!root) return;
+  const srv = curServer();
+  const isLoginOpen = Boolean($('#login'));
+  const showTrigger = !['dash', 'admin', 'acc'].includes(S.view);
+  if (!S.token || isLoginOpen || !srv || S.view === 'con' || (!showTrigger && !S.flyConOpen)) {
+    root.innerHTML = '';
+    delete root.dataset.flySig;
+    return;
+  }
+
+  const sig = `${srv.id}|${S.flyConOpen ? 1 : 0}|${S.flyConTall ? 1 : 0}`;
+  if (root.dataset.flySig === sig && root.children.length > 0) {
+    syncFlyConsoleState();
+    return;
+  }
+
+  const prevOpen = root.dataset.flySig?.split('|')[1] === '1';
+  root.dataset.flySig = sig;
+  const statusLabel = { online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[S.status] || 'Offline';
+
+  root.innerHTML = `
+    ${S.flyConOpen ? `
+      <div class="fly-con-drawer ${S.flyConTall ? 'tall' : ''}" role="dialog" aria-label="Live Console Drawer">
+        <div class="fly-con-head">
+          <div class="fly-con-title">
+            ${ic('terminal', 15)}
+            <b>${esc(srv.name || 'Server Console')}</b>
+            <span id="fly-con-badge" class="badge ${S.status}"><i class="dot"></i>${statusLabel}</span>
+            <span id="fly-ws-pill" class="con-live-pill"><i></i>Connecting...</span>
+            <span id="fly-con-buf-count" class="mu mono" style="font-size: 11px;">${S.log.length} lines</span>
+          </div>
+          <div class="row" style="gap: 6px; flex-wrap: nowrap;">
+            <button type="button" class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');">Clear</button>
+            <button type="button" class="btn sm" onclick="toggleFlyConsoleSize()" title="${S.flyConTall ? 'Compact drawer size' : 'Expand drawer size'}">${S.flyConTall ? 'Compact' : 'Expand'}</button>
+            <button type="button" class="btn sm" onclick="S.flyConOpen=false; go('con');" title="Open full Console view">Full Page</button>
+            <button type="button" class="btn sm" onclick="closeFlyConsole()" aria-label="Minimize live console">&times;</button>
+          </div>
+        </div>
+        <div class="con fly-con-logs" id="fly-log" role="log" aria-live="polite"></div>
+        <div class="cin fly-con-input">
+          <span>&raquo;</span>
+          <input id="fly-cmd" autocomplete="off" spellcheck="false" placeholder="Type a command..." aria-label="Quick console command">
+          <button type="button" id="fly-send-btn" class="btn sm pr fly-send-btn" onclick="runFlyCmd()">Send</button>
+        </div>
+      </div>
+    ` : ''}
+    <button type="button" id="fly-con-fab" class="fly-con-fab ${S.flyConOpen ? 'is-open' : ''}" onclick="toggleFlyConsole()" title="Toggle Live Console (Ctrl+\`)">
+      <span class="fly-con-dot ${S.status}"></span>
+      ${ic('terminal', 15)}
+      <span>${S.flyConOpen ? 'Hide Console' : 'Live Console'}</span>
+      <span id="fly-fab-count" class="fly-con-count" style="display:${S.log.length > 0 ? 'inline-block' : 'none'}">${S.log.length > 0 ? S.log.length : ''}</span>
+      <kbd>Ctrl+\`</kbd>
+    </button>
+  `;
+
+  if (S.flyConOpen) {
+    paintFlyConsole();
+    bindFlyConsoleInput();
+    if (!prevOpen) {
+      setTimeout(() => {
+        const inp = $('#fly-cmd');
+        if (inp && !inp.disabled) inp.focus();
+      }, 30);
+    }
+  }
+  syncFlyConsoleState();
 }
 
 // --- WebSocket Connection (Auto-Reconnect + Cloudflare Keepalive Heartbeat) ---
@@ -1005,7 +1196,7 @@ function connectWs(serverId, isReconnect = false) {
               if (Array.isArray(list)) {
                 S.log = list.map(formatLogLine).filter(Boolean);
                 if (S.log.length > 800) S.log = S.log.slice(-800);
-                if (S.view === 'con') paintLog();
+                paintLog();
                 return;
               }
             } catch (histErr) {}
@@ -1319,9 +1510,11 @@ function srvh() {
       </div>
     </div>
     <div class="row" style="position:relative">
+      ${S.view !== 'con' ? `<button class="btn" onclick="toggleFlyConsole()" title="Open Live Console Drawer (Ctrl+\`)">${ic('terminal', 14)} Console</button>` : ''}
       <button class="btn" onclick="event.stopPropagation(); toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
       ${S.cmenu ? `<div class="cmenu" role="menu" onclick="event.stopPropagation()">
         ${CMDS.map(([label, cmd]) => `<button role="menuitem" onclick="execQuickCmd('${cmd}')">${label}</button>`).join('')}
+        <button role="menuitem" onclick="S.cmenu=false; toggleFlyConsole();">${ic('terminal', 13)} Toggle Live Console (Ctrl+\`)</button>
         <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
         <button role="menuitem" style="color: #ef4444;" onclick="S.cmenu=false; openDeleteServerModal('${srv?.id}', '${esc(srv?.name || '')}');">${ic('trash', 13)} Delete Server</button>
       </div>` : ''}
@@ -1477,6 +1670,372 @@ function updateDashLiveStats() {
   if (allocRunBar) allocRunBar.style.width = `${Math.min(100, (runningCount / (totalCount || 1)) * 100)}%`;
 }
 
+// --- Rich Activity & Audit Log Engine ---
+const ACTIVITY_META_MAP = {
+  power_start: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Started Server' },
+  power_stop: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Stopped Server' },
+  power_restart: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Restarted Server' },
+  power_kill: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Force Killed Server' },
+  server_create: { category: 'admin', badgeLabel: 'Server', cls: 'act-cat-admin', title: 'Created Server Instance' },
+  server_update: { category: 'software', badgeLabel: 'Settings', cls: 'act-cat-software', title: 'Updated Server Config' },
+  server_delete: { category: 'security', badgeLabel: 'Server', cls: 'act-cat-security', title: 'Deleted Server Instance' },
+  server_reinstall: { category: 'software', badgeLabel: 'Software', cls: 'act-cat-software', title: 'Reinstalled Server' },
+  console_command: { category: 'console', badgeLabel: 'Console', cls: 'act-cat-console', title: 'Console Command' },
+  file_save: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Saved File' },
+  file_create: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Created File / Folder' },
+  file_delete: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Deleted File / Folder' },
+  file_upload: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Uploaded File' },
+  file_download: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Downloaded File' },
+  file_rename: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Renamed Item' },
+  file_unzip: { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: 'Extracted Archive' },
+  plugin_install: { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: 'Installed Plugin' },
+  plugin_delete: { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: 'Uninstalled Plugin' },
+  software_install: { category: 'software', badgeLabel: 'Software', cls: 'act-cat-software', title: 'Installed Engine JAR' },
+  properties_save: { category: 'software', badgeLabel: 'Config', cls: 'act-cat-software', title: 'Saved server.properties' },
+  backup_create: { category: 'backups', badgeLabel: 'Backups', cls: 'act-cat-backups', title: 'Created Backup' },
+  backup_delete: { category: 'backups', badgeLabel: 'Backups', cls: 'act-cat-backups', title: 'Deleted Backup' },
+  backup_download: { category: 'backups', badgeLabel: 'Backups', cls: 'act-cat-backups', title: 'Downloaded Backup' },
+  port_add: { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: 'Assigned Port' },
+  port_delete: { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: 'Removed Port' },
+  port_primary: { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: 'Changed Primary Port' },
+  player_op: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Granted Operator' },
+  player_deop: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Revoked Operator' },
+  player_kick: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Kicked Player' },
+  player_ban: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Banned Player' },
+  player_pardon: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Pardoned Player' },
+  player_whitelist_add: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Whitelisted Player' },
+  player_whitelist_remove: { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: 'Removed Whitelist' },
+  auth_setup: { category: 'security', badgeLabel: 'Security', cls: 'act-cat-security', title: 'Panel Initialized' },
+  auth_login: { category: 'security', badgeLabel: 'Security', cls: 'act-cat-security', title: 'Signed In' },
+  auth_login_failed: { category: 'security', badgeLabel: 'Alert', cls: 'act-cat-security', title: 'Failed Sign-In' },
+  password_change: { category: 'security', badgeLabel: 'Security', cls: 'act-cat-security', title: 'Changed Password' },
+  ssh_key_add: { category: 'security', badgeLabel: 'SSH Key', cls: 'act-cat-security', title: 'Added SSH Key' },
+  ssh_key_delete: { category: 'security', badgeLabel: 'SSH Key', cls: 'act-cat-security', title: 'Deleted SSH Key' },
+  api_key_create: { category: 'security', badgeLabel: 'API Key', cls: 'act-cat-security', title: 'Created API Key' },
+  api_key_delete: { category: 'security', badgeLabel: 'API Key', cls: 'act-cat-security', title: 'Revoked API Key' },
+  admin_user_create: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Created Panel User' },
+  admin_user_delete: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Deleted Panel User' },
+  admin_turnstile: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Updated Turnstile' },
+  admin_gc: { category: 'admin', badgeLabel: 'System', cls: 'act-cat-admin', title: 'Garbage Collection' }
+};
+
+const ACTIVITY_CATEGORIES = [
+  ['all', 'All Events'],
+  ['power', 'Power'],
+  ['console', 'Console'],
+  ['files', 'Files'],
+  ['plugins', 'Plugins'],
+  ['software', 'Software & Config'],
+  ['backups', 'Backups'],
+  ['network', 'Network & Ports'],
+  ['players', 'Players'],
+  ['security', 'Security & Auth'],
+  ['admin', 'Admin & System']
+];
+
+function getActivityMeta(action) {
+  const key = String(action || '').toLowerCase().trim();
+  if (ACTIVITY_META_MAP[key]) return ACTIVITY_META_MAP[key];
+  if (key.startsWith('power_')) return { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('file_')) return { category: 'files', badgeLabel: 'Files', cls: 'act-cat-files', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('plugin_')) return { category: 'plugins', badgeLabel: 'Plugins', cls: 'act-cat-plugins', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('backup_')) return { category: 'backups', badgeLabel: 'Backups', cls: 'act-cat-backups', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('port_')) return { category: 'network', badgeLabel: 'Network', cls: 'act-cat-network', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('player_')) return { category: 'players', badgeLabel: 'Players', cls: 'act-cat-players', title: key.replace(/_/g, ' ') };
+  if (key.startsWith('auth_') || key.includes('key') || key.includes('password')) {
+    return { category: 'security', badgeLabel: 'Security', cls: 'act-cat-security', title: key.replace(/_/g, ' ') };
+  }
+  if (key.startsWith('admin_') || key.startsWith('server_')) {
+    return { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: key.replace(/_/g, ' ') };
+  }
+  const readable = key ? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Panel Event';
+  return { category: 'admin', badgeLabel: 'System', cls: 'act-cat-admin', title: readable };
+}
+
+function formatFullDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString();
+}
+
+function getScopedActivityRows(scope = 'all') {
+  const all = Array.isArray(S.acct.act) ? S.acct.act : [];
+  if (scope !== 'mine' || !S.acct.un) return all;
+  const me = String(S.acct.un).toLowerCase();
+  return all.filter(r => !r.username || String(r.username).toLowerCase() === me);
+}
+
+function getFilteredActivity(scope = 'all') {
+  const rows = getScopedActivityRows(scope);
+  const q = (S.actFilter?.q || '').toLowerCase().trim();
+  const cat = S.actFilter?.category || 'all';
+
+  return rows.filter(r => {
+    const action = r.action || (Array.isArray(r) ? r[0] : '');
+    const meta = getActivityMeta(action);
+    if (cat !== 'all' && meta.category !== cat) return false;
+    if (!q) return true;
+    const actor = r.username || (Array.isArray(r) ? r[1] : '') || '';
+    const ip = r.ip_address || r.ip || '';
+    const details = r.details || '';
+    const hay = `${action} ${meta.title} ${meta.badgeLabel} ${details} ${actor} ${ip}`.toLowerCase();
+    return hay.includes(q);
+  });
+}
+
+function renderDashRecentActivityHtml() {
+  const rows = Array.isArray(S.acct.act) ? S.acct.act.slice(0, 6) : [];
+  if (S.loading?.activity && rows.length === 0) {
+    return loaderHtml('Loading recent activity...');
+  }
+  if (rows.length === 0) {
+    return `<div class="mu" style="font-size: 12.5px; line-height: 1.5; padding: 6px 0;">
+      No activity events recorded yet. Actions like starting servers, sending commands, editing files, and installing plugins will appear here.
+    </div>`;
+  }
+  return `<div class="act-dash-list">
+    ${rows.map(r => {
+      const meta = getActivityMeta(r.action);
+      const actor = r.username || (r.user_id === 0 ? 'Anonymous' : (S.acct.un || 'system'));
+      const ip = r.ip_address || '127.0.0.1';
+      const rel = r.created_at ? formatFileDate(r.created_at) : 'Recently';
+      const full = formatFullDate(r.created_at);
+      return `<div class="act-dash-item">
+        <div style="min-width: 0; flex: 1;">
+          <div class="row" style="gap: 6px; margin-bottom: 3px; flex-wrap: wrap;">
+            <span class="act-cat-badge ${meta.cls}">${esc(meta.badgeLabel)}</span>
+            <b style="color: var(--tx); font-size: 12.5px;">${esc(meta.title)}</b>
+          </div>
+          <div class="mu" style="font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${esc(r.details || '')}">
+            ${esc(r.details || r.action || 'Event')}
+          </div>
+          <div class="mu mono" style="font-size: 11px; margin-top: 2px;">
+            ${esc(actor)} &bull; <span class="pv">${esc(ip)}</span>
+          </div>
+        </div>
+        <span class="mu" style="font-size: 11.5px; white-space: nowrap; flex-shrink: 0;" title="${esc(full)}">${esc(rel)}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function buildActivityStatsHtml(scope = 'all') {
+  const rows = getScopedActivityRows(scope);
+  const counts = {};
+  for (const r of rows) {
+    const meta = getActivityMeta(r.action);
+    counts[meta.category] = (counts[meta.category] || 0) + 1;
+  }
+  const activeCat = S.actFilter?.category || 'all';
+  const activePills = [
+    ['all', 'Total', rows.length],
+    ['power', 'Power', counts.power || 0],
+    ['console', 'Console', counts.console || 0],
+    ['files', 'Files', counts.files || 0],
+    ['plugins', 'Plugins', counts.plugins || 0],
+    ['software', 'Software', counts.software || 0],
+    ['backups', 'Backups', counts.backups || 0],
+    ['network', 'Network', counts.network || 0],
+    ['players', 'Players', counts.players || 0],
+    ['security', 'Security', counts.security || 0],
+    ['admin', 'Admin', counts.admin || 0]
+  ].filter(([k, , n]) => k === 'all' || n > 0 || k === activeCat);
+
+  return activePills.map(([k, lbl, n]) => `
+    <button type="button" class="act-stat-pill" onclick="setActivityCategory('${k}', true)"
+      style="cursor:pointer; ${activeCat === k ? 'border-color: var(--ac); background: var(--ac-subtle); color: var(--tx);' : ''}">
+      <span>${esc(lbl)}</span>
+      <b>${n}</b>
+    </button>
+  `).join('');
+}
+
+function renderActivityRowsHtml(rows, showActor = true) {
+  const cols = showActor ? 5 : 4;
+  if (S.loading?.activity && !rows.length) {
+    return `<tr><td colspan="${cols}">${loaderHtml('Loading audit trail...')}</td></tr>`;
+  }
+  if (!rows.length) {
+    const hasFilter = Boolean((S.actFilter?.q || '').trim()) || (S.actFilter?.category || 'all') !== 'all';
+    return `<tr><td colspan="${cols}" class="mu" style="text-align:center; padding: 28px;">
+      ${hasFilter ? 'No audit events match your current search or category filter.' : 'No activity events recorded yet.'}
+    </td></tr>`;
+  }
+  return rows.map(r => {
+    const meta = getActivityMeta(r.action || (Array.isArray(r) ? r[0] : ''));
+    const actor = r.username || (r.user_id === 0 ? 'anonymous' : (Array.isArray(r) ? r[1] : '') || S.acct.un || 'system');
+    const ip = r.ip_address || r.ip || (Array.isArray(r) ? r[2] : '') || '127.0.0.1';
+    const rel = r.created_at ? formatFileDate(r.created_at) : (Array.isArray(r) ? r[3] : 'Recently');
+    const full = formatFullDate(r.created_at);
+    const details = r.details || r.action || 'Event';
+
+    return `<tr>
+      <td><span class="act-cat-badge ${meta.cls}">${esc(meta.badgeLabel)}</span></td>
+      <td style="min-width: 240px;">
+        <b style="color: var(--tx); display: block;">${esc(meta.title)}</b>
+        <div class="mu" style="font-size: 12px; margin-top: 2px; word-break: break-word;">${esc(details)}</div>
+      </td>
+      ${showActor ? `<td><span class="chip">${esc(actor)}</span></td>` : ''}
+      <td class="mono pv" style="white-space: nowrap;">${esc(ip)}</td>
+      <td style="white-space: nowrap;">
+        <div style="color: var(--tx); font-size: 12.5px;">${esc(rel)}</div>
+        <div class="mu mono" style="font-size: 11px;">${esc(full)}</div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderActivityRows() {
+  const tbody = $('#act-tbody');
+  if (!tbody) return;
+  const scope = tbody.dataset.scope || 'all';
+  const showActor = tbody.dataset.showActor !== '0';
+  const filtered = getFilteredActivity(scope);
+  tbody.innerHTML = renderActivityRowsHtml(filtered, showActor);
+
+  const countEl = $('#act-count-pill');
+  if (countEl) {
+    const total = getScopedActivityRows(scope).length;
+    countEl.textContent = filtered.length === total ? `${total} events` : `${filtered.length} of ${total} events`;
+  }
+  const statsEl = $('#act-stats');
+  if (statsEl) {
+    statsEl.innerHTML = buildActivityStatsHtml(scope);
+  }
+}
+
+function renderActivityLogSection(opts = {}) {
+  const scope = opts.scope || 'all';
+  const title = opts.title || 'Activity & Audit Log';
+  const subtitle = opts.subtitle || 'Complete trail of server power events, commands, file operations, plugins, backups & logins';
+  const showActor = opts.showActor !== false;
+  const filtered = getFilteredActivity(scope);
+  const totalScoped = getScopedActivityRows(scope).length;
+  const curLimit = S.actFilter?.limit || 200;
+
+  return `
+    <div class="card" style="padding: 18px 20px; margin-bottom: 14px;">
+      <div class="row sb" style="margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <div class="row" style="gap: 10px; align-items: center;">
+            <h2 style="margin: 0; color: var(--tx); font-size: 17px;">${esc(title)}</h2>
+            <span id="act-count-pill" class="chip">${filtered.length === totalScoped ? `${totalScoped} events` : `${filtered.length} of ${totalScoped} events`}</span>
+          </div>
+          <div class="mu" style="font-size: 12.5px; margin-top: 3px;">${esc(subtitle)}</div>
+        </div>
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
+          <button type="button" class="btn sm" onclick="loadActivityLog(); toast('Activity logs refreshed');">${ic('refresh', 13)} Refresh</button>
+          <button type="button" class="btn sm" onclick="exportActivityLogs('${scope}')">${ic('download', 13)} Export JSON</button>
+        </div>
+      </div>
+
+      <div class="act-toolbar">
+        <div style="position: relative; flex: 1; min-width: 220px;">
+          <input type="text" id="act-search-inp" placeholder="Search actions, files, commands, usernames, or IPs..."
+            value="${esc(S.actFilter?.q || '')}"
+            oninput="setActivityQuery(this.value)"
+            style="padding-left: 34px; height: 38px;">
+          <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
+        </div>
+        <select id="act-cat-filter" onchange="setActivityCategory(this.value)" style="width: auto; min-width: 185px; height: 38px;">
+          ${ACTIVITY_CATEGORIES.map(([k, lbl]) => `
+            <option value="${k}" ${(S.actFilter?.category || 'all') === k ? 'selected' : ''}>Category: ${esc(lbl)}</option>
+          `).join('')}
+        </select>
+      </div>
+
+      <div id="act-stats" class="act-stats" style="margin-bottom: 0;">
+        ${buildActivityStatsHtml(scope)}
+      </div>
+    </div>
+
+    <div class="card tw">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 105px;">Category</th>
+            <th>Event &amp; Details</th>
+            ${showActor ? '<th style="width: 130px;">Actor</th>' : ''}
+            <th style="width: 145px;">IP Address</th>
+            <th style="width: 185px;">Timestamp</th>
+          </tr>
+        </thead>
+        <tbody id="act-tbody" data-scope="${esc(scope)}" data-show-actor="${showActor ? '1' : '0'}">
+          ${renderActivityRowsHtml(filtered, showActor)}
+        </tbody>
+      </table>
+    </div>
+    ${(S.acct.act.length >= curLimit && curLimit < 500) ? `
+      <div class="row" style="justify-content: center; margin-top: 14px;">
+        <button type="button" class="btn sm" onclick="loadMoreActivity()">Load up to 500 events</button>
+      </div>
+    ` : ''}
+  `;
+}
+
+async function loadActivityLog(limit = S.actFilter?.limit || 200) {
+  if (!S.token) return;
+  if (!S.loading) S.loading = {};
+  S.loading.activity = true;
+  if ($('#act-tbody') && (!S.acct.act || S.acct.act.length === 0)) {
+    renderActivityRows();
+  }
+  try {
+    const logs = await api(`/api/account/activity?limit=${limit}`);
+    S.acct.act = Array.isArray(logs) ? logs : [];
+  } catch (e) {} finally {
+    S.loading.activity = false;
+    if ($('#act-tbody')) {
+      renderActivityRows();
+    } else if ($('#dash-recent-activity')) {
+      const box = $('#dash-recent-activity');
+      if (box) box.innerHTML = renderDashRecentActivityHtml();
+    } else if (S.view === 'act' || (S.view === 'admin' && S.adminTab === 4) || (S.view === 'acc' && S.acct.tab === 4)) {
+      R();
+    }
+  }
+}
+
+function setActivityQuery(q) {
+  if (!S.actFilter) S.actFilter = { q: '', category: 'all', limit: 200 };
+  S.actFilter.q = q;
+  renderActivityRows();
+}
+
+function setActivityCategory(cat, syncSelect = false) {
+  if (!S.actFilter) S.actFilter = { q: '', category: 'all', limit: 200 };
+  S.actFilter.category = cat || 'all';
+  if (syncSelect) {
+    const sel = $('#act-cat-filter');
+    if (sel) {
+      sel.value = S.actFilter.category;
+      if (typeof sel._cselectRebuild === 'function') sel._cselectRebuild();
+    }
+  }
+  renderActivityRows();
+}
+
+function loadMoreActivity() {
+  if (!S.actFilter) S.actFilter = { q: '', category: 'all', limit: 200 };
+  S.actFilter.limit = 500;
+  loadActivityLog(500);
+}
+
+function exportActivityLogs(scope = 'all') {
+  const rows = getFilteredActivity(scope);
+  const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `neopanel-activity-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`Exported ${rows.length} activity event${rows.length === 1 ? '' : 's'}`);
+}
+
 // --- Views Implementation (V) ---
 const V = {
   dash() {
@@ -1599,32 +2158,11 @@ const V = {
         <!-- Recent Activity Card -->
         <div class="card" style="padding: 18px;">
           <div class="row sb" style="margin-bottom: 14px;">
-            <h2 style="font-size: 15px; font-weight: 700; color: var(--tx);">Recent activity</h2>
+            <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin: 0;">Recent activity</h2>
             <a href="#act" onclick="go('act')" class="mu" style="font-size: 12px; text-decoration: none;">View all</a>
           </div>
-          <div style="display: flex; flex-direction: column; gap: 12px;">
-            <div style="display: flex; align-items: flex-start; justify-content: space-between; font-size: 13px;">
-              <div style="display: flex; gap: 8px;">
-                <span class="mu" style="color: var(--tx-dim);">&rarr;</span>
-                <div>
-                  <div style="font-weight: 600; color: var(--tx);">Signed in</div>
-                  <div class="mu mono" style="font-size: 11.5px;">${esc(S.acct.un || 'admin')} &bull; ${window.location.hostname}</div>
-                </div>
-              </div>
-              <span class="mu" style="font-size: 12px;">Now</span>
-            </div>
-            ${S.servers.length ? `
-              <div style="display: flex; align-items: flex-start; justify-content: space-between; font-size: 13px;">
-                <div style="display: flex; gap: 8px;">
-                  <span class="mu" style="color: var(--tx-dim);">&rarr;</span>
-                  <div>
-                    <div style="font-weight: 600; color: var(--tx);">Server registered</div>
-                    <div class="mu" style="font-size: 11.5px;">${esc(S.servers[0].name)} &bull; ${esc(S.servers[0].type || 'paper')}</div>
-                  </div>
-                </div>
-                <span class="mu" style="font-size: 12px;">Active</span>
-              </div>
-            ` : ''}
+          <div id="dash-recent-activity">
+            ${renderDashRecentActivityHtml()}
           </div>
         </div>
 
@@ -2024,12 +2562,12 @@ const V = {
       `).join('')}
     </div>
 
-    <div class="row sb" style="margin:22px 0 12px; flex-wrap: wrap; gap: 10px;">
+    <div class="row sb" style="margin-top:22px; margin-bottom:12px; flex-wrap: wrap; gap: 10px;">
       <h2 style="margin:0">2. Select ${esc(sel)} Version</h2>
       <span class="mu" style="font-size:12.5px;">Click any release to confirm installation &amp; optional world backup</span>
     </div>
 
-    <div class="row" style="margin:0 0 12px; gap:10px; flex-wrap: wrap;">
+    <div class="row" style="margin-top:0; margin-bottom:12px; gap:10px; flex-wrap: wrap;">
       <div style="position: relative; flex: 1; min-width: 220px; max-width: 320px;">
         <input type="text" placeholder="Search versions (e.g. 1.21.4, 1.20.1)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
         <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
@@ -2053,7 +2591,7 @@ const V = {
 
   bk() {
     return `${srvh()}
-    <div class="row sb" style="margin:14px 0 12px">
+    <div class="row sb" style="margin-top:14px; margin-bottom:12px;">
       <span class="mu">${S.bk.length} backups recorded</span>
       <button class="btn pr" onclick="createBackup()">${ic('plus', 14)} Create Full Backup</button>
     </div>
@@ -2471,24 +3009,17 @@ const V = {
   },
 
   act() {
-    return `${srvh()}
-    <div class="card tw" style="margin-top:14px">
-      <table>
-        <thead><tr><th>Event</th><th>User</th><th>IP Address</th><th>When</th></tr></thead>
-        <tbody>
-          ${S.acct.act.length ? S.acct.act.map(r => `
-            <tr>
-              <td><b>${esc(r.details || r.action || r[0] || 'Event')}</b></td>
-              <td>${esc(r[1] || S.acct.un)}</td>
-              <td class="mono pv">${esc(r.ip_address || r.ip || r[2] || '127.0.0.1')}</td>
-              <td class="mu">${esc(r.created_at ? formatFileDate(r.created_at) : (r[3] || 'Recently'))}</td>
-            </tr>
-          `).join('') : `
-            <tr><td>Started server instance</td><td>${esc(S.acct.un)}</td><td class="mono pv">127.0.0.1</td><td class="mu">Just now</td></tr>
-            <tr><td>Saved server.properties</td><td>${esc(S.acct.un)}</td><td class="mono pv">127.0.0.1</td><td class="mu">10 minutes ago</td></tr>
-          `}
-        </tbody>
-      </table>
+    const header = curServer()
+      ? srvh()
+      : `<div class="card" style="padding: 18px 22px;"><h1 style="margin:0; font-size:20px;">Panel Activity Log</h1></div>`;
+    return `${header}
+    <div style="margin-top: 14px;">
+      ${renderActivityLogSection({
+        scope: 'all',
+        title: 'Server & Panel Activity',
+        subtitle: 'Real-time audit trail of power actions, console commands, files, plugins, backups & logins',
+        showActor: true
+      })}
     </div>`;
   },
 
@@ -2728,31 +3259,12 @@ const V = {
         </div>
       `;
     } else if (t === 4) {
-      content = `
-        <div class="card tw" style="margin-bottom:18px;">
-          <div class="row sb" style="margin-bottom:14px;">
-            <h2 style="margin:0; color:var(--tx);">Global Daemon Audit Log</h2>
-            <button class="btn sm" onclick="loadAccountData(); toast('Logs refreshed');">${ic('refresh', 12)} Refresh</button>
-          </div>
-          <table>
-            <thead><tr><th>Event</th><th>Actor</th><th>IP Address</th><th>Timestamp</th></tr></thead>
-            <tbody>
-              ${S.acct.act.length ? S.acct.act.map(r => `
-                <tr>
-                  <td><b>${esc(r.details || r.action || r[0] || 'Event')}</b></td>
-                  <td>${esc(r[1] || S.acct.un)}</td>
-                  <td class="mono pv">${esc(r.ip_address || r.ip || r[2] || '127.0.0.1')}</td>
-                  <td class="mu">${esc(r.created_at ? formatFileDate(r.created_at) : (r[3] || 'Recently'))}</td>
-                </tr>
-              `).join('') : `
-                <tr><td>Daemon Started (systemd)</td><td>root</td><td class="mono pv">127.0.0.1</td><td class="mu">System boot</td></tr>
-                <tr><td>Garbage Collection invoked</td><td>admin</td><td class="mono pv">127.0.0.1</td><td class="mu">Recently</td></tr>
-                <tr><td>Reinstalled server jar</td><td>admin</td><td class="mono pv">127.0.0.1</td><td class="mu">Recently</td></tr>
-              `}
-            </tbody>
-          </table>
-        </div>
-      `;
+      content = renderActivityLogSection({
+        scope: 'all',
+        title: 'Global Daemon Audit Log',
+        subtitle: 'Cluster-wide security, user management, power, console, file & software audit events',
+        showActor: true
+      });
     }
 
     return `<header class="top">
@@ -2762,9 +3274,9 @@ const V = {
       <span class="badge online"><i class="dot"></i>System Healthy</span>
     </header>
 
-    <div class="tabs" style="margin: 16px 0;">
+    <div class="tabs" style="margin-top: 16px; margin-bottom: 16px;">
       ${tabs.map(([lbl, idx]) => `
-        <button class="${t === idx ? 'active' : ''}" onclick="S.adminTab=${idx}; R();">${lbl}</button>
+        <button class="${t === idx ? 'active' : ''}" onclick="S.adminTab=${idx}; R(); ${idx === 4 ? 'loadActivityLog();' : ''}">${lbl}</button>
       `).join('')}
     </div>
 
@@ -2889,20 +3401,12 @@ const V = {
         </table>
       </div>`;
     } else {
-      tabContent = `<div class="card tw">
-        <table>
-          <thead><tr><th>Event</th><th>IP Address</th><th>Timestamp</th></tr></thead>
-          <tbody>
-            ${a.act.length ? a.act.map(r => `
-              <tr>
-                <td><b>${esc(r.details || r.action || r[0] || 'Event')}</b></td>
-                <td class="mono pv">${esc(r.ip_address || r.ip || r[1] || '127.0.0.1')}</td>
-                <td class="mu">${esc(r.created_at ? formatFileDate(r.created_at) : (r[2] || 'Recent'))}</td>
-              </tr>
-            `).join('') : '<tr><td colspan="3" class="mu" style="text-align:center;padding:24px;">No recorded security events.</td></tr>'}
-          </tbody>
-        </table>
-      </div>`;
+      tabContent = renderActivityLogSection({
+        scope: S.user?.role === 'admin' ? 'all' : 'mine',
+        title: 'Account & Security Activity',
+        subtitle: 'Sign-ins, password changes, SSH & API keys, and recent panel operations',
+        showActor: true
+      });
     }
 
     const accTabs = [
@@ -2962,13 +3466,19 @@ function versionRowsHtml() {
       .filter(item => !q || (item.v + ' ' + item.n).toLowerCase().includes(q))
       .map(item => {
         const isRunning = S.ver === item.v && S.core === sel;
+        const isInstalling = S.installingSoftware === `${sel}:${item.v}`;
         return `<tr>
           <td class="mono"><b>${esc(item.v)}</b></td>
           <td><span class="chip">${esc(item.n)}</span></td>
           <td class="mono">Java ${esc(item.j)}</td>
           <td><span class="chip">${esc(sel)}</span></td>
           <td style="text-align:right">
-            ${isRunning ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${esc(sel)}', '${esc(item.v)}')">Install ${esc(sel)} ${esc(item.v)}</button>`}
+            ${isRunning
+              ? '<span class="badge online"><i class="dot"></i>Active</span>'
+              : isInstalling
+                ? `<button class="btn sm pr is-loading" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)" disabled aria-busy="true"><span class="np-spinner-sm"></span> Installing...</button>`
+                : `<button class="btn sm pr" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)">Install ${esc(sel)} ${esc(item.v)}</button>`
+            }
           </td>
         </tr>`;
       }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching proxy builds found.</td></tr>';
@@ -2987,6 +3497,7 @@ function versionRowsHtml() {
     })
     .map(item => {
       const isRunning = S.ver === item.v && S.core === sel;
+      const isInstalling = S.installingSoftware === `${sel}:${item.v}`;
       const majorMinor = parseInt(item.v.split('.')[1] || '0', 10);
       const major = parseInt(item.v.split('.')[0] || '1', 10);
       const javaVer = (major >= 26 || majorMinor >= 20) ? '21' : '17';
@@ -3000,7 +3511,12 @@ function versionRowsHtml() {
         <td class="mono">Java ${javaVer}</td>
         <td><span class="chip">${esc(sel)}</span></td>
         <td style="text-align:right">
-          ${isRunning ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${esc(sel)}', '${esc(item.v)}')">Install ${esc(sel)} ${esc(item.v)}</button>`}
+          ${isRunning
+            ? '<span class="badge online"><i class="dot"></i>Active</span>'
+            : isInstalling
+              ? `<button class="btn sm pr is-loading" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)" disabled aria-busy="true"><span class="np-spinner-sm"></span> Installing...</button>`
+              : `<button class="btn sm pr" data-soft="${esc(sel)}" data-ver="${esc(item.v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)">Install ${esc(sel)} ${esc(item.v)}</button>`
+          }
         </td>
       </tr>`;
     }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching versions found.</td></tr>';
@@ -3153,6 +3669,7 @@ window.R = function() {
     }
     enhanceSelects(main);
   }
+  renderFlyConsole();
 };
 
 function bindConsoleInput() {
@@ -3198,6 +3715,7 @@ window.onEnterView = function(view) {
   else if (view === 'bk') loadBackupsList();
   else if (view === 'set') loadProperties();
   else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
+  else if (view === 'act') loadActivityLog();
   else if (view === 'admin') loadAdminData();
   else if (view === 'acc') loadAccountData();
   else if (view === 'dash') loadDashboard();
@@ -3208,8 +3726,12 @@ async function loadDashboard() {
   if (!S.loading) S.loading = {};
   if (S.servers.length === 0) S.loading.dash = true;
   try {
-    const srvs = await api('/api/servers');
+    const [srvs, act] = await Promise.all([
+      api('/api/servers'),
+      api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null)
+    ]);
     S.servers = srvs || [];
+    if (Array.isArray(act)) S.acct.act = act;
     if (S.servers.length > 0) {
       if (S.cs >= S.servers.length) S.cs = 0;
       const cur = curServer();
@@ -3236,6 +3758,10 @@ async function loadAdminData() {
   try {
     const ts = await api('/api/admin/turnstile');
     if (ts) S.adminTurnstile = ts;
+  } catch (e) {}
+  try {
+    const act = await api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`);
+    if (Array.isArray(act)) S.acct.act = act;
   } catch (e) {}
   R();
 }
@@ -4138,6 +4664,7 @@ async function searchModrinth() {
         ? `<img src="${esc(hit.icon_url)}" class="plugin-icon" onerror="this.src='/favicon.svg'">`
         : `<div class="plugin-icon" style="display:grid; place-items:center; color:var(--ac); font-size:20px;">🧩</div>`;
       const slugVal = hit.slug || hit.project_id || hit.id || '';
+      const isInstalling = Boolean(S.installingPlugins && S.installingPlugins.has(slugVal));
 
       return `
       <div class="plugin-card">
@@ -4159,7 +4686,9 @@ async function searchModrinth() {
         <div style="flex-shrink: 0;">
           ${isInstalled
             ? '<span class="badge online"><i class="dot"></i>Installed</span>'
-            : `<button class="btn pr" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" style="min-width: 95px; justify-content: center;">${ic('download', 14)} Install</button>`
+            : isInstalling
+              ? `<button class="btn pr is-loading" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" disabled aria-busy="true" style="min-width: 112px; justify-content: center;"><span class="np-spinner-sm"></span> Installing...</button>`
+              : `<button class="btn pr" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" style="min-width: 112px; justify-content: center;">${ic('download', 14)} Install</button>`
           }
         </div>
       </div>`;
@@ -4172,6 +4701,8 @@ async function searchModrinth() {
 async function installPlugin(projectSlug, title, btnEl) {
   const srv = curServer();
   if (!srv || !projectSlug) return;
+  if (S.installingPlugins && S.installingPlugins.has(projectSlug)) return;
+
   const targetFolder = String(S.core || '').toLowerCase() === 'fabric' ? 'mods/' : 'plugins/';
   const ok = await uiConfirm({
     title: 'Install Plugin from Modrinth',
@@ -4183,25 +4714,42 @@ async function installPlugin(projectSlug, title, btnEl) {
   });
   if (!ok) return;
 
-  if (btnEl) {
-    btnEl.disabled = true;
-    btnEl.innerHTML = 'Installing...';
+  if (!S.installingPlugins) S.installingPlugins = new Set();
+  S.installingPlugins.add(projectSlug);
+
+  const findBtn = () => {
+    if (btnEl && document.body.contains(btnEl)) return btnEl;
+    if (typeof CSS !== 'undefined' && CSS.escape) {
+      return document.querySelector(`#store-grid button[data-slug="${CSS.escape(projectSlug)}"]`);
+    }
+    return null;
+  };
+
+  const activeBtn = findBtn();
+  if (activeBtn) {
+    setBtnLoading(activeBtn, true, 'Installing...');
   }
-  toast(`Downloading & installing ${title}...`);
+  toast(`Downloading & installing ${title || projectSlug}...`);
   try {
     await api(`/api/servers/${srv.id}/plugins/install`, {
       method: 'POST',
       body: JSON.stringify({ slug: projectSlug, project_id: projectSlug })
     });
-    toast(`Successfully installed ${title}!`);
-    if (btnEl && btnEl.parentElement) {
-      btnEl.parentElement.innerHTML = '<span class="badge online"><i class="dot"></i>Installed</span>';
+    S.installingPlugins.delete(projectSlug);
+    toast(`Successfully installed ${title || projectSlug}!`);
+    const curBtn = findBtn();
+    if (curBtn && curBtn.parentElement) {
+      curBtn.parentElement.innerHTML = '<span class="badge online"><i class="dot"></i>Installed</span>';
     }
     loadPluginsList();
   } catch (e) {
-    if (btnEl) {
-      btnEl.disabled = false;
-      btnEl.innerHTML = `${ic('download', 14)} Install`;
+    S.installingPlugins.delete(projectSlug);
+    const curBtn = findBtn();
+    if (curBtn) {
+      setBtnLoading(curBtn, false);
+      if (curBtn.innerHTML.includes('Installing')) {
+        curBtn.innerHTML = `${ic('download', 14)} Install`;
+      }
     }
   }
 }
@@ -4317,18 +4865,35 @@ function askInstallSoftwareModal(srv, software, version) {
   });
 }
 
-async function installSoftware(software, version) {
+async function installSoftware(software, version, btnEl) {
   const srv = curServer();
   if (!srv) return;
+  if (S.installingSoftware) {
+    toast('Another software installation is already in progress.');
+    return;
+  }
   const choice = await askInstallSoftwareModal(srv, software, version);
   if (!choice || !choice.confirmed) return;
 
-  if (choice.backup) {
-    toast('Creating world & server backup prior to upgrade...');
-    await api(`/api/servers/${srv.id}/backups`, { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
-  }
-  toast(`Downloading ${software} ${version} server jar...`);
+  S.installingSoftware = `${software}:${version}`;
+  const findBtn = () => {
+    if (btnEl && document.body.contains(btnEl)) return btnEl;
+    if (typeof CSS !== 'undefined' && CSS.escape) {
+      return document.querySelector(`#vres button[data-soft="${CSS.escape(software)}"][data-ver="${CSS.escape(version)}"]`);
+    }
+    return null;
+  };
+
+  let curBtn = findBtn();
   try {
+    if (choice.backup) {
+      if (curBtn) setBtnLoading(curBtn, true, 'Backing up...');
+      toast('Creating world & server backup prior to upgrade...');
+      await api(`/api/servers/${srv.id}/backups`, { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
+    }
+    curBtn = findBtn();
+    if (curBtn) setBtnLoading(curBtn, true, 'Installing...');
+    toast(`Downloading ${software} ${version} server jar...`);
     await api(`/api/servers/${srv.id}/software`, {
       method: 'POST',
       body: JSON.stringify({ software, version })
@@ -4337,7 +4902,6 @@ async function installSoftware(software, version) {
     S.ver = version;
     toast(`Successfully installed ${software} ${version}! Restarting...`);
     power('restart', true);
-    R();
   } catch (e) {
     toast(`Software installation failed: ${e.message}`, 'bad');
     uiAlert({
@@ -4345,6 +4909,15 @@ async function installSoftware(software, version) {
       message: `Failed to install <b>${esc(software)} ${esc(version)}</b>:<br><br>${esc(e.message || 'Download failed or version unavailable.')}`,
       type: 'error'
     });
+  } finally {
+    S.installingSoftware = null;
+    if (S.view === 'ver') {
+      renderVersionRows();
+      R();
+    } else {
+      curBtn = findBtn();
+      if (curBtn) setBtnLoading(curBtn, false);
+    }
   }
 }
 
@@ -4453,7 +5026,7 @@ async function loadAccountData() {
     } else if (S.acct.tab === 3) {
       S.acct.api = (await api('/api/account/api-keys')) || [];
     } else if (S.acct.tab === 4) {
-      S.acct.act = (await api('/api/account/activity')) || [];
+      S.acct.act = (await api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`)) || [];
     }
     R();
   } catch (e) {}
@@ -4639,6 +5212,7 @@ function paletteItems() {
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
     ...S.servers.map((s, i) => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => switchServer(i)]),
     ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.view = 'pl'; S.ptab = 'online'; R(); }]),
+    ['Actions', 'Toggle Live Console', 'Ctrl + `', () => toggleFlyConsole()],
     ['Actions', 'Create Backup', 'Backups', () => createBackup()],
     ['Actions', 'Restart Server', 'Power', () => power('restart')],
     ['Actions', 'Toggle Dark / Light Theme', 'Appearance', () => toggleTheme()],
@@ -4725,9 +5299,18 @@ window.addEventListener('keydown', e => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     openPalette(1);
+  } else if ((e.ctrlKey || e.metaKey) && (e.code === 'Backquote' || e.key === '`')) {
+    if (!$('#login')) {
+      e.preventDefault();
+      toggleFlyConsole();
+    }
   } else if (e.key === 'Escape') {
-    openPalette(0);
-    closeModal();
+    if ($('#pal') || $('#modal-container')?.innerHTML.trim()) {
+      openPalette(0);
+      closeModal();
+    } else if (S.flyConOpen) {
+      closeFlyConsole();
+    }
   }
 });
 
@@ -5823,6 +6406,9 @@ async function logout() {
     } catch (e) {}
     S.activeWs = null;
   }
+  S.flyConOpen = false;
+  S.log = [];
+  renderFlyConsole();
   $('#login')?.remove();
   showLoginScreen();
 }
@@ -5924,6 +6510,16 @@ window.unzipFileItem = unzipFileItem;
 window.unzipSelectedArchive = unzipSelectedArchive;
 window.enhanceSelects = enhanceSelects;
 window.closeAllCustomSelects = closeAllCustomSelects;
+window.toggleFlyConsole = toggleFlyConsole;
+window.toggleFlyConsoleSize = toggleFlyConsoleSize;
+window.closeFlyConsole = closeFlyConsole;
+window.runFlyCmd = runFlyCmd;
+window.renderFlyConsole = renderFlyConsole;
+window.loadActivityLog = loadActivityLog;
+window.setActivityQuery = setActivityQuery;
+window.setActivityCategory = setActivityCategory;
+window.loadMoreActivity = loadMoreActivity;
+window.exportActivityLogs = exportActivityLogs;
 
 // --- Custom Glassmorphic Selects System ---
 function closeAllCustomSelects() {

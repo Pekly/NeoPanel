@@ -157,6 +157,8 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		size = fi.Size()
 	}
 
+	logAudit(h.db, r, "backup_create", fmt.Sprintf("Created backup '%s' (%s) for %s (%s)", baseName, formatBytesAudit(size), srv.Name, serverID))
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Backup created successfully",
 		"name":    baseName,
@@ -178,6 +180,8 @@ func (h *BackupHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logAudit(h.db, r, "backup_delete", fmt.Sprintf("Deleted backup '%s' from %s", name, auditServerLabel(h.db, serverID)))
+
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Backup deleted"})
 }
 
@@ -190,10 +194,17 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath := filepath.Join(h.getBackupsDir(serverID), name)
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	fi, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
 		http.Error(w, "Backup not found", http.StatusNotFound)
 		return
 	}
+
+	var sizeStr string
+	if fi != nil {
+		sizeStr = " (" + formatBytesAudit(fi.Size()) + ")"
+	}
+	logAudit(h.db, r, "backup_download", fmt.Sprintf("Downloaded backup '%s'%s from %s", name, sizeStr, auditServerLabel(h.db, serverID)))
 
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
 	w.Header().Set("Content-Type", "application/gzip")

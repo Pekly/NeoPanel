@@ -59,6 +59,7 @@ type APIKey struct {
 type ActivityLog struct {
 	ID        int       `json:"id"`
 	UserID    int       `json:"user_id"`
+	Username  string    `json:"username"`
 	Action    string    `json:"action"`
 	Details   string    `json:"details"`
 	IPAddress string    `json:"ip_address"`
