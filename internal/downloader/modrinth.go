@@ -43,15 +43,48 @@ type ModrinthVersion struct {
 	} `json:"files"`
 }
 
-// SearchModrinthPlugins queries the Modrinth API for Minecraft plugins
-func SearchModrinthPlugins(query string, limit int) (*ModrinthSearchResult, error) {
+// SearchModrinthPlugins queries the Modrinth API for Minecraft plugins with optional loader, version, and sort filters
+func SearchModrinthPlugins(query string, limit int, loader string, mcVersion string, sortBy string) (*ModrinthSearchResult, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
 
-	facets := `[["project_type:plugin"]]`
-	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/search?query=%s&facets=%s&limit=%d",
-		url.QueryEscape(query), url.QueryEscape(facets), limit)
+	var facetGroups []string
+	loaderLow := strings.ToLower(strings.TrimSpace(loader))
+	switch loaderLow {
+	case "":
+		facetGroups = append(facetGroups, `["project_type:plugin"]`)
+	case "paper", "purpur":
+		facetGroups = append(facetGroups, `["project_type:plugin"]`)
+		facetGroups = append(facetGroups, `["categories:paper","categories:spigot","categories:bukkit"]`)
+	case "spigot", "bukkit":
+		facetGroups = append(facetGroups, `["project_type:plugin"]`)
+		facetGroups = append(facetGroups, `["categories:spigot","categories:bukkit"]`)
+	case "velocity", "waterfall", "bungeecord":
+		facetGroups = append(facetGroups, `["project_type:plugin"]`)
+		facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+	case "fabric", "neoforge", "forge":
+		facetGroups = append(facetGroups, `["project_type:plugin","project_type:mod"]`)
+		facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+	default:
+		facetGroups = append(facetGroups, `["project_type:plugin"]`)
+		facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+	}
+
+	verTrim := strings.TrimSpace(mcVersion)
+	if verTrim != "" && !strings.EqualFold(verTrim, "any") {
+		facetGroups = append(facetGroups, fmt.Sprintf(`["versions:%s"]`, verTrim))
+	}
+
+	index := "relevance"
+	switch strings.ToLower(strings.TrimSpace(sortBy)) {
+	case "downloads", "follows", "newest", "updated", "relevance":
+		index = strings.ToLower(strings.TrimSpace(sortBy))
+	}
+
+	facets := "[" + strings.Join(facetGroups, ",") + "]"
+	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/search?query=%s&facets=%s&index=%s&limit=%d",
+		url.QueryEscape(query), url.QueryEscape(facets), url.QueryEscape(index), limit)
 
 	resp, err := httpGet(apiURL)
 	if err != nil {

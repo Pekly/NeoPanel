@@ -34,13 +34,16 @@ type InstalledPlugin struct {
 
 func (h *PluginHandler) Search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("query")
+	loader := r.URL.Query().Get("loader")
+	version := r.URL.Query().Get("version")
+	sortBy := r.URL.Query().Get("sort")
 	limitStr := r.URL.Query().Get("limit")
-	limit := 20
+	limit := 24
 	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
 		limit = l
 	}
 
-	res, err := downloader.SearchModrinthPlugins(q, limit)
+	res, err := downloader.SearchModrinthPlugins(q, limit, loader, version, sortBy)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -71,6 +71,11 @@ window.S = {
   sel: 'Paper',
   q: '',
   cat: 'All',
+  plugTab: 'browse',
+  plugLoader: '',
+  plugVer: '',
+  plugSort: 'relevance',
+  plugFilter: '',
   ptab: 'online',
   ftab: 'server.properties',
   currentDir: '',
@@ -122,7 +127,7 @@ window.S = {
   pq: '',
   pi: 0,
   vq: '',
-  vf: 'All',
+  vf: 'All Families',
   acct: {
     fn: 'Admin',
     ln: 'User',
@@ -1134,10 +1139,8 @@ const PG = [
   ['sub', 'Subdomain', 'link', 'Management'],
   ['stp', 'Startup', 'play', 'Management'],
   ['pl', 'Players', 'users', 'Management'],
-  ['plug', 'Plugins', 'puzzle', 'Minecraft'],
-  ['store', 'Plugin store', 'store', 'Minecraft'],
-  ['ver', 'Software', 'cpu', 'Minecraft'],
-  ['all', 'All versions', 'layers', 'Minecraft']
+  ['plug', 'Plugins & Store', 'puzzle', 'Minecraft'],
+  ['ver', 'Software & Versions', 'cpu', 'Minecraft']
 ];
 
 const CMDS = [
@@ -1752,91 +1755,128 @@ const V = {
 
   plug() {
     const isBrowse = (S.plugTab || 'browse') === 'browse';
+    const isFabric = String(S.core || '').toLowerCase() === 'fabric';
+    const targetFolder = isFabric ? 'mods/' : 'plugins/';
+    const instFilter = (S.plugFilter || '').toLowerCase();
+    const filteredInstalled = S.plugins
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => !instFilter || String(p[0] || '').toLowerCase().includes(instFilter));
+
     return `${srvh()}
     <div style="margin-top: 18px;">
-      <!-- Top Title and Controls Bar -->
+      <!-- Top Title and Tabs Bar -->
       <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 14px;">
-        <h1 style="font-size: 24px; font-weight: 800; color: #fff;">Plugins</h1>
-        <div class="row" style="gap: 10px; flex-wrap: wrap;">
-          <button class="btn ${isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('browse')">Browse</button>
-          <button class="btn ${!isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('installed')">Installed ${S.plugins.length}</button>
-          
-          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;" disabled>
-            <option>Source: Modrinth</option>
-          </select>
-          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;" onchange="S.core=this.value; searchModrinth();">
-            <option ${S.core === 'Paper' ? 'selected' : ''}>Software: Paper</option>
-            <option ${S.core === 'Purpur' ? 'selected' : ''}>Software: Purpur</option>
-            <option ${S.core === 'Fabric' ? 'selected' : ''}>Software: Fabric</option>
-            <option ${S.core === 'Spigot' ? 'selected' : ''}>Software: Spigot</option>
-            <option ${S.core === 'Velocity' ? 'selected' : ''}>Software: Velocity</option>
-          </select>
-          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;">
-            <option>Version: Any</option>
-            <option>1.21.4</option>
-            <option>1.20.4</option>
-            <option>1.19.4</option>
-          </select>
-          <select style="width: auto; height: 32px; padding: 2px 10px; font-size: 12px;">
-            <option>Sort: Relevance</option>
-            <option>Sort: Downloads</option>
-            <option>Sort: Follows</option>
-            <option>Sort: Newest</option>
-          </select>
+        <div>
+          <h1 style="font-size: 24px; font-weight: 800; color: var(--tx); margin: 0;">Plugins &amp; Store</h1>
+          <div class="mu" style="font-size: 12.5px; margin-top: 3px;">
+            Browse and install Modrinth plugins directly into <span class="mono">${targetFolder}</span>
+          </div>
+        </div>
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
+          <button class="btn ${isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('browse')">
+            ${ic('store', 14)} Browse Store
+          </button>
+          <button class="btn ${!isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('installed')">
+            ${ic('puzzle', 14)} Installed <span id="plug-installed-count" class="chip" style="margin-left: 4px; padding: 1px 7px;">${S.plugins.length}</span>
+          </button>
         </div>
       </div>
 
-      <!-- Big Search Input -->
-      <div style="position: relative; margin-bottom: 18px;">
-        <input type="text" id="store-search" placeholder="Search 19,447 plugins on Modrinth..." value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 42px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
-        <span style="position: absolute; left: 12px; top: 12px; color: var(--tx-muted);">${ic('search', 16)}</span>
-      </div>
-
-      <!-- Content Grid: Browse Modrinth Hits or Installed Plugins -->
       ${isBrowse ? `
+        <!-- Browse Modrinth Filter & Search Bar -->
+        <div class="row" style="gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+          <div style="position: relative; flex: 1; min-width: 240px;">
+            <input type="text" id="store-search" placeholder="Search plugins on Modrinth (e.g. EssentialsX, LuckPerms, WorldEdit)..." value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 40px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
+            <span style="position: absolute; left: 12px; top: 11px; color: var(--tx-muted);">${ic('search', 16)}</span>
+          </div>
+
+          <select style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugLoader=this.value; searchModrinth();">
+            <option value="" ${!S.plugLoader ? 'selected' : ''}>Software: Any</option>
+            <option value="paper" ${S.plugLoader === 'paper' ? 'selected' : ''}>Paper</option>
+            <option value="purpur" ${S.plugLoader === 'purpur' ? 'selected' : ''}>Purpur</option>
+            <option value="spigot" ${S.plugLoader === 'spigot' ? 'selected' : ''}>Spigot</option>
+            <option value="velocity" ${S.plugLoader === 'velocity' ? 'selected' : ''}>Velocity</option>
+            <option value="bungeecord" ${S.plugLoader === 'bungeecord' ? 'selected' : ''}>BungeeCord</option>
+            <option value="fabric" ${S.plugLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
+          </select>
+
+          <select style="width: auto; min-width: 135px; height: 40px; font-size: 13px;" onchange="S.plugVer=this.value; searchModrinth();">
+            <option value="" ${!S.plugVer ? 'selected' : ''}>Version: Any</option>
+            <option value="1.21.4" ${S.plugVer === '1.21.4' ? 'selected' : ''}>1.21.4</option>
+            <option value="1.21.1" ${S.plugVer === '1.21.1' ? 'selected' : ''}>1.21.1</option>
+            <option value="1.20.4" ${S.plugVer === '1.20.4' ? 'selected' : ''}>1.20.4</option>
+            <option value="1.20.1" ${S.plugVer === '1.20.1' ? 'selected' : ''}>1.20.1</option>
+            <option value="1.19.4" ${S.plugVer === '1.19.4' ? 'selected' : ''}>1.19.4</option>
+            <option value="1.18.2" ${S.plugVer === '1.18.2' ? 'selected' : ''}>1.18.2</option>
+            <option value="1.16.5" ${S.plugVer === '1.16.5' ? 'selected' : ''}>1.16.5</option>
+            <option value="1.12.2" ${S.plugVer === '1.12.2' ? 'selected' : ''}>1.12.2</option>
+          </select>
+
+          <select style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugSort=this.value; searchModrinth();">
+            <option value="relevance" ${(S.plugSort || 'relevance') === 'relevance' ? 'selected' : ''}>Sort: Relevance</option>
+            <option value="downloads" ${S.plugSort === 'downloads' ? 'selected' : ''}>Sort: Downloads</option>
+            <option value="follows" ${S.plugSort === 'follows' ? 'selected' : ''}>Sort: Follows</option>
+            <option value="newest" ${S.plugSort === 'newest' ? 'selected' : ''}>Sort: Newest</option>
+          </select>
+        </div>
+
         <div style="display: flex; flex-direction: column; gap: 10px;" id="store-grid">
           <div class="mu" style="padding: 24px; text-align: center;">Loading top plugins from Modrinth...</div>
         </div>
       ` : `
+        <!-- Installed Plugins Filter & List -->
+        <div class="row sb" style="gap: 10px; flex-wrap: wrap; margin-bottom: 14px;">
+          <div style="position: relative; flex: 1; min-width: 240px; max-width: 420px;">
+            <input type="text" placeholder="Filter installed plugins..." value="${esc(S.plugFilter || '')}" oninput="S.plugFilter=this.value; R();" style="height: 38px; font-size: 13.5px; padding-left: 36px; border-radius: 10px;">
+            <span style="position: absolute; left: 11px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
+          </div>
+          <div class="row" style="gap: 8px;">
+            <button class="btn sm" onclick="loadPluginsList()">${ic('refresh', 13)} Refresh</button>
+            <button class="btn sm pr" onclick="setPlugTab('browse')">${ic('plus', 13)} Install More</button>
+          </div>
+        </div>
+
         <div style="display: flex; flex-direction: column; gap: 10px;">
-          ${S.plugins.map((p, i) => `
+          ${filteredInstalled.map(({ p, i }) => `
             <div class="plugin-card">
               <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
-                <div style="width: 44px; height: 44px; border-radius: 8px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 20px;">
+                <div style="width: 44px; height: 44px; border-radius: 8px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 20px; flex-shrink: 0;">
                   🧩
                 </div>
-                <div>
+                <div style="min-width: 0;">
                   <b class="plugin-title">${esc(p[0])}</b>
-                  <div class="mu mono" style="font-size: 12px; margin-top: 3px;">${esc(p[1] || 'installed')}</div>
+                  <div class="mu mono" style="font-size: 12px; margin-top: 3px;">
+                    ${esc(p[1] || 'installed')}${p[3] ? ` &bull; ${esc(formatFileDate(p[3]))}` : ''}
+                  </div>
                 </div>
               </div>
-              <div class="row" style="gap: 12px;">
-                <label class="sw">
+              <div class="row" style="gap: 12px; flex-shrink: 0;">
+                <label class="sw" title="Toggle plugin state">
                   <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
                   <i></i>
                 </label>
-                <button class="btn sm dg" onclick="deletePlugin('${esc(p[0])}')">Uninstall</button>
+                <button class="btn sm dg" data-plugin="${esc(p[0])}" onclick="deletePlugin(this.dataset.plugin)">${ic('trash', 13)} Uninstall</button>
               </div>
             </div>
-          `).join('') || '<div class="mu" style="padding: 32px; text-align: center;">No plugins installed. Switch to Browse to install plugins with one click.</div>'}
+          `).join('') || `<div class="card" style="padding: 32px; text-align: center;">
+            <div class="mu" style="margin-bottom: 12px;">${S.plugins.length ? 'No installed plugins match your filter.' : 'No plugins installed yet in ' + targetFolder + '.'}</div>
+            ${!S.plugins.length ? `<button class="btn pr sm" onclick="setPlugTab('browse')">${ic('store', 14)} Browse Modrinth Plugins</button>` : ''}
+          </div>`}
         </div>
       `}
     </div>`;
   },
 
-  store() {
-    S.plugTab = 'browse';
-    return this.plug();
-  },
-
   ver() {
+    const sel = S.sel || S.core || 'Paper';
+    const isProxy = ['Velocity', 'Waterfall', 'BungeeCord'].includes(sel);
     return `${srvh()}
     <div class="card hero" style="margin-top:14px">
       <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 12px;">
         <div>
           <span class="mu">Currently Running</span>
-          <b class="big">${S.core} ${S.ver}</b>
-          <span class="mu">Java 21 / 17 compatible &bull; High performance runtime</span>
+          <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
+          <span class="mu">Java 21 / 17 compatible &bull; Direct installer for all server engines &amp; Minecraft versions</span>
         </div>
         <button class="btn pr" onclick="openReinstallModal('${curServer()?.id}')">
           ${ic('refresh', 14)} Reinstall Server (mcjarfiles.com)
@@ -1844,96 +1884,43 @@ const V = {
       </div>
     </div>
 
-    <h2 style="margin-top:20px">Choose Server Engine</h2>
+    <h2 style="margin-top:20px">1. Choose Server Engine</h2>
     <div class="grid g4">
       ${CORES.map(([name, desc]) => `
-        <button class="card sel ${S.sel === name ? 'on' : ''}" onclick="S.sel='${name}'; R();">
-          <b>${name}</b>
+        <button class="card sel ${sel === name ? 'on' : ''}" onclick="S.sel='${name}'; R();">
+          <div class="row sb" style="width:100%">
+            <b>${name}</b>
+            ${S.core === name ? '<span class="badge online" style="font-size:10px;padding:2px 6px;"><i class="dot"></i>Active</span>' : ''}
+          </div>
           <span class="mu" style="font-size:12px;">${desc}</span>
         </button>
       `).join('')}
     </div>
 
-    <div class="row sb" style="margin:22px 0 12px">
-      <div class="row">
-        <h2 style="margin:0">Available Releases for ${S.sel}</h2>
-        <button class="btn sm" onclick="go('all')">See all version matrix</button>
-      </div>
+    <div class="row sb" style="margin:22px 0 12px; flex-wrap: wrap; gap: 10px;">
+      <h2 style="margin:0">2. Select ${esc(sel)} Version</h2>
       <label class="row" style="cursor:pointer">
         <input type="checkbox" id="bkf" checked style="width:auto; margin-right:6px;"> Back up the world first
       </label>
     </div>
 
-    <div class="card tw">
-      <table>
-        <thead><tr><th>Version</th><th>Notes</th><th style="text-align:right">Action</th></tr></thead>
-        <tbody>
-          ${(() => {
-            let releases = [];
-            if (S.sel === 'Velocity') {
-              releases = [
-                ['3.4.0-SNAPSHOT', 'Popular latest (Java 17-21)'],
-                ['3.3.0-SNAPSHOT', 'Stable proxy release']
-              ];
-            } else if (S.sel === 'Waterfall') {
-              releases = [
-                ['1.20', 'Final Waterfall release (Build 578)'],
-                ['1.19', 'Legacy stable proxy']
-              ];
-            } else if (S.sel === 'BungeeCord') {
-              releases = [
-                ['latest', 'Continuous Jenkins CI build']
-              ];
-            } else {
-              releases = [
-                ['1.21.4', 'Popular latest'],
-                ['1.21.1', 'Widely supported'],
-                ['1.20.4', 'Stable'],
-                ['1.20.1', 'Top modded'],
-                ['1.19.4', 'Legacy stable']
-              ];
-            }
-            return releases.map(([v, n]) => {
-              const cur = S.ver === v && S.core === S.sel;
-              return `<tr>
-                <td class="mono"><b>${v}</b></td>
-                <td><span class="chip">${n}</span></td>
-                <td style="text-align:right">
-                  ${cur ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${S.sel}', '${v}')">Install ${S.sel} ${v}</button>`}
-                </td>
-              </tr>`;
-            }).join('');
-          })()}
-        </tbody>
-      </table>
-    </div>`;
-  },
-
-  all() {
-    return `${srvh()}
-    <div class="card hero" style="margin-top:14px">
-      <span class="mu">Running now</span>
-      <b class="big">${S.core} ${S.ver}</b>
-      <span class="mu">Direct installer for all official Minecraft versions (from modern drops down to legacy releases).</span>
-    </div>
-
-    <div class="row" style="margin:18px 0 12px; gap:10px;">
-      <input type="text" placeholder="Search versions..." value="${esc(S.vq)}" oninput="S.vq=this.value; renderVersionRows();" style="max-width:240px">
-      <select onchange="S.vf=this.value; renderVersionRows();" style="width:auto">
-        <option>All Families</option>
-        ${FAM.map(f => `<option ${S.vf === f[0] ? 'selected' : ''}>${f[0]} (${f[1]})</option>`).join('')}
-      </select>
-      <select onchange="S.sel=this.value; renderVersionRows();" style="width:auto">
-        ${CORES.map(([c]) => `<option ${S.sel === c ? 'selected' : ''}>${c}</option>`).join('')}
-      </select>
-      <label class="row" style="margin-left:auto; cursor:pointer;">
-        <input type="checkbox" id="bkf" checked style="width:auto; margin-right:6px;"> Back up world first
-      </label>
+    <div class="row" style="margin:0 0 12px; gap:10px; flex-wrap: wrap;">
+      <div style="position: relative; flex: 1; min-width: 220px; max-width: 320px;">
+        <input type="text" placeholder="Search versions (e.g. 1.21.4, 1.20.1)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
+        <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
+      </div>
+      ${!isProxy ? `
+        <select onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
+          <option value="All Families" ${(S.vf === 'All Families' || S.vf === 'All') ? 'selected' : ''}>All Release Families</option>
+          <option value="Popular" ${S.vf === 'Popular' ? 'selected' : ''}>Popular / Recommended</option>
+          ${FAM.map(f => `<option value="${f[0]}" ${S.vf === f[0] ? 'selected' : ''}>${f[0]} — ${f[1]} (${f[2]})</option>`).join('')}
+        </select>
+      ` : ''}
     </div>
 
     <div class="card tw">
       <table>
-        <thead><tr><th>Version</th><th>Release Family</th><th>Java</th><th>Engines</th><th style="text-align:right">Action</th></tr></thead>
+        <thead><tr><th>Version</th><th>Release / Notes</th><th>Java</th><th>Engine</th><th style="text-align:right">Action</th></tr></thead>
         <tbody id="vres">${versionRowsHtml()}</tbody>
       </table>
     </div>`;
@@ -2788,26 +2775,68 @@ const V = {
 
 // --- Version Rows Helper ---
 function versionRowsHtml() {
-  const q = (S.vq || '').toLowerCase();
-  const sel = S.sel || 'Paper';
+  const q = (S.vq || '').toLowerCase().trim();
+  const sel = S.sel || S.core || 'Paper';
   const fam = S.vf || 'All Families';
+
+  if (sel === 'Velocity' || sel === 'Waterfall' || sel === 'BungeeCord') {
+    const proxyReleases = sel === 'Velocity'
+      ? [
+          { v: '3.4.0-SNAPSHOT', n: 'Popular latest proxy build', j: '21' },
+          { v: '3.3.0-SNAPSHOT', n: 'Stable proxy release', j: '17' }
+        ]
+      : sel === 'Waterfall'
+      ? [
+          { v: '1.20', n: 'Final Waterfall release (Build 578)', j: '21' },
+          { v: '1.19', n: 'Legacy stable proxy', j: '17' }
+        ]
+      : [
+          { v: 'latest', n: 'Continuous Jenkins CI build', j: '17+' }
+        ];
+
+    return proxyReleases
+      .filter(item => !q || (item.v + ' ' + item.n).toLowerCase().includes(q))
+      .map(item => {
+        const isRunning = S.ver === item.v && S.core === sel;
+        return `<tr>
+          <td class="mono"><b>${esc(item.v)}</b></td>
+          <td><span class="chip">${esc(item.n)}</span></td>
+          <td class="mono">Java ${esc(item.j)}</td>
+          <td><span class="chip">${esc(sel)}</span></td>
+          <td style="text-align:right">
+            ${isRunning ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${esc(sel)}', '${esc(item.v)}')">Install ${esc(sel)} ${esc(item.v)}</button>`}
+          </td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching proxy builds found.</td></tr>';
+  }
+
+  const POPULAR_VERS = new Set(['1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4']);
 
   return ALL_VERS
     .filter(item => {
-      const matchesQ = (item.v + ' ' + item.n).toLowerCase().includes(q);
-      const matchesF = fam === 'All Families' || item.f === fam.split(' ')[0];
+      const matchesQ = !q || (item.v + ' ' + item.n + ' ' + item.y).toLowerCase().includes(q);
+      const matchesF =
+        fam === 'All Families' ||
+        fam === 'All' ||
+        (fam === 'Popular' ? POPULAR_VERS.has(item.v) : item.f === fam.split(' ')[0]);
       return matchesQ && matchesF;
     })
     .map(item => {
       const isRunning = S.ver === item.v && S.core === sel;
-      const javaVer = parseInt(item.v.split('.')[1] || '0') >= 20 ? '21' : '17';
+      const majorMinor = parseInt(item.v.split('.')[1] || '0', 10);
+      const major = parseInt(item.v.split('.')[0] || '1', 10);
+      const javaVer = (major >= 26 || majorMinor >= 20) ? '21' : '17';
+      const isPopular = POPULAR_VERS.has(item.v);
       return `<tr>
-        <td class="mono"><b>${item.v}</b></td>
-        <td><span class="chip">${item.n} (${item.y})</span></td>
+        <td class="mono">
+          <b>${esc(item.v)}</b>
+          ${item.v === '1.21.4' ? '<span class="badge online" style="font-size:10px;padding:1px 6px;margin-left:6px;">Latest</span>' : isPopular ? '<span class="chip" style="font-size:10px;padding:1px 6px;margin-left:6px;">Popular</span>' : ''}
+        </td>
+        <td><span class="chip">${esc(item.n)} (${esc(item.y)})</span></td>
         <td class="mono">Java ${javaVer}</td>
-        <td><span class="chip">${sel}</span></td>
+        <td><span class="chip">${esc(sel)}</span></td>
         <td style="text-align:right">
-          ${isRunning ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${sel}', '${item.v}')">Switch</button>`}
+          ${isRunning ? '<span class="badge online"><i class="dot"></i>Active</span>' : `<button class="btn sm pr" onclick="installSoftware('${esc(sel)}', '${esc(item.v)}')">Install ${esc(sel)} ${esc(item.v)}</button>`}
         </td>
       </tr>`;
     }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching versions found.</td></tr>';
@@ -2844,10 +2873,6 @@ function navHtml() {
     </button>
 
     <div class="ng">Billing</div>
-    <button class="nav-item ${S.view === 'store' ? 'on' : ''}" onclick="go('store')">
-      ${ic('store', 16)}
-      <span>Store</span>
-    </button>
     <button class="nav-item" onclick="go('dash')">
       ${ic('layers', 16)}
       <span>Overview</span>
@@ -2920,15 +2945,28 @@ function navHtml() {
 }
 
 // --- View Router & URL Hash Engine ---
+function normalizeRoute(view) {
+  if (view === 'store') {
+    S.plugTab = 'browse';
+    return 'plug';
+  }
+  if (view === 'all') {
+    return 'ver';
+  }
+  return view;
+}
+
 window.go = function(view) {
-  S.view = view;
-  window.location.hash = '#' + view;
+  const target = normalizeRoute(view);
+  S.view = target;
+  window.location.hash = '#' + target;
   R();
-  onEnterView(view);
+  onEnterView(target);
 };
 
 window.addEventListener('hashchange', () => {
-  const hash = window.location.hash.replace('#', '');
+  const raw = window.location.hash.replace('#', '');
+  const hash = normalizeRoute(raw);
   if (hash && hash !== S.view && (V[hash] || hash === 'admin' || hash === 'acc')) {
     go(hash);
   }
@@ -2989,8 +3027,10 @@ function bindEditorTabKey() {
 window.onEnterView = function(view) {
   if (view === 'pl') loadPlayersData();
   else if (view === 'fi') loadFileList(S.currentDir);
-  else if (view === 'plug') loadPluginsList();
-  else if (view === 'store') searchModrinth();
+  else if (view === 'plug') {
+    loadPluginsList();
+    if ((S.plugTab || 'browse') === 'browse') searchModrinth();
+  }
   else if (view === 'bk') loadBackupsList();
   else if (view === 'set') loadProperties();
   else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
@@ -3725,16 +3765,27 @@ async function loadPluginsList() {
   if (!srv) return;
   try {
     const data = await api(`/api/servers/${srv.id}/plugins`);
-    S.plugins = (data || []).map(p => [p.name || p, p.version || 'installed', true]);
-    R();
+    const list = Array.isArray(data) ? data : (data?.plugins || []);
+    S.plugins = list.map(p => {
+      if (typeof p === 'string') return [p, 'installed', true, ''];
+      const fname = p.filename || p.name || 'plugin.jar';
+      const meta = p.size ? formatFileSize(p.size) : (p.version || 'installed');
+      return [fname, meta, true, p.modified || ''];
+    });
+    if (S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
+      const cnt = $('#plug-installed-count');
+      if (cnt) cnt.textContent = String(S.plugins.length);
+    } else {
+      R();
+    }
   } catch (e) {}
 }
 
 async function deletePlugin(name) {
   const srv = curServer();
-  if (!srv) return;
+  if (!srv || !name) return;
   try {
-    await api(`/api/servers/${srv.id}/plugins?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await api(`/api/servers/${srv.id}/plugins?filename=${encodeURIComponent(name)}`, { method: 'DELETE' });
     toast(`Removed plugin ${name}`);
     loadPluginsList();
   } catch (e) {}
@@ -3755,37 +3806,52 @@ async function searchModrinth() {
   const grid = $('#store-grid');
   if (!grid) return;
   const q = S.q || '';
-  const cat = S.cat === 'All' ? '' : S.cat.toLowerCase();
+  const loader = S.plugLoader || '';
+  const ver = S.plugVer || '';
+  const sort = S.plugSort || 'relevance';
   try {
-    const res = await api(`/api/plugins/search?query=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&limit=24`);
+    const params = new URLSearchParams({
+      query: q,
+      loader,
+      version: ver,
+      sort,
+      limit: '24'
+    });
+    const res = await api(`/api/plugins/search?${params.toString()}`);
     const hits = res.hits || [];
     grid.innerHTML = hits.map(hit => {
-      const isInstalled = S.plugins.some(p => p[0].toLowerCase().includes(hit.title.toLowerCase()));
+      const titleLow = String(hit.title || '').toLowerCase();
+      const slugLow = String(hit.slug || '').toLowerCase();
+      const isInstalled = S.plugins.some(p => {
+        const fname = String(p[0] || '').toLowerCase();
+        return (titleLow && fname.includes(titleLow.replace(/\s+/g, ''))) || (slugLow && fname.includes(slugLow));
+      });
       const icon = hit.icon_url
         ? `<img src="${esc(hit.icon_url)}" class="plugin-icon" onerror="this.src='/favicon.svg'">`
         : `<div class="plugin-icon" style="display:grid; place-items:center; color:var(--ac); font-size:20px;">🧩</div>`;
+      const slugVal = hit.slug || hit.project_id || hit.id || '';
 
       return `
       <div class="plugin-card">
         <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
           ${icon}
           <div style="min-width: 0;">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px;">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
               <b class="plugin-title">${esc(hit.title)}</b>
               <span class="mu" style="font-size: 12.5px;">by ${esc(hit.author || 'Author')}</span>
             </div>
             <div class="plugin-desc">${esc(hit.description || '')}</div>
-            <div class="row" style="gap: 12px; font-size: 11.5px; margin-top: 5px;">
+            <div class="row" style="gap: 10px; font-size: 11.5px; margin-top: 5px; flex-wrap: wrap;">
               <span class="mu">&darr; ${formatNum(hit.downloads)}</span>
               <span class="mu">&hearts; ${formatNum(hit.follows || 0)} follows</span>
               <span class="chip">Modrinth</span>
             </div>
           </div>
         </div>
-        <div>
+        <div style="flex-shrink: 0;">
           ${isInstalled
             ? '<span class="badge online"><i class="dot"></i>Installed</span>'
-            : `<button class="btn pr" onclick="installPlugin('${hit.slug || hit.project_id || hit.id}', '${esc(hit.title)}')" style="min-width: 95px; justify-content: center;">${ic('download', 14)} Install</button>`
+            : `<button class="btn pr" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" style="min-width: 95px; justify-content: center;">${ic('download', 14)} Install</button>`
           }
         </div>
       </div>`;
@@ -3795,9 +3861,13 @@ async function searchModrinth() {
   }
 }
 
-async function installPlugin(projectSlug, title) {
+async function installPlugin(projectSlug, title, btnEl) {
   const srv = curServer();
-  if (!srv) return;
+  if (!srv || !projectSlug) return;
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.innerHTML = 'Installing...';
+  }
   toast(`Downloading & installing ${title}...`);
   try {
     await api(`/api/servers/${srv.id}/plugins/install`, {
@@ -3805,8 +3875,16 @@ async function installPlugin(projectSlug, title) {
       body: JSON.stringify({ slug: projectSlug, project_id: projectSlug })
     });
     toast(`Successfully installed ${title}!`);
+    if (btnEl && btnEl.parentElement) {
+      btnEl.parentElement.innerHTML = '<span class="badge online"><i class="dot"></i>Installed</span>';
+    }
     loadPluginsList();
-  } catch (e) {}
+  } catch (e) {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.innerHTML = `${ic('download', 14)} Install`;
+    }
+  }
 }
 
 // --- Backups ---
@@ -5066,7 +5144,8 @@ async function checkAuth() {
     await loadDashboard();
 
     // Respect URL hash if present
-    const hash = window.location.hash.replace('#', '');
+    const rawHash = window.location.hash.replace('#', '');
+    const hash = normalizeRoute(rawHash);
     if (hash && (V[hash] || hash === 'admin' || hash === 'acc')) {
       go(hash);
     }
