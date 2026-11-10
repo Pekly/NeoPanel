@@ -189,6 +189,10 @@ window.S = {
   servers: [],
   sftp: null,
   system: null,
+  javaRuntimes: null,
+  installingJava: null,
+  startupFailures: 0,
+  startupHalted: false,
   cmenu: false,
   pq: '',
   pi: 0,
@@ -503,11 +507,18 @@ function normalizeServerStatus(rawStatus) {
 
 function applyServerStatsSnapshot(srv, stats, pushSeries = false) {
   if (!stats) return;
+  const prevHalted = S.startupHalted;
   const normStatus = normalizeServerStatus(stats.status);
   S.status = normStatus;
   S.uptimeSec = Math.max(0, Number(stats.uptime_sec) || 0);
   S.start = Date.now() - S.uptimeSec * 1000;
   S.diskMB = Math.max(0, Number(stats.disk_mb) || 0);
+  S.startupFailures = Math.max(0, Number(stats.startup_failures) || 0);
+  S.startupHalted = Boolean(stats.startup_halted);
+
+  if (S.startupHalted && !prevHalted && normStatus === 'offline') {
+    toast('Startup timed out after 2 failed attempts — check Console logs.', 'bad');
+  }
 
   const cpuVal = Math.max(0, Math.min(100, Number(stats.cpu_percent ?? stats.cpu_usage) || 0));
   const memMB = Math.max(0, Number(stats.memory_mb) || 0);
@@ -545,7 +556,9 @@ function applyServerStatsSnapshot(srv, stats, pushSeries = false) {
       disk_mb: S.diskMB,
       uptime_sec: S.uptimeSec,
       net_in_kib: netIn,
-      net_out_kib: netOut
+      net_out_kib: netOut,
+      startup_failures: S.startupFailures,
+      startup_halted: S.startupHalted
     };
   }
 }
@@ -903,6 +916,16 @@ function updateHeaderBadge() {
       badge.innerHTML = badgeHtml;
     }
   }
+  const haltBadge = $('#srv-halt-badge');
+  if (haltBadge) {
+    haltBadge.style.display = (S.status === 'offline' && S.startupHalted) ? 'inline-flex' : 'none';
+  }
+  const startBtn = document.querySelector('[data-power-btn="start"]');
+  if (startBtn) startBtn.disabled = S.status !== 'offline';
+  const restartBtn = document.querySelector('[data-power-btn="restart"]');
+  if (restartBtn) restartBtn.disabled = S.status !== 'online';
+  const stopBtn = document.querySelector('[data-power-btn="stop"]');
+  if (stopBtn) stopBtn.disabled = !(S.status === 'online' || S.status === 'starting');
   const fabDot = $('#fly-con-fab .fly-con-dot');
   if (fabDot) fabDot.className = `fly-con-dot ${S.status}`;
 }
@@ -1205,8 +1228,9 @@ function connectWs(serverId, isReconnect = false) {
             return;
           } else if (msg.event === 'stats' || msg.type === 'stats') {
             const prevStatus = S.status;
+            const prevHalted = S.startupHalted;
             applyServerStatsSnapshot(curServer(), msg, true);
-            if (S.status !== prevStatus) {
+            if (S.status !== prevStatus || S.startupHalted !== prevHalted) {
               updateInputState();
               updateHeaderBadge();
             }
@@ -1321,6 +1345,8 @@ async function power(action, skipConfirm = false) {
 
   if (action === 'start') {
     S.status = 'starting';
+    S.startupHalted = false;
+    S.startupFailures = 0;
     addLog(`[NeoPanel]: Starting instance ${srv.name}...`);
     updateInputState();
     updateHeaderBadge();
@@ -1332,6 +1358,8 @@ async function power(action, skipConfirm = false) {
     updateHeaderBadge();
     toast('Stopping server...');
   } else if (action === 'restart') {
+    S.startupHalted = false;
+    S.startupFailures = 0;
     toast('Restarting server...');
     addLog('[NeoPanel]: Restart sequence initiated...');
   } else if (action === 'kill') {
@@ -1388,8 +1416,8 @@ async function power(action, skipConfirm = false) {
         </div>
         <b>How to resolve:</b>
         <ol style="margin: 8px 0 0 18px; padding: 0; line-height: 1.6;">
-          <li>Go to <b>Settings -> Startup</b> and choose an installed Java runtime (e.g., <b>Java 21</b>, <b>Java 17</b>, or <b>Java 25</b>).</li>
-          <li>Run <code>sudo neopanel-installer --java</code> on your server to install all supported Java versions.</li>
+          <li>Go to <b>Settings -> Startup</b> and choose an installed Java runtime (<b>Java 25</b>, <b>Java 21</b>, <b>Java 17</b>, or <b>Java 8</b>), or click <b>Install</b> next to a missing runtime.</li>
+          <li>Or run <code>sudo neopanel-installer --java</code> on your server to install all supported Java versions.</li>
         </ol>
       </div>`;
     }
@@ -1486,6 +1514,167 @@ const FAM = [
 const ALL_VERS = FAM.flatMap(f => f[3].map(v => ({ v, f: f[0], n: f[1], y: f[2] })));
 const CATS = ['All', 'Admin', 'Protection', 'Performance', 'Network', 'Building', 'Utility', 'API', 'Map'];
 
+const PREMADE_JAVA_VERSIONS = [
+  { value: '25', short: 'Java 25', label: 'Java 25 (Latest LTS • Minecraft 26+)' },
+  { value: '21', short: 'Java 21', label: 'Java 21 (LTS • Minecraft 1.20.5 - 1.21.x)' },
+  { value: '17', short: 'Java 17', label: 'Java 17 (LTS • Minecraft 1.17 - 1.20.4)' },
+  { value: '8', short: 'Java 8', label: 'Java 8 (Legacy • Minecraft 1.8 - 1.16.5)' }
+];
+
+function isStandardJavaChoice(val) {
+  return ['25', '21', '17', '8', 'java', ''].includes(String(val ?? '').trim());
+}
+
+function getRecommendedJavaForMcVersion(ver, engine = '') {
+  const eng = String(engine || '').toLowerCase().trim();
+  const v = String(ver || '').toLowerCase().trim();
+  if (eng === 'velocity') {
+    return v.startsWith('3.3') ? '17' : '21';
+  }
+  if (eng === 'waterfall' || eng === 'bungeecord') {
+    return '21';
+  }
+  if (!v || v === 'latest') return '25';
+  const parts = v.replace(/^v/i, '').split('.');
+  const major = parseInt(parts[0] || '0', 10);
+  const minor = parseInt(parts[1] || '0', 10);
+  const patch = parseInt((parts[2] || '0').replace(/[^0-9].*$/, ''), 10) || 0;
+  if (major >= 26) return '25';
+  if (major === 1) {
+    if (minor >= 21 || (minor === 20 && patch >= 5)) return '21';
+    if (minor >= 17) return '17';
+    if (minor > 0 && minor <= 16) return '8';
+  }
+  return '21';
+}
+
+function resolveJavaSelectValue(rawVal, mcVer = '', engine = '') {
+  const v = String(rawVal ?? '').trim();
+  if (!v || v === 'java' || v === 'default') {
+    return mcVer ? getRecommendedJavaForMcVersion(mcVer, engine) : '21';
+  }
+  if (['25', '21', '17', '8'].includes(v)) return v;
+  return 'custom';
+}
+
+function getPremadeJavaStatusMap() {
+  const map = new Map();
+  const list = S.javaRuntimes?.premade || [];
+  for (const item of list) {
+    if (item && item.version) map.set(String(item.version), item);
+  }
+  return map;
+}
+
+function renderJavaSelectOptions(selectedVal, includeCustom = true, fallbackMcVer = '', engine = '') {
+  const cur = resolveJavaSelectValue(selectedVal, fallbackMcVer, engine);
+  const statusMap = getPremadeJavaStatusMap();
+  const opts = PREMADE_JAVA_VERSIONS.map(item => {
+    const info = statusMap.get(item.value);
+    const suffix = info ? (info.installed ? ' [Installed]' : ' [Not Installed]') : '';
+    return `<option value="${item.value}" ${cur === item.value ? 'selected' : ''}>${esc(item.label + suffix)}</option>`;
+  }).join('');
+  if (!includeCustom) return opts;
+  return opts + `<option value="custom" ${cur === 'custom' ? 'selected' : ''}>Custom Binary Path...</option>`;
+}
+
+function renderJavaAvailabilityStrip() {
+  if (!S.javaRuntimes || !Array.isArray(S.javaRuntimes.premade)) {
+    return `<div class="java-status-strip"><span class="java-status-chip">Checking installed Java 25, 21, 17 &amp; 8 runtimes...</span></div>`;
+  }
+  const canInstall = Boolean(S.javaRuntimes.can_auto_install) && (S.user?.role === 'admin');
+  return `<div class="java-status-strip">
+    ${S.javaRuntimes.premade.map(item => {
+      const busy = S.installingJava === item.version;
+      if (item.installed) {
+        return `<span class="java-status-chip is-ok" title="${esc(item.path || 'Installed')}">
+          <span class="java-status-dot"></span>Java ${esc(item.version)} Ready
+        </span>`;
+      }
+      return `<span class="java-status-chip is-missing" title="Not detected in /usr/lib/jvm">
+        <span class="java-status-dot"></span>Java ${esc(item.version)} Missing
+        ${canInstall ? `<button type="button" class="btn sm pr java-install-inline ${busy ? 'is-loading' : ''}" onclick="installJavaRuntime('${esc(item.version)}', this)" ${busy || S.installingJava ? 'disabled' : ''}>${busy ? '<span class="np-spinner-sm"></span> Installing...' : 'Install'}</button>` : ''}
+      </span>`;
+    }).join('')}
+  </div>`;
+}
+
+function refreshJavaUIStrips() {
+  const stripHtml = renderJavaAvailabilityStrip();
+  document.querySelectorAll('.java-status-strip').forEach(el => {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = stripHtml;
+    if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild);
+  });
+
+  const statusMap = getPremadeJavaStatusMap();
+  for (const id of ['stp-java', 'prop-java', 'cs-java']) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    for (const opt of Array.from(sel.options)) {
+      const def = PREMADE_JAVA_VERSIONS.find(x => x.value === opt.value);
+      if (def) {
+        const info = statusMap.get(def.value);
+        const suffix = info ? (info.installed ? ' [Installed]' : ' [Not Installed]') : '';
+        opt.textContent = def.label + suffix;
+      }
+    }
+    if (sel._cselectRebuild) sel._cselectRebuild();
+  }
+}
+
+async function loadJavaRuntimes(force = false) {
+  if (!S.token) return S.javaRuntimes;
+  if (S.javaRuntimes && !force) {
+    refreshJavaUIStrips();
+    return S.javaRuntimes;
+  }
+  try {
+    const data = await api('/api/system/java?matrix=1');
+    if (data && Array.isArray(data.premade)) {
+      S.javaRuntimes = data;
+      refreshJavaUIStrips();
+      if (S.view === 'admin' && (S.adminTab || 0) === 0) R();
+    }
+    return S.javaRuntimes;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function installJavaRuntime(ver, btnEl) {
+  if (S.installingJava) {
+    toast(`Already installing Java ${S.installingJava}...`);
+    return;
+  }
+  S.installingJava = ver;
+  if (btnEl) setBtnLoading(btnEl, true, 'Installing...');
+  refreshJavaUIStrips();
+  toast(`Downloading and installing Java ${ver} (Eclipse Temurin)...`);
+  try {
+    const res = await api('/api/system/java/install', {
+      method: 'POST',
+      body: JSON.stringify({ version: ver })
+    });
+    if (res && Array.isArray(res.premade)) {
+      S.javaRuntimes = {
+        installed: res.installed || [],
+        premade: res.premade,
+        can_auto_install: Boolean(res.can_auto_install)
+      };
+    } else {
+      await loadJavaRuntimes(true);
+    }
+    toast(`Java ${ver} installed and ready!`, 'ok');
+  } catch (e) {
+    toast(e.message || `Failed to install Java ${ver}`, 'bad');
+  } finally {
+    S.installingJava = null;
+    refreshJavaUIStrips();
+    if (S.view === 'admin' && (S.adminTab || 0) === 0) R();
+  }
+}
+
 // --- Header Banner Component (.srvh) ---
 function srvh() {
   const srv = curServer();
@@ -1502,6 +1691,7 @@ function srvh() {
       <div class="row">
         <h1>${esc(S.props.motd || srv?.name || 'Minecraft Server')}</h1>
         <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st] || 'Offline'}</span>
+        <span id="srv-halt-badge" class="badge halted" style="display:${st === 'offline' && S.startupHalted ? 'inline-flex' : 'none'};" title="Auto-restart stopped after 2 consecutive startup failures">Start Halted (2/2)</span>
       </div>
       <div id="hst" class="row hst">
         <span class="mono mu pv">${hostAddr}</span>
@@ -1518,9 +1708,9 @@ function srvh() {
         <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
         <button role="menuitem" style="color: #ef4444;" onclick="S.cmenu=false; openDeleteServerModal('${srv?.id}', '${esc(srv?.name || '')}');">${ic('trash', 13)} Delete Server</button>
       </div>` : ''}
-      <button class="btn pr" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
-      <button class="btn" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
-      <button class="btn stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
+      <button class="btn pr" data-power-btn="start" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
+      <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
+      <button class="btn stop" data-power-btn="stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
       <button class="btn dg" onclick="power('kill')">Kill</button>
     </div>
   </div>`;
@@ -1676,6 +1866,7 @@ const ACTIVITY_META_MAP = {
   power_stop: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Stopped Server' },
   power_restart: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Restarted Server' },
   power_kill: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Force Killed Server' },
+  startup_failed: { category: 'power', badgeLabel: 'Timeout', cls: 'act-cat-security', title: 'Startup Halted (2/2)' },
   server_create: { category: 'admin', badgeLabel: 'Server', cls: 'act-cat-admin', title: 'Created Server Instance' },
   server_update: { category: 'software', badgeLabel: 'Settings', cls: 'act-cat-software', title: 'Updated Server Config' },
   server_delete: { category: 'security', badgeLabel: 'Server', cls: 'act-cat-security', title: 'Deleted Server Instance' },
@@ -1716,6 +1907,7 @@ const ACTIVITY_META_MAP = {
   admin_user_create: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Created Panel User' },
   admin_user_delete: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Deleted Panel User' },
   admin_turnstile: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Updated Turnstile' },
+  admin_java_install: { category: 'admin', badgeLabel: 'Admin', cls: 'act-cat-admin', title: 'Installed Java Runtime' },
   admin_gc: { category: 'admin', badgeLabel: 'System', cls: 'act-cat-admin', title: 'Garbage Collection' }
 };
 
@@ -2541,7 +2733,7 @@ const V = {
         <div>
           <span class="mu">Currently Running</span>
           <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
-          <span class="mu">Java 21 / 17 compatible &bull; Direct installer for all server engines &amp; Minecraft versions</span>
+          <span class="mu">Java 25, 21, 17 &amp; 8 supported &bull; Direct installer for all server engines &amp; Minecraft versions</span>
         </div>
         <button class="btn pr" onclick="openReinstallModal('${curServer()?.id}')">
           ${ic('refresh', 14)} Reinstall Server (mcjarfiles.com)
@@ -2783,13 +2975,14 @@ const V = {
 
   stp() {
     const srv = curServer();
-    const curJava = srv?.java_path || '21';
-    const isCustom = !['21', '17', '8', '25', 'java', ''].includes(curJava);
+    const rawJava = srv?.java_path || '';
+    const curJava = resolveJavaSelectValue(rawJava, srv?.version, srv?.type);
+    const isCustom = curJava === 'custom';
     const memMin = srv?.memory_min || Math.min(1024, srv?.memory_max || 2048);
     const memMax = srv?.memory_max || 2048;
     const jvmFlags = srv?.java_args || '-XX:+UseG1GC';
     const jarName = srv?.jar_file || 'server.jar';
-    const javaCmd = (curJava === 'custom' || isCustom) ? (srv?.java_path || 'java') : `java (OpenJDK ${curJava})`;
+    const javaCmd = isCustom ? (rawJava || 'java') : `java (OpenJDK ${curJava})`;
 
     return `${srvh()}
     <div style="margin-top: 18px;">
@@ -2800,22 +2993,19 @@ const V = {
           <div class="mono" style="background: var(--con-bg); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.6; word-break: break-all;">
             ${esc(javaCmd)} -Xms${memMin}M -Xmx${memMax}M ${esc(jvmFlags)} -jar ${esc(jarName)} nogui
           </div>
-          <span class="mu" style="font-size: 12px; margin-top: 8px; display: block;">This command is dynamically constructed from your selected Java binary, memory allocation, and JVM arguments.</span>
+          <span class="mu" style="font-size: 12px; margin-top: 8px; display: block;">This command is dynamically constructed from your selected Java binary, memory allocation, and JVM arguments. Auto-restart automatically times out after 2 failed startup attempts.</span>
         </div>
 
         <div class="card" style="padding: 20px;">
           <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 12px;">Java Runtime Environment</h2>
           <select id="stp-java" onchange="toggleCustomJavaInput(this.value)" style="margin-bottom: 8px;">
-            <option value="21" ${curJava === '21' || curJava === 'java' || !curJava ? 'selected' : ''}>Java 21 (Modern 1.20.5+ / Recommended)</option>
-            <option value="17" ${curJava === '17' ? 'selected' : ''}>Java 17 (Legacy 1.18 - 1.20.4)</option>
-            <option value="8" ${curJava === '8' ? 'selected' : ''}>Java 8 (Legacy 1.8 - 1.12.2)</option>
-            <option value="25" ${curJava === '25' ? 'selected' : ''}>Java 25 (Cutting edge / Experimental)</option>
-            <option value="custom" ${isCustom ? 'selected' : ''}>Custom Binary Path...</option>
+            ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type)}
           </select>
           <div id="stp-custom-wrap" style="${isCustom ? '' : 'display: none;'} margin-bottom: 8px;">
-            <input type="text" id="stp-java-custom" value="${esc(isCustom ? curJava : '')}" placeholder="/usr/lib/jvm/java-XX/bin/java" style="font-size: 13px;">
+            <input type="text" id="stp-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;">
           </div>
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block;">Select which OpenJDK runtime binary executes your server JAR. NeoPanel automatically dispatches to the correct binary on your system.</span>
+          ${renderJavaAvailabilityStrip()}
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Select which premade Java runtime executes your server JAR (Java 25, 21, 17, or 8).</span>
         </div>
       </div>
 
@@ -2956,16 +3146,13 @@ const V = {
         <label class="f" style="margin-top: 10px;">
           <span>Java Runtime Version</span>
           <select id="prop-java" onchange="toggleCustomPropJava(this.value)">
-            <option value="21" ${srv?.java_path === '21' || srv?.java_path === 'java' || !srv?.java_path ? 'selected' : ''}>Java 21 (Modern 1.20.5+ / Recommended)</option>
-            <option value="17" ${srv?.java_path === '17' ? 'selected' : ''}>Java 17 (Legacy 1.18 - 1.20.4)</option>
-            <option value="8" ${srv?.java_path === '8' ? 'selected' : ''}>Java 8 (Legacy 1.8 - 1.12.2)</option>
-            <option value="25" ${srv?.java_path === '25' ? 'selected' : ''}>Java 25 (Cutting edge / Experimental)</option>
-            <option value="custom" ${!['21', '17', '8', '25', 'java', ''].includes(srv?.java_path) ? 'selected' : ''}>Custom Binary Path...</option>
+            ${renderJavaSelectOptions(srv?.java_path || '', true, srv?.version, srv?.type)}
           </select>
         </label>
-        <div id="prop-custom-wrap" style="${!['21', '17', '8', '25', 'java', ''].includes(srv?.java_path) ? '' : 'display: none;'} margin-top: 6px;">
-          <input type="text" id="prop-java-custom" value="${esc(!['21', '17', '8', '25', 'java', ''].includes(srv?.java_path) ? srv?.java_path : '')}" placeholder="/usr/lib/jvm/java-XX/bin/java" style="font-size: 13px;">
+        <div id="prop-custom-wrap" style="${isStandardJavaChoice(srv?.java_path) ? 'display: none;' : ''} margin-top: 6px;">
+          <input type="text" id="prop-java-custom" value="${esc(!isStandardJavaChoice(srv?.java_path) ? srv?.java_path : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;">
         </div>
+        ${renderJavaAvailabilityStrip()}
         <div class="row" style="margin-top:14px;">
           <button class="btn pr" onclick="saveProperties()">${ic('download', 14)} Save Properties</button>
           <button class="btn" onclick="toggleTheme()">Toggle Dark/Light</button>
@@ -3092,6 +3279,17 @@ const V = {
               <span class="mono" style="color:#fff;">${esc(sys.arch)} on ${esc(sys.os)}</span>
             </div>
           </div>
+        </div>
+
+        <div class="card tw" style="margin-bottom:18px;">
+          <div class="row sb" style="margin-bottom:10px; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="margin:0 0 4px; color:var(--tx);">Java Runtimes (25, 21, 17 &amp; 8)</h2>
+              <span class="mu" style="font-size:13px;">Monitor detected OpenJDK / Eclipse Temurin runtimes and install missing premade versions.</span>
+            </div>
+            <button class="btn sm" onclick="loadJavaRuntimes(true)">${ic('refresh', 13)} Refresh</button>
+          </div>
+          ${renderJavaAvailabilityStrip()}
         </div>
       `;
     } else if (t === 1) {
@@ -3484,7 +3682,7 @@ function versionRowsHtml() {
       }).join('') || '<tr><td colspan="5" class="mu" style="text-align:center;padding:20px;">No matching proxy builds found.</td></tr>';
   }
 
-  const POPULAR_VERS = new Set(['1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4']);
+  const POPULAR_VERS = new Set(['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4']);
 
   return ALL_VERS
     .filter(item => {
@@ -3498,17 +3696,15 @@ function versionRowsHtml() {
     .map(item => {
       const isRunning = S.ver === item.v && S.core === sel;
       const isInstalling = S.installingSoftware === `${sel}:${item.v}`;
-      const majorMinor = parseInt(item.v.split('.')[1] || '0', 10);
-      const major = parseInt(item.v.split('.')[0] || '1', 10);
-      const javaVer = (major >= 26 || majorMinor >= 20) ? '21' : '17';
+      const javaVer = getRecommendedJavaForMcVersion(item.v, sel);
       const isPopular = POPULAR_VERS.has(item.v);
       return `<tr>
         <td class="mono">
           <b>${esc(item.v)}</b>
-          ${item.v === '1.21.4' ? '<span class="badge online" style="font-size:10px;padding:1px 6px;margin-left:6px;">Latest</span>' : isPopular ? '<span class="chip" style="font-size:10px;padding:1px 6px;margin-left:6px;">Popular</span>' : ''}
+          ${item.v === '26.3' ? '<span class="badge online" style="font-size:10px;padding:1px 6px;margin-left:6px;">Latest</span>' : isPopular ? '<span class="chip" style="font-size:10px;padding:1px 6px;margin-left:6px;">Popular</span>' : ''}
         </td>
         <td><span class="chip">${esc(item.n)} (${esc(item.y)})</span></td>
-        <td class="mono">Java ${javaVer}</td>
+        <td class="mono">Java ${esc(javaVer)}</td>
         <td><span class="chip">${esc(sel)}</span></td>
         <td style="text-align:right">
           ${isRunning
@@ -3713,7 +3909,8 @@ window.onEnterView = function(view) {
     if ((S.plugTab || 'browse') === 'browse') searchModrinth();
   }
   else if (view === 'bk') loadBackupsList();
-  else if (view === 'set') loadProperties();
+  else if (view === 'set') { loadProperties(); loadJavaRuntimes(); }
+  else if (view === 'stp' || view === 'ver') { loadJavaRuntimes(); }
   else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
   else if (view === 'act') loadActivityLog();
   else if (view === 'admin') loadAdminData();
@@ -3763,6 +3960,7 @@ async function loadAdminData() {
     const act = await api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`);
     if (Array.isArray(act)) S.acct.act = act;
   } catch (e) {}
+  await loadJavaRuntimes(true);
   R();
 }
 
@@ -4829,6 +5027,14 @@ function askInstallSoftwareModal(srv, software, version) {
     }
     _uiModalResolver = (val) => resolve(val);
 
+    const recJava = getRecommendedJavaForMcVersion(version, software);
+    const curJava = resolveJavaSelectValue(srv.java_path || '', srv.version || '', srv.type || '');
+    const needsJavaSwitch = curJava !== recJava;
+    const javaInfo = getPremadeJavaStatusMap().get(recJava);
+    const javaMissingNote = javaInfo && !javaInfo.installed
+      ? `<span class="mu" style="font-size: 11.5px; display: block; margin-top: 4px; color: #fbbf24;">Note: Java ${esc(recJava)} is not installed yet — install it from Startup Settings or Admin Area before starting.</span>`
+      : '';
+
     const container = $('#modal-container') || document.body;
     container.innerHTML = `
       <div class="pal" onclick="if(event.target===this) closeUiModal(null)">
@@ -4850,10 +5056,21 @@ function askInstallSoftwareModal(srv, software, version) {
                 </div>
               </label>
             </div>
+            ${needsJavaSwitch ? `
+            <div style="margin-top: 10px; padding: 12px 14px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 10px;">
+              <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
+                <input type="checkbox" id="confirm-sync-java" checked style="margin-top: 2px;">
+                <div>
+                  <b style="color: var(--tx); display: block; font-size: 13.5px;">Switch Java Runtime to Java ${esc(recJava)} (Recommended)</b>
+                  <span class="mu" style="font-size: 12px; display: block; margin-top: 2px;">${esc(software)} ${esc(version)} expects <b>Java ${esc(recJava)}</b> (currently using <code>${esc(curJava === 'custom' ? (srv.java_path || 'custom') : 'Java ' + curJava)}</code>).</span>
+                  ${javaMissingNote}
+                </div>
+              </label>
+            </div>` : (javaMissingNote ? `<div style="margin-top: 10px;">${javaMissingNote}</div>` : '')}
           </div>
           <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
             <button type="button" class="btn" onclick="closeUiModal(null)">Cancel</button>
-            <button type="button" id="ui-modal-confirm-btn" class="btn pr" onclick="closeUiModal({ confirmed: true, backup: Boolean(document.getElementById('confirm-bkf')?.checked) })">
+            <button type="button" id="ui-modal-confirm-btn" class="btn pr" onclick="closeUiModal({ confirmed: true, backup: Boolean(document.getElementById('confirm-bkf')?.checked), syncJava: Boolean(document.getElementById('confirm-sync-java')?.checked), recJava: '${esc(recJava)}' })">
               ${ic('download', 14)} Download &amp; Install
             </button>
           </div>
@@ -4894,10 +5111,34 @@ async function installSoftware(software, version, btnEl) {
     curBtn = findBtn();
     if (curBtn) setBtnLoading(curBtn, true, 'Installing...');
     toast(`Downloading ${software} ${version} server jar...`);
-    await api(`/api/servers/${srv.id}/software`, {
+    const softRes = await api(`/api/servers/${srv.id}/software`, {
       method: 'POST',
       body: JSON.stringify({ software, version })
     });
+    srv.type = softRes?.software || String(software).toLowerCase();
+    srv.version = softRes?.version || version;
+    if (softRes?.jar_file) srv.jar_file = softRes.jar_file;
+
+    if (choice.syncJava && choice.recJava) {
+      await api(`/api/servers/${srv.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: srv.name,
+          description: srv.description,
+          type: srv.type,
+          version: srv.version,
+          jar_file: srv.jar_file,
+          port: srv.port,
+          memory_min: srv.memory_min,
+          memory_max: srv.memory_max,
+          java_path: choice.recJava,
+          java_args: srv.java_args,
+          auto_restart: srv.auto_restart
+        })
+      });
+      srv.java_path = choice.recJava;
+    }
+
     S.core = software;
     S.ver = version;
     toast(`Successfully installed ${software} ${version}! Restarting...`);
@@ -5323,6 +5564,21 @@ window.setCreateRam = function(mb) {
   });
 };
 
+window.syncCreateJavaFromVersion = function(ver) {
+  const engine = $('#cs-type')?.value || 'paper';
+  const v = String(ver ?? $('#cs-ver')?.value ?? '').trim();
+  $$('.ver-pill').forEach(btn => {
+    btn.classList.toggle('pr', btn.dataset.ver === v);
+  });
+  const sel = $('#cs-java');
+  if (!sel || sel.dataset.userPicked === '1') return;
+  const rec = getRecommendedJavaForMcVersion(v, engine);
+  if (sel.value !== rec) {
+    sel.value = rec;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+};
+
 window.setCreateEngine = function(type) {
   const sel = $('#cs-type');
   if (sel) sel.value = type;
@@ -5332,7 +5588,7 @@ window.setCreateEngine = function(type) {
 
   // Proxy presets
   if (type === 'velocity') {
-    $('#cs-ver').value = '3.3.0-SNAPSHOT';
+    $('#cs-ver').value = '3.4.0-SNAPSHOT';
     $('#cs-port').value = '25565';
     setCreateRam(1024);
   } else if (type === 'waterfall' || type === 'bungeecord') {
@@ -5342,14 +5598,13 @@ window.setCreateEngine = function(type) {
   } else if (type === 'paper') {
     $('#cs-ver').value = '1.21.4';
   }
+  syncCreateJavaFromVersion($('#cs-ver')?.value || '');
 };
 
 window.setCreateVersion = function(ver) {
   const inp = $('#cs-ver');
   if (inp) inp.value = ver;
-  $$('.ver-pill').forEach(btn => {
-    btn.classList.toggle('pr', btn.dataset.ver === ver);
-  });
+  syncCreateJavaFromVersion(ver);
 };
 
 function getNextSuggestedPort() {
@@ -5431,32 +5686,32 @@ function openCreateServerModal() {
 
         <!-- Version Input with Selectable Pills -->
         <div style="margin-bottom:14px;">
-          <div class="row sb" style="margin-bottom:6px;">
+          <div class="row sb" style="margin-bottom:6px; flex-wrap:wrap; gap:6px;">
             <span class="mu" style="font-size:13px; font-weight:600;">Minecraft / Release Version</span>
-            <div class="row" style="gap:4px;">
-              ${['1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4', '1.16.5'].map(v => `
+            <div class="row" style="gap:4px; flex-wrap:wrap;">
+              ${['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.16.5'].map(v => `
                 <button type="button" class="btn sm ver-pill ${v === '1.21.4' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
               `).join('')}
             </div>
           </div>
-          <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 1.21.4, 1.20.4, 3.3.0-SNAPSHOT">
+          <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 26.3, 1.21.4, 1.20.4, 3.4.0-SNAPSHOT" oninput="syncCreateJavaFromVersion(this.value)">
         </div>
 
         <!-- Custom Port Allocation -->
-        <div class="grid g2" style="margin-bottom:14px;">
+        <div class="grid g2" style="margin-bottom:10px;">
           <label class="f" style="margin-bottom:0;">
             <span>Custom Port (1024 - 65535)</span>
             <input type="number" id="cs-port" value="${nextPort}" min="1024" max="65535" required>
           </label>
           <label class="f" style="margin-bottom:0;">
             <span>Java Runtime</span>
-            <select id="cs-java">
-              <option value="21" selected>OpenJDK 21 (1.20.5+ / Modern)</option>
-              <option value="17">OpenJDK 17 (1.18 - 1.20.4)</option>
-              <option value="8">OpenJDK 8 (1.8 - 1.12.2 Legacy)</option>
-              <option value="25">Java 25 (Cutting edge / Experimental)</option>
+            <select id="cs-java" onchange="this.dataset.userPicked='1'">
+              ${renderJavaSelectOptions('21', false, '1.21.4', 'paper')}
             </select>
           </label>
+        </div>
+        <div style="margin-bottom:14px;">
+          ${renderJavaAvailabilityStrip()}
         </div>
 
         <!-- Memory Allocation Pills -->
@@ -5498,6 +5753,7 @@ function openCreateServerModal() {
   </div>`;
 
   enhanceSelects(container);
+  loadJavaRuntimes();
   setTimeout(() => $('#cs-name')?.focus(), 50);
 }
 
@@ -5526,6 +5782,7 @@ async function handleCreateServer(e) {
   const memoryMin = Math.min(1024, memoryMax);
   const port = parseInt($('#cs-port')?.value) || 25565;
   const javaPath = $('#cs-java')?.value || '21';
+  const autoDownload = $('#cs-dl')?.checked ?? true;
   const useAikar = $('#cs-aikar')?.checked;
 
   let javaArgs = '-XX:+UseG1GC';
@@ -5547,7 +5804,7 @@ async function handleCreateServer(e) {
         port,
         java_path: javaPath,
         java_args: javaArgs,
-        auto_download: true,
+        auto_download: autoDownload,
         auto_restart: true
       })
     });
@@ -5850,6 +6107,13 @@ async function executeDeleteServer(srvId) {
 }
 
 // --- Server Reinstallation (mcjarfiles.com) ---
+function updateReinstallJavaPreview() {
+  const sw = $('#reinst-software')?.value || 'paper';
+  const ver = $('#reinst-version')?.value.trim() || '1.21.4';
+  const el = $('#reinst-java-rec');
+  if (el) el.textContent = `Java ${getRecommendedJavaForMcVersion(ver, sw)}`;
+}
+
 function openReinstallModal(srvId) {
   const container = $('#modal-container');
   if (!container) return;
@@ -5861,6 +6125,7 @@ function openReinstallModal(srvId) {
   const targetName = targetSrv.name || 'Server';
   const curType = (targetSrv.type || 'paper').toLowerCase();
   const curVer = targetSrv.version || '1.21.4';
+  const recJava = getRecommendedJavaForMcVersion(curVer, curType);
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:580px; max-height:88vh; overflow-y:auto; border:1px solid var(--border-light);">
@@ -5878,7 +6143,7 @@ function openReinstallModal(srvId) {
       <form id="reinstall-form" onsubmit="submitReinstall(event, '${targetId}')">
         <label class="f" style="margin-bottom:12px;">
           <span>Minecraft Engine / Server Software</span>
-          <select id="reinst-software" style="height:38px;">
+          <select id="reinst-software" style="height:38px;" onchange="updateReinstallJavaPreview()">
             <option value="paper" ${curType === 'paper' ? 'selected' : ''}>Paper (High performance, Bukkit/Spigot plugins)</option>
             <option value="purpur" ${curType === 'purpur' ? 'selected' : ''}>Purpur (Ultra-configurable Paper fork)</option>
             <option value="leaf" ${curType === 'leaf' || curType === 'leafmc' ? 'selected' : ''}>LeafMC (Hyper-optimized Paper fork)</option>
@@ -5893,10 +6158,10 @@ function openReinstallModal(srvId) {
 
         <label class="f" style="margin-bottom:16px;">
           <span>Version</span>
-          <input type="text" id="reinst-version" value="${esc(curVer)}" placeholder="1.21.4, 1.20.4, or latest" required>
+          <input type="text" id="reinst-version" value="${esc(curVer)}" placeholder="26.3, 1.21.4, 1.20.4, or latest" required oninput="updateReinstallJavaPreview()">
         </label>
 
-        <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:20px;">
+        <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
           <b style="font-size:13px; color:#fff; display:block; margin-bottom:8px;">Preservation Options</b>
           <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-world" checked>
@@ -5909,6 +6174,16 @@ function openReinstallModal(srvId) {
           <label class="row" style="cursor:pointer; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-plugins" checked>
             <span>Preserve Plugins &amp; Mods (keep <code>plugins</code>, <code>mods</code> folders)</span>
+          </label>
+        </div>
+
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 8px; padding: 11px 14px; margin-bottom: 20px;">
+          <label class="row" style="cursor:pointer; font-size:13px; gap:10px; align-items:flex-start;">
+            <input type="checkbox" id="reinst-sync-java" checked style="margin-top:2px;">
+            <div>
+              <b style="color: var(--tx); display: block;">Sync Java Runtime (<span id="reinst-java-rec">Java ${esc(recJava)}</span>)</b>
+              <span class="mu" style="font-size:12px;">Automatically switches server Java Runtime among Java 25, 21, 17, or 8 for the chosen release.</span>
+            </div>
           </label>
         </div>
 
@@ -5938,6 +6213,7 @@ async function submitReinstall(e, srvId) {
   const preserveWorld = $('#reinst-world')?.checked ?? true;
   const preserveConfig = $('#reinst-config')?.checked ?? true;
   const preservePlugins = $('#reinst-plugins')?.checked ?? true;
+  const syncJava = $('#reinst-sync-java')?.checked ?? false;
 
   toast(`Initiating reinstallation of ${software} ${version}...`);
 
@@ -5953,13 +6229,41 @@ async function submitReinstall(e, srvId) {
       })
     });
 
+    const targetSrv = (S.servers || []).find(s => s.id === srvId) || curServer();
+    if (targetSrv) {
+      targetSrv.type = software;
+      targetSrv.version = version;
+      if (res?.jar_file) targetSrv.jar_file = res.jar_file;
+    }
+
+    if (syncJava && targetSrv) {
+      const recJava = getRecommendedJavaForMcVersion(version, software);
+      if (resolveJavaSelectValue(targetSrv.java_path || '', targetSrv.version || '', targetSrv.type || '') !== recJava) {
+        await api(`/api/servers/${srvId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: targetSrv.name,
+            description: targetSrv.description,
+            type: targetSrv.type,
+            version: targetSrv.version,
+            jar_file: targetSrv.jar_file || 'server.jar',
+            port: targetSrv.port,
+            memory_min: targetSrv.memory_min,
+            memory_max: targetSrv.memory_max,
+            java_path: recJava,
+            java_args: targetSrv.java_args,
+            auto_restart: targetSrv.auto_restart
+          })
+        }).catch(() => {});
+        targetSrv.java_path = recJava;
+      }
+    }
+
     closeModal();
     toast(`Server reinstalled successfully (${software} ${version})!`, 'ok');
 
     const cur = curServer();
     if (cur && cur.id === srvId) {
-      cur.type = software;
-      cur.version = version;
       S.ver = version;
       S.core = software.charAt(0).toUpperCase() + software.slice(1);
     }
@@ -6520,6 +6824,9 @@ window.setActivityQuery = setActivityQuery;
 window.setActivityCategory = setActivityCategory;
 window.loadMoreActivity = loadMoreActivity;
 window.exportActivityLogs = exportActivityLogs;
+window.loadJavaRuntimes = loadJavaRuntimes;
+window.installJavaRuntime = installJavaRuntime;
+window.updateReinstallJavaPreview = updateReinstallJavaPreview;
 
 // --- Custom Glassmorphic Selects System ---
 function closeAllCustomSelects() {

@@ -191,6 +191,87 @@ step_prerequisites() {
     curl wget jq tar ufw ca-certificates software-properties-common git
 }
 
+has_java_version() {
+  local ver="$1"
+  local d
+  for d in /usr/lib/jvm/* /opt/java/*; do
+    [ -d "$d" ] || continue
+    case "$(basename "$d")" in
+      *"-${ver}-"*|*"-${ver}"|"java-${ver}"*|"jdk-${ver}"*|"jre-${ver}"*|"temurin-${ver}"*)
+        if [ -x "$d/bin/java" ] && "$d/bin/java" -version >/dev/null 2>&1; then
+          return 0
+        fi
+        if [ -x "$d/jre/bin/java" ] && "$d/jre/bin/java" -version >/dev/null 2>&1; then
+          return 0
+        fi
+        ;;
+    esac
+  done
+  return 1
+}
+
+install_java_25() {
+  if has_java_version "25"; then
+    return 0
+  fi
+
+  # Remove any empty/broken directory left by an earlier failed download
+  if [ -e "/usr/lib/jvm/java-25-temurin" ] && [ ! -x "/usr/lib/jvm/java-25-temurin/bin/java" ]; then
+    rm -rf "/usr/lib/jvm/java-25-temurin"
+  fi
+
+  # Try Ubuntu apt repository if OpenJDK 25 is available
+  if apt-cache show openjdk-25-jre-headless >/dev/null 2>&1; then
+    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+      openjdk-25-jre-headless || true
+    if has_java_version "25"; then
+      return 0
+    fi
+  fi
+
+  local arch="x64"
+  if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+    arch="aarch64"
+  fi
+
+  mkdir -p /usr/lib/jvm
+  local tmp_tar="/tmp/neopanel-temurin-25.tar.gz"
+  local stage_dir="/usr/lib/jvm/.java-25-temurin.stage"
+  local urls=(
+    "https://api.adoptium.net/v3/binary/latest/25/ga/linux/${arch}/jre/hotspot/normal/eclipse"
+    "https://api.adoptium.net/v3/binary/latest/25/ga/linux/${arch}/jdk/hotspot/normal/eclipse"
+    "https://api.adoptium.net/v3/binary/latest/25/ea/linux/${arch}/jre/hotspot/normal/eclipse"
+    "https://api.adoptium.net/v3/binary/latest/25/ea/linux/${arch}/jdk/hotspot/normal/eclipse"
+  )
+
+  local url
+  for url in "${urls[@]}"; do
+    rm -f "$tmp_tar"
+    rm -rf "$stage_dir"
+    echo "[INFO] Attempting Java 25 download from: $url"
+    if curl -fsSL --retry 2 --connect-timeout 15 --max-time 300 -o "$tmp_tar" "$url"; then
+      if tar -tzf "$tmp_tar" >/dev/null 2>&1; then
+        mkdir -p "$stage_dir"
+        if tar -xzf "$tmp_tar" -C "$stage_dir" --strip-components=1 && \
+           [ -x "$stage_dir/bin/java" ] && \
+           "$stage_dir/bin/java" -version >/dev/null 2>&1; then
+          rm -rf "/usr/lib/jvm/java-25-temurin"
+          mv "$stage_dir" "/usr/lib/jvm/java-25-temurin"
+          chmod -R a+rX "/usr/lib/jvm/java-25-temurin"
+          rm -f "$tmp_tar"
+          echo "[INFO] Java 25 installed at /usr/lib/jvm/java-25-temurin"
+          return 0
+        fi
+      fi
+    fi
+  done
+
+  rm -f "$tmp_tar"
+  rm -rf "$stage_dir"
+  echo "[WARN] Failed to auto-install Java 25 from Adoptium." >&2
+  return 1
+}
+
 step_java() {
   apt-get update -y -q
   apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
@@ -198,19 +279,8 @@ step_java() {
   apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
     openjdk-8-jre-headless || true
 
-  # Install Java 25 (Cutting edge / Experimental) via Adoptium if not already present
-  if [ ! -x "/usr/lib/jvm/java-25-temurin/bin/java" ] && [ ! -x "/usr/lib/jvm/java-25-openjdk-amd64/bin/java" ]; then
-    local arch="x64"
-    if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
-      arch="aarch64"
-    fi
-    mkdir -p /usr/lib/jvm/java-25-temurin
-    local j25_url="https://api.adoptium.net/v3/binary/latest/25/ga/linux/${arch}/jdk/hotspot/normal/eclipse"
-    if ! curl -sIL "$j25_url" | grep -qi "HTTP.*[23]0[0-9]"; then
-      j25_url="https://api.adoptium.net/v3/binary/latest/25/ea/linux/${arch}/jdk/hotspot/normal/eclipse"
-    fi
-    curl -sL "$j25_url" | tar -xz -C /usr/lib/jvm/java-25-temurin --strip-components=1 2>/dev/null || true
-  fi
+  # Install latest Java 25 runtime cleanly
+  install_java_25 || true
 }
 
 step_go_compiler() {
@@ -493,7 +563,7 @@ run_full_installation() {
 
   # Run steps with smooth percentage progress
   run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
-  run_step 15 35 "Installing Minecraft Java runtimes (8, 17, 21 & 25)" "step_java"
+  run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
   run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
   run_step 55 75 "Compiling NeoPanel core binary from source" "step_build_neopanel"
   run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT' '$TURNSTILE_ENABLED' '$TURNSTILE_SITE_KEY' '$TURNSTILE_SECRET_KEY'"
@@ -553,6 +623,20 @@ run_full_installation() {
 # -----------------------------------------------------------------------------
 # Update Flow
 # -----------------------------------------------------------------------------
+
+step_update_ensure_java() {
+  if ! has_java_version "21" || ! has_java_version "17" || ! has_java_version "8"; then
+    apt-get update -y -q || true
+    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+      openjdk-21-jre-headless openjdk-17-jre-headless openjdk-8-jre-headless || true
+  fi
+  if ! has_java_version "25"; then
+    if ! command -v curl &>/dev/null || ! command -v tar &>/dev/null; then
+      apt-get update -y -q && apt-get install -y -q curl tar ca-certificates || true
+    fi
+    install_java_25 || true
+  fi
+}
 
 step_update_fetch() {
   if ! command -v git &>/dev/null; then
@@ -615,9 +699,10 @@ update_neopanel() {
 
   echo -e "${BOLD}Updating NeoPanel to Latest Release...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
-  run_step 0 35 "Fetching latest updates from GitHub" "step_update_fetch"
-  run_step 35 75 "Compiling fresh NeoPanel binary" "step_update_compile"
-  run_step 75 100 "Restarting service and verifying health" "step_update_swap"
+  run_step 0 20 "Ensuring Java 25, 21, 17 & 8 runtimes" "step_update_ensure_java"
+  run_step 20 45 "Fetching latest updates from GitHub" "step_update_fetch"
+  run_step 45 80 "Compiling fresh NeoPanel binary" "step_update_compile"
+  run_step 80 100 "Restarting service and verifying health" "step_update_swap"
 
   echo -e "\n${GREEN}${BOLD}================================================================${NC}"
   echo -e "${GREEN}${BOLD}           NeoPanel Successfully Updated to Latest Version!     ${NC}"
@@ -636,7 +721,7 @@ interactive_menu() {
   echo "Please select an option:"
   echo -e "  ${GREEN}[1]${NC} Full Installation (Panel + Java + SSL + Firewall)"
   echo -e "  ${GREEN}[2]${NC} Update NeoPanel to Latest Version (From GitHub)"
-  echo -e "  ${GREEN}[3]${NC} Install Java Runtimes (OpenJDK 8, 17, 21 & Java 25)"
+  echo -e "  ${GREEN}[3]${NC} Install Java Runtimes (Java 25, 21, 17 & 8)"
   echo -e "  ${GREEN}[4]${NC} Configure / Reconfigure Let's Encrypt SSL (Caddy)"
   echo -e "  ${GREEN}[5]${NC} Configure UFW Firewall"
   echo -e "  ${GREEN}[6]${NC} Configure Cloudflare Turnstile Bot Protection"
@@ -657,7 +742,7 @@ interactive_menu() {
     3)
       check_root
       print_banner
-      run_step 0 100 "Installing Java 8, 17, 21 & Java 25 runtimes" "step_java"
+      run_step 0 100 "Installing Java 25, 21, 17 & 8 runtimes" "step_java"
       log_success "Java installed successfully."
       ;;
     4)
@@ -722,7 +807,7 @@ else
       ;;
     --java)
       check_root
-      run_step 0 100 "Installing Java 8, 17, 21 & Java 25 runtimes" "step_java"
+      run_step 0 100 "Installing Java 25, 21, 17 & 8 runtimes" "step_java"
       ;;
     --firewall)
       check_root

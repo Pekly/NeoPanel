@@ -3495,3 +3495,64 @@ html[data-theme="light"] .act-cat-network { color: #4338ca; }
 html[data-theme="light"] .act-cat-players { color: #be185d; }
 html[data-theme="light"] .act-cat-security { color: #b91c1c; }
 html[data-theme="light"] .act-cat-admin { color: #c2410c; }
+
+/* =============================================================================
+   JAVA RUNTIME STATUS CHIPS & STARTUP HALT BADGE
+   ============================================================================= */
+.java-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.java-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--tx-muted);
+}
+
+.java-status-chip.is-ok {
+  background: rgba(63, 185, 80, 0.1);
+  border-color: rgba(63, 185, 80, 0.3);
+  color: #4ade80;
+}
+
+.java-status-chip.is-missing {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.32);
+  color: #fbbf24;
+}
+
+.java-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.java-install-inline {
+  margin-left: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  border-radius: 6px;
+}
+
+.badge.halted {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #fca5a5;
+}
+
+html[data-theme="light"] .java-status-chip.is-ok { color: #15803d; }
+html[data-theme="light"] .java-status-chip.is-missing { color: #b45309; }
+html[data-theme="light"] .badge.halted { color: #b91c1c; }

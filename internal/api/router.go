@@ -174,6 +174,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	// System info & Admin tools
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))
 	r.mux.HandleFunc("GET /api/system/java", r.requireAuth(HandleGetJavaRuntimes))
+	r.mux.HandleFunc("POST /api/system/java/install", r.requireAuth(HandleInstallJavaRuntime(db)))
 	r.mux.HandleFunc("POST /api/admin/gc", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
 		logAudit(db, req, "admin_gc", "Triggered manual Go runtime garbage collection")
 		HandleRunGC(w, req)

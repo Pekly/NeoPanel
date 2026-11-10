@@ -67,6 +67,7 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server record: " + err.Error()})
 		return
 	}
+	h.manager.UpdateInstanceServer(srv)
 
 	logAudit(h.db, r, "software_install", fmt.Sprintf("Installed %s %s (%s) on %s (%s)", req.Software, req.Version, jarName, srv.Name, serverID))
 
@@ -218,6 +219,7 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server record: " + err.Error()})
 		return
 	}
+	h.manager.UpdateInstanceServer(srv)
 
 	logAudit(h.db, r, "server_reinstall", fmt.Sprintf("Reinstalled %s %s on %s (%s)", req.Software, req.Version, srv.Name, serverID))
 
@@ -228,4 +230,3 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 		"jar_file": jarName,
 	})
 }
-

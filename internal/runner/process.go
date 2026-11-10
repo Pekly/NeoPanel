@@ -14,34 +14,66 @@ import (
 	"github.com/Pekly/NeoPanel/internal/database"
 )
 
-const maxLogBuffer = 1000
+const (
+	maxLogBuffer          = 1000
+	DefaultStartupTimeout = 3 * time.Minute
+	MaxStartupAttempts    = 2
+	minStableUptime       = 20 * time.Second
+)
 
 type ProcessInstance struct {
-	mu            sync.RWMutex
-	server        *database.Server
-	workingDir    string
-	cmd           *exec.Cmd
-	stdin         io.WriteCloser
-	status        string
-	startedAt     time.Time
-	metrics       *ProcessMetrics
-	logBuffer     []string
-	subscribers   map[chan string]struct{}
-	stopExpected  bool
-	onExit        func(srvID string, unexpected bool)
-	cachedDiskMB  int64
-	lastDiskCheck time.Time
-	diskScanning  bool
+	mu             sync.RWMutex
+	server         *database.Server
+	workingDir     string
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	status         string
+	startedAt      time.Time
+	metrics        *ProcessMetrics
+	logBuffer      []string
+	subscribers    map[chan string]struct{}
+	stopExpected   bool
+	reachedOnline  bool
+	timedOut       bool
+	runID          uint64
+	startupTimeout time.Duration
+	startupStopCh  chan struct{}
+	onReady        func(srvID string)
+	onExit         func(srvID string, unexpected bool, reachedOnline bool, timedOut bool, uptime time.Duration)
+	cachedDiskMB   int64
+	lastDiskCheck  time.Time
+	diskScanning   bool
 }
 
-func NewProcessInstance(server *database.Server, workingDir string, onExit func(string, bool)) *ProcessInstance {
+func NewProcessInstance(server *database.Server, workingDir string, startupTimeout time.Duration, onReady func(string), onExit func(string, bool, bool, bool, time.Duration)) *ProcessInstance {
+	if startupTimeout <= 0 {
+		startupTimeout = DefaultStartupTimeout
+	}
 	return &ProcessInstance{
-		server:      server,
-		workingDir:  workingDir,
-		status:      "offline",
-		logBuffer:   make([]string, 0, maxLogBuffer),
-		subscribers: make(map[chan string]struct{}),
-		onExit:      onExit,
+		server:         server,
+		workingDir:     workingDir,
+		status:         "offline",
+		logBuffer:      make([]string, 0, maxLogBuffer),
+		subscribers:    make(map[chan string]struct{}),
+		startupTimeout: startupTimeout,
+		onReady:        onReady,
+		onExit:         onExit,
+	}
+}
+
+func (p *ProcessInstance) SetStartupTimeout(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	p.mu.Lock()
+	p.startupTimeout = d
+	p.mu.Unlock()
+}
+
+func (p *ProcessInstance) stopStartupTimerLocked() {
+	if p.startupStopCh != nil {
+		close(p.startupStopCh)
+		p.startupStopCh = nil
 	}
 }
 
@@ -122,12 +154,22 @@ func (p *ProcessInstance) Start() error {
 		return fmt.Errorf("server is already running")
 	}
 
+	p.stopStartupTimerLocked()
 	p.status = "starting"
 	p.stopExpected = false
+	p.reachedOnline = false
+	p.timedOut = false
+	p.runID++
+	currentRunID := p.runID
+	srv := *p.server
+	timeout := p.startupTimeout
+	if timeout <= 0 {
+		timeout = DefaultStartupTimeout
+	}
 	p.mu.Unlock()
 
 	// Build Java command
-	javaBinary, javaLabel := ResolveJavaBinary(p.server.JavaPath)
+	javaBinary, javaLabel := ResolveJavaBinary(srv.JavaPath)
 	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Starting instance using %s (%s)...\x1b[0m", javaLabel, javaBinary))
 
 	// Validate Java binary existence
@@ -141,12 +183,12 @@ func (p *ProcessInstance) Start() error {
 		p.broadcast(fmt.Sprintf("\x1b[31mThe specified Java binary does not exist or is not executable on this host:\x1b[0m"))
 		p.broadcast(fmt.Sprintf("  \x1b[33;1mPath:  %s\x1b[0m", javaBinary))
 		p.broadcast(fmt.Sprintf("  \x1b[33;1mLabel: %s\x1b[0m", javaLabel))
-		p.broadcast("\x1b[36m👉 Solution: Open Server Settings -> Java Version and choose an installed runtime (e.g. Java 21, Java 17, Java 25), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
+		p.broadcast("\x1b[36m👉 Solution: Open Server -> Startup and choose or install a Java runtime (Java 25, 21, 17, or 8), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		return fmt.Errorf("Java binary '%s' (%s) was not found. Please verify your Java settings in Server Settings", javaBinary, javaLabel)
+		return fmt.Errorf("Java binary '%s' (%s) was not found. Please install it or verify your Java settings in Startup", javaBinary, javaLabel)
 	}
 
-	jarPath := filepath.Join(p.workingDir, p.server.JarFile)
+	jarPath := filepath.Join(p.workingDir, srv.JarFile)
 	if fi, err := os.Stat(jarPath); os.IsNotExist(err) || (err == nil && fi.IsDir()) {
 		p.mu.Lock()
 		p.status = "offline"
@@ -155,30 +197,30 @@ func (p *ProcessInstance) Start() error {
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		p.broadcast("\x1b[31;1m[NeoPanel ERROR] SERVER JAR FILE NOT FOUND!\x1b[0m")
 		p.broadcast("\x1b[31mCould not locate the executable JAR file in server directory:\x1b[0m")
-		p.broadcast(fmt.Sprintf("  \x1b[33;1mExpected file: %s\x1b[0m", p.server.JarFile))
+		p.broadcast(fmt.Sprintf("  \x1b[33;1mExpected file: %s\x1b[0m", srv.JarFile))
 		p.broadcast(fmt.Sprintf("  \x1b[33;1mFull path:     %s\x1b[0m", jarPath))
 		p.broadcast("\x1b[36m👉 Solution: Click 'Reinstall Server' in Settings to cleanly download an official JAR from mcjarfiles.com, or upload your server JAR to the root folder via the File Manager.\x1b[0m")
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		return fmt.Errorf("server JAR file '%s' not found. Please upload it or use 'Reinstall Server'", p.server.JarFile)
+		return fmt.Errorf("server JAR file '%s' not found. Please upload it or use 'Reinstall Server'", srv.JarFile)
 	}
 
 	// Validate memory settings
-	if p.server.MemoryMinMB > 0 && p.server.MemoryMaxMB > 0 && p.server.MemoryMinMB > p.server.MemoryMaxMB {
+	if srv.MemoryMinMB > 0 && srv.MemoryMaxMB > 0 && srv.MemoryMinMB > srv.MemoryMaxMB {
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
 
-		errMsg := fmt.Sprintf("Minimum RAM (%d MB) cannot exceed Maximum RAM (%d MB)", p.server.MemoryMinMB, p.server.MemoryMaxMB)
+		errMsg := fmt.Sprintf("Minimum RAM (%d MB) cannot exceed Maximum RAM (%d MB)", srv.MemoryMinMB, srv.MemoryMaxMB)
 		p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] INVALID RAM SETTINGS: %s\x1b[0m", errMsg))
 		return fmt.Errorf("%s", errMsg)
 	}
 
 	args := []string{}
-	if p.server.MemoryMinMB > 0 {
-		args = append(args, fmt.Sprintf("-Xms%dM", p.server.MemoryMinMB))
+	if srv.MemoryMinMB > 0 {
+		args = append(args, fmt.Sprintf("-Xms%dM", srv.MemoryMinMB))
 	}
-	if p.server.MemoryMaxMB > 0 {
-		args = append(args, fmt.Sprintf("-Xmx%dM", p.server.MemoryMaxMB))
+	if srv.MemoryMaxMB > 0 {
+		args = append(args, fmt.Sprintf("-Xmx%dM", srv.MemoryMaxMB))
 	}
 
 	// Force full ANSI terminal color output even when piped in daemons/subprocesses
@@ -190,23 +232,23 @@ func (p *ProcessInstance) Start() error {
 	)
 
 	// Add custom JVM flags if provided
-	if strings.TrimSpace(p.server.JavaArgs) != "" {
-		customArgs := strings.Fields(p.server.JavaArgs)
+	if strings.TrimSpace(srv.JavaArgs) != "" {
+		customArgs := strings.Fields(srv.JavaArgs)
 		args = append(args, customArgs...)
 	}
 
 	// Ensure server game port is synchronized to configuration file
-	port := p.server.Port
+	port := srv.Port
 	if port <= 0 {
 		port = 25565
 	}
-	syncServerPort(p.workingDir, p.server.Type, port)
+	syncServerPort(p.workingDir, srv.Type, port)
 	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Bound game server port: %d (TCP/UDP)\x1b[0m", port))
 
-	args = append(args, "-jar", p.server.JarFile, "nogui")
+	args = append(args, "-jar", srv.JarFile, "nogui")
 
 	// Pass CLI port parameter for game servers that support port override
-	lowerType := strings.ToLower(p.server.Type)
+	lowerType := strings.ToLower(srv.Type)
 	if lowerType != "velocity" && lowerType != "bungeecord" && lowerType != "waterfall" {
 		args = append(args, "--port", fmt.Sprintf("%d", port))
 	}
@@ -260,45 +302,102 @@ func (p *ProcessInstance) Start() error {
 		return fmt.Errorf("failed to start Java process: %w", err)
 	}
 
+	stopTimerCh := make(chan struct{})
+	startedAt := time.Now()
 	p.mu.Lock()
 	p.cmd = cmd
 	p.stdin = stdin
-	p.startedAt = time.Now()
+	p.startedAt = startedAt
 	p.metrics = NewProcessMetrics(cmd.Process.Pid)
+	p.startupStopCh = stopTimerCh
 	p.mu.Unlock()
 
 	p.broadcast(fmt.Sprintf("\x1b[32m[NeoPanel] Server process started (PID: %d)...\x1b[0m", cmd.Process.Pid))
 
-	// Stream stdout & stderr concurrently
-	go p.streamOutput(stdout)
-	go p.streamOutput(stderr)
+	// Watchdog timeout if the server stays stuck in "starting" without coming online
+	if timeout > 0 {
+		go func(runID uint64, ch <-chan struct{}, limit time.Duration) {
+			timer := time.NewTimer(limit)
+			defer timer.Stop()
+			select {
+			case <-ch:
+				return
+			case <-timer.C:
+				p.mu.Lock()
+				if p.runID != runID || p.status != "starting" || p.reachedOnline || p.stopExpected {
+					p.mu.Unlock()
+					return
+				}
+				p.timedOut = true
+				proc := p.cmd
+				p.mu.Unlock()
+
+				p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+				p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] SERVER STARTUP TIMED OUT (%s)!\x1b[0m", limit.Round(time.Second)))
+				p.broadcast("\x1b[31mThe server did not finish starting before the timeout elapsed. Terminating stalled process...\x1b[0m")
+				p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+
+				if proc != nil && proc.Process != nil {
+					_ = proc.Process.Kill()
+				}
+			}
+		}(currentRunID, stopTimerCh, timeout)
+	}
+
+	// Stream stdout & stderr concurrently and wait for EOF before cmd.Wait()
+	var streamWg sync.WaitGroup
+	streamWg.Add(2)
+	go func() {
+		defer streamWg.Done()
+		p.streamOutput(stdout, currentRunID)
+	}()
+	go func() {
+		defer streamWg.Done()
+		p.streamOutput(stderr, currentRunID)
+	}()
 
 	// Wait for process exit in background
-	go func() {
+	go func(runID uint64, started time.Time) {
+		streamWg.Wait()
 		waitErr := cmd.Wait()
 
 		p.mu.Lock()
+		if p.runID != runID {
+			p.mu.Unlock()
+			return
+		}
+		p.stopStartupTimerLocked()
 		p.status = "offline"
 		p.cmd = nil
 		p.stdin = nil
 		expected := p.stopExpected
+		reached := p.reachedOnline
+		timedOut := p.timedOut
+		onExit := p.onExit
+		srvID := p.server.ID
 		p.mu.Unlock()
 
-		if waitErr != nil && !expected {
+		uptime := time.Since(started)
+
+		if timedOut {
+			p.broadcast("\x1b[31;1m[NeoPanel] Startup attempt aborted due to startup timeout.\x1b[0m")
+		} else if waitErr != nil && !expected {
 			p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel] Server process terminated unexpectedly (%v).\x1b[0m", waitErr))
+		} else if !expected && !reached {
+			p.broadcast("\x1b[31;1m[NeoPanel] Server exited during startup before coming online.\x1b[0m")
 		} else {
 			p.broadcast("\x1b[33m[NeoPanel] Server process stopped.\x1b[0m")
 		}
 
-		if p.onExit != nil {
-			p.onExit(p.server.ID, !expected)
+		if onExit != nil {
+			onExit(srvID, !expected, reached, timedOut, uptime)
 		}
-	}()
+	}(currentRunID, startedAt)
 
 	return nil
 }
 
-func (p *ProcessInstance) streamOutput(r io.Reader) {
+func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 	scanner := bufio.NewScanner(r)
 	// Support very large single-line outputs (up to 1MB) without dropping stream
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -306,13 +405,22 @@ func (p *ProcessInstance) streamOutput(r io.Reader) {
 		line := scanner.Text()
 
 		// Detect when Minecraft / Proxy finishes startup
+		var readyCallback func(string)
+		var readySrvID string
 		p.mu.Lock()
-		if p.status == "starting" && (strings.Contains(line, "Done (") || strings.Contains(line, "For help, type \"help\"") || strings.Contains(line, "Listening on /")) {
+		if p.runID == runID && p.status == "starting" && (strings.Contains(line, "Done (") || strings.Contains(line, "For help, type \"help\"") || strings.Contains(line, "Listening on /")) {
 			p.status = "online"
+			p.reachedOnline = true
+			p.stopStartupTimerLocked()
+			readyCallback = p.onReady
+			readySrvID = p.server.ID
 		}
 		p.mu.Unlock()
 
 		p.broadcast(line)
+		if readyCallback != nil {
+			readyCallback(readySrvID)
+		}
 
 		// Real-time runtime diagnostic detectors
 		p.detectRuntimeDiagnostics(line)
@@ -331,7 +439,7 @@ func (p *ProcessInstance) detectRuntimeDiagnostics(line string) {
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] JAVA VERSION MISMATCH DETECTED!\x1b[0m")
 		p.broadcast("\x1b[31mYour Minecraft server JAR was compiled for a newer Java runtime than the one currently selected.\x1b[0m")
-		p.broadcast("\x1b[33;1m👉 Quick Fix: Go to Server Settings -> Java Version, change to Java 21 or Java 25, then restart.\x1b[0m")
+		p.broadcast("\x1b[33;1m👉 Quick Fix: Go to Server -> Startup, change Java Runtime to Java 25 or Java 21, then restart.\x1b[0m")
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		return
 	}
@@ -416,6 +524,7 @@ func (p *ProcessInstance) Stop(graceful bool) error {
 		return nil
 	}
 	p.stopExpected = true
+	p.stopStartupTimerLocked()
 	p.status = "stopping"
 	cmd := p.cmd
 	stdin := p.stdin
@@ -600,4 +709,3 @@ func syncBungeePort(workingDir string, port int) {
 	}
 	_ = os.WriteFile(cfgPath, []byte(strings.Join(lines, "\n")), 0644)
 }
-

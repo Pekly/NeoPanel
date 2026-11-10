@@ -20,9 +20,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host"`
-	Port int    `yaml:"port"`
-	Mode string `yaml:"mode"` // "standalone" or "behind_proxy"
+	Host              string `yaml:"host"`
+	Port              int    `yaml:"port"`
+	Mode              string `yaml:"mode"` // "standalone" or "behind_proxy"
+	StartupTimeoutSec int    `yaml:"startup_timeout_seconds"`
 }
 
 type SFTPConfig struct {
@@ -63,9 +64,10 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Server: ServerConfig{
-			Host: "0.0.0.0",
-			Port: 8080,
-			Mode: "behind_proxy",
+			Host:              "0.0.0.0",
+			Port:              8080,
+			Mode:              "behind_proxy",
+			StartupTimeoutSec: 180,
 		},
 		Paths: PathsConfig{
 			DataDir:    dataDir,
@@ -146,4 +148,3 @@ func generateRandomKey(length int) string {
 	}
 	return hex.EncodeToString(bytes)
 }
-

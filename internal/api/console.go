@@ -40,16 +40,18 @@ type WSMessage struct {
 }
 
 type WSStatsPayload struct {
-	Event       string  `json:"event"`
-	ServerID    string  `json:"server_id"`
-	Status      string  `json:"status"`
-	CPUPercent  float64 `json:"cpu_percent"`
-	MemoryMB    int64   `json:"memory_mb"`
-	MemoryMaxMB int     `json:"memory_max_mb"`
-	DiskMB      int64   `json:"disk_mb"`
-	UptimeSec   int64   `json:"uptime_sec"`
-	NetInKiB    float64 `json:"net_in_kib"`
-	NetOutKiB   float64 `json:"net_out_kib"`
+	Event           string  `json:"event"`
+	ServerID        string  `json:"server_id"`
+	Status          string  `json:"status"`
+	CPUPercent      float64 `json:"cpu_percent"`
+	MemoryMB        int64   `json:"memory_mb"`
+	MemoryMaxMB     int     `json:"memory_max_mb"`
+	DiskMB          int64   `json:"disk_mb"`
+	UptimeSec       int64   `json:"uptime_sec"`
+	NetInKiB        float64 `json:"net_in_kib"`
+	NetOutKiB       float64 `json:"net_out_kib"`
+	StartupFailures int     `json:"startup_failures"`
+	StartupHalted   bool    `json:"startup_halted"`
 }
 
 func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
@@ -113,16 +115,18 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 
 	if st, ok := h.manager.GetStatsByID(serverID); ok {
 		payload := WSStatsPayload{
-			Event:       "stats",
-			ServerID:    st.ServerID,
-			Status:      st.Status,
-			CPUPercent:  st.CPUUsage,
-			MemoryMB:    st.MemoryMB,
-			MemoryMaxMB: st.MemoryMaxMB,
-			DiskMB:      st.DiskMB,
-			UptimeSec:   st.UptimeSec,
-			NetInKiB:    st.NetInKiB,
-			NetOutKiB:   st.NetOutKiB,
+			Event:           "stats",
+			ServerID:        st.ServerID,
+			Status:          st.Status,
+			CPUPercent:      st.CPUUsage,
+			MemoryMB:        st.MemoryMB,
+			MemoryMaxMB:     st.MemoryMaxMB,
+			DiskMB:          st.DiskMB,
+			UptimeSec:       st.UptimeSec,
+			NetInKiB:        st.NetInKiB,
+			NetOutKiB:       st.NetOutKiB,
+			StartupFailures: st.StartupFailures,
+			StartupHalted:   st.StartupHalted,
 		}
 		if b, err := json.Marshal(payload); err == nil {
 			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
@@ -165,16 +169,18 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 					continue
 				}
 				payload := WSStatsPayload{
-					Event:       "stats",
-					ServerID:    st.ServerID,
-					Status:      st.Status,
-					CPUPercent:  st.CPUUsage,
-					MemoryMB:    st.MemoryMB,
-					MemoryMaxMB: st.MemoryMaxMB,
-					DiskMB:      st.DiskMB,
-					UptimeSec:   st.UptimeSec,
-					NetInKiB:    st.NetInKiB,
-					NetOutKiB:   st.NetOutKiB,
+					Event:           "stats",
+					ServerID:        st.ServerID,
+					Status:          st.Status,
+					CPUPercent:      st.CPUUsage,
+					MemoryMB:        st.MemoryMB,
+					MemoryMaxMB:     st.MemoryMaxMB,
+					DiskMB:          st.DiskMB,
+					UptimeSec:       st.UptimeSec,
+					NetInKiB:        st.NetInKiB,
+					NetOutKiB:       st.NetOutKiB,
+					StartupFailures: st.StartupFailures,
+					StartupHalted:   st.StartupHalted,
 				}
 				b, _ := json.Marshal(payload)
 				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))

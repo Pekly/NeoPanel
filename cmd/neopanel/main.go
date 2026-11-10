@@ -77,6 +77,9 @@ func main() {
 	// 2. Initialize Process / Server Manager
 	log.Printf("[INFO] Initializing server manager with data directory: %s", cfg.Paths.ServersDir)
 	manager := runner.NewServerManager(cfg.Paths.ServersDir, db)
+	if cfg.Server.StartupTimeoutSec > 0 {
+		manager.SetStartupTimeout(time.Duration(cfg.Server.StartupTimeoutSec) * time.Second)
+	}
 
 	// 3. Mount Embedded Frontend & Router
 	staticFS := web.GetFS()
@@ -138,4 +141,3 @@ func main() {
 		log.Fatalf("[FATAL] Server terminated unexpectedly: %v", err)
 	}
 }
-
