@@ -2501,6 +2501,10 @@ function getNodeById(nodeId = 'local') {
   return (S.nodes || []).find(n => n.id === id) || null;
 }
 
+function getNode(nodeId = 'local') {
+  return getNodeById(nodeId);
+}
+
 function findServerRef(srvId, nodeId = null) {
   if (!srvId) return null;
   const resolved = resolveServerByParam(srvId, nodeId);
@@ -4383,10 +4387,10 @@ const PG = [
 ];
 
 const CMDS = [
-  ['Save the world', 'save-all'],
-  ['Say hello', 'say Hello from NeoPanel!'],
-  ['List players', 'list'],
-  ['Check TPS', 'tps']
+  ['Save All Worlds', 'save-all'],
+  ['List Online Players', 'list'],
+  ['Check TPS & Health', 'tps'],
+  ['Reload Configurations', 'reload confirm']
 ];
 
 const CORES = [
@@ -4775,13 +4779,20 @@ function srvh() {
     </div>
     <div class="row" style="position:relative">
       ${S.view !== 'con' ? `<button class="btn" onclick="toggleFlyConsole()" title="Open Live Console Drawer (Ctrl+\`)">${ic('terminal', 14)} Console</button>` : ''}
-      <button class="btn" onclick="event.stopPropagation(); toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
-      ${S.cmenu ? `<div class="cmenu" role="menu" onclick="event.stopPropagation()">
-        ${CMDS.map(([label, cmd]) => `<button role="menuitem" onclick="execQuickCmd('${cmd}')">${label}</button>`).join('')}
-        <button role="menuitem" onclick="S.cmenu=false; toggleFlyConsole();">${ic('terminal', 13)} Toggle Live Console (Ctrl+\`)</button>
-        <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
-        <button role="menuitem" style="color: #ef4444;" data-srv-id="${esc(srv?.id || '')}" data-srv-name="${esc(srv?.name || '')}" data-node-id="${esc(nodeId)}" onclick="S.cmenu=false; openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);">${ic('trash', 13)} Delete Server</button>
-      </div>` : ''}
+      <div style="position: relative; display: inline-block;">
+        <button class="btn" onclick="event.stopPropagation(); toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
+        ${S.cmenu ? `<div class="cmenu" role="menu" onclick="event.stopPropagation()">
+          ${CMDS.map(([label, cmd]) => `
+            <button role="menuitem" onclick="execQuickCmd('${cmd}')">
+              <span>${esc(label)}</span>
+              <span class="mono mu" style="font-size: 11px; margin-left: auto;">${esc(cmd)}</span>
+            </button>
+          `).join('')}
+          <button role="menuitem" onclick="S.cmenu=false; toggleFlyConsole();">${ic('terminal', 13)} Live Console <kbd style="margin-left: auto; font-size: 10px;">Ctrl+\`</kbd></button>
+          <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
+          <button role="menuitem" style="color: #ef4444;" data-srv-id="${esc(srv?.id || '')}" data-srv-name="${esc(srv?.name || '')}" data-node-id="${esc(nodeId)}" onclick="S.cmenu=false; openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);">${ic('trash', 13)} Delete Server</button>
+        </div>` : ''}
+      </div>
       <button class="btn pr" data-power-btn="start" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
       <button class="btn stop" data-power-btn="stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
@@ -7107,7 +7118,7 @@ const V = {
     const verList = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
     const saveStatus = _settingsUiState?.status || 'saved';
     const saveText = _settingsUiState?.text || 'Real-time auto-save active';
-    const node = getNode(srv?.node_id || 'local');
+    const node = getNodeById(srv?.node_id || 'local');
     const isAdmin = S.user?.role === 'admin';
     const isRamLocked = Boolean(node && node.allow_user_ram === false && !isAdmin);
     const isPortsLocked = Boolean(node && node.allow_user_ports === false && !isAdmin);
@@ -14776,6 +14787,8 @@ async function logout() {
 }
 
 // --- Attach All Functions to Window for Seamless HTML Event Handling ---
+window.getNode = getNode;
+window.getNodeById = getNodeById;
 window.toast = toast;
 window.power = power;
 window.switchServer = switchServer;

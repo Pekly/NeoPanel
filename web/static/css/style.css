@@ -768,7 +768,7 @@ h2 {
   overflow: hidden;
   isolation: isolate;
   transform: translateZ(0);
-  -webkit-mask-image: -webkit-radial-gradient(white, black);
+  background-clip: padding-box;
   cursor: pointer;
   transition: all 0.22s ease;
   display: flex;
@@ -1120,28 +1120,25 @@ h2 {
   background-color: #121827;
   padding: 22px 26px;
   border-radius: var(--np-radius, 14px);
-  overflow: hidden !important;
-  isolation: isolate;
-  transform: translateZ(0);
-  -webkit-mask-image: -webkit-radial-gradient(white, black);
+  overflow: visible;
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 16px;
+  background-clip: padding-box;
 }
 
 .srvh-bg {
   position: absolute;
   inset: 0;
-  border-radius: inherit !important;
+  border-radius: calc(var(--np-radius, 14px) - 1px) !important;
   overflow: hidden !important;
   background-size: cover;
   background-position: center 35%;
   pointer-events: none;
   z-index: 0;
   transform: translateZ(0);
-  -webkit-mask-image: -webkit-radial-gradient(white, black);
 }
 
 .srvh-bg::after {
@@ -1613,15 +1610,17 @@ h2 {
 /* Commands Dropdown Menu */
 .cmenu {
   position: absolute;
-  top: 44px;
-  left: 0;
-  min-width: 210px;
-  background: #111827;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 230px;
+  background: var(--card-bg-solid, #111827);
+  border: 1px solid var(--border-light, rgba(255, 255, 255, 0.16));
   border-radius: 10px;
   padding: 6px;
-  z-index: 120;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65);
+  z-index: 1000;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .cmenu button {
@@ -1960,6 +1959,10 @@ html[data-theme="light"] .cselect-opt.on {
   width: 100%;
   user-select: none;
   display: block;
+}
+
+.cselect-wrap.open {
+  z-index: 1000;
 }
 
 .cselect-wrap[style*="width: auto"],
@@ -3874,6 +3877,8 @@ html.oled .fly-con-drawer {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 14px;
+  position: relative;
+  z-index: 30;
 }
 
 .act-stats {
