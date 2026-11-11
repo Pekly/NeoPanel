@@ -67,7 +67,7 @@ func (h *ClientAPIHandler) authenticateClientAPI(r *http.Request) bool {
 	if user, err := h.db.GetUserByAPIKeyHash(keyHash); err == nil && user != nil && user.Role == "admin" {
 		return true
 	}
-	if user, err := h.db.GetUserBySession(apiKey); err == nil && user != nil && user.Role == "admin" {
+	if claims, err := NewAuthHandler(h.db, h.cfg).ValidateAuthToken(apiKey); err == nil && claims != nil && claims.Role == "admin" {
 		return true
 	}
 	return false

@@ -404,6 +404,47 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	_ = json.NewEncoder(w).Encode(data)
 }
 
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]interface{}{
+		"status": "error",
+		"error":  message,
+	})
+}
+
+func getClientIP(r *http.Request) string {
+	return extractClientIP(r)
+}
+
+func extractIDFromPath(path, prefix, suffix string) string {
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	trimmed := strings.TrimPrefix(path, prefix)
+	if suffix != "" {
+		idx := strings.Index(trimmed, suffix)
+		if idx != -1 {
+			return trimmed[:idx]
+		}
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) > 0 {
+		return parts[0]
+	}
+	return ""
+}
+
+func getUserFromContext(r *http.Request) *database.User {
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	if claims == nil {
+		return nil
+	}
+	return &database.User{
+		ID:       claims.UserID,
+		Username: claims.Username,
+		Role:     claims.Role,
+	}
+}
+
 func getURLParam(r *http.Request, key string) string {
 	return r.PathValue(key)
 }
