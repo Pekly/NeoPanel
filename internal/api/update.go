@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -280,12 +282,13 @@ func executeSystemUpdate(repoURL, branch string) {
 	}
 
 	// Prefer /usr/local/bin/neopanel-update if present; otherwise stream install.sh via curl
+	// NEOPANEL_WEB_UPDATE=1 signals install.sh to schedule service restart gracefully in background.
 	var scriptCmd string
 	if _, err := os.Stat("/usr/local/bin/neopanel-update"); err == nil {
-		scriptCmd = fmt.Sprintf("NEOPANEL_REPO_URL=%q NEOPANEL_REPO_BRANCH=%q /usr/local/bin/neopanel-update --repo %q --branch %q",
+		scriptCmd = fmt.Sprintf("NEOPANEL_WEB_UPDATE=1 NEOPANEL_REPO_URL=%q NEOPANEL_REPO_BRANCH=%q /usr/local/bin/neopanel-update --repo %q --branch %q",
 			repoURL, branch, repoURL, branch)
 	} else {
-		scriptCmd = fmt.Sprintf("curl -sSL %q | NEOPANEL_REPO_URL=%q NEOPANEL_REPO_BRANCH=%q bash -s -- --update --repo %q --branch %q",
+		scriptCmd = fmt.Sprintf("curl -sSL %q | NEOPANEL_WEB_UPDATE=1 NEOPANEL_REPO_URL=%q NEOPANEL_REPO_BRANCH=%q bash -s -- --update --repo %q --branch %q",
 			rawInstallURL, repoURL, branch, repoURL, branch)
 	}
 
@@ -305,28 +308,72 @@ func executeSystemUpdate(repoURL, branch string) {
 	}
 }
 
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\([a-zA-Z]|\r`)
+
+func cleanANSI(s string) string {
+	return ansiRegex.ReplaceAllString(s, "")
+}
+
+func parseUpdateProgress(logs string) (int, string) {
+	if strings.Contains(logs, "Successfully Updated") || strings.Contains(logs, "Finished update successfully") {
+		return 100, "Successfully updated"
+	}
+
+	lines := strings.Split(logs, "\n")
+	rePct := regexp.MustCompile(`(\d{1,3})%\s*(?:✔|✖|⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏)?\s*(.*)`)
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		matches := rePct.FindStringSubmatch(line)
+		if len(matches) >= 3 {
+			pct, err := strconv.Atoi(matches[1])
+			if err == nil && pct >= 0 && pct <= 100 {
+				step := strings.TrimSpace(matches[2])
+				if step == "" {
+					step = "Updating..."
+				}
+				return pct, step
+			}
+		}
+	}
+	return 0, ""
+}
+
 func HandleGetUpdateLogs(w http.ResponseWriter, r *http.Request) {
 	updateMu.Lock()
 	running := updateRunning
 	updateMu.Unlock()
 
-	var lines []string
+	var rawLines []string
 	if file, err := os.Open(updateLogPath); err == nil {
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
 		// Keep ring buffer of last 250 lines
 		const maxLines = 250
 		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-			if len(lines) > maxLines {
-				lines = lines[1:]
+			rawLines = append(rawLines, scanner.Text())
+			if len(rawLines) > maxLines {
+				rawLines = rawLines[1:]
 			}
 		}
 	}
 
+	cleanedLogs := cleanANSI(strings.Join(rawLines, "\n"))
+	pct, step := parseUpdateProgress(cleanedLogs)
+	if !running && pct == 100 {
+		step = "Update complete"
+	} else if running && pct < 5 {
+		pct = 5
+		step = "Starting update..."
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"running": running,
-		"logs":    strings.Join(lines, "\n"),
-		"lines":   len(lines),
+		"running":  running,
+		"progress": pct,
+		"step":     step,
+		"logs":     cleanedLogs,
+		"lines":    len(rawLines),
 	})
 }

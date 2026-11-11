@@ -7555,9 +7555,9 @@ const V = {
               </h2>
               <span class="mu" style="font-size:13px;">Manage panel version, track upstream commits, and configure GitHub update repository source/branch.</span>
             </div>
-            <div class="row" style="gap:8px;">
+            <div class="row" style="gap:8px; align-items:center;" id="admin-update-actions-wrap">
               <button type="button" class="btn sm" onclick="checkAdminUpdates()">${ic('refresh', 13)} Check Updates</button>
-              <button type="button" class="btn sm pr" onclick="openApplyUpdateModal()">${ic('download', 13)} Update Panel Now</button>
+              ${renderAdminUpdateBtn(up)}
             </div>
           </div>
 

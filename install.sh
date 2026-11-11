@@ -417,28 +417,46 @@ step_go_compiler() {
 
 write_global_shortcuts() {
   # Install global neopanel-update command shortcut
-  cat > "$INSTALL_DIR/neopanel-update" <<EOF
+  cat > "$INSTALL_DIR/neopanel-update.tmp" <<'EOF'
 #!/usr/bin/env bash
 set -e
-REPO_URL="\${NEOPANEL_REPO_URL:-$GIT_REPO_URL}"
-REPO_BRANCH="\${NEOPANEL_REPO_BRANCH:-$GIT_BRANCH}"
-CLEAN_SLUG="\$(echo "\$REPO_URL" | sed -E 's|https?://github.com/([^/]+)/([^/.]+)(\.git)?|\1/\2|')"
-RAW_URL="https://raw.githubusercontent.com/\${CLEAN_SLUG}/\${REPO_BRANCH}/install.sh"
-curl -sSL "\$RAW_URL" | bash -s -- --update --repo "\$REPO_URL" --branch "\$REPO_BRANCH" "\$@"
+REPO_URL="${NEOPANEL_REPO_URL:-https://github.com/Pekly/NeoPanel.git}"
+REPO_BRANCH="${NEOPANEL_REPO_BRANCH:-main}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) REPO_URL="$2"; shift 2 ;;
+    --branch) REPO_BRANCH="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
+CLEAN_SLUG="$(echo "$REPO_URL" | sed -E 's|https?://github.com/([^/]+)/([^/.]+)(\.git)?|\1/\2|')"
+RAW_URL="https://raw.githubusercontent.com/${CLEAN_SLUG}/${REPO_BRANCH}/install.sh"
+curl -sSL "$RAW_URL" | bash -s -- --update --repo "$REPO_URL" --branch "$REPO_BRANCH" "$@"
+exit 0
 EOF
-  chmod +x "$INSTALL_DIR/neopanel-update"
+  chmod +x "$INSTALL_DIR/neopanel-update.tmp"
+  mv -f "$INSTALL_DIR/neopanel-update.tmp" "$INSTALL_DIR/neopanel-update"
 
   # Install global neopanel-installer command shortcut
-  cat > "$INSTALL_DIR/neopanel-installer" <<EOF
+  cat > "$INSTALL_DIR/neopanel-installer.tmp" <<'EOF'
 #!/usr/bin/env bash
 set -e
-REPO_URL="\${NEOPANEL_REPO_URL:-$GIT_REPO_URL}"
-REPO_BRANCH="\${NEOPANEL_REPO_BRANCH:-$GIT_BRANCH}"
-CLEAN_SLUG="\$(echo "\$REPO_URL" | sed -E 's|https?://github.com/([^/]+)/([^/.]+)(\.git)?|\1/\2|')"
-RAW_URL="https://raw.githubusercontent.com/\${CLEAN_SLUG}/\${REPO_BRANCH}/install.sh"
-curl -sSL "\$RAW_URL" | bash -s -- --repo "\$REPO_URL" --branch "\$REPO_BRANCH" "\$@"
+REPO_URL="${NEOPANEL_REPO_URL:-https://github.com/Pekly/NeoPanel.git}"
+REPO_BRANCH="${NEOPANEL_REPO_BRANCH:-main}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) REPO_URL="$2"; shift 2 ;;
+    --branch) REPO_BRANCH="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
+CLEAN_SLUG="$(echo "$REPO_URL" | sed -E 's|https?://github.com/([^/]+)/([^/.]+)(\.git)?|\1/\2|')"
+RAW_URL="https://raw.githubusercontent.com/${CLEAN_SLUG}/${REPO_BRANCH}/install.sh"
+curl -sSL "$RAW_URL" | bash -s -- --repo "$REPO_URL" --branch "$REPO_BRANCH" "$@"
+exit 0
 EOF
-  chmod +x "$INSTALL_DIR/neopanel-installer"
+  chmod +x "$INSTALL_DIR/neopanel-installer.tmp"
+  mv -f "$INSTALL_DIR/neopanel-installer.tmp" "$INSTALL_DIR/neopanel-installer"
 }
 
 step_build_neopanel() {
@@ -1136,9 +1154,15 @@ step_update_swap() {
 
   write_global_shortcuts
 
-  systemctl restart neopanel
-  sleep 1
-  systemctl is-active --quiet neopanel
+  if [ "$NEOPANEL_WEB_UPDATE" = "1" ]; then
+    # Background service restart with a 2-second grace delay so the web updater process
+    # and Go backend can cleanly finish writing the success log and return HTTP 200/exit 0!
+    (sleep 2 && (systemd-run --no-block systemctl restart neopanel 2>/dev/null || systemctl restart neopanel)) >/dev/null 2>&1 &
+  else
+    systemctl restart neopanel || true
+    sleep 1
+    systemctl is-active --quiet neopanel || true
+  fi
 }
 
 update_neopanel() {

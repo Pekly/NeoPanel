@@ -487,3 +487,4 @@ func (h *EmailHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Reque
 		"username": user.Username,
 	})
 }
+
