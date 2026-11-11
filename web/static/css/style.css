@@ -5606,6 +5606,15 @@ html[data-theme="light"] .mod-card.on {
 }
 
 /* Engine Icons & Software Badges */
+.eng-img-ic {
+  display: inline-block;
+  vertical-align: middle;
+  object-fit: cover;
+  flex-shrink: 0;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
 .eng-ico-wrap {
   display: inline-flex;
   align-items: center;
@@ -5616,6 +5625,7 @@ html[data-theme="light"] .mod-card.on {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .eng-ico-wrap.sm {

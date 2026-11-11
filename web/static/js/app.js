@@ -63,7 +63,10 @@ function fileListIconHtml(item, extraCls = '', iconSize = 15) {
   const name = String(item.name || '').toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop() : '';
   if (ext === 'jar') {
-    return `<span class="fi-badge jar${cls}" title="Java Archive (.jar)">${ic('package', iconSize)}</span>`;
+    const jarEngine = detectJarEngine(name);
+    const iconUrl = getEngineIconUrl(jarEngine);
+    const imgSize = Math.max(14, iconSize - 2);
+    return `<span class="fi-badge jar${cls}" style="padding:0; overflow:hidden; display:inline-flex; align-items:center; justify-content:center;" title="${esc(item.name || 'JAR')} (${esc(engineMeta(jarEngine).label)} Jar)"><img src="${esc(iconUrl)}" alt="jar" style="width:${imgSize}px; height:${imgSize}px; object-fit:cover; border-radius:3px;" loading="lazy"></span>`;
   }
   if (['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz'].includes(ext)) {
     return `<span class="fi-badge arc${cls}" title="Compressed Archive">${ic('archive', iconSize)}</span>`;
@@ -87,6 +90,43 @@ function fileListIconHtml(item, extraCls = '', iconSize = 15) {
 }
 
 // --- Server Software Icons & Helpers ---
+const ENGINE_ICONS = {
+  vanilla: 'https://i.ibb.co/MmxPTbN/image.jpg',
+  paper: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc.svg',
+  purpur: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/purpurmc.svg',
+  leaf: 'https://i.ibb.co/7tLC0XDz/image.webp',
+  folia: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc-folia.svg',
+  forge: 'https://i.ibb.co/CKpCYrPq/image-1.jpg',
+  neoforge: 'https://i.ibb.co/NgGPZcVc/image-2.jpg',
+  neoforged: 'https://i.ibb.co/NgGPZcVc/image-2.jpg',
+  fabric: 'https://i.ibb.co/qYjbv9C1/image-1.webp',
+  velocity: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc-velocity.svg',
+  waterfall: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc.svg',
+  bungeecord: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc-velocity.svg',
+  custom: 'https://i.ibb.co/MmxPTbN/image.jpg'
+};
+
+function getEngineIconUrl(type) {
+  const raw = String(type || 'paper').toLowerCase().trim();
+  const k = raw === 'leafmc' ? 'leaf' : (raw === 'neoforged' ? 'neoforge' : raw);
+  return ENGINE_ICONS[k] || ENGINE_ICONS.paper;
+}
+
+function detectJarEngine(filename = '') {
+  const n = String(filename || '').toLowerCase();
+  if (n.includes('paper')) return 'paper';
+  if (n.includes('purpur')) return 'purpur';
+  if (n.includes('leaf')) return 'leaf';
+  if (n.includes('folia')) return 'folia';
+  if (n.includes('neoforge') || n.includes('neoforged')) return 'neoforge';
+  if (n.includes('forge')) return 'forge';
+  if (n.includes('fabric')) return 'fabric';
+  if (n.includes('velocity')) return 'velocity';
+  if (n.includes('waterfall') || n.includes('bungee')) return 'velocity';
+  if (n.includes('vanilla') || n.includes('spigot') || n.includes('craftbukkit')) return 'vanilla';
+  return curServer()?.type || 'vanilla';
+}
+
 function isModdedEngine(type) {
   const k = String(type || '').toLowerCase().trim();
   return k === 'fabric' || k === 'forge' || k === 'neoforge';
@@ -94,7 +134,7 @@ function isModdedEngine(type) {
 
 function engineMeta(type) {
   const raw = String(type || 'paper').toLowerCase().trim();
-  const key = raw === 'leafmc' ? 'leaf' : raw;
+  const key = raw === 'leafmc' ? 'leaf' : (raw === 'neoforged' ? 'neoforge' : raw);
   const map = {
     paper: { key: 'paper', label: 'Paper', color: '#3b82f6' },
     purpur: { key: 'purpur', label: 'Purpur', color: '#a855f7' },
@@ -102,7 +142,7 @@ function engineMeta(type) {
     folia: { key: 'folia', label: 'Folia', color: '#10b981' },
     fabric: { key: 'fabric', label: 'Fabric', color: '#e2b98b' },
     forge: { key: 'forge', label: 'Forge', color: '#f59e0b' },
-    neoforge: { key: 'neoforge', label: 'NeoForge', color: '#fb923c' },
+    neoforge: { key: 'neoforge', label: 'NeoForged', color: '#fb923c' },
     vanilla: { key: 'vanilla', label: 'Vanilla', color: '#4ade80' },
     velocity: { key: 'velocity', label: 'Velocity', color: '#06b6d4' },
     waterfall: { key: 'waterfall', label: 'Waterfall', color: '#38bdf8' },
@@ -114,24 +154,12 @@ function engineMeta(type) {
 
 function engineIcon(type, size = 16, withBg = false) {
   const m = engineMeta(type);
-  const paths = {
-    paper: `<path d="M21 3L3 11l7 3 3 7 8-18z" fill="currentColor" fill-opacity="0.16"/><path d="M21 3L10 14"/>`,
-    purpur: `<polygon points="12 2 20 7 20 17 12 22 4 17 4 7 12 2" fill="currentColor" fill-opacity="0.18"/><path d="M12 22V12m0 0L20 7M12 12L4 7"/>`,
-    leaf: `<path d="M19 4C11 4 5 9 5 17c0 1.2.2 2.2.5 3C13 20 19 14 19 4z" fill="currentColor" fill-opacity="0.18"/><path d="M5 20c3-4 7-8 12-11"/>`,
-    folia: `<path d="M12 3c4 0 8 3 8 8-4 0-8-3-8-8z" fill="currentColor" fill-opacity="0.18"/><path d="M4 13c0-4 3-8 8-8 0 4-3 8-8 8z" fill="currentColor" fill-opacity="0.14"/><path d="M12 21c-4 0-8-3-8-8 4 0 8 3 8 8z" fill="currentColor" fill-opacity="0.18"/><path d="M20 11c0 4-3 8-8 8 0-4 3-8 8-8z" fill="currentColor" fill-opacity="0.14"/>`,
-    fabric: `<rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor" fill-opacity="0.15"/><path d="M4 10h16M4 15h16M10 4v16M15 4v16"/>`,
-    forge: `<path d="M4 8h16v3c0 2.5-2 4-5 4h-6c-3 0-5-1.5-5-4V8z" fill="currentColor" fill-opacity="0.18"/><path d="M8 15v5h8v-5M2 8h20"/>`,
-    neoforge: `<path d="M12 3l8 4v6c0 4.5-3.4 7.7-8 9-4.6-1.3-8-4.5-8-9V7l8-4z" fill="currentColor" fill-opacity="0.18"/><path d="M8 9h8l-2 4h-4L8 9zm2 4v5h4v-5"/>`,
-    vanilla: `<polygon points="12 3 21 8 21 16 12 21 3 16 3 8 12 3" fill="currentColor" fill-opacity="0.18"/><path d="M3 8l9 5 9-5M12 13v8"/>`,
-    velocity: `<path d="M4 6l8 6-8 6M12 6l8 6-8 6"/>`,
-    waterfall: `<path d="M6 4v12a4 4 0 0 0 4 4M12 4v10a4 4 0 0 0 4 4M18 4v16"/>`,
-    bungeecord: `<circle cx="6" cy="12" r="3" fill="currentColor" fill-opacity="0.2"/><circle cx="18" cy="6" r="3" fill="currentColor" fill-opacity="0.2"/><circle cx="18" cy="18" r="3" fill="currentColor" fill-opacity="0.2"/><path d="M8.7 10.6l6.6-3.2M8.7 13.4l6.6 3.2"/>`,
-    custom: `<circle cx="12" cy="12" r="3"/><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m15.4-6.4l-2.1 2.1M7.7 16.3l-2.1 2.1m0-12.8l2.1 2.1m8.6 8.6l2.1 2.1"/>`
-  };
-  const svg = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${m.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="ic eng-ic" aria-hidden="true">${paths[m.key] || paths.custom}</svg>`;
-  if (!withBg) return svg;
+  const iconUrl = getEngineIconUrl(type);
+  const rad = size >= 24 ? 6 : (size >= 16 ? 4 : 3);
+  const img = `<img src="${esc(iconUrl)}" alt="${esc(m.label)}" width="${size}" height="${size}" class="eng-img-ic" style="width:${size}px; height:${size}px; min-width:${size}px; min-height:${size}px; object-fit:cover; border-radius:${rad}px; display:inline-block; vertical-align:middle; flex-shrink:0;" loading="lazy">`;
+  if (!withBg) return img;
   const wrapCls = size >= 22 ? 'lg' : (size <= 14 ? 'sm' : '');
-  return `<span class="eng-ico-wrap ${wrapCls}" title="${esc(m.label)}">${svg}</span>`;
+  return `<span class="eng-ico-wrap ${wrapCls}" title="${esc(m.label)}">${img}</span>`;
 }
 
 function onPlayerHeadError(imgEl, fallbackUrl) {
@@ -568,7 +596,7 @@ function collectSettingsFormPayload(srv) {
   if (!name) return { ok: false, reason: 'Server name cannot be empty' };
 
   const desc = descEl ? descEl.value.trim() : (srv.description || '');
-  const ver = verEl ? verEl.value.trim() : (srv.version || '1.21.4');
+  const ver = verEl ? verEl.value.trim() : (srv.version || '1.21.11');
   if (!ver) return { ok: false, reason: 'Minecraft version cannot be empty' };
 
   const jar = jarEl ? jarEl.value.trim() : (srv.jar_file || 'server.jar');
@@ -1037,7 +1065,7 @@ window.S = {
   modsSafeMode: false,
   modPageId: '',
   tps: 20.00,
-  ver: '1.21.4',
+  ver: '1.21.11',
   core: 'Paper',
   sel: 'Paper',
   q: '',
@@ -4408,23 +4436,28 @@ const CORES = [
 ];
 
 const FAM = [
-  ['1.21', 'Tricky Trials & Drops', '2024–2025', ['1.21.4', '1.21.3', '1.21.2', '1.21.1', '1.21']],
-  ['1.20', 'Trails & Tales', '2023–2024', ['1.20.6', '1.20.5', '1.20.4', '1.20.3', '1.20.2', '1.20.1', '1.20']],
-  ['1.19', 'The Wild Update', '2022–2023', ['1.19.4', '1.19.3', '1.19.2', '1.19.1', '1.19']],
-  ['1.18', 'Caves & Cliffs: Part II', '2021–2022', ['1.18.2', '1.18.1', '1.18']],
-  ['1.17', 'Caves & Cliffs: Part I', '2021', ['1.17.1', '1.17']],
-  ['1.16', 'Nether Update', '2020–2021', ['1.16.5', '1.16.4', '1.16.3', '1.16.2', '1.16.1', '1.16']],
-  ['1.15', 'Buzzy Bees', '2019–2020', ['1.15.2', '1.15.1', '1.15']],
-  ['1.14', 'Village & Pillage', '2019', ['1.14.4', '1.14.3', '1.14.2', '1.14.1', '1.14']],
-  ['1.13', 'Update Aquatic', '2018', ['1.13.2', '1.13.1', '1.13']],
-  ['1.12', 'World of Color', '2017', ['1.12.2', '1.12.1', '1.12']],
-  ['1.11', 'Exploration Update', '2016–2017', ['1.11.2', '1.11.1', '1.11']],
-  ['1.10', 'Frostburn Update', '2016', ['1.10.2', '1.10.1', '1.10']],
-  ['1.9', 'Combat Update', '2016', ['1.9.4', '1.9.3', '1.9.2', '1.9.1', '1.9']],
-  ['1.8', 'Bountiful Update', '2014–2015', ['1.8.9', '1.8.8', '1.8.7', '1.8.6', '1.8.5', '1.8.4', '1.8.3', '1.8.2', '1.8.1', '1.8']],
-  ['1.7', 'Update that Changed the World', '2013–2014', ['1.7.10', '1.7.9', '1.7.8', '1.7.7', '1.7.6', '1.7.5', '1.7.4', '1.7.2']],
-  ['1.0', 'Early Releases (1.0 – 1.6)', '2011–2013', ['1.6.4', '1.6.2', '1.6.1', '1.5.2', '1.5.1', '1.5', '1.4.7', '1.4.6', '1.4.5', '1.4.4', '1.4.2', '1.3.2', '1.3.1', '1.2.5', '1.2.4', '1.2.3', '1.2.2', '1.2.1', '1.1', '1.0']]
+  ['1.21', 'Tricky Trials & Game Drops', '2024–2026', [
+    '1.21.11', '1.21.10', '1.21.9', '1.21.8', '1.21.7', '1.21.6', '1.21.5',
+    '1.21.4', '1.21.3', '1.21.2', '1.21.1', '1.21'
+  ]],
+  ['1.20', 'Trails & Tales', '2023–2024', ['1.20.6', '1.20.4', '1.20.1']],
+  ['1.19', 'The Wild Update', '2022–2023', ['1.19.4', '1.19.2']],
+  ['1.18', 'Caves & Cliffs: Part II', '2021–2022', ['1.18.2']],
+  ['1.16', 'Nether Update', '2020–2021', ['1.16.5']],
+  ['1.12', 'World of Color & Forge Era', '2017', ['1.12.2']],
+  ['1.8', 'Bountiful Update & PvP', '2014–2015', ['1.8.9']],
+  ['1.7', 'Legacy Modding Classic', '2013–2014', ['1.7.10']]
 ];
+
+const POPULAR_MC_VERSIONS = new Set([
+  '1.20.6', '1.20.4', '1.20.1',
+  '1.19.4', '1.19.2',
+  '1.18.2',
+  '1.16.5',
+  '1.12.2',
+  '1.8.9',
+  '1.7.10'
+]);
 
 const ALL_VERS = FAM.flatMap(f => f[3].map(v => ({ v, f: f[0], n: f[1], y: f[2] })));
 const FALLBACK_ALL_MC = ALL_VERS.map(item => item.v);
@@ -4471,17 +4504,30 @@ function getAllMcVersions(engine = '') {
     return Array.from(new Set([...live, ...base]));
   }
   if (eng === 'waterfall') {
-    const base = ['1.20', '1.19', '1.18', '1.17', '1.16', '1.15', '1.14', '1.13', '1.12'];
+    const base = ['1.20', '1.19', '1.18', '1.17', '1.16', '1.12'];
     const live = Array.isArray(cat?.by_engine?.waterfall) ? cat.by_engine.waterfall : [];
     return Array.from(new Set([...live, ...base])).sort(compareMcVersionsDesc);
   }
   const merged = new Set(FALLBACK_ALL_MC);
+  const filterAllowed = (v) => {
+    if (!v) return false;
+    const str = String(v).trim();
+    return str.startsWith('1.21') || str.startsWith('26.') || POPULAR_MC_VERSIONS.has(str);
+  };
+
   if (Array.isArray(cat?.all_mc)) {
-    for (const v of cat.all_mc) if (v) merged.add(String(v));
+    for (const v of cat.all_mc) {
+      if (filterAllowed(v)) merged.add(String(v));
+    }
   }
   if (eng && Array.isArray(cat?.by_engine?.[eng])) {
-    for (const v of cat.by_engine[eng]) if (v) merged.add(String(v));
+    for (const v of cat.by_engine[eng]) {
+      if (filterAllowed(v)) merged.add(String(v));
+    }
   }
+  const curV = S.ver || curServer()?.version;
+  if (curV) merged.add(curV);
+
   const sorted = Array.from(merged).sort(compareMcVersionsDesc);
   if (eng === 'bungeecord') {
     return ['latest', ...sorted.filter(v => v !== 'latest')];
@@ -4500,7 +4546,7 @@ function refreshOpenVersionSelects() {
   const engineCS = $('#cs-type')?.value || 'paper';
   const csSel = $('#cs-ver-sel');
   if (csSel) {
-    const curVal = $('#cs-ver')?.value?.trim() || csSel.value || '1.21.4';
+    const curVal = $('#cs-ver')?.value?.trim() || csSel.value || '1.21.11';
     const vers = getAllMcVersions(engineCS);
     const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
     csSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
@@ -4509,7 +4555,7 @@ function refreshOpenVersionSelects() {
   const reinstSel = $('#reinst-ver-sel');
   if (reinstSel) {
     const engR = $('#reinst-software')?.value || 'paper';
-    const curVal = $('#reinst-version')?.value?.trim() || reinstSel.value || '1.21.4';
+    const curVal = $('#reinst-version')?.value?.trim() || reinstSel.value || '1.21.11';
     const vers = getAllMcVersions(engR);
     const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
     reinstSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
@@ -4526,7 +4572,7 @@ function refreshOpenVersionSelects() {
   const propVerSel = $('#prop-ver-sel');
   if (propVerSel) {
     const srv = curServer();
-    const curVal = $('#prop-ver')?.value?.trim() || srv?.version || '1.21.4';
+    const curVal = $('#prop-ver')?.value?.trim() || srv?.version || '1.21.11';
     const vers = getAllMcVersions(srv?.type || S.core || '');
     const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
     propVerSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
@@ -6362,7 +6408,7 @@ const V = {
       <div class="ver-toolbar" style="justify-content: space-between;">
         <div class="row" style="gap: 10px; flex-wrap: wrap; flex: 1;">
           <div class="ver-search-wrap">
-            <input type="text" placeholder="Search versions (e.g. 1.21.4, 1.20.1, 1.8.9)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
+            <input type="text" placeholder="Search versions (e.g. 1.21.11, 1.20.4, 1.8.9)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
             <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted); pointer-events: none;">${ic('search', 15)}</span>
           </div>
           ${!isProxy ? `
@@ -7113,7 +7159,7 @@ const V = {
     const javaCmd = isCustom ? (rawJava || 'java') : `java (OpenJDK ${curJava})`;
     const editName = (S.activeServerId === srv?.id && S.editSrvName !== '') ? S.editSrvName : (srv?.name || '');
     const editDesc = (S.activeServerId === srv?.id && typeof S.editSrvDesc === 'string') ? S.editSrvDesc : (srv?.description || '');
-    const curV = srv?.version || '1.21.4';
+    const curV = srv?.version || '1.21.11';
     const allV = getAllMcVersions(srv?.type || S.core || '');
     const verList = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
     const saveStatus = _settingsUiState?.status || 'saved';
@@ -8395,7 +8441,7 @@ function versionRowsHtml() {
     }).join('');
   }
 
-  const POPULAR_VERS = new Set(['26.3', '1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4', '1.16.5', '1.12.2', '1.8.9']);
+  const POPULAR_VERS = new Set(['26.3', '1.21.11', '1.21.8', '1.21.4', '1.20.4', '1.20.1', '1.19.4', '1.16.5', '1.12.2', '1.8.9']);
   const items = getMergedVersionItems(sel).filter(item => {
     const matchesQ = !q || (item.v + ' ' + item.n + ' ' + item.y).toLowerCase().includes(q);
     const matchesF =
@@ -9484,7 +9530,7 @@ async function saveStartupSettings() {
   if (javaChoice === 'custom') {
     javaChoice = $('#stp-java-custom')?.value.trim();
   }
-  const ver = $('#stp-ver')?.value?.trim() || srv.version || '1.21.4';
+  const ver = $('#stp-ver')?.value?.trim() || srv.version || '1.21.11';
   const jar = $('#stp-jar')?.value?.trim() || srv.jar_file || 'server.jar';
   const args = $('#stp-args')?.value?.trim() || srv.java_args || '-XX:+UseG1GC';
   const newRam = parseInt($('#stp-ram')?.value, 10) || srv.memory_max || 2048;
@@ -11439,13 +11485,13 @@ function setCreateEngine(type) {
   } else if (verInp) {
     const cur = verInp.value.trim();
     if (!cur || cur === '3.4.0-SNAPSHOT' || cur === 'latest' || cur === '1.20') {
-      verInp.value = '1.21.4';
+      verInp.value = '1.21.11';
     }
   }
 
   const csVerSel = $('#cs-ver-sel');
   if (csVerSel) {
-    const curVer = verInp?.value?.trim() || '1.21.4';
+    const curVer = verInp?.value?.trim() || '1.21.11';
     const vers = getAllMcVersions(type);
     const list = (curVer && !vers.includes(curVer)) ? [curVer, ...vers] : vers;
     csVerSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVer ? 'selected' : ''}>${esc(v)}</option>`).join('');
@@ -11558,18 +11604,18 @@ function openCreateServerModal() {
         <!-- Version Searchable Catalog + Custom Input + Popular Pills -->
         <div style="margin-bottom:14px;">
           <div class="row sb" style="margin-bottom:6px; flex-wrap:wrap; gap:6px;">
-            <span class="mu" style="font-size:13px; font-weight:600;">Minecraft / Release Version (All Releases)</span>
+            <span class="mu" style="font-size:13px; font-weight:600;">Minecraft Version (Recent &amp; Popular)</span>
             <div class="row" style="gap:4px; flex-wrap:wrap;">
-              ${['1.21.4', '1.21.1', '1.20.4', '1.20.1', '1.19.4', '1.18.2', '1.16.5', '1.12.2', '1.8.9'].map(v => `
-                <button type="button" class="btn sm ver-pill ${v === '1.21.4' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
+              ${['1.21.11', '1.21.8', '1.21.4', '1.20.4', '1.20.1', '1.19.4', '1.16.5', '1.12.2', '1.8.9'].map(v => `
+                <button type="button" class="btn sm ver-pill ${v === '1.21.11' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
               `).join('')}
             </div>
           </div>
           <div style="display:grid; grid-template-columns: minmax(145px, 185px) 1fr; gap:8px;">
             <select id="cs-ver-sel" data-searchable="1" onchange="setCreateVersion(this.value)">
-              ${initialVers.map(v => `<option value="${esc(v)}" ${v === '1.21.4' ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+              ${initialVers.map(v => `<option value="${esc(v)}" ${v === '1.21.11' ? 'selected' : ''}>${esc(v)}</option>`).join('')}
             </select>
-            <input type="text" id="cs-ver" value="1.21.4" required placeholder="e.g. 1.21.4, 1.20.1, 1.16.5, 1.12.2, 1.8.9, or custom" oninput="onCreateVersionInput(this.value)">
+            <input type="text" id="cs-ver" value="1.21.11" required placeholder="e.g. 1.21.11, 1.20.4, 1.16.5, 1.12.2, 1.8.9, or custom" oninput="onCreateVersionInput(this.value)">
           </div>
         </div>
 
@@ -11582,7 +11628,7 @@ function openCreateServerModal() {
           <label class="f" style="margin-bottom:0;">
             <span>Java Runtime</span>
             <select id="cs-java" onchange="this.dataset.userPicked='1'">
-              ${renderJavaSelectOptions('21', false, '1.21.4', 'paper', defaultNodeId)}
+              ${renderJavaSelectOptions('21', false, '1.21.11', 'paper', defaultNodeId)}
             </select>
           </label>
         </div>
@@ -11656,7 +11702,7 @@ async function handleCreateServer(e) {
   const targetNodeId = $('#cs-node')?.value || 'local';
   const name = $('#cs-name')?.value.trim() || 'Minecraft Server';
   const type = $('#cs-type')?.value || 'paper';
-  const version = $('#cs-ver')?.value.trim() || '1.21.4';
+  const version = $('#cs-ver')?.value.trim() || '1.21.11';
   const memoryMax = parseInt($('#cs-mem')?.value) || 2048;
   const memoryMin = Math.min(1024, memoryMax);
   const port = parseInt($('#cs-port')?.value) || 25565;
@@ -12771,7 +12817,7 @@ async function executeDeleteServer(srvId, nodeId = 'local') {
 // --- Server Reinstallation (mcjarfiles.com) ---
 function updateReinstallJavaPreview() {
   const sw = $('#reinst-software')?.value || 'paper';
-  const ver = $('#reinst-version')?.value.trim() || '1.21.4';
+  const ver = $('#reinst-version')?.value.trim() || '1.21.11';
   const el = $('#reinst-java-rec');
   if (el) el.textContent = `Java ${getRecommendedJavaForMcVersion(ver, sw)}`;
 }
@@ -12798,7 +12844,7 @@ function onReinstallEngineChange(sw) {
   if (iconEl) iconEl.innerHTML = engineIcon(sw, 18, true);
   const sel = $('#reinst-ver-sel');
   const inp = $('#reinst-version');
-  const curV = inp?.value?.trim() || '1.21.4';
+  const curV = inp?.value?.trim() || '1.21.11';
   if (sw === 'velocity' && !curV.includes('SNAPSHOT')) {
     if (inp) inp.value = '3.4.0-SNAPSHOT';
   } else if (sw === 'waterfall' && curV !== '1.20') {
@@ -12807,7 +12853,7 @@ function onReinstallEngineChange(sw) {
     if (inp) inp.value = 'latest';
   }
   if (sel) {
-    const newCur = inp?.value?.trim() || '1.21.4';
+    const newCur = inp?.value?.trim() || '1.21.11';
     const vers = getAllMcVersions(sw);
     const list = (newCur && !vers.includes(newCur)) ? [newCur, ...vers] : vers;
     sel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === newCur ? 'selected' : ''}>${esc(v)}</option>`).join('');
@@ -12827,7 +12873,7 @@ function openReinstallModal(srvId, nodeId = null) {
   const targetNodeId = nodeId || targetSrv.node_id || 'local';
   const targetName = targetSrv.name || 'Server';
   const curType = (targetSrv.type || 'paper').toLowerCase();
-  const curVer = targetSrv.version || '1.21.4';
+  const curVer = targetSrv.version || '1.21.11';
   const recJava = getRecommendedJavaForMcVersion(curVer, curType);
   const allVers = getAllMcVersions(curType);
   const verList = (curVer && !allVers.includes(curVer)) ? [curVer, ...allVers] : allVers;
@@ -12872,7 +12918,7 @@ function openReinstallModal(srvId, nodeId = null) {
             <select id="reinst-ver-sel" data-searchable="1" onchange="setReinstallVersion(this.value)">
               ${verList.map(v => `<option value="${esc(v)}" ${v === curVer ? 'selected' : ''}>${esc(v)}</option>`).join('')}
             </select>
-            <input type="text" id="reinst-version" value="${esc(curVer)}" placeholder="26.3, 1.21.4, 1.12.2, or latest" required oninput="syncReinstallSelectFromInput(this.value); updateReinstallJavaPreview();">
+            <input type="text" id="reinst-version" value="${esc(curVer)}" placeholder="1.21.11, 1.20.4, 1.12.2, or latest" required oninput="syncReinstallSelectFromInput(this.value); updateReinstallJavaPreview();">
           </div>
         </div>
 

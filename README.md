@@ -1,133 +1,81 @@
-# NeoPanel 🚀
+# NeoPanel
 
-> **Pterodactyl from Temu** — A single static Go binary that sips **~15–25 MB of idle RAM**, requires **zero Docker / PHP / Redis / MariaDB / Wings**, and delivers **~80% of Pterodactyl's Minecraft workflow**.
+A lightweight Minecraft server panel. Think "Pterodactyl from Temu": it does most of what you'd actually use day to day, but it's one Go binary instead of a whole stack.
 
-[![Linux Multi-OS](https://img.shields.io/badge/Linux-Debian%20%7C%20Ubuntu%20%7C%20RHEL%20%7C%20Arch%20%7C%20Alpine-E95420?logo=linux&logoColor=white)](#)
-[![Idle RAM](https://img.shields.io/badge/Idle%20RAM-~15--25%20MB-10b981)](#)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](#)
-[![Database](https://img.shields.io/badge/Database-SQLite%20WAL%20(Pure%20Go)-003B57?logo=sqlite&logoColor=white)](#)
-[![SSL](https://img.shields.io/badge/SSL-Caddy%20%2B%20Let's%20Encrypt-003A70?logo=letsencrypt&logoColor=white)](#)
+I built it because running Pterodactyl for a Minecraft-only setup meant PHP, Nginx, Redis, MariaDB, Docker and Wings, and that eats a lot of RAM before a single block is placed. NeoPanel is one executable with an embedded SQLite database. It idles at roughly 15 to 25 MB on my setup, so the memory goes to your server instead.
 
----
+## How it compares
 
-## 🛒 The "Pterodactyl from Temu" Reality
+| | Pterodactyl + Wings | NeoPanel |
+|---|---|---|
+| Stack | PHP, Nginx, MariaDB, Redis, Docker, Wings | One Go binary, SQLite, Java |
+| Idle RAM | around 1 to 2 GB | around 15 to 25 MB |
+| Install | Docker images, Compose, database setup | One install script |
+| Built for | Any game via Eggs | Minecraft and proxies only |
+| Multi-node | Wings tokens and SSL per node | Same binary in `--node` mode, paired with an API key |
 
-Running full **Pterodactyl Panel + Wings** for Minecraft means maintaining **PHP-FPM, Nginx, Redis, MariaDB, Composer worker queues, Docker daemons, and Wings** — consuming **1–2 GB of RAM** before a single Minecraft world chunk loads.
+## What you get
 
-**NeoPanel takes the opposite approach:** one compiled Go executable contains the HTTP dashboard, WebSocket multiplexer, embedded SQLite WAL engine (`modernc.org/sqlite`), chroot SFTP server, multi-node cluster reverse proxy, subuser RBAC, cron scheduler, pure-Go token-bucket rate limiter, and Modrinth/mcjarfiles downloaders. 
+- **Live console** over WebSocket with colors, command history, a popout terminal, and a slide-out drawer you can open from any server page with `Ctrl + \``. CPU, memory and network charts sit alongside it.
+- **File manager** with an in-browser editor, drag-and-drop uploads, bulk select and move, zip/tar.gz archiving, and extracting `.zip`, `.tar.gz`, `.tgz`, `.tar` and `.jar`.
+- **Built-in SFTP** on port 2022. Log in with your panel credentials or an SSH key, and each user is jailed to their server's directory.
+- **11 server engines**: Paper, Purpur, LeafMC, Folia, Vanilla, Fabric, Forge, NeoForge, Velocity, Waterfall and BungeeCord. Downloads come from mcjarfiles.com, the Paper, Purpur and Fabric APIs, and Mojang's manifest. Reinstalling lets you keep your worlds, configs and plugins.
+- **Java manager** for Java 25, 21, 17 and 8. It detects what's installed, installs what's missing, and picks the right version for each Minecraft release. If a server fails to start twice in a row, it stops retrying instead of crash-looping.
+- **Modrinth store** for plugins and mods, with filters for category, loader and Minecraft version, plus one-click install.
+- **Per-server SQLite databases** with a small SQL studio in the browser, and `.sql` or `.db` export.
+- **Backups, ports and players**: `.tar.gz` world backups, port allocations with automatic UFW rules, and a player manager (OP, kick, ban, whitelist). There's also a searchable audit log you can export as CSV or JSON.
+- **MOTD rendering** for legacy `§` and `&` codes, hex colors, Iridium gradients and MiniMessage tags, so your server header and the settings preview look right.
+- **Multi-node clustering**. Run a master panel and add worker VPSes with the same binary.
+- **Branding and themes**: six built-in themes, custom accent colors and CSS, uploadable logo, favicon, wallpaper and avatars, and a maintenance mode that still lets admins in.
+- **Auth and security**: bcrypt passwords, JWT sessions, API keys (`neo_...`), optional Cloudflare Turnstile, and automatic HTTPS through Caddy.
+- **Client area link** for connecting an external billing or storefront site (Paymenter, WHMCS, Tebex and similar) as a sidebar page or an iframe.
+- **Mods and extensions** through a small JavaScript SDK. More on that below.
 
-Your VPS RAM is spent running Minecraft servers, not administrative scaffolding.
+## What it doesn't do
 
-| Feature / Metric | Pterodactyl + Wings | NeoPanel |
-| :--- | :--- | :--- |
-| **Daemon Architecture** | PHP 8.x + Nginx + MariaDB + Redis + Docker + Wings | **1 Static Go Binary** + SQLite WAL + Java |
-| **Idle Memory Footprint** | ~1,024 – 2,048 MB | **~15 – 25 MB** |
-| **Process Isolation** | Heavy Docker container layers | **Bubblewrap (`bwrap`) Jail + Systemd Slices** |
-| **Setup & Dependencies** | Docker images + Compose + SQL schemas + Node.js | **Single `curl \| sudo bash` script** |
-| **Multi-Node Clustering** | Wings tokens + TLS per node | **Daemon `--node` mode + Token / API key pairing** |
-| **Subuser Access** | Granular ACL checkboxes | **Per-server RBAC subuser permissions** |
-| **Automated Billing API** | External Wings API wrappers | **Native Client API (`/api/client-api/v1/provision`)** |
-| **Resource Limits** | Docker cgroups | **`systemd-run` PID (`TasksMax=512`) & CPU caps** |
+- No Docker eggs. Servers run as plain JVM processes, so no SteamCMD, Rust, Python or Discord bot eggs.
+- No per-server subuser permissions. There are two roles, `admin` and `user`.
+- No hosted MySQL or MariaDB. Databases are embedded SQLite.
+- No payment processing. You can link your own storefront, but NeoPanel won't handle checkout.
 
----
+## Install
 
-## 🛡️ Security & Sandboxing Architecture
+Tested on Ubuntu 24.04 LTS.
 
-### 1. Filesystem Isolation (Bubblewrap `bwrap`)
-Untrusted Minecraft plugins can execute arbitrary Java code and read `/etc/passwd`, `/etc/shadow`, or neighbor server files on uncontainerized hosts. NeoPanel invokes server instances inside unprivileged user namespaces via `bwrap`:
-- **Read-only system binds**: `/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`, `/etc/alternatives`, and JVM runtime directories.
-- **Isolated scratch mounts**: Empty private `tmpfs` mounts for `/tmp` and `/run`.
-- **Server jail**: The server's working directory is the **only read-write mount**. All neighboring server directories, `/root`, and sensitive system paths are completely unreachable.
-- **Network access**: Net namespace is shared (`--share-net`) for multiplayer networking while isolation boundaries stay locked.
+### Master panel
 
-### 2. Fork-Bomb & CPU Starvation Defense (Systemd Slices)
-Malicious plugins or runaway threads cannot exhaust host process tables:
-- Process groups run inside dedicated systemd scopes (`systemd-run --scope`).
-- **PID Limit**: Hard-capped via `-p TasksMax=512` to instantly mitigate fork-bombs.
-- **CPU Quota**: Optional `-p CPUQuota=...%` to prevent a rogue instance from pinning 100% of all VPS cores.
-
-### 3. Pure Go Token-Bucket Rate Limiter
-NeoPanel protects endpoints from brute force and scraper spam without Redis or external dependencies:
-- In-memory thread-safe rate limiter (`internal/api/ratelimit.go`).
-- **Global API rate**: 60 req/sec (burst 100).
-- **Authentication login rate**: 1 req/sec (burst 15).
-- Background cleanup routines automatically prune inactive IP states to keep memory usage negligible.
-
----
-
-## ⚡ What You Get: The 80% for Minecraft
-
-### 🎮 Live Console & Monitoring
-- **Real-Time WebSocket Stream**: Live log streaming with ANSI & Minecraft `§` formatting, interactive input bar with command history (`↑`/`↓`), quick-command menu, and standalone popout terminal.
-- **Slide-Out Drawer (`Ctrl + \``)**: Access the live console from any sub-page or file manager without leaving your current work.
-- **Interactive SVG Telemetry**: Real-time crosshair hover tooltips displaying exact timestamps and values for CPU %, Memory MiB/GiB, and Network In/Out.
-- **1-Click Copyable IP**: Click any host address chip to copy `fqdn:port` instantly.
-
-### 📁 Pterodactyl-Style File Manager
-- **Full File Operations**: Upload (multi-file drag-and-drop with progress), rename, delete, download, and in-browser editor (`Tab` indentation, keyboard shortcuts).
-- **Batch Multi-Select**: Select multiple items with shift-click support to **Move** (with `/home/container/` auto-completion), **Archive / Zip** (`.zip` / `.tar.gz`), or **Extract / Unzip** (`.zip`, `.tar.gz`, `.tar`, `.jar`).
-- **View Switcher**: Switch between **List**, **Icons**, and **Tiles** views.
-- **Smart Sorting**: Folders always stay on top, with sorting by Name, Size, or Extension.
-
-### ⏰ Database-Backed Automated Schedules
-- **Go Cron Scheduler**: Recurring automation evaluated every 30 seconds by an internal worker.
-- **Supported Actions**: Console commands (`say`, `save-all`), graceful restarts, world backups (`.tar.gz`), and graceful shutdowns.
-- **Interactive Management**: Modal editor with human-readable cron presets, active toggles, duplicate-minute safeguards, and instant **"Run Now"** triggers.
-
-### 👥 Subusers & Granular RBAC Permissions
-- **Invite Teammates**: Add staff members or builders by email or username.
-- **Granular Permissions**:
-  `console.view`, `console.command`, `server.power`, `files.view`, `files.edit`, `files.delete`, `settings.view`, `settings.edit`, `database.manage`, `backup.manage`, `subusers.manage`, `schedules.manage`.
-- **Node-Level Policy Padlocks**: Cluster administrators can lock RAM allocation, port numbers, or Java runtimes on specific nodes. Restricted settings display padlock chips in the UI and enforce `403 Forbidden` checks on the backend.
-
-### 🔌 Client Area Billing Integration (`POST /api/client-api/v1/provision`)
-- Seamlessly connects storefronts (WHMCS, Blesta, Paymenter, custom billing portals).
-- Automatically provisions user accounts, allocates ports, targets specific nodes, and sets memory/CPU limits.
-- **Admin Area Integration Hub**: Live copyable code snippets in PHP (WHMCS/Blesta), Node.js, Python, and cURL.
-- **Sidebar Visibility**: Toggle whether the "Client Area" navigation button is visible.
-
-### 💤 Free Node Idle Player Watchdog
-- Designate any cluster node as a **Free Node** (`is_free: true`).
-- Running servers with **0 connected players** automatically shut down after a configurable timeout (default 15 minutes) to conserve VPS resources.
-- Fully audited with clean server log notifications before shutdown.
-
-### ⚙️ Quick Configs & Server Icon Tools
-- **Server Icon Uploader**: Upload 64×64 PNG icons directly (`server-icon.png`) for the in-game multiplayer list.
-- **Quick Configs Editor**: Sliders for view distance (2–32), simulation distance (2–32), spawn protection, toggles for flight, PvP, whitelist, command blocks, and 1-click EULA acceptance.
-- **Presets**: 1-click presets for *Extreme Performance* (low render), *Balanced*, and *Ultra Visual*.
-
-### 🌐 Global Timezone Customization
-- Display all activity logs, console timestamps, file modification dates, and schedule timers in your preferred timezone (UTC, America, Europe, Asia, Australia, etc.).
-
----
-
-## 📦 Multi-OS Installation
-
-The unified installer (`install.sh`) automatically detects your Linux distribution and package manager (`apt`, `dnf`, `yum`, `pacman`, `apk`):
-
-Supported OS: **Ubuntu 20.04/22.04/24.04 LTS, Debian 11/12, CentOS 8/9, RHEL 8/9, AlmaLinux, Rocky Linux, Fedora, Arch Linux, Alpine Linux**.
-
-### 1. Install Master Panel
-```bash
+```
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash
 ```
 
-Unattended non-interactive installation:
-```bash
+For a non-interactive install:
+
+```
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- \
-  --install --domain panel.yourdomain.com --email admin@yourdomain.com -y
+  --install --domain panel.yourdomain.com --email you@yourdomain.com -y
 ```
 
-### 2. Connect Dedicated Cluster Nodes (`--node` Mode)
-Install a lightweight worker node on another VPS without serving any frontend web code:
+The script will:
 
-**Step 1:** On the Master Panel, create an Admin API key (`neo_...`) via `Admin Area -> API Keys` or via SSH:
-```bash
+1. Install the basics (`curl`, `jq`, `tar`, `ufw`, `git`) and Go 1.24+ if needed.
+2. Install Java 25, 21, 17 and 8.
+3. Build `/usr/local/bin/neopanel` and write `/etc/neopanel/config.yaml`.
+4. Optionally set up Caddy with a Let's Encrypt certificate.
+5. Configure UFW for ports 22, 80, 443, 2022 and 25565 to 25600.
+6. Optionally set up Cloudflare Turnstile.
+7. Install a systemd service plus the `neopanel-update` and `neopanel-installer` helpers.
+
+### Adding a node
+
+On the master panel, create an admin API key under Admin Area, Cluster Nodes (or Account, API Keys). You can also do it over SSH:
+
+```
 sudo neopanel api-key create --name "eu-node-01"
 ```
 
-**Step 2:** On the remote worker VPS:
-```bash
+Then run this on the new VPS:
+
+```
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- \
   --node \
   --master https://panel.yourdomain.com \
@@ -136,42 +84,147 @@ curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sud
   --location "Frankfurt, DE"
 ```
 
----
+It builds the binary, installs Java, opens the firewall ports, starts the service, and registers itself with your master panel. The node doesn't serve a web UI. Everything shows up in the master.
 
-## 🛠️ CLI Management
+## Command line
 
 | Task | Command |
-| :--- | :--- |
-| **Update Panel / Node to Latest Release** | `sudo neopanel-update` |
-| **Interactive Installer Menu** | `sudo neopanel-installer` |
-| **Show / Rotate Node Secret Token** | `sudo neopanel node-token [--rotate] [--raw]` |
-| **Create / List / Revoke API Keys** | `sudo neopanel api-key create\|list\|delete ...` |
-| **Connect Remote Node via CLI** | `sudo neopanel node connect --name n1 --url http://IP:8080 --token neo_...` |
-| **Check Daemon Status** | `systemctl status neopanel` |
-| **Follow Live Daemon Logs** | `journalctl -u neopanel -f` |
+|---|---|
+| Update from GitHub | `sudo neopanel-update` |
+| Installer menu | `sudo neopanel-installer` |
+| Show or rotate node token | `sudo neopanel node-token [--rotate] [--raw]` |
+| Manage API keys | `sudo neopanel api-key create\|list\|delete ...` |
+| Connect a node from the CLI | `sudo neopanel node connect --name n1 --url http://IP:8080 --token neo_node_...` |
+| List, test or remove nodes | `sudo neopanel node list\|test\|remove ...` |
+| Service status | `systemctl status neopanel` |
+| Live logs | `journalctl -u neopanel -f` |
 
----
+Running the binary directly:
 
-## 🏗️ Building From Source
+```
+neopanel -config /etc/neopanel/config.yaml -host 0.0.0.0 -port 8080 -role panel
+neopanel -config /etc/neopanel/config.yaml -role node   # or just: -node
+```
 
-Requires **Go 1.22+**. All frontend assets in `web/` are embedded directly into the Go binary at compile time via `//go:embed`:
+In the web UI, `Ctrl + K` opens the command palette and `Ctrl + \`` toggles the console drawer.
 
-```bash
+## Configuration
+
+The config lives at `/etc/neopanel/config.yaml`:
+
+```yaml
+server:
+  host: "127.0.0.1"             # 127.0.0.1 behind Caddy, 0.0.0.0 for standalone or nodes
+  port: 8080
+  mode: "behind_proxy"          # "behind_proxy" or "standalone"
+  role: "panel"                 # "panel" (master + web UI) or "node" (daemon only)
+  startup_timeout_seconds: 180
+
+paths:
+  data_dir: "/var/lib/neopanel"
+  servers_dir: "/var/lib/neopanel/servers"
+  db_path: "/var/lib/neopanel/neopanel.db"
+
+security:
+  jwt_secret: "<auto-generated-hex>"
+  token_expiration_hours: 72
+  node_token: "neo_node_<auto-generated-hex>"
+  turnstile:
+    enabled: false
+    site_key: ""
+    secret_key: ""
+
+java:
+  default_path: "java"
+
+sftp:
+  enabled: true
+  port: 2022
+  key_path: "/var/lib/neopanel/sftp_host_key"
+```
+
+## Mods and extensions
+
+You can extend the panel without rebuilding it. Mods can add pages, sidebar items, dashboard widgets, command palette actions, and themes.
+
+There are three ways to install one:
+
+- **In the browser.** Go to Admin Area, Mods & Extensions (`/admin/mods`), pick a template, edit the JS and CSS, and hit Save & Apply Live.
+- **Upload.** Drop in a `.zip` (with an optional `manifest.json`), a `.js` or `.mjs` file, or a `.css` file.
+- **On disk.** Put an unpacked mod in `/var/lib/neopanel/mods/<mod-id>/`:
+
+```
+my-custom-mod/
+├── manifest.json   # { id, name, version, author, description, enabled, entry_js, entry_css }
+├── mod.js          # runs on panel load, with window.NP available
+└── mod.css         # attached while the mod is enabled
+```
+
+Each mod runs in its own try/catch, so a broken one shouldn't take the panel down. If something goes wrong, add `?safemode=1` to any URL (like `/admin/mods?safemode=1`) to skip mod execution while you fix it.
+
+### The `window.NP` API
+
+| Method | What it does |
+|---|---|
+| `NP.registerPage({ id, title, icon, scope, render })` | Adds a page at `/mod/<id>` and a sidebar entry. `scope` is `'global'`, `'server'` or `'both'`. |
+| `NP.addSidebarItem({ id, label, icon, scope, pageId, url, onClick })` | Adds a sidebar item. |
+| `NP.registerSlot(slotName, (el, ctx) => ...)` | Renders into built-in slots: `nav:bottom`, `dashboard:top`, `dashboard:bottom`, `console:below-stats`, `console:below-charts`, `files:top`, `plugins:top`, `settings:bottom`. |
+| `NP.addPaletteCommand({ id, group, label, subtitle, action })` | Adds an action to the `Ctrl + K` palette. |
+| `NP.on(event, fn)` | Listens for `'render'`, `'route'` or `'server:switch'`. |
+| `NP.api(url, opts)` / `NP.srvApi(subPath, opts)` | Calls the panel or active-server API with the current session. |
+| `NP.injectCSS(id, css)` / `NP.removeCSS(id)` | Adds or removes a stylesheet at runtime. |
+| `NP.storage(modId)` | A namespaced `localStorage` wrapper with `get`, `set` and `remove`. |
+| `NP.navigate(target)` / `NP.toast(msg, kind)` / `NP.modal` | Navigation, notifications, and alert/confirm/prompt dialogs. |
+
+A small example, adding a "Save World" button below the console charts:
+
+```js
+NP.registerSlot('console:below-charts', (el, ctx) => {
+  if (!ctx.server) return;
+  el.innerHTML = `<div class="card"><div class="row sb">
+    <b>Server Macros (${ctx.server.name})</b>
+    <button class="btn sm pr" id="macro-save">Save World</button>
+  </div></div>`;
+  el.querySelector('#macro-save').onclick = () =>
+    NP.srvApi('/command', { method: 'POST', body: JSON.stringify({ command: 'save-all' }) })
+      .then(() => NP.toast('Saved world!', 'ok'));
+});
+```
+
+## Client area and maintenance mode
+
+**Client area.** Under Admin Area, Panel Look & Branding, Client Area Storefront Portal, you can set a sidebar label, point it at your external storefront URL, and choose whether it opens as a card with a new tab or embeds as an iframe. Turn it off and visitors get a 503 page. Leave it unconfigured and they get a "not configured" page.
+
+**Maintenance mode.** You can enable it from the same branding page, with your own title, message and optional ETA. Regular users see a 503 lock screen, and admins can still sign in and get a banner reminding them it's on.
+
+Server pages use short routes like `/server/{id}/console` (with `?node={nodeId}` for remote nodes). Unknown routes and missing servers show a proper 404.
+
+## HTTP and WebSocket API
+
+For scripts and automation, authenticate with `Authorization: Bearer neo_<api_key>` or a JWT from login.
+
+- **Cluster and nodes:** `GET /api/cluster/servers`, `GET|POST /api/nodes`, `ALL /api/nodes/{id}/proxy/*`, `WS /api/nodes/{id}/ws/{serverId}`
+- **Servers and power:** `GET|POST /api/servers`, `GET|PUT|DELETE /api/servers/{id}`, `POST /api/servers/{id}/power`, `POST /api/servers/{id}/command`
+- **Console:** `WS /api/servers/{id}/ws`
+- **Files:** `GET|DELETE /api/servers/{id}/files`, plus `/content`, `/rename`, `/move`, `/compress`, `/unzip`, `/upload` and `/download` under `/api/servers/{id}/files/`
+- **Software and Java:** `GET /api/versions`, `POST /api/servers/{id}/software`, `POST /api/servers/{id}/reinstall`, `GET /api/system/java`, `POST /api/system/java/install`
+- **Plugins, backups, databases:** `/api/plugins/search`, `/api/servers/{id}/plugins*`, `/api/servers/{id}/backups*`, `/api/servers/{id}/databases*`
+- **Branding:** `GET /api/branding`, `GET|PUT /api/admin/branding`, `POST /api/admin/branding/upload`, `POST /api/admin/branding/reset`, `GET /branding/{filename}`
+- **Mods:** `GET /api/mods`, `GET /mods/{id}/{path...}`, `GET|POST /api/admin/mods`, `POST /api/admin/mods/upload`, `PUT|DELETE /api/admin/mods/{id}`
+
+## Building from source
+
+You need Go 1.22 or newer. There's no Node.js and no bundler, since everything in `web/` is embedded with `//go:embed`.
+
+```
 git clone https://github.com/Pekly/NeoPanel.git
 cd NeoPanel
 
-# Compile binary -> ./bin/neopanel
-make build
-
-# Cross-compile static Linux binaries (amd64 / arm64)
-make build-linux
-
-# Run directly
-make run
+make build         # builds ./bin/neopanel
+make build-linux   # static Linux binaries for amd64 and arm64
+make run           # run in dev mode
 ```
 
----
+## License
 
-## 📄 License
-
-MIT License — Crafted for Minecraft admins who prefer spending RAM on players instead of PHP workers.
+MIT. Made for Minecraft admins who would rather spend their RAM on players than on PHP workers.
