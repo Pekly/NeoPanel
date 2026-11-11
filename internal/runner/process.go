@@ -1012,10 +1012,10 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 		sysArgs := []string{
 			"--scope",
 			"-q",
-			fmt.Sprintf("-p TasksMax=%d", tasksMax),
+			fmt.Sprintf("--property=TasksMax=%d", tasksMax),
 		}
 		if p.server != nil && p.server.CPULimitPercent > 0 {
-			sysArgs = append(sysArgs, fmt.Sprintf("-p CPUQuota=%d%%", p.server.CPULimitPercent))
+			sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", p.server.CPULimitPercent))
 		}
 		sysArgs = append(sysArgs, javaBinary)
 		sysArgs = append(sysArgs, args...)
@@ -1109,10 +1109,10 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 			sysArgs := []string{
 				"--scope",
 				"-q",
-				fmt.Sprintf("-p TasksMax=%d", tasksMax),
+				fmt.Sprintf("--property=TasksMax=%d", tasksMax),
 			}
 			if p.server != nil && p.server.CPULimitPercent > 0 {
-				sysArgs = append(sysArgs, fmt.Sprintf("-p CPUQuota=%d%%", p.server.CPULimitPercent))
+				sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", p.server.CPULimitPercent))
 			}
 			sysArgs = append(sysArgs, bwrapPath)
 			sysArgs = append(sysArgs, bwrapArgs...)
