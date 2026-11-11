@@ -7572,7 +7572,7 @@ const V = {
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
               <span class="mu">Upstream Git Status</span>
               <div class="row" style="gap:8px; align-items:center;">
-                ${up?.is_updating ? '<span class="badge starting"><i class="dot"></i>Update In Progress</span>' :
+                ${(up?.is_updating || S.updateProgress?.running) ? '<span class="badge starting"><i class="dot"></i>Update In Progress</span>' :
                   up?.error ? `<span class="badge offline" title="${esc(up.error)}"><i class="dot"></i>Check Note: ${esc(up.error)}</span>` :
                   up?.update_available ? `<span class="badge starting"><i class="dot"></i>New Commit Available (${esc(up.remote_commit?.slice(0, 7) || 'latest')})</span>` :
                   '<span class="badge online"><i class="dot"></i>Up to Date</span>'}
@@ -9224,7 +9224,12 @@ async function loadAdminData(skipRender = false) {
   if (usersRes) S.adminUsers = usersRes || [];
   if (tsRes) S.adminTurnstile = tsRes;
   if (Array.isArray(nodesRes)) S.nodes = nodesRes;
-  if (upRes) S.adminUpdate = upRes;
+  if (upRes) {
+    S.adminUpdate = upRes;
+    if (upRes.is_updating) {
+      startUpdateProgressPolling();
+    }
+  }
   if (smtpRes) S.adminSmtp = smtpRes;
   if (modsRes && Array.isArray(modsRes.mods)) {
     S.adminMods = modsRes.mods;
@@ -13729,17 +13734,137 @@ async function openApplyUpdateModal() {
   await executePanelUpdate();
 }
 
+function renderAdminUpdateBtn(up) {
+  const isUpdating = !!(S.updateProgress?.running || up?.is_updating);
+  let pct = S.updateProgress?.pct || 0;
+  let step = S.updateProgress?.step || (isUpdating ? 'Updating...' : '');
+  if (isUpdating && pct < 5) pct = 5;
+
+  if (isUpdating) {
+    return `
+      <button type="button" class="btn sm pr np-update-btn is-updating" id="admin-update-now-btn" disabled style="position:relative; overflow:hidden; min-width:220px; justify-content:center; padding:6px 14px; background:#111927; border:1px solid rgba(56,122,255,0.45); cursor:wait;" title="Panel update is compiling and applying in the background">
+        <span class="np-update-bar-fill" id="admin-update-bar-fill" style="position:absolute; left:0; top:0; bottom:0; width:${pct}%; background:linear-gradient(90deg, rgba(56,122,255,0.4), rgba(56,122,255,0.75)); transition:width 0.35s ease; border-radius:inherit; pointer-events:none;"></span>
+        <span style="position:relative; z-index:2; display:inline-flex; align-items:center; gap:8px; font-weight:600; font-size:12px; color:#ffffff;">
+          <span class="spinner-sm" style="width:12px; height:12px; border:2px solid rgba(255,255,255,0.3); border-top-color:#fff; border-radius:50%; animation:spin 0.8s linear infinite;"></span>
+          <span id="admin-update-bar-label">${pct}% ${esc(step)}</span>
+        </span>
+      </button>
+    `;
+  }
+
+  const hasUpdate = up?.update_available;
+  const label = hasUpdate ? `Update to Latest (${esc(up.remote_commit?.slice(0, 7) || 'new')})` : 'Update Panel Now';
+  return `
+    <button type="button" class="btn sm pr np-update-btn" id="admin-update-now-btn" onclick="openApplyUpdateModal()">
+      ${ic('download', 13)} <span>${label}</span>
+    </button>
+  `;
+}
+
 async function executePanelUpdate() {
   try {
-    const res = await api('/api/admin/updates/apply', { method: 'POST' });
-    toast(res.message || 'Update started in background!');
+    S.updateProgress = { running: true, pct: 5, step: 'Starting update...' };
     if (!S.adminUpdate) S.adminUpdate = {};
     S.adminUpdate.is_updating = true;
-    R();
-    openUpdateLogsModal();
+
+    const wrap = $('#admin-update-actions-wrap');
+    if (wrap) {
+      wrap.innerHTML = `<button type="button" class="btn sm" onclick="checkAdminUpdates()">${ic('refresh', 13)} Check Updates</button>${renderAdminUpdateBtn(S.adminUpdate)}`;
+    } else {
+      R();
+    }
+
+    startUpdateProgressPolling();
+
+    const res = await api('/api/admin/updates/apply', { method: 'POST' });
+    toast(res.message || 'Update started in background!', 'ok');
   } catch (e) {
+    S.updateProgress = null;
+    if (S.adminUpdate) S.adminUpdate.is_updating = false;
     toast(e.message || 'Failed to start update', 'bad');
+    R();
   }
+}
+
+let _updatePoller = null;
+function startUpdateProgressPolling() {
+  if (_updatePoller) return;
+
+  const poll = async () => {
+    try {
+      const res = await api('/api/admin/updates/logs');
+      const isRunning = !!res.running;
+      let pct = typeof res.progress === 'number' ? res.progress : 0;
+      let step = res.step || '';
+
+      if (isRunning && pct < 5) pct = 5;
+      if (!step) step = isRunning ? 'Updating...' : 'Ready';
+
+      S.updateProgress = { running: isRunning, pct, step };
+
+      // Update button elements directly in DOM
+      const barFill = $('#admin-update-bar-fill');
+      const barLabel = $('#admin-update-bar-label');
+      if (barFill) barFill.style.width = pct + '%';
+      if (barLabel) barLabel.textContent = `${pct}% ${step}`;
+
+      if (!isRunning) {
+        clearInterval(_updatePoller);
+        _updatePoller = null;
+
+        if (pct >= 80 || res.logs?.includes('Successfully Updated') || res.logs?.includes('NeoPanel Update SUCCESS')) {
+          if (barFill) {
+            barFill.style.width = '100%';
+            barFill.style.background = '#10b981';
+          }
+          if (barLabel) barLabel.innerHTML = '✔ 100% Updated &bull; Reconnecting...';
+          toast('NeoPanel successfully updated! Reconnecting to panel...', 'ok');
+
+          waitForPanelRestart();
+        } else {
+          S.updateProgress = null;
+          if (S.adminUpdate) S.adminUpdate.is_updating = false;
+          R();
+        }
+      }
+    } catch (e) {
+      // Panel daemon may be restarting right now
+      const barLabel = $('#admin-update-bar-label');
+      if (barLabel && (S.updateProgress?.pct >= 80)) {
+        barLabel.innerHTML = '✔ Restarting &bull; Reconnecting...';
+      }
+    }
+  };
+
+  poll();
+  _updatePoller = setInterval(poll, 1500);
+}
+
+function waitForPanelRestart() {
+  let attempts = 0;
+  const maxAttempts = 35; // ~50s
+  const ping = setInterval(async () => {
+    attempts++;
+    try {
+      const res = await fetch('/api/system', { method: 'GET', cache: 'no-cache' });
+      if (res.ok) {
+        clearInterval(ping);
+        S.updateProgress = null;
+        if (S.adminUpdate) S.adminUpdate.is_updating = false;
+        toast('NeoPanel is back online with the latest update!', 'ok');
+        await loadAdminData();
+        R();
+      }
+    } catch (e) {
+      if (attempts >= maxAttempts) {
+        clearInterval(ping);
+        S.updateProgress = null;
+        if (S.adminUpdate) S.adminUpdate.is_updating = false;
+        toast('Panel update complete! Please refresh the page.', 'ok');
+        R();
+      }
+    }
+  }, 1500);
 }
 
 let _updateLogTimer = null;
@@ -13769,13 +13894,15 @@ async function pollUpdateLogsOnce() {
     const pre = $('#update-log-pre');
     const pill = $('#update-log-status');
     if (pre) {
-      pre.textContent = data.logs || 'No update logs found yet (/tmp/neopanel-install.log is empty).';
+      let clean = String(data.logs || 'No update logs found yet (/tmp/neopanel-install.log is empty).');
+      clean = clean.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\([a-zA-Z]|\r/g, '');
+      pre.textContent = clean;
       pre.scrollTop = pre.scrollHeight;
     }
     if (pill) {
       if (data.running) {
         pill.className = 'con-live-pill';
-        pill.innerHTML = '<i></i>Compiling &amp; updating...';
+        pill.innerHTML = `<i></i>${data.progress ? data.progress + '% ' : ''}${esc(data.step || 'Compiling & updating...')}`;
       } else {
         pill.className = 'badge online';
         pill.innerHTML = '<i class="dot"></i>Process Idle / Completed';
@@ -15988,6 +16115,9 @@ window.openPalette = openPalette;
 window.execPaletteItem = execPaletteItem;
 window.toggleCmdMenu = toggleCmdMenu;
 window.execQuickCmd = execQuickCmd;
+window.renderAdminUpdateBtn = renderAdminUpdateBtn;
+window.startUpdateProgressPolling = startUpdateProgressPolling;
+window.waitForPanelRestart = waitForPanelRestart;
 window.checkAdminUpdates = checkAdminUpdates;
 window.saveAdminUpdateConfig = saveAdminUpdateConfig;
 window.resetAdminUpdateRepo = resetAdminUpdateRepo;
