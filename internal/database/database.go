@@ -183,6 +183,11 @@ func (db *DB) migrate() error {
 	}
 
 	// Safe automatic schema column migrations
+	_ = db.addColumnIfNotExists("users", "email", "TEXT NOT NULL DEFAULT ''")
+	_ = db.addColumnIfNotExists("users", "avatar_url", "TEXT NOT NULL DEFAULT ''")
+	_ = db.addColumnIfNotExists("users", "two_factor_enabled", "BOOLEAN NOT NULL DEFAULT 0")
+	_ = db.addColumnIfNotExists("users", "two_factor_secret", "TEXT NOT NULL DEFAULT ''")
+	_ = db.addColumnIfNotExists("users", "recovery_codes", "TEXT NOT NULL DEFAULT ''")
 	_ = db.addColumnIfNotExists("servers", "icon_url", "TEXT DEFAULT ''")
 	_ = db.addColumnIfNotExists("servers", "owner_id", "INTEGER DEFAULT 1")
 	_ = db.addColumnIfNotExists("servers", "node_id", "TEXT DEFAULT 'local'")
@@ -213,33 +218,55 @@ func (db *DB) GetUserCount() (int, error) {
 }
 
 func (db *DB) GetUserByUsername(username string) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?", username)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ?", username)
 	user := &User{}
-	err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt)
+	var tfa int
+	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
+	user.TwoFactorEnabled = tfa == 1
 	return user, nil
 }
 
 func (db *DB) GetUserByID(id int) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, password_hash, role, created_at FROM users WHERE id = ?", id)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE id = ?", id)
 	user := &User{}
-	err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt)
+	var tfa int
+	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
+	user.TwoFactorEnabled = tfa == 1
 	return user, nil
 }
 
 func (db *DB) GetUserByEmailOrUsername(lookup string) (*User, error) {
-	return db.GetUserByUsername(lookup)
+	lookup = strings.TrimSpace(lookup)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ? OR (email != '' AND LOWER(email) = LOWER(?))", lookup, lookup)
+	user := &User{}
+	var tfa int
+	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	user.TwoFactorEnabled = tfa == 1
+	return user, nil
 }
 
 func (db *DB) CreateUser(username, passwordHash, role string) (*User, error) {
+	return db.CreateUserWithDetails(username, "", passwordHash, role, "")
+}
+
+func (db *DB) CreateUserWithDetails(username, email, passwordHash, role, avatarURL string) (*User, error) {
 	now := time.Now().UTC()
-	res, err := db.conn.Exec("INSERT INTO users (username, password_hash, role, created_at) VALUES (?, ?, ?, ?)",
-		username, passwordHash, role, now)
+	username = strings.TrimSpace(username)
+	email = strings.TrimSpace(email)
+	if role != "admin" {
+		role = "user"
+	}
+	res, err := db.conn.Exec("INSERT INTO users (username, email, password_hash, role, avatar_url, two_factor_enabled, two_factor_secret, recovery_codes, created_at) VALUES (?, ?, ?, ?, ?, 0, '', '', ?)",
+		username, email, passwordHash, role, avatarURL, now)
 	if err != nil {
 		return nil, err
 	}
@@ -248,16 +275,52 @@ func (db *DB) CreateUser(username, passwordHash, role string) (*User, error) {
 		return nil, err
 	}
 	return &User{
-		ID:           int(id),
-		Username:     username,
-		PasswordHash: passwordHash,
-		Role:         role,
-		CreatedAt:    now,
+		ID:               int(id),
+		Username:         username,
+		Email:            email,
+		PasswordHash:     passwordHash,
+		Role:             role,
+		AvatarURL:        avatarURL,
+		TwoFactorEnabled: false,
+		CreatedAt:        now,
 	}, nil
 }
 
+func (db *DB) UpdateUserEmail(id int, email string) error {
+	_, err := db.conn.Exec("UPDATE users SET email = ? WHERE id = ?", strings.TrimSpace(email), id)
+	return err
+}
+
+func (db *DB) UpdateUserAvatar(id int, avatarURL string) error {
+	_, err := db.conn.Exec("UPDATE users SET avatar_url = ? WHERE id = ?", strings.TrimSpace(avatarURL), id)
+	return err
+}
+
+func (db *DB) UpdateUserTwoFactor(id int, enabled bool, secret, recoveryCodes string) error {
+	val := 0
+	if enabled {
+		val = 1
+	}
+	_, err := db.conn.Exec("UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?",
+		val, secret, recoveryCodes, id)
+	return err
+}
+
+func (db *DB) UpdateUserPassword(id int, passwordHash string) error {
+	_, err := db.conn.Exec("UPDATE users SET password_hash = ? WHERE id = ?", passwordHash, id)
+	return err
+}
+
+func (db *DB) UpdateUserRole(id int, role string) error {
+	if role != "admin" {
+		role = "user"
+	}
+	_, err := db.conn.Exec("UPDATE users SET role = ? WHERE id = ?", role, id)
+	return err
+}
+
 func (db *DB) ListUsers() ([]*User, error) {
-	rows, err := db.conn.Query("SELECT id, username, role, created_at FROM users ORDER BY created_at ASC")
+	rows, err := db.conn.Query("SELECT id, username, COALESCE(email, ''), role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), created_at FROM users ORDER BY created_at ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -266,9 +329,11 @@ func (db *DB) ListUsers() ([]*User, error) {
 	var users []*User
 	for rows.Next() {
 		u := &User{}
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CreatedAt); err != nil {
+		var tfa int
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.AvatarURL, &tfa, &u.CreatedAt); err != nil {
 			return nil, err
 		}
+		u.TwoFactorEnabled = tfa == 1
 		users = append(users, u)
 	}
 	if users == nil {
@@ -280,6 +345,45 @@ func (db *DB) ListUsers() ([]*User, error) {
 func (db *DB) DeleteUser(id int) error {
 	_, err := db.conn.Exec("DELETE FROM users WHERE id = ?", id)
 	return err
+}
+
+func (db *DB) ListServersForUser(userID int, role string) ([]*Server, error) {
+	if role == "admin" || userID == 0 {
+		return db.ListServers()
+	}
+	query := `SELECT s.id, s.name, s.description, s.type, s.version, s.jar_file, s.port, s.memory_min, s.memory_max, s.java_args, s.java_path, s.auto_restart, COALESCE(s.icon_url, ''), COALESCE(s.owner_id, 1), COALESCE(s.node_id, 'local'), s.created_at, s.updated_at 
+	FROM servers s 
+	LEFT JOIN server_subusers su ON s.id = su.server_id AND su.user_id = ?
+	WHERE s.owner_id = ? OR su.user_id IS NOT NULL
+	GROUP BY s.id
+	ORDER BY s.created_at DESC`
+	rows, err := db.conn.Query(query, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var servers []*Server
+	for rows.Next() {
+		s := &Server{}
+		var iconURL, nodeID string
+		var ownerID int
+		if err := rows.Scan(
+			&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
+			&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
+			&s.AutoRestart, &iconURL, &ownerID, &nodeID, &s.CreatedAt, &s.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		s.IconURL = iconURL
+		s.OwnerID = ownerID
+		s.NodeID = nodeID
+		servers = append(servers, s)
+	}
+	if servers == nil {
+		servers = []*Server{}
+	}
+	return servers, nil
 }
 
 func (db *DB) ListServers() ([]*Server, error) {

@@ -3,11 +3,16 @@ package database
 import "time"
 
 type User struct {
-	ID           int       `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"`
-	Role         string    `json:"role"` // "admin" or "user"
-	CreatedAt    time.Time `json:"created_at"`
+	ID               int       `json:"id"`
+	Username         string    `json:"username"`
+	Email            string    `json:"email"`
+	PasswordHash     string    `json:"-"`
+	Role             string    `json:"role"` // "admin" or "user"
+	AvatarURL        string    `json:"avatar_url,omitempty"`
+	TwoFactorEnabled bool      `json:"two_factor_enabled"`
+	TwoFactorSecret  string    `json:"-"`
+	RecoveryCodes    string    `json:"-"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type Server struct {

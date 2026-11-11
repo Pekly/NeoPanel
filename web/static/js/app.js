@@ -4,6 +4,7 @@
 // --- High-Quality Vector SVG Icon Generator ---
 function ic(name, size = 18) {
   const p = {
+    mail: `<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>`,
     terminal: `<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>`,
     settings: `<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>`,
     activity: `<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>`,
@@ -1715,6 +1716,17 @@ function applyRoute(urlStr, opts = {}) {
     if (route.plugTab !== undefined) S.plugTab = route.plugTab;
   }
 
+  if (resolvedView === 'admin') {
+    if (S.user && S.user.role !== 'admin') {
+      toast('Administrator privileges required', 'bad');
+      resolvedView = 'dash';
+      finalUrl = withSafeModeQuery('/');
+    } else {
+      S.activeServerId = null;
+      S.activeNodeId = null;
+    }
+  }
+
   S.view = resolvedView;
   if (route.adminTab !== undefined && resolvedView === 'admin') S.adminTab = route.adminTab;
   if (route.acctTab !== undefined && resolvedView === 'acc' && S.acct) S.acct.tab = route.acctTab;
@@ -2326,13 +2338,35 @@ function setBtnLoading(btn, isLoading, loadingText = 'Loading...') {
 }
 
 function av(s) {
-  const letter = (S.acct.fn ? S.acct.fn[0] : (S.acct.un ? S.acct.un[0] : 'A')).toUpperCase();
-  const hasCustomGravatar = S.acct.h && S.acct.em && S.acct.em.toLowerCase() !== 'admin@neopanel.internal';
+  const customAvatar = (S.user?.avatar_url || S.acct?.avatar_url || '').trim();
+  const letter = (S.acct?.fn ? S.acct.fn[0] : (S.acct?.un ? S.acct.un[0] : (S.user?.username ? S.user.username[0] : 'A'))).toUpperCase();
+  if (customAvatar) {
+    return `<span class="av" style="width:${s}px;height:${s}px;font-size:${s * 0.4}px">
+      ${esc(letter)}
+      <img src="${esc(customAvatar)}" alt="" style="object-fit:cover; width:100%; height:100%; border-radius:inherit;" onerror="this.remove()">
+    </span>`;
+  }
+  const hasCustomGravatar = S.acct?.h && S.acct?.em && S.acct.em.toLowerCase() !== 'admin@neopanel.internal';
   const defAvatar = (typeof getBrand === 'function' ? getBrand('default_avatar_url') : '') || DEFAULT_USER_AVATAR_URL;
   return `<span class="av" style="width:${s}px;height:${s}px;font-size:${s * 0.4}px">
     ${esc(letter)}
     <img src="${esc(defAvatar)}" alt="" onerror="this.remove()">
     ${hasCustomGravatar ? `<img src="https://gravatar.com/avatar/${S.acct.h}?s=${s * 2}&d=404" alt="" onerror="this.remove()">` : ''}
+  </span>`;
+}
+
+function userAvatarHtml(u, s = 32) {
+  const name = u?.username || 'User';
+  const letter = (name[0] || 'U').toUpperCase();
+  const avatarUrl = (u?.avatar_url || '').trim();
+  if (avatarUrl) {
+    return `<span class="av user-avatar-ic" style="width:${s}px;height:${s}px;font-size:${s * 0.4}px">
+      ${esc(letter)}
+      <img src="${esc(avatarUrl)}" alt="${esc(name)}" style="object-fit:cover; width:100%; height:100%; border-radius:inherit;" onerror="this.remove()">
+    </span>`;
+  }
+  return `<span class="av user-avatar-ic" style="width:${s}px;height:${s}px;font-size:${s * 0.4}px; background:linear-gradient(135deg, #6366f1, #8b5cf6); color:#fff; font-weight:700;">
+    ${esc(letter)}
   </span>`;
 }
 
@@ -7761,36 +7795,66 @@ const V = {
       `;
     } else if (t === 3) {
       content = `
+        <input type="file" id="admin-user-avatar-file" accept="image/*" style="display:none;" onchange="onAdminUserAvatarSelected(this)">
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx);">Panel Users &amp; Permissions</h2>
-              <span class="mu" style="font-size:13px;">Manage operators, administrators, and client user accounts.</span>
+              <span class="mu" style="font-size:13px;">Manage operators, administrators, and client user accounts with independent roles and avatars.</span>
             </div>
             <button class="btn pr" onclick="openAddUserModal()">+ Create User</button>
           </div>
           <table>
-            <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead>
+            <thead><tr><th>User</th><th>Email Address</th><th>Role</th><th>Security</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
-              ${(S.adminUsers || []).length ? S.adminUsers.map(u => `
+              ${(S.adminUsers || []).length ? S.adminUsers.map(u => {
+                const isMe = (S.user && (u.id === S.user.id || u.username === S.user.username)) || u.username === S.acct.un;
+                return `
                 <tr>
-                  <td class="mono mu">${u.id}</td>
-                  <td><b>${esc(u.username)}</b></td>
+                  <td>
+                    <div class="row" style="gap:10px; align-items:center;">
+                      ${userAvatarHtml(u, 32)}
+                      <div>
+                        <b>${esc(u.username)}</b>
+                        ${isMe ? '<span class="chip" style="margin-left:6px; font-size:10px;">You</span>' : ''}
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="mono" style="color:${u.email ? 'var(--tx)' : 'var(--tx-muted)'}; font-size:13px;">
+                      ${esc(u.email || '—')}
+                    </span>
+                  </td>
                   <td><span class="badge ${u.role === 'admin' ? 'online' : ''}">${esc(u.role)}</span></td>
+                  <td>
+                    ${u.two_factor_enabled
+                      ? '<span class="badge online"><i class="dot"></i>2FA Enabled</span>'
+                      : '<span class="chip" style="font-size:11px;">Standard</span>'}
+                  </td>
                   <td class="mu">${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
                   <td style="text-align:right">
-                    ${u.username !== S.acct.un ? `
-                      <button class="btn sm dg" data-id="${u.id}" data-name="${esc(u.username)}" onclick="deleteAdminUser(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Delete</button>
-                    ` : '<span class="mu" style="font-size:12px;">Current Account</span>'}
+                    <div class="row" style="justify-content:flex-end; gap:6px;">
+                      <button type="button" class="btn sm" data-id="${u.id}" data-name="${esc(u.username)}" onclick="adminTriggerUserAvatarUpload(this.dataset.id)">${ic('image', 12)} Icon</button>
+                      ${!isMe ? `
+                        <button class="btn sm dg" data-id="${u.id}" data-name="${esc(u.username)}" onclick="deleteAdminUser(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Delete</button>
+                      ` : '<span class="mu" style="font-size:12px; padding:0 4px;">Active</span>'}
+                    </div>
                   </td>
-                </tr>
-              `).join('') : `
+                </tr>`;
+              }).join('') : `
                 <tr>
-                  <td class="mono mu">1</td>
-                  <td><b>${esc(S.acct.un)}</b></td>
-                  <td><span class="badge online">admin</span></td>
-                  <td class="mu">Just now</td>
-                  <td style="text-align:right"><span class="mu" style="font-size:12px;">Current Account</span></td>
+                  <td>
+                    <div class="row" style="gap:10px; align-items:center;">
+                      ${av(32)}
+                      <b>${esc(S.acct.un || S.user?.username || 'admin')}</b>
+                      <span class="chip" style="margin-left:6px; font-size:10px;">You</span>
+                    </div>
+                  </td>
+                  <td><span class="mono" style="font-size:13px;">${esc(S.acct.em || S.user?.email || 'admin@neopanel.internal')}</span></td>
+                  <td><span class="badge online">${esc(S.user?.role || 'admin')}</span></td>
+                  <td><span class="badge online"><i class="dot"></i>Standard</span></td>
+                  <td class="mu">Active</td>
+                  <td style="text-align:right"><span class="mu" style="font-size:12px;">Active</span></td>
                 </tr>
               `}
             </tbody>
@@ -8225,15 +8289,19 @@ const V = {
       tabContent = `<div class="card prof">
         <div class="banner" style="background-image: url('${esc(getBrand('card_cover_url'))}'), url('/img/banner.jpg'); background-size: cover; background-position: center;">
           <span class="avb">${av(64)}</span>
-          <button class="btn sm" onclick="$('#aem').focus()">Change Gravatar</button>
+          <input type="file" id="my-avatar-upload" accept="image/*" style="display:none;" onchange="uploadMyAvatar(this)">
+          <div class="row" style="gap:8px;">
+            <button type="button" class="btn sm" onclick="$('#my-avatar-upload').click()">${ic('image', 13)} Upload Avatar</button>
+            <button type="button" class="btn sm" onclick="$('#aem').focus()">Gravatar</button>
+          </div>
         </div>
         <div class="pbody">
           <div class="grid g2">
             <label class="f"><span>First name</span><input type="text" id="afn" value="${esc(a.fn)}"></label>
             <label class="f"><span>Last name</span><input type="text" id="aln" value="${esc(a.ln)}"></label>
           </div>
-          <label class="f"><span>Username</span><input type="text" id="aun" value="${esc(a.un)}"></label>
-          <label class="f"><span>Email (used for Gravatar)</span><input type="text" id="aem" value="${esc(a.em)}"></label>
+          <label class="f"><span>Username</span><input type="text" id="aun" value="${esc(a.un)}" readonly style="opacity:0.8; cursor:not-allowed;" title="Username is assigned by administrators"></label>
+          <label class="f"><span>Email Address <b style="color:var(--err); font-size:12px;">*required</b></span><input type="email" id="aem" value="${esc(a.em)}"></label>
           <div class="row" style="justify-content:flex-end">
             <button class="btn pr" onclick="updateAccountProfile()">Update Profile</button>
           </div>
@@ -8270,6 +8338,7 @@ const V = {
         </div>
       </div>`;
     } else if (t === 1) {
+      const is2FA = Boolean(S.user?.two_factor_enabled || a.two_factor_enabled);
       tabContent = `<div class="card">
         <h2>Update Password</h2>
         <label class="f"><span>Current Password</span><input type="password" id="cur-pw"></label>
@@ -8277,9 +8346,23 @@ const V = {
         <button class="btn pr" onclick="updatePassword()">Update Password</button>
       </div>
       <div class="card" style="margin-top:14px">
-        <div class="ar" style="border:0; padding:0;">
-          <div><b>Two-Factor Authentication (2FA)</b><div class="mu">Require an authenticator app code on login</div></div>
-          <label class="sw"><input type="checkbox" ${a.tfa ? 'checked' : ''} onchange="a.tfa=this.checked; toast(this.checked ? '2FA enabled' : '2FA disabled');"><i></i></label>
+        <div class="row sb" style="align-items:center; flex-wrap:wrap; gap:12px;">
+          <div>
+            <div class="row" style="gap:8px; align-items:center;">
+              <h2 style="margin:0;">Two-Factor Authentication (TOTP)</h2>
+              ${is2FA ? '<span class="badge online"><i class="dot"></i>Active</span>' : '<span class="badge offline"><i class="dot"></i>Disabled</span>'}
+            </div>
+            <span class="mu" style="font-size:13px; display:block; margin-top:4px;">
+              ${is2FA
+                ? 'Your account is secured with two-factor authentication. An authenticator app code is required at sign in.'
+                : 'Protect your account from unauthorized sign-ins using Google Authenticator, Authy, 1Password, or standard TOTP app.'}
+            </span>
+          </div>
+          ${is2FA ? `
+            <button type="button" class="btn sm dg" onclick="openDisable2FAModal()">${ic('lock', 13)} Disable 2FA</button>
+          ` : `
+            <button type="button" class="btn sm pr" onclick="openEnable2FAWizard()">${ic('shield', 13)} Setup 2FA</button>
+          `}
         </div>
       </div>`;
     } else if (t === 2) {
@@ -8537,11 +8620,14 @@ function renderModSidebarItemsHtml(scope) {
   }).join('');
 }
 
+function selectAdminTabNav(e, idx) {
+  if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0)) return true;
+  if (e && e.preventDefault) e.preventDefault();
+  selectAdminTab(idx);
+  return false;
+}
+
 function navHtml() {
-  const showGlobalNav = ['dash', 'client', 'notfound', 'mod', 'maintenance'].includes(S.view) ||
-    (S.view === 'act' && !window.location.pathname.startsWith('/server/')) ||
-    !curServer();
-  const isAdminGlobal = (S.view === 'admin' || S.view === 'acc') && (!curServer() || S.view === 'dash');
   const brandHref = withSafeModeQuery('/');
   const adminHref = routeUrl('admin');
   const accHref = routeUrl('acc');
@@ -8553,7 +8639,74 @@ function navHtml() {
       ? `<span class="chip" style="margin-left:auto; font-size:10px; padding:1px 6px; color:#f87171;">503</span>`
       : '');
 
-  if (showGlobalNav || isAdminGlobal) {
+  // 1. Independent Dedicated Admin Navigation
+  if (S.view === 'admin') {
+    const t = S.adminTab || 0;
+    return `
+    <a class="brand" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
+      ${brandLogoHtml(false)}
+    </a>
+    
+    <button class="nsearch" onclick="openPalette(1)" aria-label="Search (Ctrl+K)">
+      ${ic('search', 15)}
+      <span>Search</span>
+      <kbd>Ctrl K</kbd>
+    </button>
+
+    <a class="nb" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="margin-bottom: 8px; text-decoration:none;">
+      &larr; Back to Servers
+    </a>
+
+    <div class="ng">ADMINISTRATION</div>
+
+    <a class="nav-item ${t === 0 ? 'on' : ''}" href="/admin" onclick="return selectAdminTabNav(event, 0)" ${t === 0 ? 'aria-current="page"' : ''}>
+      ${ic('activity', 16)}
+      <span>Overview &amp; Health</span>
+    </a>
+    <a class="nav-item ${t === 1 ? 'on' : ''}" href="/admin/nodes" onclick="return selectAdminTabNav(event, 1)" ${t === 1 ? 'aria-current="page"' : ''}>
+      ${ic('network', 16)}
+      <span>Cluster Nodes</span>
+    </a>
+    <a class="nav-item ${t === 2 ? 'on' : ''}" href="/admin/servers" onclick="return selectAdminTabNav(event, 2)" ${t === 2 ? 'aria-current="page"' : ''}>
+      ${ic('server', 16)}
+      <span>Managed Servers</span>
+    </a>
+    <a class="nav-item ${t === 3 ? 'on' : ''}" href="/admin/users" onclick="return selectAdminTabNav(event, 3)" ${t === 3 ? 'aria-current="page"' : ''}>
+      ${ic('users', 16)}
+      <span>Users &amp; Roles</span>
+    </a>
+    <a class="nav-item ${t === 4 ? 'on' : ''}" href="/admin/branding" onclick="return selectAdminTabNav(event, 4)" ${t === 4 ? 'aria-current="page"' : ''}>
+      ${ic('layers', 16)}
+      <span>Branding &amp; OEM</span>
+    </a>
+    <a class="nav-item ${t === 5 ? 'on' : ''}" href="/admin/audit" onclick="return selectAdminTabNav(event, 5)" ${t === 5 ? 'aria-current="page"' : ''}>
+      ${ic('clock', 16)}
+      <span>Audit Logs</span>
+    </a>
+    <a class="nav-item ${t === 6 ? 'on' : ''}" href="/admin/mods" onclick="return selectAdminTabNav(event, 6)" ${t === 6 ? 'aria-current="page"' : ''}>
+      ${ic('package', 16)}
+      <span>Extensions &amp; Mods</span>
+    </a>
+
+    <div class="np-slot-container" data-np-slot="nav:bottom"></div>
+    <span class="sp"></span>
+
+    <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
+      ${av(34)}
+      <span class="who">
+        <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
+        <span class="mu pv">${esc(S.acct.em || S.user?.email || 'Administrator')}</span>
+      </span>
+      ${ic('settings', 16)}
+    </a>`;
+  }
+
+  // 2. Global Navigation (Servers, Activity, Client Area, Account)
+  const showGlobalNav = ['dash', 'client', 'notfound', 'mod', 'maintenance', 'acc'].includes(S.view) ||
+    (S.view === 'act' && !window.location.pathname.startsWith('/server/')) ||
+    !curServer();
+
+  if (showGlobalNav) {
     const isActGlobal = S.view === 'act';
     return `
     <a class="brand" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
@@ -8586,22 +8739,23 @@ function navHtml() {
 
     <span class="sp"></span>
 
-    <a class="nav-item ${S.view === 'admin' ? 'on' : ''}" href="${esc(adminHref)}" onclick="return handleNavClick(event, 'admin')" style="margin-bottom:6px;" ${S.view === 'admin' ? 'aria-current="page"' : ''}>
+    ${S.user?.role === 'admin' ? `
+    <a class="nav-item" href="${esc(adminHref)}" onclick="return handleNavClick(event, 'admin')" style="margin-bottom:6px;">
       ${ic('shield', 16)}
       <span>Open Admin Area</span>
-    </a>
+    </a>` : ''}
 
     <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
       ${av(34)}
       <span class="who">
-        <b>${esc(S.acct.fn)} ${esc(S.acct.ln)}</b>
-        <span class="mu pv">${esc(S.acct.em)}</span>
+        <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
+        <span class="mu pv">${esc(S.acct.em || S.user?.email || (S.user?.role === 'admin' ? 'Administrator' : 'Standard User'))}</span>
       </span>
       ${ic('settings', 16)}
     </a>`;
   }
 
-  // Inside a Server Workspace
+  // 3. Inside a Server Workspace
   let group = '';
   return `
   <a class="brand" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
@@ -8639,16 +8793,11 @@ function navHtml() {
 
   <span class="sp"></span>
 
-  <a class="nav-item ${S.view === 'admin' ? 'on' : ''}" href="${esc(adminHref)}" onclick="return handleNavClick(event, 'admin')" style="margin-bottom:6px;" ${S.view === 'admin' ? 'aria-current="page"' : ''}>
-    ${ic('shield', 16)}
-    <span>Open Admin Area</span>
-  </a>
-
   <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
     ${av(34)}
     <span class="who">
-      <b>${esc(S.acct.fn)} ${esc(S.acct.ln)}</b>
-      <span class="mu pv">${esc(S.acct.em)}</span>
+      <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
+      <span class="mu pv">${esc(S.acct.em || S.user?.email || (S.user?.role === 'admin' ? 'Administrator' : 'Standard User'))}</span>
     </span>
     ${ic('settings', 16)}
   </a>`;
@@ -11120,25 +11269,189 @@ async function loadAccountData(skipRender = false) {
 }
 
 async function updateAccountProfile() {
-  const fn = $('#afn')?.value?.trim();
-  const ln = $('#aln')?.value?.trim() ?? '';
-  const un = $('#aun')?.value?.trim();
-  const em = $('#aem')?.value?.trim();
-  if (fn) S.acct.fn = fn;
-  S.acct.ln = ln;
-  if (un) S.acct.un = un;
-  if (em) {
-    S.acct.em = em;
-    S.acct.h = await computeGravatarHash(em);
+  const fn = $('#afn')?.value?.trim() || '';
+  const ln = $('#aln')?.value?.trim() || '';
+  const em = $('#aem')?.value?.trim() || '';
+
+  if (!em || !em.includes('@') || !em.includes('.')) {
+    toast('A valid email address is required', 'bad');
+    return;
   }
-  localStorage.setItem('neopanel_profile', JSON.stringify({
-    fn: S.acct.fn,
-    ln: S.acct.ln,
-    un: S.acct.un,
-    em: S.acct.em
-  }));
-  toast('Profile information saved!', 'ok');
-  R();
+
+  try {
+    await api('/api/account/profile', {
+      method: 'PUT',
+      body: JSON.stringify({ email: em })
+    });
+    if (S.user) S.user.email = em;
+    S.acct.em = em;
+    S.acct.fn = fn;
+    S.acct.ln = ln;
+    S.acct.h = await computeGravatarHash(em);
+    if (S.user?.id) {
+      localStorage.setItem(`neopanel_names_${S.user.id}`, JSON.stringify({ fn, ln }));
+    }
+    toast('Profile updated successfully!', 'ok');
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to update profile', 'bad');
+  }
+}
+
+async function openEnable2FAWizard() {
+  const container = $('#modal-container');
+  if (!container) return;
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:480px; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:16px;">
+        <h2 style="font-size:20px; margin:0; color:#fff;">${ic('shield', 18)} Setup Two-Factor Authentication</h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+      <div id="tfa-wizard-content" style="text-align:center; padding:20px 0;">
+        <span class="np-spinner-sm"></span> Generating security keys...
+      </div>
+    </div>
+  </div>`;
+
+  try {
+    const res = await api('/api/account/2fa/generate', { method: 'POST' });
+    const content = $('#tfa-wizard-content');
+    if (!content) return;
+
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(res.otpauth_url)}`;
+    const formattedSecret = (res.secret.match(/.{1,4}/g) || []).join(' ');
+
+    content.innerHTML = `
+      <p class="mu" style="font-size:13px; margin:0 0 16px; text-align:left;">
+        1. Scan this QR code in Google Authenticator, Authy, or 1Password. Or enter the secret key manually:
+      </p>
+      <div style="background:#fff; display:inline-block; padding:10px; border-radius:12px; margin-bottom:14px; box-shadow:0 4px 14px rgba(0,0,0,0.25);">
+        <img src="${esc(qrUrl)}" alt="TOTP QR Code" width="180" height="180" style="display:block;">
+      </div>
+      <div style="margin-bottom:16px;">
+        <span class="mu" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">Secret Key</span>
+        <div class="mono" style="background:var(--con-bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; font-size:14px; font-weight:700; user-select:all; color:#fff; display:inline-flex; align-items:center; gap:8px;">
+          <span>${esc(formattedSecret)}</span>
+          <button type="button" class="btn sm" onclick="navigator.clipboard.writeText('${esc(res.secret)}'); toast('Secret copied to clipboard', 'ok');">${ic('copy', 12)}</button>
+        </div>
+      </div>
+      <p class="mu" style="font-size:13px; margin:0 0 10px; text-align:left;">
+        2. Enter the 6-digit confirmation code shown on your phone:
+      </p>
+      <div class="row" style="gap:8px; margin-bottom:16px; justify-content:center;">
+        <input type="text" id="tfa-verify-code" maxlength="6" placeholder="000000" autocomplete="one-time-code" style="width:180px; text-align:center; font-size:20px; font-weight:700; letter-spacing:4px;" onkeydown="if(event.key==='Enter')confirmEnable2FA('${esc(res.secret)}')">
+        <button type="button" id="tfa-confirm-btn" class="btn pr" onclick="confirmEnable2FA('${esc(res.secret)}')">Activate</button>
+      </div>
+      <div id="tfa-wizard-err" style="color:var(--err); font-size:13px; min-height:18px;"></div>
+    `;
+    $('#tfa-verify-code')?.focus();
+  } catch (err) {
+    const content = $('#tfa-wizard-content');
+    if (content) content.innerHTML = `<span style="color:var(--err);">Failed to generate 2FA key: ${esc(err.message)}</span>`;
+  }
+}
+
+async function confirmEnable2FA(secret) {
+  const code = $('#tfa-verify-code')?.value.trim();
+  const errEl = $('#tfa-wizard-err');
+  const btn = $('#tfa-confirm-btn');
+  if (!code || code.length !== 6) {
+    if (errEl) errEl.textContent = 'Please enter a 6-digit code from your authenticator app.';
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api('/api/account/2fa/enable', {
+      method: 'POST',
+      body: JSON.stringify({ secret, code })
+    });
+    if (S.user) S.user.two_factor_enabled = true;
+    S.acct.two_factor_enabled = true;
+
+    const content = $('#tfa-wizard-content');
+    if (content) {
+      const codes = res.recovery_codes || [];
+      content.innerHTML = `
+        <div style="width:48px; height:48px; border-radius:50%; background:rgba(34,197,94,0.15); color:#22c55e; display:grid; place-items:center; margin:0 auto 14px;">
+          ${ic('check', 24)}
+        </div>
+        <h3 style="margin:0 0 8px; color:var(--tx);">Two-Factor Authentication Active!</h3>
+        <p class="mu" style="font-size:13px; margin:0 0 16px; text-align:left;">
+          Save these <b>emergency recovery codes</b> in a secure password manager. If you ever lose your phone, each code can be used once to log in:
+        </p>
+        <div class="grid g2" style="background:var(--con-bg); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:16px;">
+          ${codes.map(c => `<div class="mono" style="font-size:13px; font-weight:700; color:#fff; padding:4px;">${esc(c)}</div>`).join('')}
+        </div>
+        <div class="row" style="gap:10px; justify-content:center;">
+          <button type="button" class="btn" onclick="navigator.clipboard.writeText('${codes.join('\\n')}'); toast('Recovery codes copied!', 'ok');">${ic('copy', 13)} Copy All Codes</button>
+          <button type="button" class="btn pr" onclick="closeModal(); R();">Done</button>
+        </div>
+      `;
+    }
+    toast('Two-factor authentication successfully enabled!', 'ok');
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    if (errEl) errEl.textContent = err.message || 'Verification failed. Please check the code and try again.';
+  }
+}
+
+function openDisable2FAModal() {
+  const container = $('#modal-container');
+  if (!container) return;
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:440px; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:16px;">
+        <h2 style="font-size:20px; margin:0; color:#fff;">${ic('lock', 18)} Disable Two-Factor Auth</h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+      <p class="mu" style="font-size:13px; margin:0 0 16px;">
+        Disabling 2FA reduces your account security. Please verify your identity with your account password and current authenticator code:
+      </p>
+      <label class="f" style="margin-bottom:12px;">
+        <span>Account Password</span>
+        <input type="password" id="disable-2fa-pw" required autocomplete="current-password">
+      </label>
+      <label class="f" style="margin-bottom:18px;">
+        <span>6-Digit Code or Recovery Code</span>
+        <input type="text" id="disable-2fa-code" maxlength="9" placeholder="000000 or 1a2b-3c4d" autocomplete="one-time-code">
+      </label>
+      <div id="disable-2fa-err" style="color:var(--err); font-size:13px; margin-bottom:12px;"></div>
+      <div class="row" style="justify-content:flex-end; gap:10px;">
+        <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+        <button type="button" id="disable-2fa-btn" class="btn dg" onclick="confirmDisable2FA()">Disable 2FA</button>
+      </div>
+    </div>
+  </div>`;
+  $('#disable-2fa-pw')?.focus();
+}
+
+async function confirmDisable2FA() {
+  const password = $('#disable-2fa-pw')?.value;
+  const code = $('#disable-2fa-code')?.value.trim();
+  const errEl = $('#disable-2fa-err');
+  const btn = $('#disable-2fa-btn');
+
+  if (!password) {
+    if (errEl) errEl.textContent = 'Account password is required.';
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    await api('/api/account/2fa/disable', {
+      method: 'POST',
+      body: JSON.stringify({ password, code })
+    });
+    if (S.user) S.user.two_factor_enabled = false;
+    S.acct.two_factor_enabled = false;
+    closeModal();
+    toast('Two-factor authentication disabled', 'ok');
+    R();
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    if (errEl) errEl.textContent = err.message || 'Failed to disable 2FA';
+  }
 }
 
 async function updatePassword() {
@@ -13052,6 +13365,60 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
 }
 
 // --- Admin Panel Management (Users, GC, Customization) ---
+let _targetAdminUploadUserId = null;
+
+function adminTriggerUserAvatarUpload(userId) {
+  _targetAdminUploadUserId = userId;
+  const inp = $('#admin-user-avatar-file');
+  if (inp) {
+    inp.value = '';
+    inp.click();
+  }
+}
+
+async function onAdminUserAvatarSelected(input) {
+  const file = input?.files?.[0];
+  if (!file || !_targetAdminUploadUserId) return;
+  const fd = new FormData();
+  fd.append('avatar', file);
+  try {
+    const res = await api(`/api/admin/users/${_targetAdminUploadUserId}/avatar`, {
+      method: 'POST',
+      body: fd
+    });
+    toast('User icon updated successfully', 'ok');
+    await loadAdminData();
+  } catch (err) {
+    toast(err.message || 'Failed to upload icon', 'bad');
+  } finally {
+    _targetAdminUploadUserId = null;
+    if (input) input.value = '';
+  }
+}
+
+async function uploadMyAvatar(input) {
+  const file = input?.files?.[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('avatar', file);
+  try {
+    const res = await api('/api/account/avatar', {
+      method: 'POST',
+      body: fd
+    });
+    if (res.avatar_url) {
+      if (S.user) S.user.avatar_url = res.avatar_url;
+      if (S.acct) S.acct.avatar_url = res.avatar_url;
+      toast('Profile avatar updated successfully', 'ok');
+      R();
+    }
+  } catch (err) {
+    toast(err.message || 'Failed to upload avatar', 'bad');
+  } finally {
+    if (input) input.value = '';
+  }
+}
+
 function openAddUserModal() {
   const container = $('#modal-container');
   if (!container) return;
@@ -13065,21 +13432,35 @@ function openAddUserModal() {
 
       <form id="add-user-form" onsubmit="submitAddUser(event)">
         <label class="f" style="margin-bottom:12px;">
-          <span>Username</span>
+          <span>Username <b style="color:var(--err); font-size:12px;">*required</b></span>
           <input type="text" id="nu-username" required placeholder="e.g. operator" autocomplete="off">
         </label>
 
         <label class="f" style="margin-bottom:12px;">
-          <span>Password</span>
+          <span>Email Address <b style="color:var(--err); font-size:12px;">*required</b></span>
+          <input type="email" id="nu-email" required placeholder="user@example.com" autocomplete="off">
+        </label>
+
+        <label class="f" style="margin-bottom:12px;">
+          <span>Password <b style="color:var(--err); font-size:12px;">*required</b></span>
           <input type="password" id="nu-password" required placeholder="Minimum 6 characters" autocomplete="new-password">
         </label>
 
-        <label class="f" style="margin-bottom:20px;">
+        <label class="f" style="margin-bottom:12px;">
           <span>Role</span>
           <select id="nu-role" style="height:38px;">
-            <option value="user">Standard User (Access assigned servers)</option>
+            <option value="user" selected>Standard User (Access assigned servers)</option>
             <option value="admin">Administrator (Full cluster management)</option>
           </select>
+        </label>
+
+        <label class="f" style="margin-bottom:20px;">
+          <span>Profile Icon (Optional)</span>
+          <div class="row" style="gap:10px; align-items:center;">
+            <input type="file" id="nu-avatar-file" accept="image/*" style="display:none;" onchange="const n=$('#nu-avatar-name'); if(n) n.textContent=this.files[0]?.name||'No file chosen';">
+            <button type="button" class="btn sm" onclick="$('#nu-avatar-file').click()">${ic('image', 14)} Choose Icon...</button>
+            <span id="nu-avatar-name" class="mu" style="font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px;">No file chosen</span>
+          </div>
         </label>
 
         <div class="row" style="justify-content:flex-end; gap:10px;">
@@ -13099,20 +13480,41 @@ async function submitAddUser(e) {
   if (btn) btn.disabled = true;
 
   const username = $('#nu-username')?.value.trim();
+  const email = $('#nu-email')?.value.trim();
   const password = $('#nu-password')?.value;
   const role = $('#nu-role')?.value || 'user';
+  const avatarFile = $('#nu-avatar-file')?.files?.[0];
 
   if (!username || !password) {
     toast('Username and password are required', 'bad');
     if (btn) btn.disabled = false;
     return;
   }
+  if (!email || !email.includes('@') || !email.includes('.')) {
+    toast('A valid email address is required for user accounts', 'bad');
+    if (btn) btn.disabled = false;
+    return;
+  }
 
   try {
-    await api('/api/admin/users', {
+    const newUser = await api('/api/admin/users', {
       method: 'POST',
-      body: JSON.stringify({ username, password, role })
+      body: JSON.stringify({ username, email, password, role })
     });
+
+    if (avatarFile && newUser?.id) {
+      try {
+        const fd = new FormData();
+        fd.append('avatar', avatarFile);
+        await api(`/api/admin/users/${newUser.id}/avatar`, {
+          method: 'POST',
+          body: fd
+        });
+      } catch (avErr) {
+        console.warn('Avatar upload warning:', avErr);
+      }
+    }
+
     closeModal();
     toast(`User "${username}" created successfully`, 'ok');
     await loadAdminData();
@@ -13121,7 +13523,7 @@ async function submitAddUser(e) {
     if (btn) btn.disabled = false;
     uiAlert({
       title: 'User Creation Failed',
-      message: `Failed to create user account <b>${esc(username)}</b>:<br><br>${esc(err.message || 'Username already exists or password too short')}`,
+      message: `Failed to create user account <b>${esc(username)}</b>:<br><br>${esc(err.message || 'Username or email already exists')}`,
       type: 'error'
     });
   }
@@ -14536,12 +14938,13 @@ async function checkAuth() {
       return;
     }
     const user = await meRes.json();
-    const savedProf = JSON.parse(localStorage.getItem('neopanel_profile') || '{}');
     S.user = user;
-    S.acct.un = savedProf.un || user.username || S.acct.un;
-    S.acct.em = savedProf.em || user.email || S.acct.em;
-    if (savedProf.fn) S.acct.fn = savedProf.fn;
-    if (savedProf.ln !== undefined) S.acct.ln = savedProf.ln;
+    S.acct.un = user.username || '';
+    S.acct.em = user.email || '';
+    S.acct.avatar_url = user.avatar_url || '';
+    S.acct.two_factor_enabled = Boolean(user.two_factor_enabled);
+    if (user.first_name) S.acct.fn = user.first_name;
+    if (user.last_name) S.acct.ln = user.last_name;
     S.acct.h = await computeGravatarHash(S.acct.em);
 
     setPageProgress(65);
@@ -14612,7 +15015,11 @@ function showSetupScreen() {
     <h1 class="lt">Create Admin Master Account</h1>
     <label class="lf">
       ${ic('user', 16)}
-      <input id="su-name" type="text" placeholder="Username" autocomplete="username" onkeydown="if(event.key==='Enter')submitSetup()">
+      <input id="su-name" type="text" placeholder="Admin Username" autocomplete="username" onkeydown="if(event.key==='Enter')submitSetup()">
+    </label>
+    <label class="lf">
+      ${ic('mail', 16)}
+      <input id="su-email" type="email" placeholder="Administrator Email" autocomplete="email" onkeydown="if(event.key==='Enter')submitSetup()">
     </label>
     <label class="lf">
       ${ic('lock', 16)}
@@ -14634,10 +15041,15 @@ function showSetupScreen() {
 
 async function submitSetup() {
   const username = $('#su-name')?.value.trim();
+  const email = $('#su-email')?.value.trim();
   const password = $('#su-pw')?.value;
   const err = $('#lerr');
   if (!username || !password) {
     if (err) err.textContent = 'Username and password are required.';
+    return;
+  }
+  if (!email || !email.includes('@') || !email.includes('.')) {
+    if (err) err.textContent = 'A valid administrator email address is required.';
     return;
   }
   if (S.turnstileEnabled && !S.turnstileToken) {
@@ -14652,6 +15064,7 @@ async function submitSetup() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username,
+        email,
         password,
         'cf-turnstile-response': S.turnstileToken
       })
@@ -14769,6 +15182,13 @@ async function submitLogin() {
       })
     })).json();
 
+    if (res.two_factor_required && res.temp_token) {
+      setBtnLoading(btn, false);
+      resetTurnstileWidget();
+      show2FALoginScreen(res.temp_token);
+      return;
+    }
+
     if (res.token) {
       S.token = res.token;
       S.turnstileToken = '';
@@ -14789,6 +15209,64 @@ async function submitLogin() {
   }
 }
 
+function show2FALoginScreen(tempToken) {
+  const box = $('#login .lbox');
+  if (!box) return;
+  box.innerHTML = `
+    <div class="llogo">${brandLogoHtml(true)}</div>
+    <div style="width:48px; height:48px; border-radius:14px; background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; display:grid; place-items:center; margin:0 auto 16px; box-shadow:0 4px 14px rgba(99,102,241,0.35);">
+      ${ic('shield', 24)}
+    </div>
+    <h1 class="lt" style="margin-bottom:6px; font-size:22px;">Two-Factor Authentication</h1>
+    <p class="mu" style="font-size:13px; line-height:1.45; margin:0 0 18px; text-align:center;">
+      Enter the 6-digit code from your authenticator app, or an 8-character recovery code.
+    </p>
+    <label class="lf" style="margin-bottom:14px;">
+      ${ic('key', 16)}
+      <input id="l2fa-code" type="text" maxlength="9" placeholder="000000 or Recovery Code" autofocus autocomplete="one-time-code" style="text-align:center; font-size:18px; font-weight:700; letter-spacing:2px;" onkeydown="if(event.key==='Enter')submit2FALogin('${esc(tempToken)}')">
+    </label>
+    <div class="lerr" id="lerr" role="alert"></div>
+    <button class="lbtn" onclick="submit2FALogin('${esc(tempToken)}')">Verify &amp; Sign In</button>
+    <button type="button" class="btn sm" style="width:100%; margin-top:12px; justify-content:center;" onclick="$('#login')?.remove(); showLoginScreen();">
+      &larr; Back to standard login
+    </button>
+  `;
+  $('#l2fa-code')?.focus();
+}
+
+async function submit2FALogin(tempToken) {
+  const code = $('#l2fa-code')?.value.trim();
+  const err = $('#lerr');
+  if (!code) {
+    if (err) err.textContent = 'Please enter your 6-digit code or recovery code.';
+    return;
+  }
+  const btn = $('#login .lbtn');
+  setBtnLoading(btn, true, 'Verifying...');
+  try {
+    const res = await (await fetch('/api/auth/login/2fa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ temp_token: tempToken, code })
+    })).json();
+
+    if (res.token) {
+      S.token = res.token;
+      S.maintAdminSignInOpen = false;
+      localStorage.setItem('neopanel_token', res.token);
+      $('#login')?.remove();
+      toast('Signed in successfully');
+      checkAuth();
+    } else {
+      setBtnLoading(btn, false);
+      if (err) err.textContent = res.error || 'Invalid verification code.';
+    }
+  } catch (e) {
+    setBtnLoading(btn, false);
+    if (err) err.textContent = 'Verification request failed.';
+  }
+}
+
 async function logout() {
   const brandName = (getBrand('brand_name') || 'NeoPanel').trim() || 'NeoPanel';
   const ok = await uiConfirm({
@@ -14802,6 +15280,20 @@ async function logout() {
   if (!ok) return;
 
   S.token = '';
+  S.user = null;
+  S.acct = {
+    un: '',
+    em: '',
+    fn: '',
+    ln: '',
+    h: '',
+    tab: 0,
+    ssh: [],
+    api: [],
+    act: [],
+    avatar_url: '',
+    two_factor_enabled: false
+  };
   S.activeServerId = null;
   S.activeNodeId = null;
   clearSettingsAutoSaveTimer();
@@ -14809,6 +15301,7 @@ async function logout() {
   S.wsState = 'disconnected';
   S.maintAdminSignInOpen = false;
   localStorage.removeItem('neopanel_token');
+  localStorage.removeItem('neopanel_profile');
   clearTimeout(S.wsReconnectTimer);
   S.wsReconnectTimer = null;
   if (S.wsPingTimer) {
@@ -14923,6 +15416,16 @@ window.submitReinstall = submitReinstall;
 window.openAddUserModal = openAddUserModal;
 window.submitAddUser = submitAddUser;
 window.deleteAdminUser = deleteAdminUser;
+window.adminTriggerUserAvatarUpload = adminTriggerUserAvatarUpload;
+window.onAdminUserAvatarSelected = onAdminUserAvatarSelected;
+window.uploadMyAvatar = uploadMyAvatar;
+window.openEnable2FAWizard = openEnable2FAWizard;
+window.confirmEnable2FA = confirmEnable2FA;
+window.openDisable2FAModal = openDisable2FAModal;
+window.confirmDisable2FA = confirmDisable2FA;
+window.show2FALoginScreen = show2FALoginScreen;
+window.submit2FALogin = submit2FALogin;
+window.selectAdminTabNav = selectAdminTabNav;
 window.triggerAdminGC = triggerAdminGC;
 window.saveAdminDaemonSettings = saveAdminDaemonSettings;
 window.saveAdminTurnstileSettings = saveAdminTurnstileSettings;

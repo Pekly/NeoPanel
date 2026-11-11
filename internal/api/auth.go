@@ -30,6 +30,7 @@ type JWTClaims struct {
 	UserID   int    `json:"user_id"`
 	Username string `json:"username"`
 	Role     string `json:"role"`
+	Scope    string `json:"scope,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -76,6 +77,37 @@ func (h *AuthHandler) GenerateToken(user *database.User) (string, error) {
 	return token.SignedString(h.jwtSecret)
 }
 
+func (h *AuthHandler) Generate2FATempToken(user *database.User) (string, error) {
+	claims := JWTClaims{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+		Scope:    "2fa_pending",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(h.jwtSecret)
+}
+
+func (h *AuthHandler) Validate2FATempToken(tokenStr string) (*JWTClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
+		return h.jwtSecret, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
+		if claims.Scope != "2fa_pending" {
+			return nil, jwt.ErrTokenInvalidClaims
+		}
+		return claims, nil
+	}
+	return nil, jwt.ErrSignatureInvalid
+}
+
 func (h *AuthHandler) ValidateToken(tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
 		return h.jwtSecret, nil
@@ -84,6 +116,9 @@ func (h *AuthHandler) ValidateToken(tokenStr string) (*JWTClaims, error) {
 		return nil, err
 	}
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
+		if claims.Scope == "2fa_pending" {
+			return nil, jwt.ErrTokenInvalidClaims
+		}
 		return claims, nil
 	}
 	return nil, jwt.ErrSignatureInvalid
@@ -184,6 +219,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Username       string `json:"username"`
+		Email          string `json:"email"`
 		Password       string `json:"password"`
 		TurnstileResp  string `json:"cf-turnstile-response"`
 		TurnstileToken string `json:"turnstile_token"`
@@ -205,8 +241,13 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 	if len(req.Username) < 3 || len(req.Password) < 6 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username >= 3 chars, Password >= 6 chars required"})
+		return
+	}
+	if req.Email == "" || !strings.Contains(req.Email, "@") || !strings.Contains(req.Email, ".") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "A valid email address is required"})
 		return
 	}
 
@@ -216,13 +257,13 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.CreateUser(req.Username, hash, "admin")
+	user, err := h.db.CreateUserWithDetails(req.Username, req.Email, hash, "admin", "")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create admin user"})
 		return
 	}
 
-	logAuditUser(h.db, user.ID, r, "auth_setup", fmt.Sprintf("Initialized NeoPanel admin account '%s'", user.Username))
+	logAuditUser(h.db, user.ID, r, "auth_setup", fmt.Sprintf("Initialized NeoPanel admin account '%s' (%s)", user.Username, user.Email))
 
 	token, _ := h.GenerateToken(user)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -259,10 +300,24 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	user, err := h.db.GetUserByUsername(req.Username)
+	user, err := h.db.GetUserByEmailOrUsername(req.Username)
 	if err != nil || !h.CheckPasswordHash(req.Password, user.PasswordHash) {
 		logAuditUser(h.db, 0, r, "auth_login_failed", fmt.Sprintf("Failed sign-in attempt for '%s'", truncateAuditText(strings.TrimSpace(req.Username), 64)))
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid username or password"})
+		return
+	}
+
+	if user.TwoFactorEnabled {
+		tempToken, err := h.Generate2FATempToken(user)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to initiate 2FA verification"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"two_factor_required": true,
+			"temp_token":          tempToken,
+			"username":            user.Username,
+		})
 		return
 	}
 
@@ -275,6 +330,74 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	logAuditUser(h.db, user.ID, r, "auth_login", fmt.Sprintf("Signed in to NeoPanel (%s)", user.Role))
 
 	// Set HTTP-only cookie as well for easy SPA access
+	http.SetCookie(w, &http.Cookie{
+		Name:     "neopanel_token",
+		Value:    token,
+		Path:     "/",
+		Expires:  time.Now().Add(time.Duration(h.expHours) * time.Hour),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"token": token,
+		"user":  user,
+	})
+}
+
+func (h *AuthHandler) Login2FA(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		TempToken string `json:"temp_token"`
+		Code      string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
+		return
+	}
+
+	claims, err := h.Validate2FATempToken(req.TempToken)
+	if err != nil || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "2FA session expired or invalid. Please log in again."})
+		return
+	}
+
+	user, err := h.db.GetUserByID(claims.UserID)
+	if err != nil || user == nil || !user.TwoFactorEnabled {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "User not found or 2FA not enabled"})
+		return
+	}
+
+	cleanCode := strings.TrimSpace(req.Code)
+	isValid := ValidateTOTPCode(user.TwoFactorSecret, cleanCode)
+	usedRecovery := false
+
+	if !isValid {
+		var remaining string
+		isValid, remaining = CheckAndConsumeRecoveryCode(user.RecoveryCodes, cleanCode)
+		if isValid {
+			usedRecovery = true
+			_ = h.db.UpdateUserTwoFactor(user.ID, true, user.TwoFactorSecret, remaining)
+		}
+	}
+
+	if !isValid {
+		logAuditUser(h.db, user.ID, r, "auth_2fa_failed", fmt.Sprintf("Invalid 2FA code entered for '%s'", user.Username))
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Invalid 2FA authentication code"})
+		return
+	}
+
+	token, err := h.GenerateToken(user)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate session token"})
+		return
+	}
+
+	logMsg := "2FA verified successfully"
+	if usedRecovery {
+		logMsg = "2FA verified via emergency recovery code"
+	}
+	logAuditUser(h.db, user.ID, r, "auth_2fa_success", logMsg)
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "neopanel_token",
 		Value:    token,
@@ -303,17 +426,24 @@ func (h *AuthHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Role     string `json:"role"`
+		Username  string `json:"username"`
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+		Role      string `json:"role"`
+		AvatarURL string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
 	if req.Username == "" || req.Password == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username and password are required"})
+		return
+	}
+	if req.Email == "" || !strings.Contains(req.Email, "@") || !strings.Contains(req.Email, ".") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "A valid email address is required for user accounts"})
 		return
 	}
 	if req.Role != "admin" {
@@ -326,13 +456,13 @@ func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.CreateUser(req.Username, hash, req.Role)
+	user, err := h.db.CreateUserWithDetails(req.Username, req.Email, hash, req.Role, req.AvatarURL)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username already taken or invalid"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username or email already taken or invalid"})
 		return
 	}
 
-	logAudit(h.db, r, "admin_user_create", fmt.Sprintf("Created panel user '%s' (role: %s)", user.Username, user.Role))
+	logAudit(h.db, r, "admin_user_create", fmt.Sprintf("Created panel user '%s' (%s, role: %s)", user.Username, user.Email, user.Role))
 
 	writeJSON(w, http.StatusCreated, user)
 }
@@ -367,8 +497,25 @@ func (h *AuthHandler) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
-	user := r.Context().Value(contextUserKey).(*JWTClaims)
-	writeJSON(w, http.StatusOK, user)
+	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+	dbUser, err := h.db.GetUserByID(claims.UserID)
+	if err == nil && dbUser != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id":                 dbUser.ID,
+			"user_id":            dbUser.ID,
+			"username":           dbUser.Username,
+			"email":              dbUser.Email,
+			"role":               dbUser.Role,
+			"avatar_url":         dbUser.AvatarURL,
+			"two_factor_enabled": dbUser.TwoFactorEnabled,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, claims)
 }
 
 func (h *AuthHandler) GetTurnstileConfig(w http.ResponseWriter, r *http.Request) {

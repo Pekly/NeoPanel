@@ -6,9 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Pekly/NeoPanel/internal/database"
 	"golang.org/x/crypto/bcrypt"
@@ -44,13 +48,278 @@ func (h *AccountHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	apiKeys, _ := h.db.ListAPIKeys(user.ID)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"id":            user.ID,
-		"username":      user.Username,
-		"role":          user.Role,
-		"created_at":    user.CreatedAt,
-		"ssh_key_count": len(sshKeys),
-		"api_key_count": len(apiKeys),
+		"id":                 user.ID,
+		"username":           user.Username,
+		"email":              user.Email,
+		"role":               user.Role,
+		"avatar_url":         user.AvatarURL,
+		"two_factor_enabled": user.TwoFactorEnabled,
+		"created_at":         user.CreatedAt,
+		"ssh_key_count":      len(sshKeys),
+		"api_key_count":      len(apiKeys),
 	})
+}
+
+func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	user, err := h.db.GetUserByUsername(claims.Username)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+
+	var req struct {
+		Email     string `json:"email"`
+		AvatarURL string `json:"avatar_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
+		return
+	}
+
+	req.Email = strings.TrimSpace(req.Email)
+	if req.Email != "" {
+		if !strings.Contains(req.Email, "@") || !strings.Contains(req.Email, ".") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid email address"})
+			return
+		}
+		if err := h.db.UpdateUserEmail(user.ID, req.Email); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Email address already in use"})
+			return
+		}
+		user.Email = req.Email
+	}
+
+	if req.AvatarURL != "" {
+		_ = h.db.UpdateUserAvatar(user.ID, req.AvatarURL)
+		user.AvatarURL = req.AvatarURL
+	}
+
+	_ = h.db.LogActivity(user.ID, "profile_update", "Updated account profile", extractClientIP(r))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message": "Profile updated successfully",
+		"user":    user,
+	})
+}
+
+func (h *AccountHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	user, err := h.db.GetUserByUsername(claims.Username)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+
+	avatarURL, err := saveUploadedAvatarFile(r, user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	_ = h.db.UpdateUserAvatar(user.ID, avatarURL)
+	_ = h.db.LogActivity(user.ID, "avatar_upload", "Uploaded new profile avatar", extractClientIP(r))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":    "Avatar uploaded successfully",
+		"avatar_url": avatarURL,
+	})
+}
+
+func (h *AccountHandler) AdminUploadUserAvatar(w http.ResponseWriter, r *http.Request) {
+	idStr := getURLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid user ID"})
+		return
+	}
+
+	user, err := h.db.GetUserByID(id)
+	if err != nil || user == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+
+	avatarURL, err := saveUploadedAvatarFile(r, user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	_ = h.db.UpdateUserAvatar(user.ID, avatarURL)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":    "User avatar updated",
+		"avatar_url": avatarURL,
+	})
+}
+
+func saveUploadedAvatarFile(r *http.Request, userID int) (string, error) {
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		return "", fmt.Errorf("avatar image must be under 5 MB")
+	}
+
+	file, header, err := r.FormFile("avatar")
+	if err != nil {
+		return "", fmt.Errorf("avatar file field is required")
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext == "" || (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".gif" && ext != ".svg") {
+		ext = ".png"
+	}
+
+	dir := filepath.Join("data", "avatars")
+	_ = os.MkdirAll(dir, 0755)
+
+	filename := fmt.Sprintf("avatar_%d%s", userID, ext)
+	destPath := filepath.Join(dir, filename)
+
+	dst, err := os.Create(destPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to save avatar image")
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		return "", fmt.Errorf("failed to write avatar image")
+	}
+
+	return fmt.Sprintf("/api/avatars/%s?t=%d", filename, time.Now().Unix()), nil
+}
+
+func (h *AccountHandler) ServeAvatar(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(r.URL.Path, "/api/avatars/")
+	if len(parts) < 2 || parts[1] == "" {
+		http.NotFound(w, r)
+		return
+	}
+	filename := filepath.Base(parts[1])
+	filePath := filepath.Join("data", "avatars", filename)
+
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	http.ServeFile(w, r, filePath)
+}
+
+func (h *AccountHandler) Generate2FA(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	user, err := h.db.GetUserByUsername(claims.Username)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+
+	secret, err := GenerateTOTPSecret()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate secret key"})
+		return
+	}
+
+	otpURL := GenerateTOTPURL("NeoPanel", user.Username, secret)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"secret":      secret,
+		"otpauth_url": otpURL,
+		"username":    user.Username,
+	})
+}
+
+func (h *AccountHandler) Enable2FA(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	user, err := h.db.GetUserByUsername(claims.Username)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+
+	var req struct {
+		Secret string `json:"secret"`
+		Code   string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
+		return
+	}
+
+	if !ValidateTOTPCode(req.Secret, req.Code) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid 6-digit verification code. Please ensure your authenticator app time is synchronized."})
+		return
+	}
+
+	recoveryCodes := GenerateRecoveryCodes(8)
+	recoveryCSV := strings.Join(recoveryCodes, ",")
+
+	if err := h.db.UpdateUserTwoFactor(user.ID, true, req.Secret, recoveryCSV); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to enable 2FA: " + err.Error()})
+		return
+	}
+
+	_ = h.db.LogActivity(user.ID, "2fa_enable", "Activated two-factor authentication", extractClientIP(r))
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message":        "Two-factor authentication successfully activated",
+		"recovery_codes": recoveryCodes,
+	})
+}
+
+func (h *AccountHandler) Disable2FA(w http.ResponseWriter, r *http.Request) {
+	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !ok || claims == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
+		return
+	}
+
+	user, err := h.db.GetUserByUsername(claims.Username)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		return
+	}
+
+	var req struct {
+		Password string `json:"password"`
+		Code     string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
+		return
+	}
+
+	pwdValid := h.auth.CheckPasswordHash(req.Password, user.PasswordHash)
+	codeValid := user.TwoFactorSecret != "" && ValidateTOTPCode(user.TwoFactorSecret, req.Code)
+
+	if !pwdValid && !codeValid {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Current password or valid 2FA code is required to disable 2FA"})
+		return
+	}
+
+	if err := h.db.UpdateUserTwoFactor(user.ID, false, "", ""); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to disable 2FA"})
+		return
+	}
+
+	_ = h.db.LogActivity(user.ID, "2fa_disable", "Deactivated two-factor authentication", extractClientIP(r))
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Two-factor authentication has been disabled"})
 }
 
 func (h *AccountHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) {

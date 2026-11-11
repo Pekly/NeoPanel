@@ -113,11 +113,14 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/auth/setup", r.auth.Setup)
 	if r.authLimiter != nil {
 		r.mux.Handle("POST /api/auth/login", r.authLimiter.Middleware(http.HandlerFunc(r.auth.Login)))
+		r.mux.Handle("POST /api/auth/login/2fa", r.authLimiter.Middleware(http.HandlerFunc(r.auth.Login2FA)))
 	} else {
 		r.mux.HandleFunc("POST /api/auth/login", r.auth.Login)
+		r.mux.HandleFunc("POST /api/auth/login/2fa", r.auth.Login2FA)
 	}
 	r.mux.HandleFunc("GET /api/branding", r.branding.GetPublicBranding)
 	r.mux.HandleFunc("GET /branding/{filename}", r.branding.ServeBrandingAsset)
+	r.mux.HandleFunc("GET /api/avatars/{filename}", r.account.ServeAvatar)
 	r.mux.HandleFunc("GET /api/mods", r.mods.ListRuntimeMods)
 	r.mux.HandleFunc("GET /mods/{id}/{path...}", r.mods.ServeModAsset)
 
@@ -266,6 +269,11 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// Account Settings routes
 	r.mux.HandleFunc("GET /api/account/profile", r.requireAuth(r.account.GetProfile))
+	r.mux.HandleFunc("PUT /api/account/profile", r.requireAuth(r.account.UpdateProfile))
+	r.mux.HandleFunc("POST /api/account/avatar", r.requireAuth(r.account.UploadAvatar))
+	r.mux.HandleFunc("POST /api/account/2fa/generate", r.requireAuth(r.account.Generate2FA))
+	r.mux.HandleFunc("POST /api/account/2fa/enable", r.requireAuth(r.account.Enable2FA))
+	r.mux.HandleFunc("POST /api/account/2fa/disable", r.requireAuth(r.account.Disable2FA))
 	r.mux.HandleFunc("POST /api/account/password", r.requireAuth(r.account.UpdatePassword))
 	r.mux.HandleFunc("GET /api/account/ssh-keys", r.requireAuth(r.account.ListSSHKeys))
 	r.mux.HandleFunc("POST /api/account/ssh-keys", r.requireAuth(r.account.AddSSHKey))
@@ -278,34 +286,35 @@ func (r *Router) registerRoutes(db *database.DB) {
 	// System info & Admin tools
 	r.mux.HandleFunc("GET /api/system", r.requireAuth(HandleSystemInfo))
 	r.mux.HandleFunc("GET /api/system/java", r.requireAuth(HandleGetJavaRuntimes))
-	r.mux.HandleFunc("POST /api/system/java/install", r.requireAuth(HandleInstallJavaRuntime(db)))
-	r.mux.HandleFunc("POST /api/admin/gc", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+	r.mux.HandleFunc("POST /api/system/java/install", r.requireAdmin(HandleInstallJavaRuntime(db)))
+	r.mux.HandleFunc("POST /api/admin/gc", r.requireAdmin(func(w http.ResponseWriter, req *http.Request) {
 		logAudit(db, req, "admin_gc", "Triggered manual Go runtime garbage collection")
 		HandleRunGC(w, req)
 	}))
-	r.mux.HandleFunc("GET /api/admin/turnstile", r.requireAuth(r.auth.GetTurnstileConfig))
-	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAuth(r.auth.UpdateTurnstileConfig))
-	r.mux.HandleFunc("GET /api/admin/branding", r.requireAuth(r.branding.GetAdminBranding))
-	r.mux.HandleFunc("PUT /api/admin/branding", r.requireAuth(r.branding.UpdateAdminBranding))
-	r.mux.HandleFunc("POST /api/admin/branding/upload", r.requireAuth(r.branding.UploadBrandingAsset))
-	r.mux.HandleFunc("POST /api/admin/branding/reset", r.requireAuth(r.branding.ResetAdminBranding))
-	r.mux.HandleFunc("GET /api/admin/mods", r.requireAuth(r.mods.ListAdminMods))
-	r.mux.HandleFunc("POST /api/admin/mods", r.requireAuth(r.mods.SaveAdminMod))
-	r.mux.HandleFunc("POST /api/admin/mods/upload", r.requireAuth(r.mods.UploadAdminMod))
-	r.mux.HandleFunc("PUT /api/admin/mods/{id}", r.requireAuth(r.mods.SaveAdminMod))
-	r.mux.HandleFunc("DELETE /api/admin/mods/{id}", r.requireAuth(r.mods.DeleteAdminMod))
-	r.mux.HandleFunc("GET /api/admin/users", r.requireAuth(r.auth.ListUsers))
-	r.mux.HandleFunc("POST /api/admin/users", r.requireAuth(r.auth.AdminCreateUser))
-	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAuth(r.auth.AdminDeleteUser))
+	r.mux.HandleFunc("GET /api/admin/turnstile", r.requireAdmin(r.auth.GetTurnstileConfig))
+	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAdmin(r.auth.UpdateTurnstileConfig))
+	r.mux.HandleFunc("GET /api/admin/branding", r.requireAdmin(r.branding.GetAdminBranding))
+	r.mux.HandleFunc("PUT /api/admin/branding", r.requireAdmin(r.branding.UpdateAdminBranding))
+	r.mux.HandleFunc("POST /api/admin/branding/upload", r.requireAdmin(r.branding.UploadBrandingAsset))
+	r.mux.HandleFunc("POST /api/admin/branding/reset", r.requireAdmin(r.branding.ResetAdminBranding))
+	r.mux.HandleFunc("GET /api/admin/mods", r.requireAdmin(r.mods.ListAdminMods))
+	r.mux.HandleFunc("POST /api/admin/mods", r.requireAdmin(r.mods.SaveAdminMod))
+	r.mux.HandleFunc("POST /api/admin/mods/upload", r.requireAdmin(r.mods.UploadAdminMod))
+	r.mux.HandleFunc("PUT /api/admin/mods/{id}", r.requireAdmin(r.mods.SaveAdminMod))
+	r.mux.HandleFunc("DELETE /api/admin/mods/{id}", r.requireAdmin(r.mods.DeleteAdminMod))
+	r.mux.HandleFunc("GET /api/admin/users", r.requireAdmin(r.auth.ListUsers))
+	r.mux.HandleFunc("POST /api/admin/users", r.requireAdmin(r.auth.AdminCreateUser))
+	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAdmin(r.auth.AdminDeleteUser))
+	r.mux.HandleFunc("POST /api/admin/users/{id}/avatar", r.requireAdmin(r.account.AdminUploadUserAvatar))
 
 	// Multi-node cluster & proxy routes
 	r.mux.HandleFunc("GET /api/cluster/servers", r.requireAuth(r.nodes.ListClusterServers))
 	r.mux.HandleFunc("GET /api/nodes", r.requireAuth(r.nodes.ListNodes))
-	r.mux.HandleFunc("POST /api/nodes", r.requireAuth(r.nodes.CreateNode))
-	r.mux.HandleFunc("POST /api/nodes/test", r.requireAuth(r.nodes.TestNodePayload))
-	r.mux.HandleFunc("POST /api/nodes/{id}/test", r.requireAuth(r.nodes.TestNodeByID))
-	r.mux.HandleFunc("PUT /api/nodes/{id}", r.requireAuth(r.nodes.UpdateNode))
-	r.mux.HandleFunc("DELETE /api/nodes/{id}", r.requireAuth(r.nodes.DeleteNode))
+	r.mux.HandleFunc("POST /api/nodes", r.requireAdmin(r.nodes.CreateNode))
+	r.mux.HandleFunc("POST /api/nodes/test", r.requireAdmin(r.nodes.TestNodePayload))
+	r.mux.HandleFunc("POST /api/nodes/{id}/test", r.requireAdmin(r.nodes.TestNodeByID))
+	r.mux.HandleFunc("PUT /api/nodes/{id}", r.requireAdmin(r.nodes.UpdateNode))
+	r.mux.HandleFunc("DELETE /api/nodes/{id}", r.requireAdmin(r.nodes.DeleteNode))
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		r.mux.HandleFunc(method+" /api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.nodes.Proxy))
 	}
@@ -396,6 +405,17 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(req.Context(), contextUserKey, claims)
 		next(w, req.WithContext(ctx))
 	}
+}
+
+func (r *Router) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
+		claims, _ := req.Context().Value(contextUserKey).(*JWTClaims)
+		if claims == nil || claims.Role != "admin" {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "Forbidden: Administrator privileges required"})
+			return
+		}
+		next(w, req)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

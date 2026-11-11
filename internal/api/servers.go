@@ -67,7 +67,14 @@ func readServerMOTD(workingDir string) string {
 }
 
 func (h *ServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
-	servers, err := h.db.ListServers()
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	var userID int
+	role := "user"
+	if claims != nil {
+		userID = claims.UserID
+		role = claims.Role
+	}
+	servers, err := h.db.ListServersForUser(userID, role)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -91,6 +98,17 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
 		return
+	}
+
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	if claims != nil && claims.Role != "admin" {
+		if server.OwnerID != claims.UserID {
+			perms, _ := h.db.GetUserServerPermissions(server.ID, claims.UserID)
+			if len(perms) == 0 {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "Access denied to this server"})
+				return
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, ServerWithStats{
@@ -147,6 +165,12 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	_, _ = rand.Read(idBytes)
 	srvID := fmt.Sprintf("srv-%s", hex.EncodeToString(idBytes))
 
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	ownerID := 1
+	if claims != nil && claims.UserID > 0 {
+		ownerID = claims.UserID
+	}
+
 	server := &database.Server{
 		ID:          srvID,
 		Name:        req.Name,
@@ -160,6 +184,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		JavaArgs:    req.JavaArgs,
 		JavaPath:    req.JavaPath,
 		AutoRestart: req.AutoRestart,
+		OwnerID:     ownerID,
 	}
 
 	workingDir := h.manager.GetWorkingDir(srvID)
