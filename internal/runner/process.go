@@ -70,6 +70,8 @@ type ProcessInstance struct {
 	cachedDiskMB     int64
 	lastDiskCheck    time.Time
 	diskScanning     bool
+	isolationEngine  string
+	tasksMax         int
 }
 
 func NewProcessInstance(server *database.Server, workingDir string, startupTimeout time.Duration, onReady func(string), onExit func(string, bool, bool, bool, time.Duration)) *ProcessInstance {
@@ -96,6 +98,13 @@ func (p *ProcessInstance) SetStartupTimeout(d time.Duration) {
 	}
 	p.mu.Lock()
 	p.startupTimeout = d
+	p.mu.Unlock()
+}
+
+func (p *ProcessInstance) SetIsolationConfig(engine string, tasksMax int) {
+	p.mu.Lock()
+	p.isolationEngine = engine
+	p.tasksMax = tasksMax
 	p.mu.Unlock()
 }
 
@@ -978,8 +987,45 @@ func syncBungeePort(workingDir string, port int) {
 // or traverse into other servers. If `systemd-run` is available, it applies slice
 // resource limits (e.g. TasksMax=512) to thwart fork bombs.
 func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.Cmd, string) {
+	p.mu.RLock()
+	isoEngine := p.isolationEngine
+	tasksMax := p.tasksMax
+	p.mu.RUnlock()
+	if isoEngine == "" {
+		isoEngine = "auto"
+	}
+	if tasksMax <= 0 {
+		tasksMax = 512
+	}
+
+	if isoEngine == "none" || isoEngine == "process" {
+		cmd := exec.Command(javaBinary, args...)
+		cmd.Dir = p.workingDir
+		return cmd, "Unrestricted Process (Host Namespace)"
+	}
+
 	bwrapPath, bwrapErr := exec.LookPath("bwrap")
-	if bwrapErr == nil && bwrapPath != "" {
+	systemdPath, sysErr := exec.LookPath("systemd-run")
+
+	// If user specifically requested systemd-only or bwrap isn't installed
+	if (isoEngine == "systemd" || bwrapErr != nil || bwrapPath == "") && sysErr == nil && systemdPath != "" {
+		sysArgs := []string{
+			"--scope",
+			"-q",
+			fmt.Sprintf("-p TasksMax=%d", tasksMax),
+		}
+		if p.server != nil && p.server.CPULimitPercent > 0 {
+			sysArgs = append(sysArgs, fmt.Sprintf("-p CPUQuota=%d%%", p.server.CPULimitPercent))
+		}
+		sysArgs = append(sysArgs, javaBinary)
+		sysArgs = append(sysArgs, args...)
+
+		cmd := exec.Command(systemdPath, sysArgs...)
+		cmd.Dir = p.workingDir
+		return cmd, fmt.Sprintf("Systemd Slice (TasksMax=%d)", tasksMax)
+	}
+
+	if bwrapErr == nil && bwrapPath != "" && isoEngine != "systemd" {
 		bwrapArgs := []string{
 			"--unshare-all",
 			"--share-net",
@@ -992,9 +1038,54 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 			"--tmpfs", "/tmp",
 		}
 
-		for _, optDir := range []string{"/lib64", "/sbin", "/etc/ssl", "/etc/pki", "/etc/resolv.conf", "/etc/hosts", "/etc/alternatives", "/etc/java", "/usr/lib/jvm", "/opt"} {
+		// Read-only system directories (including /etc for Java security, certificates & host configs)
+		for _, optDir := range []string{
+			"/lib64", "/sbin", "/etc", "/usr/lib/jvm", "/opt",
+			"/var/lib/ca-certificates", "/usr/share/ca-certificates",
+		} {
 			if _, err := os.Stat(optDir); err == nil {
 				bwrapArgs = append(bwrapArgs, "--ro-bind-try", optDir, optDir)
+			}
+		}
+
+		// Security mask: hide sensitive host credentials from the jail
+		for _, maskPath := range []string{"/etc/shadow", "/etc/gshadow", "/etc/sudoers"} {
+			if _, err := os.Stat(maskPath); err == nil {
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", "/dev/null", maskPath)
+			}
+		}
+		if _, err := os.Stat("/etc/sudoers.d"); err == nil {
+			bwrapArgs = append(bwrapArgs, "--tmpfs", "/etc/sudoers.d")
+		}
+
+		// Glob all /etc/java* config directories (critical for OpenJDK java.security symlinks)
+		if javaEtcMatches, err := filepath.Glob("/etc/java*"); err == nil {
+			for _, m := range javaEtcMatches {
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", m, m)
+			}
+		}
+
+		// Resolve java binary symlinks and ensure conf / security targets are explicitly bound
+		if realJava, err := filepath.EvalSymlinks(javaBinary); err == nil {
+			javaBinDir := filepath.Dir(realJava)
+			bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaBinDir, javaBinDir)
+			javaHome := filepath.Dir(javaBinDir)
+			bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaHome, javaHome)
+
+			// Modern OpenJDK: conf directory symlinks to /etc/java-<version>-openjdk
+			confDir := filepath.Join(javaHome, "conf")
+			if realConf, err := filepath.EvalSymlinks(confDir); err == nil {
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", realConf, realConf)
+			}
+
+			// Legacy OpenJDK 8: jre/lib/security symlinks to /etc/java-8-openjdk/security
+			for _, secPath := range []string{
+				filepath.Join(javaHome, "lib", "security"),
+				filepath.Join(javaHome, "jre", "lib", "security"),
+			} {
+				if realSec, err := filepath.EvalSymlinks(secPath); err == nil {
+					bwrapArgs = append(bwrapArgs, "--ro-bind-try", realSec, realSec)
+				}
 			}
 		}
 
@@ -1014,12 +1105,11 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 		bwrapArgs = append(bwrapArgs, javaBinary)
 		bwrapArgs = append(bwrapArgs, args...)
 
-		systemdPath, sysErr := exec.LookPath("systemd-run")
 		if sysErr == nil && systemdPath != "" {
 			sysArgs := []string{
 				"--scope",
 				"-q",
-				"-p", "TasksMax=512",
+				fmt.Sprintf("-p TasksMax=%d", tasksMax),
 			}
 			if p.server != nil && p.server.CPULimitPercent > 0 {
 				sysArgs = append(sysArgs, fmt.Sprintf("-p CPUQuota=%d%%", p.server.CPULimitPercent))
@@ -1029,7 +1119,7 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 
 			cmd := exec.Command(systemdPath, sysArgs...)
 			cmd.Dir = p.workingDir
-			return cmd, "Bubblewrap Jailed Filesystem + Systemd Slice (TasksMax=512)"
+			return cmd, fmt.Sprintf("Bubblewrap Jailed Filesystem + Systemd Slice (TasksMax=%d)", tasksMax)
 		}
 
 		cmd := exec.Command(bwrapPath, bwrapArgs...)

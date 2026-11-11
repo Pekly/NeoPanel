@@ -261,7 +261,7 @@ textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
+input:not(.con-cmd-input):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
 select,
 textarea {
   box-sizing: border-box;
@@ -276,7 +276,7 @@ textarea {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):focus,
+input:not(.con-cmd-input):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):focus,
 select:focus,
 textarea:focus {
   border-color: var(--ac);
@@ -766,9 +766,6 @@ h2 {
   border: 1px solid var(--border);
   border-radius: var(--np-radius, 14px);
   overflow: hidden;
-  isolation: isolate;
-  transform: translateZ(0);
-  background-clip: padding-box;
   cursor: pointer;
   transition: all 0.22s ease;
   display: flex;
@@ -792,10 +789,9 @@ h2 {
   background-size: cover;
   background-position: center;
   background-color: #1a2234;
-  border-top-left-radius: calc(var(--np-radius, 14px) - 1px);
-  border-top-right-radius: calc(var(--np-radius, 14px) - 1px);
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
   overflow: hidden;
-  transform: translateZ(0);
 }
 
 .srv-card-banner::after {
@@ -1116,7 +1112,7 @@ h2 {
 ============================================================================= */
 .srvh {
   position: relative;
-  z-index: 25;
+  z-index: 40;
   background-color: #121827;
   padding: 22px 26px;
   border-radius: var(--np-radius, 14px);
@@ -1126,19 +1122,17 @@ h2 {
   align-items: center;
   flex-wrap: wrap;
   gap: 16px;
-  background-clip: padding-box;
 }
 
 .srvh-bg {
   position: absolute;
   inset: 0;
-  border-radius: calc(var(--np-radius, 14px) - 1px) !important;
+  border-radius: inherit !important;
   overflow: hidden !important;
   background-size: cover;
   background-position: center 35%;
   pointer-events: none;
   z-index: 0;
-  transform: translateZ(0);
 }
 
 .srvh-bg::after {

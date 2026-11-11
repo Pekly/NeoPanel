@@ -4415,10 +4415,10 @@ const PG = [
 ];
 
 const CMDS = [
-  ['Save All Worlds', 'save-all'],
-  ['List Online Players', 'list'],
-  ['Check TPS & Health', 'tps'],
-  ['Reload Configurations', 'reload confirm']
+  ['Save All Worlds', 'save-all', 'download'],
+  ['List Online Players', 'list', 'users'],
+  ['Check TPS & Health', 'tps', 'activity'],
+  ['Reload Configurations', 'reload confirm', 'refresh']
 ];
 
 const CORES = [
@@ -4828,10 +4828,10 @@ function srvh() {
       <div style="position: relative; display: inline-block;">
         <button class="btn" onclick="event.stopPropagation(); toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
         ${S.cmenu ? `<div class="cmenu" role="menu" onclick="event.stopPropagation()">
-          ${CMDS.map(([label, cmd]) => `
+          ${CMDS.map(([label, cmd, icName]) => `
             <button role="menuitem" onclick="execQuickCmd('${cmd}')">
+              ${ic(icName || 'terminal', 13)}
               <span>${esc(label)}</span>
-              <span class="mono mu" style="font-size: 11px; margin-left: auto;">${esc(cmd)}</span>
             </button>
           `).join('')}
           <button role="menuitem" onclick="S.cmenu=false; toggleFlyConsole();">${ic('terminal', 13)} Live Console <kbd style="margin-left: auto; font-size: 10px;">Ctrl+\`</kbd></button>

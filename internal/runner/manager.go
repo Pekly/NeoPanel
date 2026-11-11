@@ -129,6 +129,18 @@ func (m *ServerManager) getOrCreateInstance(srv *database.Server) *ProcessInstan
 		},
 	)
 
+	if m.db != nil {
+		if srv.NodeID != "" {
+			if n, err := m.db.GetNode(srv.NodeID); err == nil && n != nil {
+				inst.SetIsolationConfig(n.IsolationEngine, n.TasksMax)
+			}
+		} else {
+			if nodes, err := m.db.ListNodes(); err == nil && len(nodes) > 0 {
+				inst.SetIsolationConfig(nodes[0].IsolationEngine, nodes[0].TasksMax)
+			}
+		}
+	}
+
 	m.instances[srv.ID] = inst
 	return inst
 }
