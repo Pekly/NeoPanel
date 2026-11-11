@@ -1042,10 +1042,23 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 		for _, optDir := range []string{
 			"/lib64", "/sbin", "/etc", "/usr/lib/jvm", "/opt",
 			"/var/lib/ca-certificates", "/usr/share/ca-certificates",
+			"/run/systemd/resolve", "/run/resolvconf", "/run/NetworkManager",
 		} {
 			if _, err := os.Stat(optDir); err == nil {
 				bwrapArgs = append(bwrapArgs, "--ro-bind-try", optDir, optDir)
 			}
+		}
+
+		// Critical for DNS resolution: resolve /etc/resolv.conf symlink and bind its real location & file
+		if realResolv, err := filepath.EvalSymlinks("/etc/resolv.conf"); err == nil {
+			resolvDir := filepath.Dir(realResolv)
+			if _, err := os.Stat(resolvDir); err == nil {
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", resolvDir, resolvDir)
+			}
+			bwrapArgs = append(bwrapArgs, "--ro-bind-try", realResolv, realResolv)
+		}
+		if _, err := os.Stat("/etc/resolv.conf"); err == nil {
+			bwrapArgs = append(bwrapArgs, "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf")
 		}
 
 		// Security mask: hide sensitive host credentials from the jail
