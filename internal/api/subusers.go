@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -86,7 +87,6 @@ func (h *SubuserHandler) AddSubuser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subuser.UserEmail = user.Email
 	subuser.Username = user.Username
 
 	_ = h.db.CreateAuditLog(user.Username, "subuser.add", "Added subuser "+user.Username+" to server "+srv.Name, getClientIP(r))
@@ -106,6 +106,11 @@ func (h *SubuserHandler) UpdateSubuser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subuserID := parts[1]
+	subuserIntID, err := strconv.Atoi(subuserID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid subuser ID")
+		return
+	}
 
 	var req struct {
 		Permissions []string `json:"permissions"`
@@ -115,7 +120,7 @@ func (h *SubuserHandler) UpdateSubuser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.UpdateServerSubuser(subuserID, req.Permissions); err != nil {
+	if err := h.db.UpdateServerSubuser(subuserIntID, req.Permissions); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update subuser: "+err.Error())
 		return
 	}
@@ -129,14 +134,20 @@ func (h *SubuserHandler) UpdateSubuser(w http.ResponseWriter, r *http.Request) {
 
 // DeleteSubuser removes a subuser association
 func (h *SubuserHandler) DeleteSubuser(w http.ResponseWriter, r *http.Request) {
+	serverID := extractIDFromPath(r.URL.Path, "/api/servers/", "/subusers/")
 	parts := strings.Split(r.URL.Path, "/subusers/")
 	if len(parts) != 2 || parts[1] == "" {
 		writeError(w, http.StatusBadRequest, "Missing subuser ID")
 		return
 	}
 	subuserID := parts[1]
+	subuserIntID, err := strconv.Atoi(subuserID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid subuser ID")
+		return
+	}
 
-	if err := h.db.DeleteServerSubuser(subuserID); err != nil {
+	if err := h.db.DeleteServerSubuser(serverID, subuserIntID); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to delete subuser: "+err.Error())
 		return
 	}
@@ -197,7 +208,7 @@ func (h *SubuserHandler) GetMyPermissions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	perms, err := h.db.GetUserServerPermissions(user.ID, serverID)
+	perms, err := h.db.GetUserServerPermissions(serverID, user.ID)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"is_admin":    false,

@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/runner"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type ClientAPIHandler struct {
@@ -60,7 +62,11 @@ func (h *ClientAPIHandler) authenticateClientAPI(r *http.Request) bool {
 	if h.cfg.Security.JWTSecret != "" && apiKey == h.cfg.Security.JWTSecret {
 		return true
 	}
-	// Accept active admin user session/token
+	// Accept active admin user session/token or API key hash
+	keyHash := fmt.Sprintf("%x", sha256.Sum256([]byte(apiKey)))
+	if user, err := h.db.GetUserByAPIKeyHash(keyHash); err == nil && user != nil && user.Role == "admin" {
+		return true
+	}
 	if user, err := h.db.GetUserBySession(apiKey); err == nil && user != nil && user.Role == "admin" {
 		return true
 	}
@@ -93,14 +99,18 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Locate or create client user
-	user, err := h.db.GetUserByEmail(clientEmail)
-	generatedPassword := ""
+	user, err := h.db.GetUserByEmailOrUsername(clientEmail)
 	if err != nil || user == nil {
+		user, _ = h.db.GetUserByUsername(username)
+	}
+	generatedPassword := ""
+	if user == nil {
 		rawBytes := make([]byte, 8)
 		_, _ = rand.Read(rawBytes)
 		generatedPassword = hex.EncodeToString(rawBytes)
 
-		newUser, createErr := h.db.CreateUser(username, clientEmail, generatedPassword, "user")
+		hash, _ := bcrypt.GenerateFromPassword([]byte(generatedPassword), 12)
+		newUser, createErr := h.db.CreateUser(username, string(hash), "user")
 		if createErr != nil {
 			writeError(w, http.StatusInternalServerError, "Failed to create client user account: "+createErr.Error())
 			return
@@ -120,28 +130,19 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 	if targetNode == nil {
 		nodes, err := h.db.ListNodes()
 		if err == nil && len(nodes) > 0 {
-			targetNode = &nodes[0]
-			for _, nd := range nodes {
-				if nd.IsActive && nd.IsMaster {
-					targetNode = &nd
-					break
-				}
-			}
+			targetNode = nodes[0]
 		}
 	}
 	if targetNode == nil {
 		targetNode = &database.ClusterNode{
-			ID:       "local",
-			Name:     "Local Host",
-			PublicIP: "127.0.0.1",
+			ID:   "local",
+			Name: "Local Host",
+			FQDN: "127.0.0.1",
 		}
 	}
 
 	// 3. Find next available game port
 	port := 25565
-	if targetNode.PortRangeStart > 0 && targetNode.PortRangeEnd >= targetNode.PortRangeStart {
-		port = targetNode.PortRangeStart
-	}
 	existingServers, _ := h.db.ListServers()
 	usedPorts := make(map[int]bool)
 	for _, s := range existingServers {
@@ -186,7 +187,7 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 		DiskLimitMB:     req.DiskMB,
 	}
 
-	createdSrv, err := h.db.CreateServer(srv)
+	err = h.db.CreateServer(&srv)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to provision server in database: "+err.Error())
 		return
@@ -205,20 +206,25 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 
 	_ = h.db.CreateAuditLog("client-api", "server.provision", fmt.Sprintf("Provisioned server %s (%s) for %s on node %s", srvName, srvID, clientEmail, targetNode.Name), getClientIP(r))
 
+	publicIP := targetNode.FQDN
+	if publicIP == "" {
+		publicIP = "127.0.0.1"
+	}
+
 	resp := map[string]interface{}{
 		"status":      "success",
-		"server_id":   createdSrv.ID,
-		"server_name": createdSrv.Name,
+		"server_id":   srv.ID,
+		"server_name": srv.Name,
 		"node_id":     targetNode.ID,
 		"node_name":   targetNode.Name,
-		"ip":          targetNode.PublicIP,
-		"port":        createdSrv.Port,
+		"ip":          publicIP,
+		"port":        srv.Port,
 		"user_id":     user.ID,
-		"user_email":  user.Email,
+		"user_email":  clientEmail,
 		"username":    user.Username,
-		"memory_mb":   createdSrv.MemoryMaxMB,
+		"memory_mb":   srv.MemoryMaxMB,
 		"login_url":   fmt.Sprintf("http://%s:%d/login", h.cfg.Server.Host, h.cfg.Server.Port),
-		"console_url": fmt.Sprintf("http://%s:%d/server/%s/console", h.cfg.Server.Host, h.cfg.Server.Port, createdSrv.ID),
+		"console_url": fmt.Sprintf("http://%s:%d/server/%s/console", h.cfg.Server.Host, h.cfg.Server.Port, srv.ID),
 	}
 	if generatedPassword != "" {
 		resp["temporary_password"] = generatedPassword

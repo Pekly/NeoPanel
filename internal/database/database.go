@@ -186,6 +186,8 @@ func (db *DB) migrate() error {
 	_ = db.addColumnIfNotExists("servers", "icon_url", "TEXT DEFAULT ''")
 	_ = db.addColumnIfNotExists("servers", "owner_id", "INTEGER DEFAULT 1")
 	_ = db.addColumnIfNotExists("servers", "node_id", "TEXT DEFAULT 'local'")
+	_ = db.addColumnIfNotExists("servers", "cpu_limit_percent", "INTEGER NOT NULL DEFAULT 0")
+	_ = db.addColumnIfNotExists("servers", "disk_limit_mb", "INTEGER NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "is_free", "BOOLEAN NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "idle_timeout_min", "INTEGER NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "allow_user_ram", "BOOLEAN NOT NULL DEFAULT 0")
@@ -228,6 +230,10 @@ func (db *DB) GetUserByID(id int) (*User, error) {
 		return nil, err
 	}
 	return user, nil
+}
+
+func (db *DB) GetUserByEmailOrUsername(lookup string) (*User, error) {
+	return db.GetUserByUsername(lookup)
 }
 
 func (db *DB) CreateUser(username, passwordHash, role string) (*User, error) {
@@ -1040,6 +1046,28 @@ func (db *DB) GetServerSchedule(serverID, id string) (*ServerSchedule, error) {
 	return s, nil
 }
 
+func (db *DB) GetServerScheduleByID(id string) (*ServerSchedule, error) {
+	row := db.conn.QueryRow(`
+		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
+		FROM server_schedules
+		WHERE id = ?
+	`, id)
+	s := &ServerSchedule{}
+	var isActive int
+	var lastRun, nextRun sql.NullTime
+	if err := row.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		return nil, err
+	}
+	s.IsActive = isActive == 1
+	if lastRun.Valid {
+		s.LastRunAt = &lastRun.Time
+	}
+	if nextRun.Valid {
+		s.NextRunAt = &nextRun.Time
+	}
+	return s, nil
+}
+
 func (db *DB) CreateServerSchedule(s *ServerSchedule) error {
 	now := time.Now().UTC()
 	s.CreatedAt = now
@@ -1074,12 +1102,26 @@ func (db *DB) DeleteServerSchedule(serverID, id string) error {
 	return err
 }
 
+func (db *DB) DeleteServerScheduleByID(id string) error {
+	_, err := db.conn.Exec(`DELETE FROM server_schedules WHERE id = ?`, id)
+	return err
+}
+
 func (db *DB) ToggleServerSchedule(serverID, id string, active bool) error {
 	val := 0
 	if active {
 		val = 1
 	}
 	_, err := db.conn.Exec(`UPDATE server_schedules SET is_active = ?, updated_at = ? WHERE server_id = ? AND id = ?`, val, time.Now().UTC(), serverID, id)
+	return err
+}
+
+func (db *DB) ToggleServerScheduleByID(id string, active bool) error {
+	val := 0
+	if active {
+		val = 1
+	}
+	_, err := db.conn.Exec(`UPDATE server_schedules SET is_active = ?, updated_at = ? WHERE id = ?`, val, time.Now().UTC(), id)
 	return err
 }
 

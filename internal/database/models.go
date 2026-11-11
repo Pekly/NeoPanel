@@ -24,9 +24,11 @@ type Server struct {
 	JavaPath    string    `json:"java_path"`  // custom Java binary path (optional)
 	AutoRestart bool      `json:"auto_restart"`
 	IconURL     string    `json:"icon_url,omitempty"`
-	OwnerID     int       `json:"owner_id,omitempty"`
-	NodeID      string    `json:"node_id,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
+	OwnerID         int       `json:"owner_id,omitempty"`
+	NodeID          string    `json:"node_id,omitempty"`
+	CPULimitPercent int       `json:"cpu_limit_percent,omitempty"`
+	DiskLimitMB     int64     `json:"disk_limit_mb,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 

@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/runner"
@@ -76,15 +78,16 @@ func (h *ScheduleHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sched, err := h.db.CreateServerSchedule(database.ServerSchedule{
+	sched := &database.ServerSchedule{
+		ID:       fmt.Sprintf("sch-%x", time.Now().UnixNano()),
 		ServerID: serverID,
 		Name:     strings.TrimSpace(req.Name),
 		CronExpr: strings.TrimSpace(req.CronExpr),
 		Action:   act,
 		Payload:  strings.TrimSpace(req.Payload),
 		IsActive: req.IsActive,
-	})
-	if err != nil {
+	}
+	if err := h.db.CreateServerSchedule(sched); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to create schedule: "+err.Error())
 		return
 	}
@@ -118,7 +121,7 @@ func (h *ScheduleHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sched, err := h.db.GetServerSchedule(schedID)
+	sched, err := h.db.GetServerScheduleByID(schedID)
 	if err != nil || sched == nil {
 		writeError(w, http.StatusNotFound, "Schedule not found")
 		return
@@ -143,7 +146,7 @@ func (h *ScheduleHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	sched.Payload = strings.TrimSpace(req.Payload)
 	sched.IsActive = req.IsActive
 
-	if err := h.db.UpdateServerSchedule(*sched); err != nil {
+	if err := h.db.UpdateServerSchedule(sched); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update schedule: "+err.Error())
 		return
 	}
@@ -165,7 +168,7 @@ func (h *ScheduleHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request)
 	}
 	schedID := parts[1]
 
-	if err := h.db.DeleteServerSchedule(schedID); err != nil {
+	if err := h.db.DeleteServerScheduleByID(schedID); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to delete schedule: "+err.Error())
 		return
 	}
@@ -192,7 +195,7 @@ func (h *ScheduleHandler) ToggleSchedule(w http.ResponseWriter, r *http.Request)
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	if err := h.db.ToggleServerSchedule(schedID, req.IsActive); err != nil {
+	if err := h.db.ToggleServerScheduleByID(schedID, req.IsActive); err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to toggle schedule: "+err.Error())
 		return
 	}
@@ -213,14 +216,14 @@ func (h *ScheduleHandler) RunScheduleNow(w http.ResponseWriter, r *http.Request)
 	subparts := strings.Split(parts[1], "/run")
 	schedID := subparts[0]
 
-	sched, err := h.db.GetServerSchedule(schedID)
+	sched, err := h.db.GetServerScheduleByID(schedID)
 	if err != nil || sched == nil {
 		writeError(w, http.StatusNotFound, "Schedule not found")
 		return
 	}
 
-	_ = h.db.RecordScheduleRun(sched.ID)
-	go h.manager.ExecuteSchedule(*sched)
+	_ = h.db.RecordScheduleRun(sched.ID, time.Now().UTC(), nil)
+	go h.manager.ExecuteSchedule(sched)
 
 	_ = h.db.CreateAuditLog("admin", "schedule.run_now", "Manually executed schedule '"+sched.Name+"'", getClientIP(r))
 
