@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -303,11 +304,6 @@ func (db *DB) UpdateUserTwoFactor(id int, enabled bool, secret, recoveryCodes st
 	}
 	_, err := db.conn.Exec("UPDATE users SET two_factor_enabled = ?, two_factor_secret = ?, recovery_codes = ? WHERE id = ?",
 		val, secret, recoveryCodes, id)
-	return err
-}
-
-func (db *DB) UpdateUserPassword(id int, passwordHash string) error {
-	_, err := db.conn.Exec("UPDATE users SET password_hash = ? WHERE id = ?", passwordHash, id)
 	return err
 }
 
