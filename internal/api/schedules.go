@@ -229,3 +229,4 @@ func (h *ScheduleHandler) RunScheduleNow(w http.ResponseWriter, r *http.Request)
 		"message": "Schedule execution triggered successfully",
 	})
 }
+

@@ -775,6 +775,10 @@ func (p *ProcessInstance) WriteCommand(cmd string) error {
 	return err
 }
 
+func (p *ProcessInstance) WriteInput(cmd string) error {
+	return p.WriteCommand(cmd)
+}
+
 func (p *ProcessInstance) Stop(graceful bool) error {
 	p.mu.Lock()
 	if p.cmd == nil || p.status == "offline" {

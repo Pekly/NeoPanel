@@ -25,6 +25,7 @@ type Server struct {
 	AutoRestart bool      `json:"auto_restart"`
 	IconURL     string    `json:"icon_url,omitempty"`
 	OwnerID     int       `json:"owner_id,omitempty"`
+	NodeID      string    `json:"node_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

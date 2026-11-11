@@ -645,7 +645,7 @@ function syncHeroFromSavedServer(targetSrv) {
   if (active.id !== targetSrv.id || (active.node_id || 'local') !== (targetSrv.node_id || 'local')) return;
 
   const heroName = $('#srv-hero-name');
-  if (heroName) heroName.textContent = targetSrv.name || 'Minecraft Server';
+  if (heroName) heroName.innerHTML = renderMinecraftTextHtml(targetSrv.name || 'Minecraft Server', { allowNewlines: false });
 
   const heroDesc = $('#srv-hero-desc');
   if (heroDesc) {
@@ -2240,13 +2240,13 @@ function updateChartHoverDom(kind) {
 }
 
 function onChartMouseMove(ev, kind) {
-  const hitEl = ev?.currentTarget;
-  const svg = hitEl?.ownerSVGElement || hitEl?.closest?.('svg');
-  if (!svg) return;
-  const rect = svg.getBoundingClientRect();
-  const relX = Math.max(0, Math.min(rect.width || 1, (ev.clientX ?? 0) - rect.left));
+  const card = ev?.currentTarget?.closest?.('.card.ch') || document.querySelector(`.card.ch[data-chart-kind="${kind}"]`);
+  const svg = card ? card.querySelector('.ch-svg') : null;
+  const targetRect = svg ? svg.getBoundingClientRect() : ev?.currentTarget?.getBoundingClientRect?.();
+  if (!targetRect || !targetRect.width) return;
+  const relX = Math.max(0, Math.min(targetRect.width, (ev.clientX ?? 0) - targetRect.left));
   const len = Math.max(1, (S.cpu || []).length);
-  const idx = Math.max(0, Math.min(len - 1, Math.round((relX / (rect.width || 1)) * (len - 1))));
+  const idx = Math.max(0, Math.min(len - 1, Math.round((relX / targetRect.width) * (len - 1))));
   S.chartHoverKind = kind;
   S.chartHoverIdx = idx;
   updateChartHoverDom(kind);
@@ -2534,14 +2534,31 @@ function srvHost(srv) {
 
 function copyDbText(val, label = 'Value') {
   if (!val) return;
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(val).then(() => {
-      toast(`${label} copied to clipboard!`, 'ok');
-    }).catch(() => {
-      uiPrompt({ title: `Copy ${label}`, message: 'Copy the value below:', defaultValue: val, confirmText: 'Done' });
-    });
-  } else {
+  const showSuccess = () => toast(`${label} copied to clipboard!`, 'ok');
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = val;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        showSuccess();
+        return;
+      }
+    } catch (e) {}
     uiPrompt({ title: `Copy ${label}`, message: 'Copy the value below:', defaultValue: val, confirmText: 'Done' });
+  };
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(val).then(showSuccess).catch(fallback);
+  } else {
+    fallback();
   }
 }
 
@@ -4740,7 +4757,7 @@ function srvh() {
     <div class="srvh-bg" style="background-image: url('${esc(heroUrl)}'), url('/img/banner.jpg');" aria-hidden="true"></div>
     <div class="srvh-main">
       <div class="srv-hero-meta">
-        <h1 id="srv-hero-name">${esc(panelName)}</h1>
+        <h1 id="srv-hero-name">${renderMinecraftTextHtml(panelName, { allowNewlines: false })}</h1>
         <span id="srv-badge" class="badge ${st}"><i class="dot"></i>${{ online: 'Running', offline: 'Offline', starting: 'Starting', stopping: 'Stopping' }[st] || 'Offline'}</span>
         ${((S.nodes && S.nodes.length > 1) || nodeId !== 'local') ? `<span class="chip srv-node-badge" title="Running on node ${esc(nodeLabel)}">${ic('network', 11)} ${esc(nodeLabel)}</span>` : ''}
         <span id="srv-halt-badge" class="badge halted" style="display:${st === 'offline' && S.startupHalted ? 'inline-flex' : 'none'};" title="Auto-restart stopped after 2 consecutive startup failures">Start Halted (2/2)</span>
@@ -4819,7 +4836,7 @@ function chartsHtml() {
   const cpuStr = active ? `${(S.cpu.at(-1) || 0).toFixed(1)}%` : '0.0%';
   const memStr = active ? `${(S.memUsedMB || 0).toFixed(0)} MiB / ${maxRamGB} GiB` : `0 MiB / ${maxRamGB} GiB`;
   const renderCard = (kind, title, valHtml) => `
-    <div class="card ch" data-chart-kind="${kind}">
+    <div class="card ch" data-chart-kind="${kind}" onmousemove="onChartMouseMove(event, '${kind}')" onmouseleave="onChartMouseLeave('${kind}')">
       <div class="row sb">
         <span class="mu">${title}</span>
         <span id="ch-val-${kind}" class="mu mono">${valHtml}</span>
@@ -4828,9 +4845,7 @@ function chartsHtml() {
         <svg class="ch-svg" viewBox="0 0 300 98" preserveAspectRatio="none" aria-hidden="true">
           <g id="ch-series-${kind}">${buildChartSeriesInnerSvg(kind)}</g>
           <g id="ch-hover-svg-${kind}"></g>
-          <rect class="ch-hit-layer" x="0" y="0" width="300" height="98"
-                onmousemove="onChartMouseMove(event, '${kind}')"
-                onmouseleave="onChartMouseLeave('${kind}')"/>
+          <rect class="ch-hit-layer" x="0" y="0" width="300" height="98" fill="transparent" pointer-events="all"/>
         </svg>
         <div id="ch-tip-${kind}" class="ch-tooltip" style="display:none;"></div>
       </div>
@@ -5501,7 +5516,7 @@ const V = {
                 <div class="srv-row-thumb" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');"></div>
                 <div style="min-width: 0; flex: 1;">
                   <div class="row" style="gap: 8px; flex-wrap: wrap;">
-                    <span class="srv-card-title">${esc(s.name || 'Minecraft Server')}</span>
+                    <span class="srv-card-title">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
                     <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}">
                       <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
                       ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
@@ -5549,7 +5564,7 @@ const V = {
             </div>
             <div class="srv-card-body">
               <div class="srv-card-title-row">
-                <span class="srv-card-title">${esc(s.name || 'Minecraft Server')}</span>
+                <span class="srv-card-title">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
                 <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}">
                   <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
                   ${isRun && dashVm !== 'icons' ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
@@ -5659,8 +5674,8 @@ const V = {
       </div>
       <div class="card stc" id="stc">${statsHtml()}</div>
     </div>
-    <div class="np-slot-container" data-np-slot="console:below-stats" style="margin-bottom: 14px;"></div>
-    <div class="grid g3" id="chr">${chartsHtml()}</div>
+    <div class="np-slot-container" data-np-slot="console:below-stats"></div>
+    <div class="grid g3" id="chr" style="margin-top: 24px;">${chartsHtml()}</div>
     <div class="np-slot-container" data-np-slot="console:below-charts" style="margin-top: 16px;"></div>`;
   },
 
@@ -15041,10 +15056,10 @@ function positionPortaledMenu(wrap, trigger, menu) {
   const hasSearch = Boolean(menu.querySelector('.cselect-search'));
   const spaceBelow = window.innerHeight - rect.bottom;
   const spaceAbove = rect.top;
-  const threshold = hasSearch ? 280 : 210;
+  const threshold = hasSearch ? 260 : 190;
   const openUp = spaceBelow < threshold && spaceAbove > spaceBelow;
 
-  const width = Math.min(Math.max(rect.width, 175), window.innerWidth - 16);
+  const width = Math.min(Math.max(rect.width, 210), window.innerWidth - 16);
   let left = rect.left;
   if (left + width > window.innerWidth - 8) {
     left = window.innerWidth - width - 8;
@@ -15059,14 +15074,17 @@ function positionPortaledMenu(wrap, trigger, menu) {
   menu.style.width = `${Math.round(width)}px`;
   menu.style.minWidth = `${Math.round(width)}px`;
 
+  const availableSpace = openUp ? spaceAbove - 16 : spaceBelow - 16;
+  const menuMaxH = Math.min(340, Math.max(200, Math.floor(availableSpace)));
+
   if (openUp) {
     menu.style.top = 'auto';
     menu.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
-    menu.style.maxHeight = `${Math.max(140, Math.min(310, Math.floor(spaceAbove - 14)))}px`;
+    menu.style.maxHeight = `${menuMaxH}px`;
   } else {
     menu.style.bottom = 'auto';
     menu.style.top = `${Math.round(rect.bottom + 4)}px`;
-    menu.style.maxHeight = `${Math.max(140, Math.min(310, Math.floor(spaceBelow - 14)))}px`;
+    menu.style.maxHeight = `${menuMaxH}px`;
   }
 
   if (menu.parentNode !== document.body) {
@@ -15120,7 +15138,7 @@ function enhanceSelects(root = document) {
     function rebuildOptions() {
       menu.innerHTML = '';
       const opts = Array.from(sel.options);
-      const isSearchable = sel.dataset.searchable === '1' || opts.length > 12;
+      const isSearchable = sel.dataset.searchable === '1' || opts.length > 5;
 
       let searchInp = null;
       let emptyEl = null;

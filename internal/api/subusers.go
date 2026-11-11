@@ -213,3 +213,4 @@ func (h *SubuserHandler) GetMyPermissions(w http.ResponseWriter, r *http.Request
 		"permissions": perms,
 	})
 }
+

@@ -1,7 +1,10 @@
 package runner
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -311,6 +314,26 @@ func (m *ServerManager) Restart(srv *database.Server) error {
 	return m.Start(srv)
 }
 
+func (m *ServerManager) StopServer(serverID string, graceful bool) error {
+	return m.Stop(serverID, graceful)
+}
+
+func (m *ServerManager) StartServer(serverID string) error {
+	srv, err := m.db.GetServer(serverID)
+	if err != nil {
+		return err
+	}
+	return m.Start(srv)
+}
+
+func (m *ServerManager) RestartServer(serverID string) error {
+	srv, err := m.db.GetServer(serverID)
+	if err != nil {
+		return err
+	}
+	return m.Restart(srv)
+}
+
 func (m *ServerManager) GetStatus(serverID string) string {
 	m.mu.RLock()
 	inst, ok := m.instances[serverID]
@@ -495,7 +518,11 @@ func (m *ServerManager) checkIdleTimeouts() {
 			continue
 		}
 
-		node, err := m.db.GetNode(srv.NodeID)
+		nodeID := srv.NodeID
+		if nodeID == "" {
+			nodeID = "local"
+		}
+		node, err := m.db.GetNode(nodeID)
 		if err != nil || node == nil {
 			continue
 		}
@@ -552,16 +579,16 @@ func (m *ServerManager) runScheduledTasks(now time.Time) {
 		}
 
 		// Prevent re-triggering within the same minute
-		if !sched.LastRunAt.IsZero() && now.Sub(sched.LastRunAt) < 55*time.Second {
+		if sched.LastRunAt != nil && !sched.LastRunAt.IsZero() && now.Sub(*sched.LastRunAt) < 55*time.Second {
 			continue
 		}
 
-		_ = m.db.RecordScheduleRun(sched.ID)
+		_ = m.db.RecordScheduleRun(sched.ID, now, nil)
 		go m.ExecuteSchedule(sched)
 	}
 }
 
-func (m *ServerManager) ExecuteSchedule(sched database.ServerSchedule) {
+func (m *ServerManager) ExecuteSchedule(sched *database.ServerSchedule) {
 	inst, ok := m.GetInstance(sched.ServerID)
 	srv, srvErr := m.db.GetServer(sched.ServerID)
 	srvName := sched.ServerID
@@ -586,18 +613,47 @@ func (m *ServerManager) ExecuteSchedule(sched database.ServerSchedule) {
 		_ = m.StopServer(sched.ServerID, false)
 	case "backup":
 		_ = m.db.CreateAuditLog("system", "schedule.backup", fmt.Sprintf("Executed schedule '%s' backup on %s", sched.Name, srvName), "")
-		backupName := fmt.Sprintf("Scheduled Backup %s", time.Now().Format("2006-01-02 15:04"))
+		backupsDir := filepath.Join(filepath.Dir(m.baseDir), "backups", sched.ServerID)
+		_ = os.MkdirAll(backupsDir, 0755)
+		baseName := fmt.Sprintf("backup-scheduled-%s-%s.tar.gz", sched.ServerID, time.Now().Format("2006-01-02-150405"))
+		destPath := filepath.Join(backupsDir, baseName)
 		workDir := m.GetWorkingDir(sched.ServerID)
-		bId := fmt.Sprintf("bk-%d", time.Now().UnixNano())
-		bPath := filepath.Join(workDir, "..", "backups", bId+".tar.gz")
-		_ = os.MkdirAll(filepath.Dir(bPath), 0755)
-		_ = m.db.CreateBackup(database.Backup{
-			ID:        bId,
-			ServerID:  sched.ServerID,
-			Name:      backupName,
-			FilePath:  bPath,
-			SizeBytes: 0,
-		})
+		go func() {
+			tarFile, err := os.Create(destPath)
+			if err != nil {
+				return
+			}
+			defer tarFile.Close()
+			gw := gzip.NewWriter(tarFile)
+			defer gw.Close()
+			tw := tar.NewWriter(gw)
+			defer tw.Close()
+			_ = filepath.Walk(workDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil || path == workDir {
+					return nil
+				}
+				rel, err := filepath.Rel(workDir, path)
+				if err != nil {
+					return nil
+				}
+				header, err := tar.FileInfoHeader(info, info.Name())
+				if err != nil {
+					return nil
+				}
+				header.Name = filepath.ToSlash(rel)
+				if err := tw.WriteHeader(header); err != nil {
+					return nil
+				}
+				if !info.IsDir() {
+					f, err := os.Open(path)
+					if err == nil {
+						_, _ = io.Copy(tw, f)
+						f.Close()
+					}
+				}
+				return nil
+			})
+		}()
 	}
 }
 

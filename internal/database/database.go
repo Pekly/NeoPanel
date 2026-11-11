@@ -185,6 +185,7 @@ func (db *DB) migrate() error {
 	// Safe automatic schema column migrations
 	_ = db.addColumnIfNotExists("servers", "icon_url", "TEXT DEFAULT ''")
 	_ = db.addColumnIfNotExists("servers", "owner_id", "INTEGER DEFAULT 1")
+	_ = db.addColumnIfNotExists("servers", "node_id", "TEXT DEFAULT 'local'")
 	_ = db.addColumnIfNotExists("nodes", "is_free", "BOOLEAN NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "idle_timeout_min", "INTEGER NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "allow_user_ram", "BOOLEAN NOT NULL DEFAULT 0")
@@ -276,7 +277,7 @@ func (db *DB) DeleteUser(id int) error {
 }
 
 func (db *DB) ListServers() ([]*Server, error) {
-	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), created_at, updated_at FROM servers ORDER BY created_at DESC`)
+	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), created_at, updated_at FROM servers ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +290,7 @@ func (db *DB) ListServers() ([]*Server, error) {
 		err := rows.Scan(
 			&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 			&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-			&autoRestart, &s.IconURL, &s.OwnerID, &s.CreatedAt, &s.UpdatedAt,
+			&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -307,13 +308,13 @@ func (db *DB) ListServers() ([]*Server, error) {
 }
 
 func (db *DB) GetServer(id string) (*Server, error) {
-	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), created_at, updated_at FROM servers WHERE id = ?`, id)
+	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), created_at, updated_at FROM servers WHERE id = ?`, id)
 	s := &Server{}
 	var autoRestart int
 	err := row.Scan(
 		&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 		&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-		&autoRestart, &s.IconURL, &s.OwnerID, &s.CreatedAt, &s.UpdatedAt,
+		&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -330,10 +331,13 @@ func (db *DB) CreateServer(s *Server) error {
 	now := time.Now().UTC()
 	s.CreatedAt = now
 	s.UpdatedAt = now
+	if s.NodeID == "" {
+		s.NodeID = "local"
+	}
 
-	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, icon_url, owner_id, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.CreatedAt, s.UpdatedAt)
+	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, icon_url, owner_id, node_id, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.CreatedAt, s.UpdatedAt)
 	return err
 }
 
@@ -343,9 +347,12 @@ func (db *DB) UpdateServer(s *Server) error {
 		autoRestart = 1
 	}
 	s.UpdatedAt = time.Now().UTC()
+	if s.NodeID == "" {
+		s.NodeID = "local"
+	}
 
-	_, err := db.conn.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, icon_url = ?, owner_id = ?, updated_at = ? WHERE id = ?`,
-		s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.UpdatedAt, s.ID)
+	_, err := db.conn.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, icon_url = ?, owner_id = ?, node_id = ?, updated_at = ? WHERE id = ?`,
+		s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.UpdatedAt, s.ID)
 	return err
 }
 
@@ -464,6 +471,16 @@ func (db *DB) LogActivity(userID int, action, details, ip string) error {
 	_, err := db.conn.Exec("INSERT INTO activity_logs (user_id, action, details, ip_address, created_at) VALUES (?, ?, ?, ?, ?)",
 		userID, action, details, ip, now)
 	return err
+}
+
+func (db *DB) CreateAuditLog(username, action, details, ip string) error {
+	userID := 0
+	if username != "" && username != "system" {
+		if u, _ := db.GetUserByUsername(username); u != nil {
+			userID = u.ID
+		}
+	}
+	return db.LogActivity(userID, action, details, ip)
 }
 
 func (db *DB) ListActivity(userID int, includeAll bool, limit int) ([]*ActivityLog, error) {
