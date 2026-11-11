@@ -41,6 +41,7 @@ type Router struct {
 	subusers       *SubuserHandler
 	schedules      *ScheduleHandler
 	clientAPI      *ClientAPIHandler
+	email          *EmailHandler
 	globalLimiter  *IPRateLimiter
 	authLimiter    *IPRateLimiter
 	embeddedStatic fs.FS
@@ -64,6 +65,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	subuserHandler := NewSubuserHandler(db)
 	scheduleHandler := NewScheduleHandler(db, manager)
 	clientAPIHandler := NewClientAPIHandler(cfg, db, manager)
+	emailHandler := NewEmailHandler(db, cfg, authHandler)
 
 	r := &Router{
 		mux:            http.NewServeMux(),
@@ -85,6 +87,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		subusers:       subuserHandler,
 		schedules:      scheduleHandler,
 		clientAPI:      clientAPIHandler,
+		email:          emailHandler,
 		globalLimiter:  NewIPRateLimiter(60, 100),
 		authLimiter:    NewIPRateLimiter(1, 15),
 		embeddedStatic: embeddedStatic,
@@ -114,9 +117,13 @@ func (r *Router) registerRoutes(db *database.DB) {
 	if r.authLimiter != nil {
 		r.mux.Handle("POST /api/auth/login", r.authLimiter.Middleware(http.HandlerFunc(r.auth.Login)))
 		r.mux.Handle("POST /api/auth/login/2fa", r.authLimiter.Middleware(http.HandlerFunc(r.auth.Login2FA)))
+		r.mux.Handle("POST /api/auth/password-reset/request", r.authLimiter.Middleware(http.HandlerFunc(r.email.RequestPasswordReset)))
+		r.mux.Handle("POST /api/auth/password-reset/confirm", r.authLimiter.Middleware(http.HandlerFunc(r.email.ConfirmPasswordReset)))
 	} else {
 		r.mux.HandleFunc("POST /api/auth/login", r.auth.Login)
 		r.mux.HandleFunc("POST /api/auth/login/2fa", r.auth.Login2FA)
+		r.mux.HandleFunc("POST /api/auth/password-reset/request", r.email.RequestPasswordReset)
+		r.mux.HandleFunc("POST /api/auth/password-reset/confirm", r.email.ConfirmPasswordReset)
 	}
 	r.mux.HandleFunc("GET /api/branding", r.branding.GetPublicBranding)
 	r.mux.HandleFunc("GET /branding/{filename}", r.branding.ServeBrandingAsset)
@@ -312,6 +319,11 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/admin/updates/config", r.requireAdmin(HandleSaveUpdateConfig(db)))
 	r.mux.HandleFunc("POST /api/admin/updates/apply", r.requireAdmin(HandleApplyUpdate(db)))
 	r.mux.HandleFunc("GET /api/admin/updates/logs", r.requireAdmin(HandleGetUpdateLogs))
+
+	// Admin SMTP email configuration & test
+	r.mux.HandleFunc("GET /api/admin/email", r.requireAdmin(r.email.HandleGetSettings))
+	r.mux.HandleFunc("POST /api/admin/email", r.requireAdmin(r.email.HandleSaveSettings))
+	r.mux.HandleFunc("POST /api/admin/email/test", r.requireAdmin(r.email.HandleTestEmail))
 
 	// Multi-node cluster & proxy routes
 	r.mux.HandleFunc("GET /api/cluster/servers", r.requireAuth(r.nodes.ListClusterServers))

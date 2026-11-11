@@ -874,7 +874,7 @@ const DEFAULT_BRANDING = {
   card_cover_url: MINECRAFT_COVER_URL,
   default_avatar_url: DEFAULT_USER_AVATAR_URL,
   default_server_icon_url: '/static/img/default-server-icon.png',
-  footer_text: 'Powered by NeoPanel Daemon',
+  footer_text: '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026',
   preset: 'obsidian',
   accent_color: '#387aff',
   accent_hover: '#4f8aff',
@@ -1349,7 +1349,7 @@ SLUG_TO_VIEW.startup = 'set';
 SLUG_TO_VIEW.stp = 'set';
 SLUG_TO_VIEW.servers = 'dash';
 
-const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods'];
+const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email'];
 const ACC_TAB_SLUGS = ['general', 'security', 'ssh', 'api', 'activity'];
 
 function shortServerId(id) {
@@ -2394,6 +2394,18 @@ function getBrand(key) {
     return DEFAULT_BRANDING[key];
   }
   return val;
+}
+
+function renderFooterHtml(raw) {
+  const text = String(raw || getBrand('footer_text') || '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026').trim();
+  const formatted = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
+    let cleanUrl = String(url || '').trim().replace(/^https?:\/\/(https?:\/\/)/i, '$1');
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+    return `<a href="${esc(cleanUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:none; font-weight:600; opacity:0.92;">${esc(label)}</a>`;
+  });
+  return formatted;
 }
 
 function hexToRgbStr(hex) {
@@ -7476,7 +7488,8 @@ const V = {
       ['Users & Roles', 3],
       ['Panel Look & Branding', 4],
       ['Audit Logs', 5],
-      ['Mods & Extensions', 6]
+      ['Mods & Extensions', 6],
+      ['Email & SMTP', 7]
     ];
 
     let content = '';
@@ -8321,6 +8334,8 @@ const V = {
       });
     } else if (t === 6) {
       content = renderAdminModsTabHtml();
+    } else if (t === 7) {
+      content = renderAdminEmailTabHtml();
     }
 
     return `<header class="top">
@@ -8746,6 +8761,10 @@ function navHtml() {
       ${ic('package', 16)}
       <span>Extensions &amp; Mods</span>
     </a>
+    <a class="nav-item ${t === 7 ? 'on' : ''}" href="/admin/email" onclick="return selectAdminTabNav(event, 7)" ${t === 7 ? 'aria-current="page"' : ''}>
+      ${ic('mail', 16)}
+      <span>Email &amp; SMTP</span>
+    </a>
 
     <div class="np-slot-container" data-np-slot="nav:bottom"></div>
     <span class="sp"></span>
@@ -8757,7 +8776,8 @@ function navHtml() {
         <span class="mu pv">${esc(S.acct.em || S.user?.email || 'Administrator')}</span>
       </span>
       ${ic('settings', 16)}
-    </a>`;
+    </a>
+    <div class="nav-footer" style="padding: 10px 14px 4px; font-size: 11px; color: var(--tx-muted); text-align: center;">${renderFooterHtml()}</div>`;
   }
 
   // 2. Global Navigation (Servers, Activity, Client Area, Account)
@@ -8811,7 +8831,8 @@ function navHtml() {
         <span class="mu pv">${esc(S.acct.em || S.user?.email || (S.user?.role === 'admin' ? 'Administrator' : 'Standard User'))}</span>
       </span>
       ${ic('settings', 16)}
-    </a>`;
+    </a>
+    <div class="nav-footer" style="padding: 10px 14px 4px; font-size: 11px; color: var(--tx-muted); text-align: center;">${renderFooterHtml()}</div>`;
   }
 
   // 3. Inside a Server Workspace
@@ -8859,7 +8880,8 @@ function navHtml() {
       <span class="mu pv">${esc(S.acct.em || S.user?.email || (S.user?.role === 'admin' ? 'Administrator' : 'Standard User'))}</span>
     </span>
     ${ic('settings', 16)}
-  </a>`;
+  </a>
+  <div class="nav-footer" style="padding: 10px 14px 4px; font-size: 11px; color: var(--tx-muted); text-align: center;">${renderFooterHtml()}</div>`;
 }
 
 // --- View Router & Multi-Page Navigation Engine ---
@@ -8889,6 +8911,7 @@ window.go = function(view, opts = {}) {
 };
 
 window.addEventListener('hashchange', () => {
+  checkUrlResetToken();
   if (!S.token || $('#login')) return;
   const raw = window.location.hash.replace('#', '');
   const hash = normalizeRoute(raw);
@@ -9185,7 +9208,7 @@ function selectAccountTab(idx) {
 }
 
 async function loadAdminData(skipRender = false) {
-  const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes, modsRes, upRes] = await Promise.all([
+  const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes, modsRes, upRes, smtpRes] = await Promise.all([
     api('/api/system').catch(() => null),
     api('/api/admin/users').catch(() => null),
     api('/api/admin/turnstile').catch(() => null),
@@ -9193,7 +9216,8 @@ async function loadAdminData(skipRender = false) {
     api('/api/admin/branding').catch(() => null),
     api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null),
     api('/api/admin/mods').catch(() => null),
-    api('/api/admin/updates').catch(() => null)
+    api('/api/admin/updates').catch(() => null),
+    api('/api/admin/email').catch(() => null)
   ]);
 
   if (sysRes) S.system = sysRes;
@@ -9201,6 +9225,7 @@ async function loadAdminData(skipRender = false) {
   if (tsRes) S.adminTurnstile = tsRes;
   if (Array.isArray(nodesRes)) S.nodes = nodesRes;
   if (upRes) S.adminUpdate = upRes;
+  if (smtpRes) S.adminSmtp = smtpRes;
   if (modsRes && Array.isArray(modsRes.mods)) {
     S.adminMods = modsRes.mods;
     if (modsRes.mods_dir) S.modsDir = modsRes.mods_dir;
@@ -13763,6 +13788,433 @@ async function pollUpdateLogsOnce() {
   } catch (e) {}
 }
 
+function renderAdminEmailTabHtml() {
+  const smtp = S.adminSmtp || {};
+  return `
+    <div class="card tw" style="margin-bottom:18px;">
+      <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2 style="margin:0 0 4px; color:var(--tx); display:flex; align-items:center; gap:8px;">
+            ${ic('mail', 18)} Email &amp; SMTP Delivery Setup
+          </h2>
+          <span class="mu" style="font-size:13px;">Configure outgoing SMTP mail server credentials to send password reset links, notification alerts, and subuser invitations.</span>
+        </div>
+        <div class="row" style="gap:8px;">
+          <button type="button" class="btn sm" onclick="loadAdminSmtp()">${ic('refresh', 13)} Refresh</button>
+          <button type="button" class="btn sm pr" onclick="saveAdminSmtp()">${ic('save', 13)} Save Email Settings</button>
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:18px;">
+        <div class="row sb" style="margin-bottom:8px; align-items:center; flex-wrap:wrap; gap:8px;">
+          <span style="font-size:13px; font-weight:600; color:var(--tx);">Quick Email Provider Presets</span>
+          <div style="min-width:260px;">
+            <select class="sel" id="admin-smtp-preset" onchange="applySmtpPreset(this.value)">
+              <option value="custom">Custom SMTP Server...</option>
+              <option value="cloudflare">Cloudflare Email Routing / Mailchannels</option>
+              <option value="gmail">Gmail / Google Workspace (smtp.gmail.com:587)</option>
+              <option value="brevo">Brevo / Sendinblue (smtp-relay.brevo.com:587)</option>
+              <option value="sendgrid">SendGrid (smtp.sendgrid.net:587)</option>
+              <option value="resend">Resend SMTP (smtp.resend.com:465)</option>
+              <option value="ses">Amazon SES (Port 587)</option>
+            </select>
+          </div>
+        </div>
+        <p class="mu" style="font-size:12px; margin:0;">Selecting a provider preset automatically populates optimal host, port, and TLS encryption modes.</p>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:18px;">
+        <div>
+          <label class="lbl" style="font-size:12px;">Email Delivery Active</label>
+          <label class="row" style="gap:10px; cursor:pointer; padding:6px 0;">
+            <input type="checkbox" id="admin-smtp-enabled" ${smtp.enabled ? 'checked' : ''} style="width:16px; height:16px; accent-color:var(--ac);">
+            <span style="font-size:13px; color:var(--tx);">Enable outgoing emails for password resets</span>
+          </label>
+        </div>
+        <div>
+          <label class="lbl" style="font-size:12px;">Encryption Security</label>
+          <select class="sel" id="admin-smtp-enc">
+            <option value="starttls" ${smtp.encryption === 'starttls' ? 'selected' : ''}>STARTTLS (Port 587 recommended)</option>
+            <option value="tls" ${smtp.encryption === 'tls' || smtp.encryption === 'ssl' ? 'selected' : ''}>Direct SSL/TLS (Port 465)</option>
+            <option value="none" ${smtp.encryption === 'none' ? 'selected' : ''}>Plain / Unencrypted (Port 25)</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl" style="font-size:12px;">SMTP Server Host</label>
+          <input type="text" id="admin-smtp-host" class="inp mono" value="${esc(smtp.host || '')}" placeholder="smtp.gmail.com or mail.yourdomain.com">
+        </div>
+        <div>
+          <label class="lbl" style="font-size:12px;">SMTP Port</label>
+          <input type="number" id="admin-smtp-port" class="inp mono" value="${smtp.port || 587}" placeholder="587">
+        </div>
+        <div>
+          <label class="lbl" style="font-size:12px;">SMTP Username / API Key</label>
+          <input type="text" id="admin-smtp-user" class="inp mono" value="${esc(smtp.username || '')}" placeholder="username@example.com or apikey">
+        </div>
+        <div>
+          <label class="lbl" style="font-size:12px;">SMTP Password / Token</label>
+          <div class="row" style="position:relative;">
+            <input type="password" id="admin-smtp-pass" class="inp mono" value="${esc(smtp.password || '')}" placeholder="${smtp.password ? '••••••••' : 'Enter password or API token'}" style="padding-right:36px;">
+            <button type="button" class="eye" onclick="const p=$('#admin-smtp-pass'); p.type=p.type==='password'?'text':'password';" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--tx-muted); cursor:pointer;">${ic('eye', 14)}</button>
+          </div>
+        </div>
+        <div>
+          <label class="lbl" style="font-size:12px;">From Sender Email</label>
+          <input type="email" id="admin-smtp-from-email" class="inp mono" value="${esc(smtp.from_email || '')}" placeholder="noreply@yourdomain.com">
+        </div>
+        <div>
+          <label class="lbl" style="font-size:12px;">From Display Name</label>
+          <input type="text" id="admin-smtp-from-name" class="inp" value="${esc(smtp.from_name || 'NeoPanel')}" placeholder="NeoPanel">
+        </div>
+      </div>
+
+      <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px;">
+        <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx); display:flex; align-items:center; gap:6px;">
+          ${ic('mail', 14)} Test Email Delivery
+        </h3>
+        <p class="mu" style="font-size:12px; margin:0 0 12px;">Send an immediate diagnostic email to confirm your SMTP host connection, TLS certificate validation, and authentication.</p>
+        <div class="row" style="gap:10px; flex-wrap:wrap;">
+          <input type="email" id="admin-smtp-test-email" class="inp mono" style="flex:1 1 260px;" placeholder="Recipient email (e.g. your personal email)" value="${esc(S.user?.email || '')}">
+          <button type="button" class="btn" onclick="sendAdminTestEmail(this)">${ic('mail', 13)} Send Test Email</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function applySmtpPreset(preset) {
+  const host = $('#admin-smtp-host');
+  const port = $('#admin-smtp-port');
+  const enc = $('#admin-smtp-enc');
+  const user = $('#admin-smtp-user');
+
+  if (preset === 'gmail') {
+    if (host) host.value = 'smtp.gmail.com';
+    if (port) port.value = '587';
+    if (enc) enc.value = 'starttls';
+  } else if (preset === 'cloudflare') {
+    if (host) host.value = 'smtp.mailchannels.net';
+    if (port) port.value = '587';
+    if (enc) enc.value = 'starttls';
+  } else if (preset === 'brevo') {
+    if (host) host.value = 'smtp-relay.brevo.com';
+    if (port) port.value = '587';
+    if (enc) enc.value = 'starttls';
+  } else if (preset === 'sendgrid') {
+    if (host) host.value = 'smtp.sendgrid.net';
+    if (port) port.value = '587';
+    if (enc) enc.value = 'starttls';
+    if (user && !user.value) user.value = 'apikey';
+  } else if (preset === 'resend') {
+    if (host) host.value = 'smtp.resend.com';
+    if (port) port.value = '465';
+    if (enc) enc.value = 'tls';
+    if (user && !user.value) user.value = 'resend';
+  } else if (preset === 'ses') {
+    if (host) host.value = 'email-smtp.us-east-1.amazonaws.com';
+    if (port) port.value = '587';
+    if (enc) enc.value = 'starttls';
+  }
+}
+
+async function loadAdminSmtp() {
+  toast('Loading SMTP configuration...');
+  try {
+    const res = await api('/api/admin/email');
+    S.adminSmtp = res;
+    toast('SMTP settings refreshed', 'ok');
+    R();
+  } catch (e) {
+    toast('Failed to load SMTP settings: ' + (e.message || e), 'bad');
+  }
+}
+
+async function saveAdminSmtp() {
+  const enabled = Boolean($('#admin-smtp-enabled')?.checked);
+  const host = $('#admin-smtp-host')?.value.trim() || '';
+  const port = parseInt($('#admin-smtp-port')?.value.trim() || '587', 10);
+  const username = $('#admin-smtp-user')?.value.trim() || '';
+  const password = $('#admin-smtp-pass')?.value.trim() || '';
+  const from_email = $('#admin-smtp-from-email')?.value.trim() || '';
+  const from_name = $('#admin-smtp-from-name')?.value.trim() || '';
+  const encryption = $('#admin-smtp-enc')?.value || 'starttls';
+
+  try {
+    const res = await api('/api/admin/email', {
+      method: 'POST',
+      body: JSON.stringify({
+        enabled,
+        host,
+        port,
+        username,
+        password,
+        from_email,
+        from_name,
+        encryption
+      })
+    });
+    toast(res.message || 'SMTP settings saved successfully!', 'ok');
+    await loadAdminSmtp();
+  } catch (e) {
+    toast(e.message || 'Failed to save SMTP settings', 'bad');
+  }
+}
+
+async function sendAdminTestEmail(btn) {
+  const to_email = $('#admin-smtp-test-email')?.value.trim() || '';
+  if (!to_email) {
+    toast('Please enter a recipient email address for testing', 'bad');
+    return;
+  }
+
+  setBtnLoading(btn, true, 'Sending...');
+  try {
+    const res = await api('/api/admin/email/test', {
+      method: 'POST',
+      body: JSON.stringify({ to_email })
+    });
+    setBtnLoading(btn, false);
+    toast(res.message || 'Test email sent successfully!', 'ok');
+    uiAlert({
+      title: 'Email Delivery Successful',
+      message: `Diagnostic test email was successfully dispatched to <b>${esc(to_email)}</b> via your configured SMTP mail server!`,
+      type: 'success'
+    });
+  } catch (e) {
+    setBtnLoading(btn, false);
+    toast('Failed to send test email: ' + (e.message || e), 'bad');
+    uiAlert({
+      title: 'SMTP Delivery Failed',
+      message: `Failed to deliver test email:<br><br><code style="color:#ef4444; word-break:break-all;">${esc(e.message || e)}</code><br><br>Please verify your SMTP host, port, credentials, and TLS encryption mode.`,
+      type: 'error'
+    });
+  }
+}
+
+function openResetPasswordModal() {
+  openModal({
+    title: 'Reset Account Password',
+    body: `
+      <div style="font-size: 13.5px; line-height: 1.6; color: var(--tx-secondary);">
+        <p style="margin-top: 0; margin-bottom: 12px;">
+          Enter your registered username or email address below. We'll send you a password reset verification link and code.
+        </p>
+        <div style="margin-bottom: 14px;">
+          <label class="lbl" style="font-size: 12px; margin-bottom: 6px;">Username or Email Address</label>
+          <input type="text" id="reset-identity" class="inp" placeholder="e.g. admin or user@example.com" autocomplete="username" autofocus onkeydown="if(event.key==='Enter')submitResetPasswordRequest()">
+        </div>
+        ${S.turnstileEnabled ? '<div id="turnstile-reset" class="turnstile-wrap" style="margin-bottom:12px;"></div>' : ''}
+        <div class="lerr" id="reset-err" role="alert" style="margin-bottom: 10px; color:#ef4444; font-size:12.5px;"></div>
+        <div class="row" style="margin-top: 6px;">
+          <a href="javascript:void(0)" onclick="openSetNewPasswordModal()" style="font-size: 12px; color: var(--ac); text-decoration: none;">
+            Already have a reset code? Enter it here &rarr;
+          </a>
+        </div>
+      </div>
+    `,
+    buttons: [
+      { label: 'Cancel', class: 'btn', onClick: () => closeModal() },
+      {
+        label: 'Send Reset Link',
+        class: 'btn pr',
+        onClick: () => submitResetPasswordRequest()
+      }
+    ]
+  });
+
+  if (S.turnstileEnabled) {
+    mountTurnstileWidget('#turnstile-reset');
+  }
+  setTimeout(() => $('#reset-identity')?.focus(), 150);
+}
+
+async function submitResetPasswordRequest() {
+  const identity = $('#reset-identity')?.value.trim();
+  const err = $('#reset-err');
+  if (!identity) {
+    if (err) err.textContent = 'Please enter your username or email address.';
+    return;
+  }
+
+  if (S.turnstileEnabled && !S.turnstileToken) {
+    if (err) err.textContent = 'Please complete the Cloudflare Turnstile security check.';
+    return;
+  }
+
+  const btn = $('#modal-container .btn.pr');
+  setBtnLoading(btn, true, 'Sending...');
+
+  try {
+    const res = await (await fetch('/api/auth/password-reset/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identity,
+        'cf-turnstile-response': S.turnstileToken
+      })
+    })).json();
+
+    setBtnLoading(btn, false);
+    resetTurnstileWidget();
+
+    if (res.error) {
+      if (err) err.textContent = res.error;
+      return;
+    }
+
+    closeModal();
+    if (res.token) {
+      uiAlert({
+        title: 'Password Reset Code Generated',
+        message: `
+          <div style="font-size:13.5px; line-height:1.6;">
+            <p style="margin-top:0;">${esc(res.message || 'A reset verification code was generated.')}</p>
+            <div style="background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:8px; padding:12px; margin:14px 0;">
+              <span class="mu" style="font-size:11.5px; display:block; margin-bottom:4px;">Your Reset Code:</span>
+              <code class="mono" style="font-size:14px; color:#38bdf8; font-weight:bold; user-select:all;">${esc(res.token)}</code>
+            </div>
+            <p class="mu" style="font-size:12px; margin-bottom:0;">Click the button below to set your new password now using this code.</p>
+          </div>
+        `,
+        type: 'info',
+        confirmText: 'Set New Password Now',
+        onConfirm: () => openSetNewPasswordModal(res.token)
+      });
+    } else {
+      uiAlert({
+        title: 'Reset Instructions Sent',
+        message: `
+          <div style="font-size:13.5px; line-height:1.6;">
+            <p style="margin-top:0;">${esc(res.message || 'If an account exists with that address, instructions and a verification code have been sent.')}</p>
+            <p class="mu" style="font-size:12.5px;">Please check your email inbox (and spam folder) for the password reset link or code.</p>
+          </div>
+        `,
+        type: 'info',
+        confirmText: 'Enter Reset Code',
+        onConfirm: () => openSetNewPasswordModal()
+      });
+    }
+  } catch (e) {
+    setBtnLoading(btn, false);
+    resetTurnstileWidget();
+    if (err) err.textContent = 'Connection error: ' + (e.message || e);
+  }
+}
+
+function openSetNewPasswordModal(presetToken = '') {
+  openModal({
+    title: 'Choose a New Password',
+    body: `
+      <div style="font-size: 13.5px; line-height: 1.6; color: var(--tx-secondary);">
+        <p style="margin-top: 0; margin-bottom: 12px;">
+          Enter the verification code from your email (or provided by the system) along with your new password.
+        </p>
+        <div style="margin-bottom: 12px;">
+          <label class="lbl" style="font-size: 12px; margin-bottom: 5px;">Reset Code / Token</label>
+          <input type="text" id="reset-token-input" class="inp mono" value="${esc(presetToken)}" placeholder="Paste your 32-character reset code" autocomplete="off">
+        </div>
+        <div style="margin-bottom: 12px;">
+          <label class="lbl" style="font-size: 12px; margin-bottom: 5px;">New Password</label>
+          <div class="row" style="position:relative;">
+            <input type="password" id="reset-new-password" class="inp" placeholder="At least 6 characters" autocomplete="new-password" style="padding-right:36px;">
+            <button type="button" class="eye" onclick="const p=$('#reset-new-password'); p.type=p.type==='password'?'text':'password';" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--tx-muted); cursor:pointer;">${ic('eye', 14)}</button>
+          </div>
+        </div>
+        <div style="margin-bottom: 14px;">
+          <label class="lbl" style="font-size: 12px; margin-bottom: 5px;">Confirm New Password</label>
+          <div class="row" style="position:relative;">
+            <input type="password" id="reset-new-password-confirm" class="inp" placeholder="Repeat new password" autocomplete="new-password" style="padding-right:36px;" onkeydown="if(event.key==='Enter')submitSetNewPassword()">
+            <button type="button" class="eye" onclick="const p=$('#reset-new-password-confirm'); p.type=p.type==='password'?'text':'password';" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--tx-muted); cursor:pointer;">${ic('eye', 14)}</button>
+          </div>
+        </div>
+        <div class="lerr" id="set-pw-err" role="alert" style="margin-bottom: 10px; color:#ef4444; font-size:12.5px;"></div>
+      </div>
+    `,
+    buttons: [
+      { label: 'Cancel', class: 'btn', onClick: () => closeModal() },
+      {
+        label: 'Update Password',
+        class: 'btn pr',
+        onClick: () => submitSetNewPassword()
+      }
+    ]
+  });
+
+  setTimeout(() => {
+    if (presetToken) {
+      $('#reset-new-password')?.focus();
+    } else {
+      $('#reset-token-input')?.focus();
+    }
+  }, 150);
+}
+
+async function submitSetNewPassword() {
+  const token = $('#reset-token-input')?.value.trim();
+  const p1 = $('#reset-new-password')?.value;
+  const p2 = $('#reset-new-password-confirm')?.value;
+  const err = $('#set-pw-err');
+
+  if (!token) {
+    if (err) err.textContent = 'Please enter your reset code / token.';
+    return;
+  }
+  if (!p1 || p1.length < 6) {
+    if (err) err.textContent = 'New password must be at least 6 characters.';
+    return;
+  }
+  if (p1 !== p2) {
+    if (err) err.textContent = 'Passwords do not match. Please re-enter.';
+    return;
+  }
+
+  const btn = $('#modal-container .btn.pr');
+  setBtnLoading(btn, true, 'Updating...');
+
+  try {
+    const res = await (await fetch('/api/auth/password-reset/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token,
+        new_password: p1
+      })
+    })).json();
+
+    setBtnLoading(btn, false);
+
+    if (res.error) {
+      if (err) err.textContent = res.error;
+      return;
+    }
+
+    closeModal();
+    toast('Password reset successful! You can now log in.', 'ok');
+    if (window.location.hash.includes('reset-token=')) {
+      window.location.hash = '';
+    }
+    $('#login')?.remove();
+    showLoginScreen();
+    if (res.username) {
+      const uInp = $('#lu');
+      if (uInp) uInp.value = res.username;
+      $('#lp')?.focus();
+    }
+  } catch (e) {
+    setBtnLoading(btn, false);
+    if (err) err.textContent = 'Connection error: ' + (e.message || e);
+  }
+}
+
+function checkUrlResetToken() {
+  if (window.location.hash && window.location.hash.includes('reset-token=')) {
+    const m = /reset-token=([^&]+)/i.exec(window.location.hash);
+    if (m && m[1]) {
+      setTimeout(() => openSetNewPasswordModal(decodeURIComponent(m[1])), 200);
+    }
+  }
+}
+
 function selectBrandPreset(presetId) {
   const p = BRAND_PRESETS.find(x => x.id === presetId);
   if (!p) return;
@@ -15227,7 +15679,7 @@ function showSetupScreen() {
     ${S.turnstileEnabled ? '<div id="turnstile-setup" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitSetup()">Initialize &amp; Launch</button>
-    <div class="lsm foot">${esc(footTxt)}</div>
+    <div class="lsm foot">${renderFooterHtml(footTxt)}</div>
   </div>`;
   applyLoginOverlayBackground(d);
   document.body.appendChild(d);
@@ -15308,7 +15760,7 @@ function showLoginScreen() {
         <button type="button" class="btn pr" onclick="$('#login')?.remove(); checkAuth();">${ic('refresh', 14)} Check Status</button>
         <button type="button" class="btn" onclick="enterAdminLoginFromMaint()">${ic('shield', 14)} Administrator Sign In</button>
       </div>
-      <div class="lsm foot" style="margin-top:18px;">${esc(footTxt)}</div>
+      <div class="lsm foot" style="margin-top:18px;">${renderFooterHtml(footTxt)}</div>
     </div>`;
     applyLoginOverlayBackground(d);
     document.body.appendChild(d);
@@ -15338,11 +15790,15 @@ function showLoginScreen() {
         ${ic('eye', 16)}
       </button>
     </label>
+    <div class="row sb" style="margin: -6px 0 12px; font-size: 12.5px;">
+      <span></span>
+      <a href="javascript:void(0)" onclick="openResetPasswordModal()" style="color: var(--ac); text-decoration: none; font-weight: 500;">Reset Password</a>
+    </div>
     ${S.turnstileEnabled ? '<div id="turnstile-login" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitLogin()">Login</button>
     ${maintEnabled ? `<button type="button" class="btn sm" style="width:100%; margin-top:10px; justify-content:center;" onclick="S.maintAdminSignInOpen=false; $('#login')?.remove(); showLoginScreen();">Back to Maintenance Notice</button>` : ''}
-    <div class="lsm foot">${esc(footTxt)}</div>
+    <div class="lsm foot">${renderFooterHtml(footTxt)}</div>
   </div>`;
   applyLoginOverlayBackground(d);
   document.body.appendChild(d);
@@ -15539,6 +15995,17 @@ window.openApplyUpdateModal = openApplyUpdateModal;
 window.executePanelUpdate = executePanelUpdate;
 window.openUpdateLogsModal = openUpdateLogsModal;
 window.pollUpdateLogsOnce = pollUpdateLogsOnce;
+window.renderFooterHtml = renderFooterHtml;
+window.renderAdminEmailTabHtml = renderAdminEmailTabHtml;
+window.applySmtpPreset = applySmtpPreset;
+window.loadAdminSmtp = loadAdminSmtp;
+window.saveAdminSmtp = saveAdminSmtp;
+window.sendAdminTestEmail = sendAdminTestEmail;
+window.openResetPasswordModal = openResetPasswordModal;
+window.submitResetPasswordRequest = submitResetPasswordRequest;
+window.openSetNewPasswordModal = openSetNewPasswordModal;
+window.submitSetNewPassword = submitSetNewPassword;
+window.checkUrlResetToken = checkUrlResetToken;
 window.playerAction = playerAction;
 window.addWhitelistPlayer = addWhitelistPlayer;
 window.browseFolder = browseFolder;
@@ -16114,6 +16581,7 @@ document.addEventListener('DOMContentLoaded', () => {
   checkAuth();
   initDragAndDrop();
   enhanceSelects(document.body);
+  checkUrlResetToken();
   if (globalSelectObserver) {
     globalSelectObserver.observe(document.body, { childList: true, subtree: true });
   }

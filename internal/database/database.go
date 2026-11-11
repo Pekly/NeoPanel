@@ -178,6 +178,19 @@ func (db *DB) migrate() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_schedules_srv ON server_schedules(server_id);
+
+	CREATE TABLE IF NOT EXISTS password_resets (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		token TEXT NOT NULL UNIQUE,
+		expires_at DATETIME NOT NULL,
+		used BOOLEAN NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token);
+	CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 	`
 	if _, err := db.conn.Exec(schema); err != nil {
 		return err
@@ -474,6 +487,37 @@ func (db *DB) DeleteServer(id string) error {
 
 func (db *DB) UpdateUserPassword(userID int, newHash string) error {
 	_, err := db.conn.Exec("UPDATE users SET password_hash = ? WHERE id = ?", newHash, userID)
+	return err
+}
+
+func (db *DB) CreatePasswordResetToken(userID int, token string, expiresAt time.Time) error {
+	now := time.Now().UTC()
+	_, _ = db.conn.Exec("UPDATE password_resets SET used = 1 WHERE user_id = ? AND used = 0", userID)
+	_, err := db.conn.Exec(`
+		INSERT INTO password_resets (user_id, token, expires_at, used, created_at)
+		VALUES (?, ?, ?, 0, ?)
+	`, userID, token, expiresAt.UTC(), now)
+	return err
+}
+
+func (db *DB) GetPasswordResetToken(token string) (*PasswordReset, error) {
+	row := db.conn.QueryRow(`
+		SELECT id, user_id, token, expires_at, used, created_at
+		FROM password_resets
+		WHERE token = ?
+	`, strings.TrimSpace(token))
+	pr := &PasswordReset{}
+	var used int
+	err := row.Scan(&pr.ID, &pr.UserID, &pr.Token, &pr.ExpiresAt, &used, &pr.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	pr.Used = used == 1
+	return pr, nil
+}
+
+func (db *DB) MarkPasswordResetUsed(token string) error {
+	_, err := db.conn.Exec("UPDATE password_resets SET used = 1 WHERE token = ?", strings.TrimSpace(token))
 	return err
 }
 

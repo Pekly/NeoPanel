@@ -143,3 +143,23 @@ type ServerDatabase struct {
 	MaxConnections int       `json:"max_connections"`
 	CreatedAt      time.Time `json:"created_at"`
 }
+
+type PasswordReset struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Used      bool      `json:"used"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type SMTPSettings struct {
+	Enabled    bool   `json:"enabled"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Username   string `json:"username"`
+	Password   string `json:"password,omitempty"`
+	FromEmail  string `json:"from_email"`
+	FromName   string `json:"from_name"`
+	Encryption string `json:"encryption"` // "starttls", "tls", "none"
+}
