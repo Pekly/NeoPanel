@@ -873,6 +873,7 @@ const DEFAULT_BRANDING = {
   server_hero_url: SERVER_HERO_URL,
   card_cover_url: MINECRAFT_COVER_URL,
   default_avatar_url: DEFAULT_USER_AVATAR_URL,
+  default_server_icon_url: '/static/img/default-server-icon.png',
   footer_text: 'Powered by NeoPanel Daemon',
   preset: 'obsidian',
   accent_color: '#387aff',
@@ -2389,7 +2390,7 @@ function detectFaviconMime(url) {
 function getBrand(key) {
   const active = (S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : (S.branding || DEFAULT_BRANDING);
   const val = active && active[key] !== undefined ? active[key] : DEFAULT_BRANDING[key];
-  if ((key === 'server_hero_url' || key === 'card_cover_url' || key === 'default_avatar_url' || key === 'brand_name') && !String(val || '').trim()) {
+  if ((key === 'server_hero_url' || key === 'card_cover_url' || key === 'default_avatar_url' || key === 'default_server_icon_url' || key === 'brand_name') && !String(val || '').trim()) {
     return DEFAULT_BRANDING[key];
   }
   return val;
@@ -7220,7 +7221,7 @@ const V = {
           <!-- Server Icon Preview & Quick Configs -->
           <div class="row" style="gap: 16px; align-items: center; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
             <div style="position: relative; width: 64px; height: 64px; border-radius: 12px; overflow: hidden; background: rgba(0,0,0,0.3); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-              <img id="set-srv-icon-img" src="${srv?.icon_url ? esc(srv.icon_url) : '/static/img/default-server-icon.png'}" onerror="this.src='/static/img/default-server-icon.png'" style="width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated;" alt="Server Icon">
+              <img id="set-srv-icon-img" src="${srv?.icon_url ? esc(srv.icon_url) : esc(getBrand('default_server_icon_url') || '/static/img/default-server-icon.png')}" onerror="this.src=getBrand('default_server_icon_url') || '/static/img/default-server-icon.png'" style="width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated;" alt="Server Icon">
             </div>
             <div style="flex: 1; min-width: 180px;">
               <div style="font-weight: 600; font-size: 13.5px; margin-bottom: 3px; color: var(--tx);">Server Icon &amp; Quick Configs</div>
@@ -8008,7 +8009,8 @@ const V = {
                   ['login_bg_url', 'Login Screen Wallpaper', 'https://example.com/login-bg.jpg', MINECRAFT_COVER_URL],
                   ['server_hero_url', 'Server Workspace Hero Banner', SERVER_HERO_URL, SERVER_HERO_URL],
                   ['card_cover_url', 'Dashboard Card Cover', MINECRAFT_COVER_URL, MINECRAFT_COVER_URL],
-                  ['default_avatar_url', 'Default User Avatar', DEFAULT_USER_AVATAR_URL, DEFAULT_USER_AVATAR_URL]
+                  ['default_avatar_url', 'Default User Avatar', DEFAULT_USER_AVATAR_URL, DEFAULT_USER_AVATAR_URL],
+                  ['default_server_icon_url', 'Default Server Icon (Fallback 64×64)', '/static/img/default-server-icon.png', '/static/img/default-server-icon.png']
                 ].map(([field, label, ph, fallbackThumb]) => {
                   const curVal = draft[field] || '';
                   const thumbSrc = curVal || fallbackThumb;
@@ -12716,7 +12718,7 @@ async function deleteServerIcon(srvId) {
     await api(srvApiPath(srv, '/icon'), { method: 'DELETE' });
     srv.icon_url = '';
     const img = $('#set-srv-icon-img');
-    if (img) img.src = '/static/img/default-server-icon.png';
+    if (img) img.src = getBrand('default_server_icon_url') || '/static/img/default-server-icon.png';
     toast('Server icon removed', 'ok');
     R();
   } catch (err) {
@@ -13623,14 +13625,15 @@ function onBrandInputChange(field, val, srcEl = null) {
 
   applyBranding(S.brandDraft);
   updateBrandLivePreview();
-  if (['logo_url', 'favicon_url', 'login_bg_url', 'server_hero_url', 'card_cover_url', 'default_avatar_url'].includes(field)) {
+  if (['logo_url', 'favicon_url', 'login_bg_url', 'server_hero_url', 'card_cover_url', 'default_avatar_url', 'default_server_icon_url'].includes(field)) {
     const fallbacks = {
       logo_url: '/favicon.svg',
       favicon_url: '/favicon.svg',
       login_bg_url: MINECRAFT_COVER_URL,
       server_hero_url: SERVER_HERO_URL,
       card_cover_url: MINECRAFT_COVER_URL,
-      default_avatar_url: DEFAULT_USER_AVATAR_URL
+      default_avatar_url: DEFAULT_USER_AVATAR_URL,
+      default_server_icon_url: '/static/img/default-server-icon.png'
     };
     const thumb = document.querySelector(`[data-brand-thumb="${field}"]`);
     if (thumb) thumb.src = (val || '').trim() || fallbacks[field] || '/favicon.svg';
@@ -13915,7 +13918,8 @@ function clearBrandingMedia(field) {
     login_bg_url: '',
     server_hero_url: SERVER_HERO_URL,
     card_cover_url: MINECRAFT_COVER_URL,
-    default_avatar_url: DEFAULT_USER_AVATAR_URL
+    default_avatar_url: DEFAULT_USER_AVATAR_URL,
+    default_server_icon_url: '/static/img/default-server-icon.png'
   };
   const nextVal = Object.prototype.hasOwnProperty.call(resetMap, field) ? resetMap[field] : '';
   onBrandInputChange(field, nextVal);

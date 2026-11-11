@@ -341,7 +341,13 @@ func (r *Router) registerRoutes(db *database.DB) {
 				fileServer.ServeHTTP(w, req)
 				return
 			}
+			cleanWithoutStatic := strings.TrimPrefix(clean, "static/")
 			if info, err := fs.Stat(r.embeddedStatic, clean); err == nil && !info.IsDir() {
+				fileServer.ServeHTTP(w, req)
+				return
+			}
+			if info, err := fs.Stat(r.embeddedStatic, cleanWithoutStatic); err == nil && !info.IsDir() {
+				req.URL.Path = "/" + cleanWithoutStatic
 				fileServer.ServeHTTP(w, req)
 				return
 			}
