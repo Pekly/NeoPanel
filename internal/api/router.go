@@ -307,6 +307,12 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAdmin(r.auth.AdminDeleteUser))
 	r.mux.HandleFunc("POST /api/admin/users/{id}/avatar", r.requireAdmin(r.account.AdminUploadUserAvatar))
 
+	// Admin panel updates & GitHub repository management
+	r.mux.HandleFunc("GET /api/admin/updates", r.requireAdmin(HandleGetUpdateStatus(db)))
+	r.mux.HandleFunc("POST /api/admin/updates/config", r.requireAdmin(HandleSaveUpdateConfig(db)))
+	r.mux.HandleFunc("POST /api/admin/updates/apply", r.requireAdmin(HandleApplyUpdate(db)))
+	r.mux.HandleFunc("GET /api/admin/updates/logs", r.requireAdmin(HandleGetUpdateLogs))
+
 	// Multi-node cluster & proxy routes
 	r.mux.HandleFunc("GET /api/cluster/servers", r.requireAuth(r.nodes.ListClusterServers))
 	r.mux.HandleFunc("GET /api/nodes", r.requireAuth(r.nodes.ListNodes))

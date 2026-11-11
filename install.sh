@@ -30,6 +30,10 @@ BINARY_NAME="neopanel"
 LOG_FILE="/tmp/neopanel-install.log"
 BUILD_DIR="/tmp/neopanel-build"
 
+# Git repository & branch configuration
+GIT_REPO_URL="${NEOPANEL_REPO_URL:-${GIT_REPO_URL:-https://github.com/Pekly/NeoPanel.git}}"
+GIT_BRANCH="${NEOPANEL_REPO_BRANCH:-${GIT_BRANCH:-main}}"
+
 # Cloudflare Turnstile defaults (Full Panel mode only)
 DEFAULT_TURNSTILE_SITE_KEY="0x4AAAAAAF7CgzdQmoC3Ho3H"
 DEFAULT_TURNSTILE_SECRET_KEY="0x4AAAAAAF7Cg6ZKTqdgSA2s8Sg2oZ2HApU"
@@ -413,18 +417,26 @@ step_go_compiler() {
 
 write_global_shortcuts() {
   # Install global neopanel-update command shortcut
-  cat > "$INSTALL_DIR/neopanel-update" <<'EOF'
+  cat > "$INSTALL_DIR/neopanel-update" <<EOF
 #!/usr/bin/env bash
 set -e
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- --update "$@"
+REPO_URL="\${NEOPANEL_REPO_URL:-$GIT_REPO_URL}"
+REPO_BRANCH="\${NEOPANEL_REPO_BRANCH:-$GIT_BRANCH}"
+CLEAN_SLUG="\$(echo "\$REPO_URL" | sed -E 's|https?://github.com/([^/]+)/([^/.]+)(\.git)?|\1/\2|')"
+RAW_URL="https://raw.githubusercontent.com/\${CLEAN_SLUG}/\${REPO_BRANCH}/install.sh"
+curl -sSL "\$RAW_URL" | bash -s -- --update --repo "\$REPO_URL" --branch "\$REPO_BRANCH" "\$@"
 EOF
   chmod +x "$INSTALL_DIR/neopanel-update"
 
   # Install global neopanel-installer command shortcut
-  cat > "$INSTALL_DIR/neopanel-installer" <<'EOF'
+  cat > "$INSTALL_DIR/neopanel-installer" <<EOF
 #!/usr/bin/env bash
 set -e
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | bash -s -- "$@"
+REPO_URL="\${NEOPANEL_REPO_URL:-$GIT_REPO_URL}"
+REPO_BRANCH="\${NEOPANEL_REPO_BRANCH:-$GIT_BRANCH}"
+CLEAN_SLUG="\$(echo "\$REPO_URL" | sed -E 's|https?://github.com/([^/]+)/([^/.]+)(\.git)?|\1/\2|')"
+RAW_URL="https://raw.githubusercontent.com/\${CLEAN_SLUG}/\${REPO_BRANCH}/install.sh"
+curl -sSL "\$RAW_URL" | bash -s -- --repo "\$REPO_URL" --branch "\$REPO_BRANCH" "\$@"
 EOF
   chmod +x "$INSTALL_DIR/neopanel-installer"
 }
@@ -444,7 +456,7 @@ step_build_neopanel() {
     go build "${go_tags[@]}" -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
   else
     rm -rf "$BUILD_DIR"
-    git clone --depth 1 https://github.com/Pekly/NeoPanel.git "$BUILD_DIR"
+    git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$BUILD_DIR"
     if [ -f "$BUILD_DIR/cmd/neopanel/main.go" ]; then
       (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
       rm -rf "$BUILD_DIR"
@@ -1102,7 +1114,7 @@ step_update_fetch() {
   fi
 
   rm -rf "$BUILD_DIR"
-  git clone --depth 1 https://github.com/Pekly/NeoPanel.git "$BUILD_DIR"
+  git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$BUILD_DIR"
 }
 
 step_update_compile() {
@@ -1183,6 +1195,8 @@ Installation Actions:
   --install, --panel        Install Master Panel (Dashboard + Daemon + Java)
   --node                    Install Dedicated Cluster Game Node (-tags node)
   --update, -u              Update existing installation (auto-preserves panel vs node build)
+  --repo <url>              Git repository URL to fetch from (default: https://github.com/Pekly/NeoPanel.git)
+  --branch <name>           Git branch to build from (default: main)
 
 Cluster Node & Pairing Flags (combine with --node):
   --master <url>            Master Panel base URL (e.g. https://panel.example.com)
@@ -1345,6 +1359,22 @@ parse_cli_args() {
         ;;
       --update|-u)
         ACTION="update"
+        shift
+        ;;
+      --repo|--git-repo)
+        GIT_REPO_URL="${2:-}"
+        shift 2
+        ;;
+      --repo=*|--git-repo=*)
+        GIT_REPO_URL="${1#*=}"
+        shift
+        ;;
+      --branch|--git-branch)
+        GIT_BRANCH="${2:-}"
+        shift 2
+        ;;
+      --branch=*|--git-branch=*)
+        GIT_BRANCH="${1#*=}"
         shift
         ;;
       --master)

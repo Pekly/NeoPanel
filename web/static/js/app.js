@@ -4858,22 +4858,8 @@ function srvh() {
         </div>
       </div>
     </div>
-    <div class="row" style="position:relative">
+    <div class="row" style="position:relative; gap:8px; align-items:center;">
       ${S.view !== 'con' ? `<button class="btn" onclick="toggleFlyConsole()" title="Open Live Console Drawer (Ctrl+\`)">${ic('terminal', 14)} Console</button>` : ''}
-      <div style="position: relative; display: inline-block;">
-        <button class="btn" onclick="event.stopPropagation(); toggleCmdMenu()" aria-haspopup="menu" aria-expanded="${!!S.cmenu}">Commands &#9662;</button>
-        ${S.cmenu ? `<div class="cmenu" role="menu" onclick="event.stopPropagation()">
-          ${CMDS.map(([label, cmd, icName]) => `
-            <button role="menuitem" onclick="execQuickCmd('${cmd}')">
-              ${ic(icName || 'terminal', 13)}
-              <span>${esc(label)}</span>
-            </button>
-          `).join('')}
-          <button role="menuitem" onclick="S.cmenu=false; toggleFlyConsole();">${ic('terminal', 13)} Live Console <kbd style="margin-left: auto; font-size: 10px;">Ctrl+\`</kbd></button>
-          <div style="border-top: 1px solid var(--border); margin: 4px 0;"></div>
-          <button role="menuitem" style="color: #ef4444;" data-srv-id="${esc(srv?.id || '')}" data-srv-name="${esc(srv?.name || '')}" data-node-id="${esc(nodeId)}" onclick="S.cmenu=false; openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);">${ic('trash', 13)} Delete Server</button>
-        </div>` : ''}
-      </div>
       <button class="btn pr" data-power-btn="start" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
       <button class="btn stop" data-power-btn="stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
@@ -5749,14 +5735,19 @@ const V = {
     <div class="cgrid">
       <div class="cwrap">
         <div class="con-top-bar">
-          <div class="row" style="gap:8px;">
+          <div class="row" style="gap:8px; align-items:center;">
             ${ic('terminal', 14)}
             <span>Console Stream</span>
             <span id="ws-live-pill" class="con-live-pill"><i></i>Connecting...</span>
             <span class="mu">&bull;</span>
             <span id="con-buf-count">${S.log.length} lines</span>
           </div>
-          <button class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');">Clear</button>
+          <div class="row" style="gap:6px; align-items:center; flex-wrap:wrap;">
+            <button type="button" class="con-quick-pill" onclick="runCmd('save-all')" title="Save all worlds to disk (save-all)">${ic('download', 11)} save-all</button>
+            <button type="button" class="con-quick-pill" onclick="runCmd('list')" title="List online players (list)">${ic('users', 11)} list</button>
+            <button type="button" class="con-quick-pill" onclick="runCmd('tps')" title="Check tick rate &amp; server health (tps)">${ic('activity', 11)} tps</button>
+            <button type="button" class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');" style="font-size:11px; padding:3px 9px;">Clear</button>
+          </div>
         </div>
         <div class="con" id="log" role="log" aria-live="polite"></div>
         <div class="cin">
@@ -7469,6 +7460,7 @@ const V = {
     const onlineNodesCount = nodesList.filter(n => n.online).length;
 
     const draft = S.brandDraft || { ...DEFAULT_BRANDING, ...S.branding };
+    const up = S.adminUpdate || {};
     const daemonDraft = S.daemonDraft || {
       fqdn: S.brandingDaemon?.fqdn || '',
       sftp_port: S.brandingDaemon?.sftp_port || S.adminDaemonCfg?.sftpPort || 2022,
@@ -7538,6 +7530,71 @@ const V = {
             <div class="row sb" style="padding:6px 0;">
               <span class="mu">Process Architecture</span>
               <span class="mono" style="color:var(--tx);">${esc(sys.arch)} on ${esc(sys.os)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card tw" style="margin-bottom:18px;">
+          <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
+            <div>
+              <h2 style="margin:0 0 4px; color:var(--tx); display:flex; align-items:center; gap:8px;">
+                ${ic('cpu', 18)} Panel Software &amp; System Updates
+              </h2>
+              <span class="mu" style="font-size:13px;">Manage panel version, track upstream commits, and configure GitHub update repository source/branch.</span>
+            </div>
+            <div class="row" style="gap:8px;">
+              <button type="button" class="btn sm" onclick="checkAdminUpdates()">${ic('refresh', 13)} Check Updates</button>
+              <button type="button" class="btn sm pr" onclick="openApplyUpdateModal()">${ic('download', 13)} Update Panel Now</button>
+            </div>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px;">
+            <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
+              <span class="mu">Binary Version &amp; Commit</span>
+              <div class="row" style="gap:8px; align-items:center;">
+                <span class="mono" style="color:var(--tx);">NeoPanel v${esc(sys.version || '1.0.0')}</span>
+                ${up?.current_commit ? `<span class="chip mono" style="font-size:11px;">#${esc(up.current_commit.slice(0, 7))}</span>` : ''}
+              </div>
+            </div>
+            <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
+              <span class="mu">Upstream Git Status</span>
+              <div class="row" style="gap:8px; align-items:center;">
+                ${up?.is_updating ? '<span class="badge starting"><i class="dot"></i>Update In Progress</span>' :
+                  up?.error ? `<span class="badge offline" title="${esc(up.error)}"><i class="dot"></i>Check Note: ${esc(up.error)}</span>` :
+                  up?.update_available ? `<span class="badge starting"><i class="dot"></i>New Commit Available (${esc(up.remote_commit?.slice(0, 7) || 'latest')})</span>` :
+                  '<span class="badge online"><i class="dot"></i>Up to Date</span>'}
+              </div>
+            </div>
+            ${up?.remote_message ? `
+            <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
+              <span class="mu">Latest Upstream Commit</span>
+              <div class="row" style="gap:8px; align-items:center;">
+                <span class="mono mu" style="font-size:11px;">#${esc(up.remote_commit?.slice(0, 7) || '')}</span>
+                <span style="color:var(--tx); font-size:12px;">${esc(up.remote_message)}</span>
+              </div>
+            </div>` : ''}
+            <div class="row sb" style="padding:6px 0; flex-wrap:wrap; gap:8px;">
+              <span class="mu">Live Build Logs</span>
+              <button type="button" class="btn sm" onclick="openUpdateLogsModal()">${ic('terminal', 12)} View Installer Logs (/tmp/neopanel-install.log)</button>
+            </div>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.015); border:1px solid var(--border); border-radius:8px; padding:16px;">
+            <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx);">GitHub Source Repository &amp; Branch</h3>
+            <p class="mu" style="font-size:12px; margin:0 0 12px;">Point NeoPanel to your own GitHub fork or a custom development branch for automated builds.</p>
+            <div class="grid g2" style="gap:12px; margin-bottom:12px;">
+              <div>
+                <label class="lbl" style="font-size:12px;">Git Repository URL</label>
+                <input type="text" id="admin-update-repo" class="inp mono" value="${esc(up?.repo_url || 'https://github.com/Pekly/NeoPanel.git')}" placeholder="https://github.com/Pekly/NeoPanel.git">
+              </div>
+              <div>
+                <label class="lbl" style="font-size:12px;">Git Branch</label>
+                <input type="text" id="admin-update-branch" class="inp mono" value="${esc(up?.branch || 'main')}" placeholder="main">
+              </div>
+            </div>
+            <div class="row" style="justify-content:flex-end; gap:8px;">
+              <button type="button" class="btn sm" onclick="resetAdminUpdateRepo()">${ic('refresh', 12)} Reset to Default</button>
+              <button type="button" class="btn sm pr" onclick="saveAdminUpdateConfig()">${ic('save', 12)} Save Repository Settings</button>
             </div>
           </div>
         </div>
@@ -9128,20 +9185,22 @@ function selectAccountTab(idx) {
 }
 
 async function loadAdminData(skipRender = false) {
-  const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes, modsRes] = await Promise.all([
+  const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes, modsRes, upRes] = await Promise.all([
     api('/api/system').catch(() => null),
     api('/api/admin/users').catch(() => null),
     api('/api/admin/turnstile').catch(() => null),
     api('/api/nodes').catch(() => null),
     api('/api/admin/branding').catch(() => null),
     api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null),
-    api('/api/admin/mods').catch(() => null)
+    api('/api/admin/mods').catch(() => null),
+    api('/api/admin/updates').catch(() => null)
   ]);
 
   if (sysRes) S.system = sysRes;
   if (usersRes) S.adminUsers = usersRes || [];
   if (tsRes) S.adminTurnstile = tsRes;
   if (Array.isArray(nodesRes)) S.nodes = nodesRes;
+  if (upRes) S.adminUpdate = upRes;
   if (modsRes && Array.isArray(modsRes.mods)) {
     S.adminMods = modsRes.mods;
     if (modsRes.mods_dir) S.modsDir = modsRes.mods_dir;
@@ -13571,6 +13630,139 @@ async function triggerAdminGC() {
   }
 }
 
+async function checkAdminUpdates() {
+  toast('Checking GitHub for updates...');
+  try {
+    const res = await api('/api/admin/updates');
+    S.adminUpdate = res;
+    if (res.error) {
+      toast(`Update check note: ${res.error}`, 'bad');
+    } else if (res.update_available) {
+      toast(`Update available: commit #${res.remote_commit?.slice(0, 7) || 'latest'}`);
+    } else {
+      toast('NeoPanel is up to date with remote repository!');
+    }
+    R();
+  } catch (e) {
+    toast('Failed to check updates: ' + (e.message || e), 'bad');
+  }
+}
+
+async function saveAdminUpdateConfig() {
+  const repoInput = $('#admin-update-repo');
+  const branchInput = $('#admin-update-branch');
+  const repo_url = repoInput ? repoInput.value.trim() : '';
+  const branch = branchInput ? branchInput.value.trim() : 'main';
+
+  if (!repo_url) {
+    toast('Repository URL cannot be empty', 'bad');
+    return;
+  }
+
+  try {
+    const res = await api('/api/admin/updates/config', {
+      method: 'POST',
+      body: JSON.stringify({ repo_url, branch })
+    });
+    toast(res.message || 'Repository settings saved!');
+    await checkAdminUpdates();
+  } catch (e) {
+    toast(e.message || 'Failed to save repository settings', 'bad');
+  }
+}
+
+function resetAdminUpdateRepo() {
+  const r = $('#admin-update-repo');
+  const b = $('#admin-update-branch');
+  if (r) r.value = 'https://github.com/Pekly/NeoPanel.git';
+  if (b) b.value = 'main';
+}
+
+async function openApplyUpdateModal() {
+  const up = S.adminUpdate || {};
+  const repo = up.repo_url || 'https://github.com/Pekly/NeoPanel.git';
+  const branch = up.branch || 'main';
+
+  const ok = await uiConfirm({
+    title: 'Confirm NeoPanel System Update',
+    message: `
+      Are you sure you want to trigger a panel binary update now?<br><br>
+      <div style="background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:8px; padding:10px; font-size:12px; margin:8px 0;">
+        <div><b>Target Repository:</b> <code>${esc(repo)}</code></div>
+        <div><b>Target Branch:</b> <code>${esc(branch)}</code></div>
+        <div><b>Current Version:</b> <code>v${esc(S.system?.version || '1.0.0')}</code></div>
+      </div>
+      The daemon will pull the latest source code from GitHub, compile the new binary, and restart the NeoPanel service. Running Minecraft servers will remain online.
+    `,
+    confirmText: 'Apply Update Now',
+    cancelText: 'Cancel',
+    isDanger: false,
+    icon: 'download'
+  });
+  if (!ok) return;
+
+  await executePanelUpdate();
+}
+
+async function executePanelUpdate() {
+  try {
+    const res = await api('/api/admin/updates/apply', { method: 'POST' });
+    toast(res.message || 'Update started in background!');
+    if (!S.adminUpdate) S.adminUpdate = {};
+    S.adminUpdate.is_updating = true;
+    R();
+    openUpdateLogsModal();
+  } catch (e) {
+    toast(e.message || 'Failed to start update', 'bad');
+  }
+}
+
+let _updateLogTimer = null;
+function openUpdateLogsModal() {
+  uiAlert({
+    title: 'NeoPanel Installer & Build Logs',
+    message: `
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="row sb" style="align-items:center;">
+          <span id="update-log-status" class="con-live-pill"><i></i>Streaming logs...</span>
+          <button type="button" class="btn sm" onclick="pollUpdateLogsOnce()">${ic('refresh', 12)} Refresh</button>
+        </div>
+        <pre id="update-log-pre" style="background:#090d16; border:1px solid var(--border); border-radius:8px; padding:12px; font-family:var(--font-mono, monospace); font-size:11.5px; line-height:1.5; color:#e2e8f0; height:320px; overflow-y:auto; white-space:pre-wrap; word-break:break-all;">Loading build logs from /tmp/neopanel-install.log...</pre>
+      </div>
+    `,
+    type: 'info'
+  });
+
+  pollUpdateLogsOnce();
+  if (_updateLogTimer) clearInterval(_updateLogTimer);
+  _updateLogTimer = setInterval(pollUpdateLogsOnce, 2500);
+}
+
+async function pollUpdateLogsOnce() {
+  try {
+    const data = await api('/api/admin/updates/logs');
+    const pre = $('#update-log-pre');
+    const pill = $('#update-log-status');
+    if (pre) {
+      pre.textContent = data.logs || 'No update logs found yet (/tmp/neopanel-install.log is empty).';
+      pre.scrollTop = pre.scrollHeight;
+    }
+    if (pill) {
+      if (data.running) {
+        pill.className = 'con-live-pill';
+        pill.innerHTML = '<i></i>Compiling &amp; updating...';
+      } else {
+        pill.className = 'badge online';
+        pill.innerHTML = '<i class="dot"></i>Process Idle / Completed';
+        if (_updateLogTimer) {
+          clearInterval(_updateLogTimer);
+          _updateLogTimer = null;
+        }
+      }
+    }
+  } catch (e) {}
+}
+
 function selectBrandPreset(presetId) {
   const p = BRAND_PRESETS.find(x => x.id === presetId);
   if (!p) return;
@@ -15332,6 +15524,7 @@ async function logout() {
 // --- Attach All Functions to Window for Seamless HTML Event Handling ---
 window.getNode = getNode;
 window.getNodeById = getNodeById;
+window.runCmd = runCmd;
 window.toast = toast;
 window.power = power;
 window.switchServer = switchServer;
@@ -15339,6 +15532,13 @@ window.openPalette = openPalette;
 window.execPaletteItem = execPaletteItem;
 window.toggleCmdMenu = toggleCmdMenu;
 window.execQuickCmd = execQuickCmd;
+window.checkAdminUpdates = checkAdminUpdates;
+window.saveAdminUpdateConfig = saveAdminUpdateConfig;
+window.resetAdminUpdateRepo = resetAdminUpdateRepo;
+window.openApplyUpdateModal = openApplyUpdateModal;
+window.executePanelUpdate = executePanelUpdate;
+window.openUpdateLogsModal = openUpdateLogsModal;
+window.pollUpdateLogsOnce = pollUpdateLogsOnce;
 window.playerAction = playerAction;
 window.addWhitelistPlayer = addWhitelistPlayer;
 window.browseFolder = browseFolder;

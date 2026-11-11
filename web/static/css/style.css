@@ -1301,6 +1301,37 @@ h2 {
   font-size: 12px;
   color: var(--tx-muted);
   flex-shrink: 0;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.con-quick-pill {
+  font-size: 11px !important;
+  font-family: var(--font-mono, monospace) !important;
+  padding: 3px 8px !important;
+  height: 24px !important;
+  line-height: 16px !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid var(--border-light, rgba(255, 255, 255, 0.12)) !important;
+  color: var(--tx-secondary, #cbd5e1) !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-weight: 500;
+}
+
+.con-quick-pill:hover {
+  background: rgba(99, 102, 241, 0.22) !important;
+  border-color: rgba(99, 102, 241, 0.55) !important;
+  color: #fff !important;
+  transform: translateY(-1px);
+}
+
+.con-quick-pill:active {
+  transform: translateY(0);
 }
 
 .con {
