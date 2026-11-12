@@ -562,8 +562,13 @@ function buildSettingsSnapshots(srv, data) {
     memory_max: data.ram,
     java_path: data.javaPath,
     java_args: data.args,
-    auto_restart: data.autoRestart
+    auto_restart: data.autoRestart,
+    cpu_limit_percent: Number(data.cpuLimit) || 0,
+    disk_limit_mb: Number(data.diskLimit) || 0
   };
+  if (data.ownerId) {
+    srvPayload.owner_id = Number(data.ownerId);
+  }
   return {
     propsPayload,
     srvPayload,
@@ -651,9 +656,17 @@ function collectSettingsFormPayload(srv) {
 
   const autoRestart = autoRestartEl ? Boolean(autoRestartEl.checked) : (srv.auto_restart !== false);
 
+  const cpuLimitEl = $('#prop-cpu-limit');
+  const diskLimitEl = $('#prop-disk-limit');
+  const ownerIdEl = $('#prop-owner-id');
+
+  const cpuLimit = cpuLimitEl ? (parseInt(cpuLimitEl.value, 10) || 0) : (srv.cpu_limit_percent || 0);
+  const diskLimit = diskLimitEl ? (parseInt(diskLimitEl.value, 10) || 0) : (srv.disk_limit_mb || 0);
+  const ownerId = ownerIdEl ? (parseInt(ownerIdEl.value, 10) || srv.owner_id || 1) : (srv.owner_id || 1);
+
   return {
     ok: true,
-    data: { name, desc, ver, jar, args, port, max, ram, javaPath, motd, diff, mode, pvp, wl, cmd, autoRestart }
+    data: { name, desc, ver, jar, args, port, max, ram, javaPath, motd, diff, mode, pvp, wl, cmd, autoRestart, cpuLimit, diskLimit, ownerId }
   };
 }
 
@@ -2424,12 +2437,19 @@ function hexToRgbStr(hex) {
   return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
 }
 
+function isPngOrSvgUrl(url) {
+  if (!url) return false;
+  const lower = String(url).toLowerCase();
+  return lower.endsWith('.png') || lower.includes('.png?') || lower.endsWith('.svg') || lower.includes('.svg?') || lower.startsWith('data:image/png') || lower.startsWith('data:image/svg');
+}
+
 function brandLogoHtml(forLogin = false, override = null) {
   const b = override || ((S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : (S.branding || DEFAULT_BRANDING));
   const name = (b.brand_name || 'NeoPanel').trim() || 'NeoPanel';
   const logo = (b.logo_url || '').trim();
+  const isPng = isPngOrSvgUrl(logo);
   const iconHtml = logo
-    ? `<img src="${esc(logo)}" class="brand-logo-img" alt="" onerror="this.outerHTML='<i class=\\'cube\\'></i>'">`
+    ? `<img src="${esc(logo)}" class="brand-logo-img ${isPng ? 'is-png' : ''}" alt="" onload="if(this.src.match(/\\.(png|svg)(\\?.*)?$/i)||this.src.startsWith('data:image\\/(png|svg)'))this.classList.add('is-png')" onerror="this.outerHTML='<i class=\\'cube\\'></i>'">`
     : `<i class="cube"></i>`;
   if (forLogin) {
     if (name === 'NeoPanel') {
@@ -5576,10 +5596,10 @@ const V = {
       </div>
     </div>
 
-    ${errEntries.length > 0 ? `
+    ${(errEntries.length > 0 && S.user?.role === 'admin') ? `
       <div class="node-error-note" style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
         <span><b>Cluster Sync Warning:</b> ${errEntries.map(([nid, msg]) => `${esc(getNodeById(nid)?.name || nid)} (${esc(msg)})`).join(' &bull; ')}</span>
-        ${S.user?.role === 'admin' ? `<a href="/admin/nodes" class="btn sm" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="text-decoration: none;">Inspect Nodes</a>` : ''}
+        <a href="/admin/nodes" class="btn sm" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="text-decoration: none;">Inspect Nodes</a>
       </div>
     ` : ''}
 
@@ -5601,6 +5621,7 @@ const V = {
           const nid = s.node_id || 'local';
           const nodeName = s.node_name || getNodeById(nid)?.name || nid;
           const isRemote = nid !== 'local';
+          const canDelete = S.user?.role === 'admin' || (s.owner_id && S.user?.id && s.owner_id === S.user.id);
           const st = origIdx === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
           const isRun = st === 'online' || st === 'starting';
           const maxRam = getServerMaxRamMB(s);
@@ -5652,7 +5673,7 @@ const V = {
               </div>
               <div class="vm-dash-row-actions">
                 <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
-                <span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>
+                ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
             </a>`;
           }
@@ -5665,7 +5686,7 @@ const V = {
               </div>
               <div class="srv-card-actions">
                 <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
-                <span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>
+                ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
             </div>
             <div class="srv-card-body">
@@ -7227,12 +7248,20 @@ const V = {
     const saveText = _settingsUiState?.text || 'Real-time auto-save active';
     const node = getNodeById(srv?.node_id || 'local');
     const isAdmin = S.user?.role === 'admin';
+    const isOwner = isAdmin || (srv?.owner_id && S.user?.id && srv.owner_id === S.user.id);
     const isRamLocked = Boolean(node && node.allow_user_ram === false && !isAdmin);
     const isPortsLocked = Boolean(node && node.allow_user_ports === false && !isAdmin);
     const isJavaLocked = Boolean(node && node.allow_user_java === false && !isAdmin);
 
     return `${srvh()}
     <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 16px;">
+      ${(!isAdmin && !isOwner) ? `
+      <div class="banner info" style="margin-bottom:0; display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:8px; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25);">
+        ${ic('users', 18)}
+        <div style="font-size:13px; line-height:1.45;">
+          <b>Player / Collaborator Access:</b> You are managing this server with operator permissions. Administrative actions such as server deletion, reinstall, and team subuser management are restricted to the server owner.
+        </div>
+      </div>` : ''}
       <!-- Top Row: Panel Identity & Active Startup Command / Java Runtime -->
       <div class="stp-top-grid">
         <div class="card" style="padding: 20px;">
@@ -7369,6 +7398,22 @@ const V = {
               <input type="text" id="prop-jar" value="${esc(jarName)}" placeholder="server.jar" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
             </label>
           </div>
+          <div class="grid g2" style="margin-bottom: 12px;">
+            <label class="f" style="margin-bottom: 0;">
+              <span class="row sb">
+                <span>CPU Limit (%)</span>
+                <span class="mu" style="font-size: 11px;">0% = Unlimited</span>
+              </span>
+              <input type="number" id="prop-cpu-limit" value="${srv?.cpu_limit_percent || 0}" min="0" max="3200" step="10" placeholder="0 for unlimited" ${!isAdmin && !isOwner ? 'disabled' : 'oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()"'} >
+            </label>
+            <label class="f" style="margin-bottom: 0;">
+              <span class="row sb">
+                <span>Storage / Disk Limit (MB)</span>
+                <span class="mu" style="font-size: 11px;">0 = Unlimited</span>
+              </span>
+              <input type="number" id="prop-disk-limit" value="${srv?.disk_limit_mb || 0}" min="0" step="512" placeholder="0 for unlimited" ${!isAdmin && !isOwner ? 'disabled' : 'oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()"'} >
+            </label>
+          </div>
           <div class="f" style="margin-bottom: 12px;">
             <span style="display:block; margin-bottom:6px; font-size:12.5px; color:var(--tx-muted); font-weight:600;">Minecraft / Release Version</span>
             <div style="display: grid; grid-template-columns: minmax(135px, 165px) 1fr; gap: 8px;">
@@ -7399,6 +7444,29 @@ const V = {
         </div>
       </div>
 
+      ${isAdmin ? `
+      <!-- Server Ownership & Tenant Assignment (Admin Only) -->
+      <div class="card" style="padding: 22px;">
+        <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 14px;">
+          <div>
+            <h2 style="font-size: 16px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; color: var(--tx);">
+              ${ic('user', 16)} Server Ownership &amp; Tenant Assignment
+            </h2>
+            <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
+              Reassign ownership of this server instance to any registered panel account. The assigned owner receives full management rights for this server.
+            </p>
+          </div>
+          <div class="row" style="gap: 10px; align-items: center; flex-wrap: wrap;">
+            <label class="f" style="margin-bottom:0; min-width: 220px;">
+              <select id="prop-owner-id" onchange="saveSettingsAutoNow()">
+                ${(S.adminUsers || []).map(u => `<option value="${u.id}" ${u.id === (srv?.owner_id || 1) ? 'selected' : ''}>${esc(u.username)}${(u.first_name || u.last_name) ? ` (${esc([u.first_name, u.last_name].filter(Boolean).join(' '))})` : ''} [${esc(u.role)}]</option>`).join('')}
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>` : ''}
+
+      ${(isAdmin || isOwner) ? `
       <!-- Server Subusers & Team Access -->
       <div class="card" style="padding: 22px;">
         <div class="row sb" style="align-items: flex-start; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
@@ -7417,11 +7485,12 @@ const V = {
         <div id="subusers-list-wrap">
           ${renderSubusersListHtml(srv)}
         </div>
-      </div>
+      </div>` : ''}
 
       <!-- Quick SFTP Access -->
       ${renderSftpCardHtml(srv, true)}
 
+      ${(isAdmin || isOwner) ? `
       <!-- Reinstall Server Section -->
       <div class="card" style="border: 1px solid var(--border-light); padding: 22px;">
         <div class="row sb" style="align-items: center; flex-wrap: wrap; gap: 16px;">
@@ -7454,7 +7523,7 @@ const V = {
             ${ic('trash', 14)} Delete Server
           </button>
         </div>
-      </div>
+      </div>` : ''}
       <div class="np-slot-container" data-np-slot="settings:bottom"></div>
     </div>`;
   },
@@ -7829,7 +7898,7 @@ const V = {
           </div>
           ${admSrvVm === 'list' ? `
           <table>
-            <thead><tr><th>Server</th><th>Node</th><th>Port</th><th>Engine</th><th>RAM Limit</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
+            <thead><tr><th>Server</th><th>Owner</th><th>Node</th><th>Port</th><th>Engine</th><th>Resource Limits</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
               ${S.servers.length ? S.servers.map((s, idx) => {
                 const nid = s.node_id || 'local';
@@ -7837,23 +7906,29 @@ const V = {
                 const normSt = normalizeServerStatus(s.stats?.status || s.status);
                 const isRun = normSt === 'online' || normSt === 'starting';
                 const srvUrl = serverRouteUrl(nid, s.id, 'con');
+                const ownerUser = (S.adminUsers || []).find(u => u.id === s.owner_id);
+                const ownerLabel = ownerUser ? ownerUser.username : (s.owner_id ? `User #${s.owner_id}` : 'Root / Admin');
+                const cpuLabel = s.cpu_limit_percent > 0 ? `${s.cpu_limit_percent}% CPU` : '∞ CPU';
+                const diskLabel = s.disk_limit_mb > 0 ? (s.disk_limit_mb >= 1024 ? `${(s.disk_limit_mb / 1024).toFixed(1)} GB` : `${s.disk_limit_mb} MB`) : '∞ Disk';
                 return `
                 <tr>
                   <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${esc(s.id)})</span></td>
+                  <td><span class="chip" style="font-size:11px; display:inline-flex; align-items:center; gap:4px;">${ic('user', 11)} ${esc(ownerLabel)}</span></td>
                   <td><span class="chip srv-node-badge">${esc(nodeName)}</span></td>
                   <td class="mono">${s.port}</td>
                   <td><span class="chip" style="display:inline-flex; align-items:center; gap:5px;">${engineIcon(s.type || 'paper', 12)} ${esc(engineMeta(s.type || 'paper').label)} ${esc(s.version)}</span></td>
-                  <td class="mono">${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</td>
+                  <td><span class="mono mu" style="font-size:11.5px;">${(getServerMaxRamMB(s)/1024).toFixed(1)}G RAM &bull; ${cpuLabel} &bull; ${diskLabel}</span></td>
                   <td><span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span></td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
                       <a href="${esc(srvUrl)}" class="btn sm" style="text-decoration:none;" onclick="return handleServerCardClick(event, ${idx}, 'con')">Manage</a>
+                      <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openAdminServerSettingsModal(this.dataset.srvId, this.dataset.nodeId)" title="Edit Limits & Ownership">${ic('sliders', 12)} Limits &amp; Owner</button>
                       <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">${ic('refresh', 12)} Reinstall</button>
                       <button class="btn sm dg" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)">${ic('trash', 12)} Delete</button>
                     </div>
                   </td>
                 </tr>`;
-              }).join('') : '<tr><td colspan="7" class="mu" style="text-align:center; padding:24px;">No server instances deployed yet.</td></tr>'}
+              }).join('') : '<tr><td colspan="8" class="mu" style="text-align:center; padding:24px;">No server instances deployed yet.</td></tr>'}
             </tbody>
           </table>` : `
           <div class="${admSrvVm === 'icons' ? 'vm-icons-grid wide' : 'vm-tiles-grid'}">
@@ -7863,11 +7938,13 @@ const V = {
               const normSt = normalizeServerStatus(s.stats?.status || s.status);
               const isRun = normSt === 'online' || normSt === 'starting';
               const srvUrl = serverRouteUrl(nid, s.id, 'con');
+              const ownerUser = (S.adminUsers || []).find(u => u.id === s.owner_id);
+              const ownerLabel = ownerUser ? ownerUser.username : (s.owner_id ? `User #${s.owner_id}` : 'Root / Admin');
               return `<div class="${admSrvVm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}">
                 <div class="vm-item-head">
                   <div style="min-width:0;">
                     <b class="vm-item-title" style="display:block;">${esc(s.name)}</b>
-                    <div class="mu mono" style="font-size:11px; margin-top:2px;">Port ${s.port} &bull; ${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</div>
+                    <div class="mu mono" style="font-size:11px; margin-top:2px;">Owner: ${esc(ownerLabel)} &bull; Port ${s.port} &bull; ${(getServerMaxRamMB(s)/1024).toFixed(1)} GB</div>
                   </div>
                   <span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span>
                 </div>
@@ -7878,6 +7955,7 @@ const V = {
                 <div class="vm-item-foot">
                   <a href="${esc(srvUrl)}" class="btn sm pr" style="text-decoration:none;" onclick="return handleServerCardClick(event, ${idx}, 'con')">Manage</a>
                   <div class="row" style="gap:6px;">
+                    <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openAdminServerSettingsModal(this.dataset.srvId, this.dataset.nodeId)" title="Edit Limits & Ownership">${ic('sliders', 12)}</button>
                     <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">${ic('refresh', 12)}</button>
                     <button class="btn sm dg" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId)">${ic('trash', 12)}</button>
                   </div>
@@ -11778,7 +11856,7 @@ function paletteItems() {
   const items = [
     ...PG.map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods & Store' : p[1], 'Go to page', () => go(p[0])]),
     ...(showClientArea ? [['Pages', clientLabel, 'External storefront & billing portal', () => go('client')]] : []),
-    ['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')],
+    ...(S.user?.role === 'admin' ? [['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')]] : []),
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
     ...S.servers.map(s => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => {
       syncActiveServerState(s);
@@ -12116,6 +12194,49 @@ function openCreateServerModal() {
           <input type="number" id="cs-mem" value="${defaultRam}" min="512" max="65536" step="512" required placeholder="RAM in MB">
         </div>
 
+        <!-- Resource Limits: CPU Percentage & Storage Allocation -->
+        <div class="grid g2" style="margin-bottom:14px;">
+          <label class="f" style="margin-bottom:0;">
+            <div class="row sb" style="margin-bottom:4px;">
+              <span>CPU Limit (%)</span>
+              <span class="mu" style="font-size:11.5px;">0% = Unlimited</span>
+            </div>
+            <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-cpu').value=0">Unlimited</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-cpu').value=100">100% (1 Core)</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-cpu').value=200">200% (2 Cores)</button>
+            </div>
+            <input type="number" id="cs-cpu" value="0" min="0" max="3200" step="10" placeholder="0 for unlimited">
+          </label>
+          <label class="f" style="margin-bottom:0;">
+            <div class="row sb" style="margin-bottom:4px;">
+              <span>Storage / Disk Limit (MB)</span>
+              <span class="mu" style="font-size:11.5px;">0 = Unlimited</span>
+            </div>
+            <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=0">Unlimited</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=5120">5 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=10240">10 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=20480">20 GB</button>
+            </div>
+            <input type="number" id="cs-disk" value="0" min="0" step="512" placeholder="0 for unlimited (in MB)">
+          </label>
+        </div>
+
+        ${(S.user?.role === 'admin' && Array.isArray(S.adminUsers) && S.adminUsers.length > 0) ? `
+        <!-- Server Ownership (Admin Only) -->
+        <div style="margin-bottom:14px;">
+          <label class="f" style="margin-bottom:0;">
+            <span class="row sb">
+              <span>Server Owner</span>
+              <span class="mu" style="font-size:11.5px;">Assign server instance ownership</span>
+            </span>
+            <select id="cs-owner">
+              ${S.adminUsers.map(u => `<option value="${u.id}" ${u.id === (S.user?.id || 1) ? 'selected' : ''}>${esc(u.username)}${(u.first_name || u.last_name) ? ` (${esc([u.first_name, u.last_name].filter(Boolean).join(' '))})` : ''} [${esc(u.role)}]</option>`).join('')}
+            </select>
+          </label>
+        </div>` : ''}
+
         <!-- EULA & Optimization Flags -->
         <div style="background:var(--pn2); border:1px solid var(--ln); border-radius:8px; padding:12px; margin-bottom:16px;">
           <label class="row" style="margin-bottom:8px; cursor:pointer;">
@@ -12175,6 +12296,9 @@ async function handleCreateServer(e) {
   const javaPath = $('#cs-java')?.value || '21';
   const autoDownload = $('#cs-dl')?.checked ?? true;
   const useAikar = $('#cs-aikar')?.checked;
+  const cpuLimit = parseInt($('#cs-cpu')?.value) || 0;
+  const diskLimit = parseInt($('#cs-disk')?.value) || 0;
+  const ownerId = parseInt($('#cs-owner')?.value) || 0;
 
   let javaArgs = '-XX:+UseG1GC';
   if (useAikar) {
@@ -12184,20 +12308,27 @@ async function handleCreateServer(e) {
   toast(`Creating and configuring ${name}...`);
 
   try {
+    const payload = {
+      name,
+      type,
+      version,
+      memory_min: memoryMin,
+      memory_max: memoryMax,
+      port,
+      java_path: javaPath,
+      java_args: javaArgs,
+      auto_download: autoDownload,
+      auto_restart: true,
+      cpu_limit_percent: cpuLimit,
+      disk_limit_mb: diskLimit
+    };
+    if (ownerId > 0) {
+      payload.owner_id = ownerId;
+    }
+
     const res = await api(nodeApiPath(targetNodeId, '/api/servers'), {
       method: 'POST',
-      body: JSON.stringify({
-        name,
-        type,
-        version,
-        memory_min: memoryMin,
-        memory_max: memoryMax,
-        port,
-        java_path: javaPath,
-        java_args: javaArgs,
-        auto_download: autoDownload,
-        auto_restart: true
-      })
+      body: JSON.stringify(payload)
     });
 
     closeModal();
@@ -13557,6 +13688,194 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
         Please verify the version and software engine, or check network connectivity to mcjarfiles.com.`,
       type: 'error'
     });
+  }
+}
+
+async function openAdminServerSettingsModal(srvId, nodeId = null) {
+  const container = $('#modal-container');
+  if (!container) return;
+
+  const targetSrv = findServerRef(srvId, nodeId) || curServer();
+  if (!targetSrv) return;
+
+  const targetId = targetSrv.id;
+  const targetNodeId = nodeId || targetSrv.node_id || 'local';
+  const targetName = targetSrv.name || 'Server';
+
+  if (!S.adminUsers || S.adminUsers.length === 0) {
+    try {
+      const users = await api('/api/admin/users');
+      if (Array.isArray(users)) S.adminUsers = users;
+    } catch (_) {}
+  }
+
+  const curRam = getServerMaxRamMB(targetSrv);
+  const curCpu = targetSrv.cpu_limit_percent || 0;
+  const curDisk = targetSrv.disk_limit_mb || 0;
+  const curPort = targetSrv.port || 25565;
+  const curOwner = targetSrv.owner_id || 1;
+  const curNid = targetSrv.node_id || 'local';
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:580px; max-height:88vh; overflow-y:auto; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:20px; margin:0; color:#fff; display:flex; align-items:center; gap:8px;">
+          ${ic('sliders', 18)} Manage Server &amp; Limits: ${esc(targetName)}
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
+        Configure server tenant ownership, compute resource limits (CPU &amp; RAM), disk storage quotas, and node routing.
+      </p>
+
+      <form onsubmit="submitAdminServerSettings(event, '${esc(targetId)}', '${esc(targetNodeId)}')">
+        <!-- Server Owner -->
+        <div style="margin-bottom:14px;">
+          <label class="f" style="margin-bottom:0;">
+            <span class="row sb">
+              <span>Server Owner</span>
+              <span class="mu" style="font-size:11.5px;">Panel user account</span>
+            </span>
+            <select id="adm-set-owner" required>
+              ${(S.adminUsers || []).map(u => `<option value="${u.id}" ${u.id === curOwner ? 'selected' : ''}>${esc(u.username)}${(u.first_name || u.last_name) ? ` (${esc([u.first_name, u.last_name].filter(Boolean).join(' '))})` : ''} [${esc(u.role)}]</option>`).join('')}
+            </select>
+          </label>
+        </div>
+
+        <!-- Node & Port -->
+        <div class="grid g2" style="margin-bottom:14px;">
+          <label class="f" style="margin-bottom:0;">
+            <span>Assigned Cluster Node</span>
+            <select id="adm-set-node">
+              ${(S.nodes || [{ id: 'local', name: 'Local Master Node' }]).map(n => `<option value="${esc(n.id)}" ${n.id === curNid ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="f" style="margin-bottom:0;">
+            <span>Port</span>
+            <input type="number" id="adm-set-port" value="${curPort}" min="1024" max="65535" required>
+          </label>
+        </div>
+
+        <!-- RAM Limit -->
+        <div style="margin-bottom:14px;">
+          <label class="f" style="margin-bottom:0;">
+            <div class="row sb" style="margin-bottom:4px;">
+              <span>Allocated RAM (MB)</span>
+              <span class="mu" style="font-size:11.5px;">-Xmx memory ceiling</span>
+            </div>
+            <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-ram').value=1024">1 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-ram').value=2048">2 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-ram').value=4096">4 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-ram').value=8192">8 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-ram').value=16384">16 GB</button>
+            </div>
+            <input type="number" id="adm-set-ram" value="${curRam}" min="512" max="65536" step="512" required>
+          </label>
+        </div>
+
+        <!-- Resource Limits: CPU & Storage -->
+        <div class="grid g2" style="margin-bottom:16px;">
+          <label class="f" style="margin-bottom:0;">
+            <div class="row sb" style="margin-bottom:4px;">
+              <span>CPU Limit (%)</span>
+              <span class="mu" style="font-size:11.5px;">0% = Unlimited</span>
+            </div>
+            <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-cpu').value=0">Unlimited</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-cpu').value=100">100% (1 Core)</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-cpu').value=200">200% (2 Cores)</button>
+            </div>
+            <input type="number" id="adm-set-cpu" value="${curCpu}" min="0" max="3200" step="10" placeholder="0 for unlimited">
+          </label>
+          <label class="f" style="margin-bottom:0;">
+            <div class="row sb" style="margin-bottom:4px;">
+              <span>Storage / Disk Limit (MB)</span>
+              <span class="mu" style="font-size:11.5px;">0 = Unlimited</span>
+            </div>
+            <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-disk').value=0">Unlimited</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-disk').value=5120">5 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-disk').value=10240">10 GB</button>
+              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-disk').value=20480">20 GB</button>
+            </div>
+            <input type="number" id="adm-set-disk" value="${curDisk}" min="0" step="512" placeholder="0 for unlimited">
+          </label>
+        </div>
+
+        <div class="row" style="justify-content:flex-end; gap:8px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn pr" id="adm-set-submit">Save Server Configuration</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+async function submitAdminServerSettings(e, srvId, nodeId) {
+  if (e) e.preventDefault();
+  const btn = $('#adm-set-submit');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+  }
+
+  const targetSrv = findServerRef(srvId, nodeId) || curServer();
+  if (!targetSrv) {
+    toast('Server instance not found', 'bad');
+    closeModal();
+    return;
+  }
+
+  const ownerId = parseInt($('#adm-set-owner')?.value, 10) || 1;
+  const assignedNodeId = $('#adm-set-node')?.value || targetSrv.node_id || 'local';
+  const port = parseInt($('#adm-set-port')?.value, 10) || targetSrv.port;
+  const ram = parseInt($('#adm-set-ram')?.value, 10) || getServerMaxRamMB(targetSrv);
+  const cpu = parseInt($('#adm-set-cpu')?.value, 10) || 0;
+  const disk = parseInt($('#adm-set-disk')?.value, 10) || 0;
+
+  const payload = {
+    name: targetSrv.name,
+    description: targetSrv.description,
+    type: targetSrv.type,
+    version: targetSrv.version,
+    jar_file: targetSrv.jar_file,
+    port: port,
+    memory_min: Math.min(1024, ram),
+    memory_max: ram,
+    java_path: targetSrv.java_path,
+    java_args: targetSrv.java_args,
+    auto_restart: targetSrv.auto_restart !== false,
+    owner_id: ownerId,
+    node_id: assignedNodeId,
+    cpu_limit_percent: cpu,
+    disk_limit_mb: disk
+  };
+
+  try {
+    await api(nodeApiPath(targetSrv.node_id || 'local', `/api/servers/${srvId}`), {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+
+    targetSrv.owner_id = ownerId;
+    targetSrv.node_id = assignedNodeId;
+    targetSrv.port = port;
+    targetSrv.memory_max = ram;
+    targetSrv.memory_min = Math.min(1024, ram);
+    targetSrv.cpu_limit_percent = cpu;
+    targetSrv.disk_limit_mb = disk;
+
+    closeModal();
+    toast('Server limits and ownership updated successfully', 'ok');
+    R();
+  } catch (err) {
+    toast(`Failed to update server: ${err.message || err}`, 'bad');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save Server Configuration';
+    }
   }
 }
 
@@ -16464,6 +16783,8 @@ window.closeFloatingCtx = closeFloatingCtx;
 window.uploadFilesWithProgress = uploadFilesWithProgress;
 window.openReinstallModal = openReinstallModal;
 window.submitReinstall = submitReinstall;
+window.openAdminServerSettingsModal = openAdminServerSettingsModal;
+window.submitAdminServerSettings = submitAdminServerSettings;
 window.openAddUserModal = openAddUserModal;
 window.submitAddUser = submitAddUser;
 window.openEditUserModal = openEditUserModal;

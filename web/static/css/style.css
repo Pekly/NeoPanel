@@ -4634,10 +4634,19 @@ html[data-theme="light"] .act-cat-nodes {
 .brand-logo-img {
   width: 24px;
   height: 24px;
-  border-radius: 6px;
-  object-fit: cover;
+  border-radius: 0;
+  object-fit: contain;
   flex-shrink: 0;
+  border: none;
+  background: transparent;
+  /* Contours the exact alpha silhouette of the logo instead of drawing a rectangular box */
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.5)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
+  transition: filter 0.18s ease, transform 0.18s ease;
+}
+
+.brand-logo-img.is-boxed {
   border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
 }
 
 .brand-layout-grid {

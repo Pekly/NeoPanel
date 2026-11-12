@@ -417,7 +417,7 @@ func (db *DB) ListServersForUser(userID int, role string) ([]*Server, error) {
 	if role == "admin" || userID == 0 {
 		return db.ListServers()
 	}
-	query := `SELECT s.id, s.name, s.description, s.type, s.version, s.jar_file, s.port, s.memory_min, s.memory_max, s.java_args, s.java_path, s.auto_restart, COALESCE(s.icon_url, ''), COALESCE(s.owner_id, 1), COALESCE(s.node_id, 'local'), s.created_at, s.updated_at 
+	query := `SELECT s.id, s.name, s.description, s.type, s.version, s.jar_file, s.port, s.memory_min, s.memory_max, s.java_args, s.java_path, s.auto_restart, COALESCE(s.icon_url, ''), COALESCE(s.owner_id, 1), COALESCE(s.node_id, 'local'), COALESCE(s.cpu_limit_percent, 0), COALESCE(s.disk_limit_mb, 0), s.created_at, s.updated_at 
 	FROM servers s 
 	LEFT JOIN server_subusers su ON s.id = su.server_id AND su.user_id = ?
 	WHERE s.owner_id = ? OR su.user_id IS NOT NULL
@@ -432,15 +432,17 @@ func (db *DB) ListServersForUser(userID int, role string) ([]*Server, error) {
 	var servers []*Server
 	for rows.Next() {
 		s := &Server{}
+		var autoRestart int
 		var iconURL, nodeID string
 		var ownerID int
 		if err := rows.Scan(
 			&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 			&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-			&s.AutoRestart, &iconURL, &ownerID, &nodeID, &s.CreatedAt, &s.UpdatedAt,
+			&autoRestart, &iconURL, &ownerID, &nodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
+		s.AutoRestart = autoRestart == 1
 		s.IconURL = iconURL
 		s.OwnerID = ownerID
 		s.NodeID = nodeID
@@ -453,7 +455,7 @@ func (db *DB) ListServersForUser(userID int, role string) ([]*Server, error) {
 }
 
 func (db *DB) ListServers() ([]*Server, error) {
-	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), created_at, updated_at FROM servers ORDER BY created_at DESC`)
+	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), COALESCE(cpu_limit_percent, 0), COALESCE(disk_limit_mb, 0), created_at, updated_at FROM servers ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +468,7 @@ func (db *DB) ListServers() ([]*Server, error) {
 		err := rows.Scan(
 			&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 			&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-			&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CreatedAt, &s.UpdatedAt,
+			&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -484,13 +486,13 @@ func (db *DB) ListServers() ([]*Server, error) {
 }
 
 func (db *DB) GetServer(id string) (*Server, error) {
-	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), created_at, updated_at FROM servers WHERE id = ?`, id)
+	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), COALESCE(cpu_limit_percent, 0), COALESCE(disk_limit_mb, 0), created_at, updated_at FROM servers WHERE id = ?`, id)
 	s := &Server{}
 	var autoRestart int
 	err := row.Scan(
 		&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 		&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-		&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CreatedAt, &s.UpdatedAt,
+		&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -510,10 +512,13 @@ func (db *DB) CreateServer(s *Server) error {
 	if s.NodeID == "" {
 		s.NodeID = "local"
 	}
+	if s.OwnerID <= 0 {
+		s.OwnerID = 1
+	}
 
-	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, icon_url, owner_id, node_id, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.CreatedAt, s.UpdatedAt)
+	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, icon_url, owner_id, node_id, cpu_limit_percent, disk_limit_mb, created_at, updated_at) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.CPULimitPercent, s.DiskLimitMB, s.CreatedAt, s.UpdatedAt)
 	return err
 }
 
@@ -526,9 +531,17 @@ func (db *DB) UpdateServer(s *Server) error {
 	if s.NodeID == "" {
 		s.NodeID = "local"
 	}
+	if s.OwnerID <= 0 {
+		s.OwnerID = 1
+	}
 
-	_, err := db.conn.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, icon_url = ?, owner_id = ?, node_id = ?, updated_at = ? WHERE id = ?`,
-		s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.UpdatedAt, s.ID)
+	_, err := db.conn.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, icon_url = ?, owner_id = ?, node_id = ?, cpu_limit_percent = ?, disk_limit_mb = ?, updated_at = ? WHERE id = ?`,
+		s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.CPULimitPercent, s.DiskLimitMB, s.UpdatedAt, s.ID)
+	return err
+}
+
+func (db *DB) UpdateServerOwner(serverID string, ownerID int) error {
+	_, err := db.conn.Exec(`UPDATE servers SET owner_id = ?, updated_at = ? WHERE id = ?`, ownerID, time.Now().UTC(), serverID)
 	return err
 }
 

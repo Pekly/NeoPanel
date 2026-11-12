@@ -126,17 +126,20 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateServerRequest struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Type         string `json:"type"`       // paper, purpur, vanilla, fabric, custom
-	Version      string `json:"version"`    // e.g. 1.20.4, 1.21
-	Port         int    `json:"port"`       // default 25565
-	MemoryMinMB  int    `json:"memory_min"` // e.g. 1024
-	MemoryMaxMB  int    `json:"memory_max"` // e.g. 2048
-	JavaArgs     string `json:"java_args"`  // custom flags
-	JavaPath     string `json:"java_path"`  // custom java path
-	AutoRestart  bool   `json:"auto_restart"`
-	AutoDownload bool   `json:"auto_download"` // true to download jar immediately
+	Name            string `json:"name"`
+	Description     string `json:"description"`
+	Type            string `json:"type"`       // paper, purpur, vanilla, fabric, custom
+	Version         string `json:"version"`    // e.g. 1.20.4, 1.21
+	Port            int    `json:"port"`       // default 25565
+	MemoryMinMB     int    `json:"memory_min"` // e.g. 1024
+	MemoryMaxMB     int    `json:"memory_max"` // e.g. 2048
+	JavaArgs        string `json:"java_args"`  // custom flags
+	JavaPath        string `json:"java_path"`  // custom java path
+	AutoRestart     bool   `json:"auto_restart"`
+	AutoDownload    bool   `json:"auto_download"` // true to download jar immediately
+	OwnerID         int    `json:"owner_id"`
+	CPULimitPercent int    `json:"cpu_limit_percent"`
+	DiskLimitMB     int64  `json:"disk_limit_mb"`
 }
 
 func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
@@ -177,21 +180,26 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	if claims != nil && claims.UserID > 0 {
 		ownerID = claims.UserID
 	}
+	if req.OwnerID > 0 && claims != nil && claims.Role == "admin" {
+		ownerID = req.OwnerID
+	}
 
 	server := &database.Server{
-		ID:          srvID,
-		Name:        req.Name,
-		Description: req.Description,
-		Type:        req.Type,
-		Version:     req.Version,
-		JarFile:     "server.jar",
-		Port:        req.Port,
-		MemoryMinMB: req.MemoryMinMB,
-		MemoryMaxMB: req.MemoryMaxMB,
-		JavaArgs:    req.JavaArgs,
-		JavaPath:    req.JavaPath,
-		AutoRestart: req.AutoRestart,
-		OwnerID:     ownerID,
+		ID:              srvID,
+		Name:            req.Name,
+		Description:     req.Description,
+		Type:            req.Type,
+		Version:         req.Version,
+		JarFile:         "server.jar",
+		Port:            req.Port,
+		MemoryMinMB:     req.MemoryMinMB,
+		MemoryMaxMB:     req.MemoryMaxMB,
+		JavaArgs:        req.JavaArgs,
+		JavaPath:        req.JavaPath,
+		AutoRestart:     req.AutoRestart,
+		OwnerID:         ownerID,
+		CPULimitPercent: req.CPULimitPercent,
+		DiskLimitMB:     req.DiskLimitMB,
 	}
 
 	workingDir := h.manager.GetWorkingDir(srvID)
@@ -295,6 +303,20 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	if req.JarFile != "" {
 		server.JarFile = req.JarFile
 	}
+	if isAdmin {
+		if req.OwnerID > 0 {
+			server.OwnerID = req.OwnerID
+		}
+		if req.CPULimitPercent >= 0 {
+			server.CPULimitPercent = req.CPULimitPercent
+		}
+		if req.DiskLimitMB >= 0 {
+			server.DiskLimitMB = req.DiskLimitMB
+		}
+		if req.NodeID != "" {
+			server.NodeID = req.NodeID
+		}
+	}
 
 	if err := h.db.UpdateServer(server); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server: " + err.Error()})
@@ -313,6 +335,12 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	server, err := h.db.GetServer(serverID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
+		return
+	}
+
+	user := getUserFromContext(r)
+	if user != nil && user.Role != "admin" && server.OwnerID != user.ID {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only administrators or the server owner can delete this server instance"})
 		return
 	}
 
