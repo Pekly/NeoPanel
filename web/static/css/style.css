@@ -1101,6 +1101,16 @@ h2 {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border);
   color: #fff;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.srv-card-uptime {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--tx-muted);
+  white-space: nowrap;
+  letter-spacing: -0.01em;
 }
 
 .dot {
@@ -5053,46 +5063,22 @@ a.sift-server-card {
 }
 
 .sift-server-card.vm-dash-row {
-  position: relative;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: 12px 18px;
   gap: 16px;
   flex-wrap: wrap;
-  background-size: cover;
-  background-position: center 35%;
-  background-repeat: no-repeat;
-  border-radius: var(--np-radius, 14px);
-  overflow: hidden;
+  background: var(--card-bg);
   border: 1px solid var(--border);
-}
-
-.sift-server-card.vm-dash-row::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, 
-    rgba(10, 14, 23, 0.94) 0%, 
-    rgba(12, 17, 29, 0.88) 50%, 
-    rgba(10, 14, 23, 0.95) 100%);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-  z-index: 1;
-  pointer-events: none;
+  border-radius: var(--np-radius, 14px);
   transition: all 0.22s ease;
 }
 
-.sift-server-card.vm-dash-row:hover::before {
-  background: linear-gradient(90deg, 
-    rgba(10, 14, 23, 0.90) 0%, 
-    rgba(12, 17, 29, 0.80) 50%, 
-    rgba(10, 14, 23, 0.92) 100%);
-}
-
-.sift-server-card.vm-dash-row > * {
-  position: relative;
-  z-index: 2;
+.sift-server-card.vm-dash-row:hover {
+  border-color: var(--border-accent);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .vm-dash-row-main {
@@ -5104,12 +5090,12 @@ a.sift-server-card {
 }
 
 .srv-row-thumb {
-  width: 68px;
-  height: 44px;
-  border-radius: 9px;
+  width: 58px;
+  height: 40px;
+  border-radius: 8px;
   background-size: cover;
   background-position: center;
-  background-color: #1a2234;
+  background-color: #141b2b;
   border: 1px solid var(--border-light);
   flex-shrink: 0;
 }

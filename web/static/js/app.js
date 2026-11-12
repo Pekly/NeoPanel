@@ -2040,7 +2040,13 @@ function formatDiskMB(mb) {
 
 function formatUptime(sec) {
   const s = Math.max(0, Math.floor(Number(sec) || 0));
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m ${s % 60}s`;
+  if (s < 60) return '< 1m';
+  const m = Math.floor(s / 60) % 60;
+  const h = Math.floor(s / 3600);
+  const d = Math.floor(s / 86400);
+  if (d > 0) return `${d}d ${h % 24}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 function up() {
@@ -5017,7 +5023,18 @@ function updateDashLiveStats() {
     const badge = card.querySelector('[data-role="badge"]');
     if (badge) {
       badge.className = `badge ${isRun ? 'online' : 'offline'}`;
-      badge.innerHTML = `<i class="dot"></i>${isRun ? 'Running' : 'Offline'}${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upVal)}</span>` : ''}`;
+      badge.innerHTML = `<i class="dot"></i>${isRun ? 'Running' : 'Offline'}`;
+    }
+    const upEl = card.querySelector('[data-role="uptime"]');
+    if (upEl) {
+      if (isRun) {
+        const isList = card.classList.contains('vm-dash-row');
+        upEl.innerHTML = `${isList ? '&bull; ' : ''}Up ${formatUptime(upVal)}`;
+        upEl.style.display = '';
+      } else {
+        upEl.innerHTML = '';
+        upEl.style.display = 'none';
+      }
     }
     const cpuValEl = card.querySelector('[data-role="cpu-val"]');
     const cpuBarEl = card.querySelector('[data-role="cpu-bar"]');
@@ -5037,7 +5054,7 @@ function updateDashLiveStats() {
 
   const totalCount = S.servers.length;
   const runSummary = $('#dash-running-summary');
-  if (runSummary) runSummary.innerHTML = `${runningCount} &bull; ${totalCount} running`;
+  if (runSummary) runSummary.innerHTML = `${runningCount} of ${totalCount} servers running`;
 
   const allocMemVal = $('#dash-alloc-mem-val');
   const allocMemBar = $('#dash-alloc-mem-bar');
@@ -5594,8 +5611,9 @@ const V = {
 
           if (dashVm === 'list') {
             return `
-            <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
+            <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
               <div class="vm-dash-row-main">
+                <div class="srv-row-thumb" style="background-image: url('${esc(s.icon_url || coverUrl)}'), url('/img/banner.jpg');"></div>
                 <div style="min-width: 0; flex: 1;">
                   <div class="row" style="gap: 10px; align-items: center; flex-wrap: wrap;">
                     <span class="srv-card-title" title="${esc(s.name)}">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
@@ -5606,7 +5624,7 @@ const V = {
                   <div class="row" style="gap: 8px; margin-top: 5px; align-items: center; flex-wrap: wrap;">
                     <span class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</span>
                     <span class="chip" style="font-size: 11px; display:inline-flex; align-items:center; gap:5px;">${engBadgeIcon} ${esc(coreLabel)} ${esc(s.version || '')}</span>
-                    ${isRun ? `<span class="mu" style="font-size: 11.5px; white-space: nowrap;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
+                    <span data-role="uptime" class="srv-card-uptime" style="font-size: 11.5px; color: var(--tx-muted); white-space: nowrap; ${isRun ? '' : 'display:none;'}">&bull; Up ${formatUptime(upSec)}</span>
                     ${isRemote ? `<span class="chip" style="font-size: 11px; padding: 1px 7px;">${esc(nodeName)}</span>` : ''}
                   </div>
                 </div>
@@ -5637,7 +5655,6 @@ const V = {
             <div class="srv-card-banner" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
               <div class="srv-card-badges-left">
                 <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:6px;">${engBadgeIcon} <span>${esc(coreLabel)}</span></span>
-                ${isRemote ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
               </div>
               <div class="srv-card-actions">
                 <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
@@ -5657,7 +5674,7 @@ const V = {
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
                   ${isRemote ? `<span class="chip" style="font-size: 10px; padding: 1px 6px;">${esc(nodeName)}</span>` : ''}
-                  ${isRun && dashVm !== 'icons' ? `<span class="srv-card-uptime" style="font-size: 11.5px; color: var(--tx-muted); white-space: nowrap;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
+                  <span data-role="uptime" class="srv-card-uptime" style="font-size: 11.5px; color: var(--tx-muted); white-space: nowrap; ${isRun ? '' : 'display:none;'}">Up ${formatUptime(upSec)}</span>
                 </div>
               </div>
               <div class="srv-meters-row">
