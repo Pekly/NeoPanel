@@ -157,7 +157,7 @@ function engineIcon(type, size = 16, withBg = false) {
   const m = engineMeta(type);
   const iconUrl = getEngineIconUrl(type);
   const rad = size >= 24 ? 6 : (size >= 16 ? 4 : 3);
-  const img = `<img src="${esc(iconUrl)}" alt="${esc(m.label)}" width="${size}" height="${size}" class="eng-img-ic" style="width:${size}px; height:${size}px; min-width:${size}px; min-height:${size}px; object-fit:cover; border-radius:${rad}px; display:inline-block; vertical-align:middle; flex-shrink:0;" loading="lazy">`;
+  const img = `<img src="${esc(iconUrl)}" alt="${esc(m.label)}" width="${size}" height="${size}" class="eng-img-ic" style="width:${size}px; height:${size}px; min-width:${size}px; min-height:${size}px; object-fit:contain; border-radius:${rad}px; display:inline-block; vertical-align:middle; flex-shrink:0;" loading="lazy">`;
   if (!withBg) return img;
   const wrapCls = size >= 22 ? 'lg' : (size <= 14 ? 'sm' : '');
   return `<span class="eng-ico-wrap ${wrapCls}" title="${esc(m.label)}">${img}</span>`;
@@ -2397,7 +2397,10 @@ function getBrand(key) {
 }
 
 function renderFooterHtml(raw) {
-  const text = String(raw || getBrand('footer_text') || '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026').trim();
+  let text = String(raw || getBrand('footer_text') || '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026').trim();
+  if (!text || text === 'Powered by NeoPanel Daemon') {
+    text = '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026';
+  }
   const formatted = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, url) => {
     let cleanUrl = String(url || '').trim().replace(/^https?:\/\/(https?:\/\/)/i, '$1');
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
@@ -5514,7 +5517,6 @@ const V = {
     const nodesList = Array.isArray(S.nodes) ? S.nodes : [];
     const nodeErrs = S.clusterNodeErrors || {};
     const errEntries = Object.entries(nodeErrs);
-    const showNodeBar = nodesList.length > 1 || errEntries.length > 0;
     const activeNodeFilter = S.nodeFilter || 'all';
 
     const indexedServers = S.servers.map((s, origIdx) => ({ s, origIdx }));
@@ -5524,44 +5526,34 @@ const V = {
     const coverUrl = getBrand('card_cover_url');
     const dashVm = getViewMode('dash', 'tiles');
     const gridCls = dashVm === 'list' ? 'vm-dash-list' : (dashVm === 'icons' ? 'vm-dash-icons' : '');
-    const gridStyle = dashVm === 'tiles' ? 'display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;' : '';
+    const gridStyle = dashVm === 'tiles' ? 'display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;' : '';
 
     return `
     <div class="row sb" style="margin-bottom: 20px; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
       <div>
         <h1 style="font-size: 26px; font-weight: 800; color: var(--tx); margin-bottom: 4px; letter-spacing: -0.02em;">Servers</h1>
-        <span id="dash-running-summary" class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} &bull; ${totalCount} running${nodesList.length > 1 ? ` &bull; ${nodesList.filter(n => n.online).length}/${nodesList.length} nodes online` : ''}</span>
+        <span id="dash-running-summary" class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} of ${totalCount} servers running</span>
       </div>
-      <div class="row" style="gap: 10px; flex-wrap: wrap;">
+      <div class="row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
         <div style="position: relative;">
           <input type="text" id="srv-filter" placeholder="Filter by name or address" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
         </div>
+        ${nodesList.length > 1 ? `
+          <select class="sel sm" style="width: auto; min-width: 130px; height: 36px;" onchange="setNodeFilter(this.value)">
+            <option value="all" ${activeNodeFilter === 'all' ? 'selected' : ''}>All Locations (${totalCount})</option>
+            ${nodesList.map(n => {
+              const cnt = S.servers.filter(x => (x.node_id || 'local') === n.id).length;
+              return `<option value="${esc(n.id)}" ${activeNodeFilter === n.id ? 'selected' : ''}>${esc(n.name)} (${cnt})</option>`;
+            }).join('')}
+          </select>
+        ` : ''}
         ${renderViewModeToggle('dash', 'tiles')}
-        ${S.user?.role === 'admin' ? `<a href="/admin/nodes" class="btn" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="height: 36px; padding: 0 14px; font-size: 13px; text-decoration: none;">${ic('network', 14)} Nodes (${Math.max(1, nodesList.length)})</a>` : ''}
         <button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
           ${ic('plus', 14)} Create server
         </button>
       </div>
     </div>
-
-    ${showNodeBar ? `
-      <div class="node-filter-bar">
-        <button type="button" class="node-filter-pill ${activeNodeFilter === 'all' ? 'on' : ''}" onclick="setNodeFilter('all')">
-          ${ic('layers', 13)}
-          <span>All Nodes</span>
-          <span class="mu mono" style="font-size: 11px;">${totalCount}</span>
-        </button>
-        ${nodesList.map(n => {
-          const cnt = S.servers.filter(x => (x.node_id || 'local') === n.id).length;
-          return `<button type="button" class="node-filter-pill ${activeNodeFilter === n.id ? 'on' : ''}" onclick="setNodeFilter('${esc(n.id)}')">
-            <span class="node-status-dot ${n.online ? 'online' : 'offline'}"></span>
-            <span>${esc(n.name)}</span>
-            <span class="mu mono" style="font-size: 11px;">${cnt}</span>
-          </button>`;
-        }).join('')}
-      </div>
-    ` : ''}
 
     ${errEntries.length > 0 ? `
       <div class="node-error-note" style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
@@ -5586,7 +5578,8 @@ const V = {
           </div>
         `).join('') : visibleServers.map(({ s, origIdx }) => {
           const nid = s.node_id || 'local';
-          const nodeName = s.node_name || getNodeById(nid)?.name || (nid === 'local' ? 'Local Master Node' : nid);
+          const nodeName = s.node_name || getNodeById(nid)?.name || nid;
+          const isRemote = nid !== 'local';
           const st = origIdx === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
           const isRun = st === 'online' || st === 'starting';
           const maxRam = getServerMaxRamMB(s);
@@ -5596,26 +5589,25 @@ const V = {
           const upSec = origIdx === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
           const host = `${srvHost(s)}:${s.port || 25565}`;
           const coreLabel = engineMeta(s.type || 'paper').label;
-          const engBadgeIcon = engineIcon(s.type || 'paper', 12);
+          const engBadgeIcon = engineIcon(s.type || 'paper', 14);
           const srvUrl = serverRouteUrl(nid, s.id, 'con');
 
           if (dashVm === 'list') {
             return `
-            <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
+            <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
               <div class="vm-dash-row-main">
-                <div class="srv-row-thumb" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');"></div>
                 <div style="min-width: 0; flex: 1;">
-                  <div class="row" style="gap: 8px; flex-wrap: wrap;">
-                    <span class="srv-card-title">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
-                    <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}">
+                  <div class="row" style="gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <span class="srv-card-title" title="${esc(s.name)}">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
+                    <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}" style="white-space: nowrap; flex-shrink: 0;">
                       <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
-                      ${isRun ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
                     </span>
                   </div>
-                  <div class="row" style="gap: 8px; margin-top: 4px; flex-wrap: wrap;">
+                  <div class="row" style="gap: 8px; margin-top: 5px; align-items: center; flex-wrap: wrap;">
                     <span class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</span>
                     <span class="chip" style="font-size: 11px; display:inline-flex; align-items:center; gap:5px;">${engBadgeIcon} ${esc(coreLabel)} ${esc(s.version || '')}</span>
-                    ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
+                    ${isRun ? `<span class="mu" style="font-size: 11.5px; white-space: nowrap;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
+                    ${isRemote ? `<span class="chip" style="font-size: 11px; padding: 1px 7px;">${esc(nodeName)}</span>` : ''}
                   </div>
                 </div>
               </div>
@@ -5644,8 +5636,8 @@ const V = {
           <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card ${dashVm === 'icons' ? 'vm-dash-icon' : ''}" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
             <div class="srv-card-banner" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
               <div class="srv-card-badges-left">
-                <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:5px;">${engBadgeIcon} ${dashVm === 'icons' ? esc(coreLabel) : `Minecraft - ${esc(coreLabel)}`}</span>
-                ${(showNodeBar || nid !== 'local') ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
+                <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:6px;">${engBadgeIcon} <span>${esc(coreLabel)}</span></span>
+                ${isRemote ? `<span class="srv-node-pill" title="${esc(nodeName)}">${esc(nodeName)}</span>` : ''}
               </div>
               <div class="srv-card-actions">
                 <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
@@ -5654,13 +5646,20 @@ const V = {
             </div>
             <div class="srv-card-body">
               <div class="srv-card-title-row">
-                <span class="srv-card-title">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
-                <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}">
+                <span class="srv-card-title" title="${esc(s.name)}">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
+                <span data-role="badge" class="badge ${isRun ? 'online' : 'offline'}" style="white-space: nowrap; flex-shrink: 0;">
                   <i class="dot"></i>${isRun ? 'Running' : 'Offline'}
-                  ${isRun && dashVm !== 'icons' ? `<span class="mu" style="font-weight: 400; margin-left: 3px;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
                 </span>
               </div>
-              <div class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</div>
+              <div class="srv-card-sub-row">
+                <div class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address">
+                  <span class="pv">${esc(host)}</span> ${ic('copy', 12)}
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                  ${isRemote ? `<span class="chip" style="font-size: 10px; padding: 1px 6px;">${esc(nodeName)}</span>` : ''}
+                  ${isRun && dashVm !== 'icons' ? `<span class="srv-card-uptime" style="font-size: 11.5px; color: var(--tx-muted); white-space: nowrap;">&bull; Up ${formatUptime(upSec)}</span>` : ''}
+                </div>
+              </div>
               <div class="srv-meters-row">
                 <div class="srv-meter">
                   <div class="srv-meter-head">
@@ -5671,7 +5670,7 @@ const V = {
                 </div>
                 <div class="srv-meter">
                   <div class="srv-meter-head">
-                    <span>Memory</span>
+                    <span>RAM</span>
                     <span data-role="mem-val" class="srv-meter-val">${Math.round(mVal)} MB</span>
                   </div>
                   <div class="meter-bar"><i data-role="mem-bar" style="width:${Math.min(100, (mVal / (maxRam || 1)) * 100)}%"></i></div>
@@ -7978,7 +7977,7 @@ const V = {
               </label>
               <label class="f" style="margin-bottom: 0;">
                 <span>Footer / Login Subtext</span>
-                <input type="text" value="${esc(draft.footer_text || '')}" maxlength="120" oninput="onBrandInputChange('footer_text', this.value)" placeholder="Powered by NeoPanel Daemon">
+                <input type="text" value="${esc(draft.footer_text || '')}" maxlength="120" oninput="onBrandInputChange('footer_text', this.value)" placeholder="[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026">
               </label>
               <label class="f" style="margin-bottom: 0;">
                 <span>Default Color Mode (New Browsers)</span>
@@ -15780,7 +15779,7 @@ async function checkAuth() {
 
 function showSetupScreen() {
   $('#login')?.remove();
-  const footTxt = (getBrand('footer_text') || 'Powered by NeoPanel Daemon').trim();
+  const footTxt = (getBrand('footer_text') || '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026').trim();
   const d = document.createElement('div');
   d.id = 'login';
   d.className = 'login';
@@ -15868,7 +15867,7 @@ function showLoginScreen() {
   if ($('#login')) return;
   const maintEnabled = Boolean(S.maintPublicInfo?.enabled || S.branding?.maintenance_enabled);
   const b = S.branding || DEFAULT_BRANDING;
-  const footTxt = (getBrand('footer_text') || 'Powered by NeoPanel Daemon').trim();
+  const footTxt = (getBrand('footer_text') || '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026').trim();
 
   if (maintEnabled && !S.maintAdminSignInOpen) {
     const title = (S.maintPublicInfo?.title || b.maintenance_title || 'Scheduled Maintenance').trim();

@@ -105,7 +105,7 @@ func defaultPanelBranding() PanelBrandingConfig {
 		ServerHeroURL:        "https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg",
 		CardCoverURL:         "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MC-Downloadables_Image-0_15th-Anniversary_1110x624.jpg",
 		DefaultAvatarURL:     "https://www.minecraft.net/content/dam/minecraftnet/games/minecraft/key-art/MCV_SummerDrop_Hero_DotNet_Downloadable_Wallpaper_r414x414.png",
-		FooterText:           "Powered by NeoPanel Daemon",
+		FooterText:           "[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026",
 		Preset:               "obsidian",
 		AccentColor:          "#387aff",
 		AccentHover:          "#4f8aff",
@@ -267,6 +267,9 @@ func sanitizeBrandingConfig(in, def PanelBrandingConfig) PanelBrandingConfig {
 	}
 
 	footer := strings.TrimSpace(in.FooterText)
+	if footer == "" || footer == "Powered by NeoPanel Daemon" {
+		footer = def.FooterText
+	}
 	if len(footer) > 120 {
 		footer = footer[:120]
 	}

@@ -208,6 +208,18 @@ func (db *DB) migrate() error {
 	_ = db.addColumnIfNotExists("servers", "cpu_limit_percent", "INTEGER NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("servers", "disk_limit_mb", "INTEGER NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "is_free", "BOOLEAN NOT NULL DEFAULT 0")
+
+	// Migrate legacy "Powered by NeoPanel Daemon" footer in database
+	_, _ = db.conn.Exec(`
+		UPDATE panel_settings 
+		SET value = REPLACE(value, '"footer_text":"Powered by NeoPanel Daemon"', '"footer_text":"[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026"')
+		WHERE key = 'branding_json' AND value LIKE '%"footer_text":"Powered by NeoPanel Daemon"%';
+	`)
+	_, _ = db.conn.Exec(`
+		UPDATE panel_settings 
+		SET value = '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026'
+		WHERE key = 'footer_text' AND (value = 'Powered by NeoPanel Daemon' OR value = '');
+	`)
 	_ = db.addColumnIfNotExists("nodes", "idle_timeout_min", "INTEGER NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "allow_user_ram", "BOOLEAN NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("nodes", "allow_user_ports", "BOOLEAN NOT NULL DEFAULT 0")

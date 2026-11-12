@@ -878,7 +878,7 @@ h2 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -890,6 +890,16 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+}
+
+.srv-card-sub-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: -4px;
 }
 
 .srv-card-addr {
@@ -897,13 +907,16 @@ h2 {
   color: var(--tx-muted);
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Resource Meters inside Server Card */
 .srv-meters-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
@@ -918,13 +931,18 @@ h2 {
 .srv-meter-head {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 11px;
   color: var(--tx-muted);
+  white-space: nowrap;
+  gap: 4px;
 }
 
 .srv-meter-val {
   font-weight: 600;
   color: #fff;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .meter-bar {
@@ -4278,7 +4296,8 @@ html[data-theme="light"] .act-cat-nodes {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .srv-card-badges-left .srv-card-badge {
@@ -5034,12 +5053,46 @@ a.sift-server-card {
 }
 
 .sift-server-card.vm-dash-row {
+  position: relative;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
+  padding: 14px 20px;
   gap: 16px;
   flex-wrap: wrap;
+  background-size: cover;
+  background-position: center 35%;
+  background-repeat: no-repeat;
+  border-radius: var(--np-radius, 14px);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.sift-server-card.vm-dash-row::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, 
+    rgba(10, 14, 23, 0.94) 0%, 
+    rgba(12, 17, 29, 0.88) 50%, 
+    rgba(10, 14, 23, 0.95) 100%);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 1;
+  pointer-events: none;
+  transition: all 0.22s ease;
+}
+
+.sift-server-card.vm-dash-row:hover::before {
+  background: linear-gradient(90deg, 
+    rgba(10, 14, 23, 0.90) 0%, 
+    rgba(12, 17, 29, 0.80) 50%, 
+    rgba(10, 14, 23, 0.92) 100%);
+}
+
+.sift-server-card.vm-dash-row > * {
+  position: relative;
+  z-index: 2;
 }
 
 .vm-dash-row-main {
