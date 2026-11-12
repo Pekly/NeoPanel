@@ -352,6 +352,12 @@ func sanitizeBrandingConfig(in, def PanelBrandingConfig) PanelBrandingConfig {
 	} else {
 		out.ClientAreaSubtitle = ""
 	}
+	if tz := strings.TrimSpace(in.Timezone); tz != "" {
+		if len(tz) > 64 {
+			tz = tz[:64]
+		}
+		out.Timezone = tz
+	}
 	return out
 }
 
@@ -415,13 +421,24 @@ func (h *BrandingHandler) UpdateAdminBranding(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Failed to read request body"})
+		return
+	}
+
 	var req struct {
 		Branding *PanelBrandingConfig  `json:"branding"`
 		Daemon   *DaemonSettingsConfig `json:"daemon"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON payload"})
-		return
+	_ = json.Unmarshal(bodyBytes, &req)
+
+	// If payload was passed without {"branding": ...} wrapper, decode directly into Branding
+	if req.Branding == nil && req.Daemon == nil {
+		var directBranding PanelBrandingConfig
+		if err := json.Unmarshal(bodyBytes, &directBranding); err == nil && (directBranding.BrandName != "" || directBranding.Timezone != "" || directBranding.DefaultTheme != "") {
+			req.Branding = &directBranding
+		}
 	}
 
 	h.mu.Lock()

@@ -5176,11 +5176,15 @@ function getActivityMeta(action) {
   return { category: 'admin', badgeLabel: 'System', cls: 'act-cat-admin', title: readable };
 }
 
+function getUserTimezone() {
+  return localStorage.getItem('neopanel_timezone') || S.branding?.timezone || 'UTC';
+}
+
 function formatFullDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   if (isNaN(d.getTime())) return String(iso);
-  const tz = S.branding?.timezone || 'UTC';
+  const tz = getUserTimezone();
   try {
     return d.toLocaleString(undefined, { timeZone: tz });
   } catch (e) {
@@ -8426,7 +8430,7 @@ const V = {
         <div class="ar">
           <div><b>Timezone</b><div class="mu">Display activity logs, console timestamps, and file dates in your timezone</div></div>
           <select id="acc-timezone" onchange="setUserTimezone(this.value)" style="max-width: 220px;">
-            ${['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Ulaanbaatar', 'Australia/Sydney'].map(tz => `<option value="${tz}" ${(S.branding?.timezone || 'UTC') === tz ? 'selected' : ''}>${tz}</option>`).join('')}
+            ${['UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Ulaanbaatar', 'Australia/Sydney'].map(tz => `<option value="${tz}" ${getUserTimezone() === tz ? 'selected' : ''}>${tz}</option>`).join('')}
           </select>
         </div>
       </div>`;
@@ -9699,7 +9703,7 @@ function formatFileDate(iso) {
     if (diffSec < 60) return 'Just now';
     if (diffSec < 3600) return `${Math.floor(diffSec / 60)} minutes ago`;
     if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} hours ago`;
-    const tz = S.branding?.timezone || 'UTC';
+    const tz = getUserTimezone();
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: tz });
   } catch (e) {
     return '—';
@@ -13163,16 +13167,20 @@ function copyClientProvisioningCode() {
   });
 }
 
-function setUserTimezone(tz) {
+async function setUserTimezone(tz) {
   if (!S.branding) S.branding = { ...DEFAULT_BRANDING };
   S.branding.timezone = tz;
   localStorage.setItem('neopanel_timezone', tz);
-  toast(`Timezone set to ${tz}`);
+  toast(`Timezone set to ${tz}`, 'ok');
   if (S.user?.role === 'admin') {
-    api('/api/branding', {
-      method: 'POST',
-      body: JSON.stringify(S.branding)
-    }).catch(() => {});
+    try {
+      const draft = { ...DEFAULT_BRANDING, ...S.branding, timezone: tz };
+      await api('/api/admin/branding', {
+        method: 'PUT',
+        suppressToast: true,
+        body: JSON.stringify({ branding: draft })
+      });
+    } catch (e) {}
   }
   R();
 }
