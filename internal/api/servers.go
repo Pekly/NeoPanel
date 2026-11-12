@@ -6,7 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	_ "image/gif"
+	_ "image/jpeg"
+	"image/png"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -585,9 +592,9 @@ func (h *ServerHandler) UploadServerIcon(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
-	if err := r.ParseMultipartForm(2 * 1024 * 1024); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid image upload (max 2MB)")
+	r.Body = http.MaxBytesReader(w, r.Body, 10*1024*1024)
+	if err := r.ParseMultipartForm(10 * 1024 * 1024); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid image upload (max 10MB)")
 		return
 	}
 
@@ -602,27 +609,122 @@ func (h *ServerHandler) UploadServerIcon(w http.ResponseWriter, r *http.Request)
 	_ = os.MkdirAll(workDir, 0755)
 	destPath := filepath.Join(workDir, "server-icon.png")
 
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save icon file: "+err.Error())
-		return
-	}
-	defer destFile.Close()
-
-	if _, err := io.Copy(destFile, file); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to write icon: "+err.Error())
+	if err := processAndSaveServerIcon(file, destPath); err != nil {
+		writeError(w, http.StatusBadRequest, "Failed to process icon (must be a valid PNG, JPG, or GIF): "+err.Error())
 		return
 	}
 
 	iconURL := fmt.Sprintf("/api/servers/%s/icon?t=%d", serverID, time.Now().Unix())
 	_ = h.db.UpdateServerIcon(serverID, iconURL)
 
-	logAudit(h.db, r, "server_icon_upload", fmt.Sprintf("Uploaded custom server-icon.png for %s (%s)", server.Name, header.Filename))
+	logAudit(h.db, r, "server_icon_upload", fmt.Sprintf("Uploaded custom 64x64 server-icon.png for %s (%s)", server.Name, header.Filename))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":   "success",
 		"icon_url": iconURL,
 	})
+}
+
+// processAndSaveServerIcon decodes an uploaded image, center-crops to square,
+// resizes to exactly 64x64 pixels (Minecraft specification), and encodes as PNG.
+func processAndSaveServerIcon(r io.Reader, destPath string) error {
+	img, _, err := image.Decode(r)
+	if err != nil {
+		return fmt.Errorf("unable to decode image: %w", err)
+	}
+
+	resized := cropAndResizeTo64x64(img)
+
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer destFile.Close()
+
+	if err := png.Encode(destFile, resized); err != nil {
+		return fmt.Errorf("failed to encode 64x64 PNG: %w", err)
+	}
+	return nil
+}
+
+func cropAndResizeTo64x64(src image.Image) *image.RGBA {
+	const targetW = 64
+	const targetH = 64
+	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
+
+	bounds := src.Bounds()
+	srcW := bounds.Dx()
+	srcH := bounds.Dy()
+
+	if srcW == targetW && srcH == targetH {
+		draw.Draw(dst, dst.Bounds(), src, bounds.Min, draw.Src)
+		return dst
+	}
+
+	minDim := srcW
+	if srcH < minDim {
+		minDim = srcH
+	}
+
+	cropX := bounds.Min.X + (srcW-minDim)/2
+	cropY := bounds.Min.Y + (srcH-minDim)/2
+
+	for y := 0; y < targetH; y++ {
+		srcY := float64(cropY) + (float64(y)*float64(minDim))/float64(targetH)
+		y0 := int(math.Floor(srcY))
+		y1 := y0 + 1
+		if y1 >= bounds.Max.Y {
+			y1 = bounds.Max.Y - 1
+		}
+		fy := srcY - float64(y0)
+
+		for x := 0; x < targetW; x++ {
+			srcX := float64(cropX) + (float64(x)*float64(minDim))/float64(targetW)
+			x0 := int(math.Floor(srcX))
+			x1 := x0 + 1
+			if x1 >= bounds.Max.X {
+				x1 = bounds.Max.X - 1
+			}
+			fx := srcX - float64(x0)
+
+			c00 := colorToRGBA(src.At(x0, y0))
+			c10 := colorToRGBA(src.At(x1, y0))
+			c01 := colorToRGBA(src.At(x0, y1))
+			c11 := colorToRGBA(src.At(x1, y1))
+
+			// Bilinear interpolation
+			r0 := float64(c00.R)*(1-fx) + float64(c10.R)*fx
+			g0 := float64(c00.G)*(1-fx) + float64(c10.G)*fx
+			b0 := float64(c00.B)*(1-fx) + float64(c10.B)*fx
+			a0 := float64(c00.A)*(1-fx) + float64(c10.A)*fx
+
+			r1 := float64(c01.R)*(1-fx) + float64(c11.R)*fx
+			g1 := float64(c01.G)*(1-fx) + float64(c11.G)*fx
+			b1 := float64(c01.B)*(1-fx) + float64(c11.B)*fx
+			a1 := float64(c01.A)*(1-fx) + float64(c11.A)*fx
+
+			r := uint8(math.Round(r0*(1-fy) + r1*fy))
+			g := uint8(math.Round(g0*(1-fy) + g1*fy))
+			b := uint8(math.Round(b0*(1-fy) + b1*fy))
+			a := uint8(math.Round(a0*(1-fy) + a1*fy))
+
+			dst.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: a})
+		}
+	}
+	return dst
+}
+
+func colorToRGBA(c color.Color) color.RGBA {
+	r, g, b, a := c.RGBA()
+	if a == 0 {
+		return color.RGBA{0, 0, 0, 0}
+	}
+	return color.RGBA{
+		R: uint8((r * 255) / a),
+		G: uint8((g * 255) / a),
+		B: uint8((b * 255) / a),
+		A: uint8(a >> 8),
+	}
 }
 
 // GetServerIcon returns the server's server-icon.png

@@ -12788,21 +12788,60 @@ async function deleteServerSubuser(subuserId) {
 }
 
 // --- Server Icon Management ---
+function resizeImageTo64x64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read image file'));
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Invalid image file format'));
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 64;
+          canvas.height = 64;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(file);
+
+          // Center-crop square to prevent distortion
+          const minDim = Math.min(img.width, img.height);
+          const sx = (img.width - minDim) / 2;
+          const sy = (img.height - minDim) / 2;
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, 64, 64);
+
+          canvas.toBlob((blob) => {
+            if (!blob) return resolve(file);
+            resolve(blob);
+          }, 'image/png');
+        } catch (err) {
+          resolve(file);
+        }
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 async function uploadServerIcon(srvId, file) {
   if (!file) return;
   const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
   if (!srv) return;
 
-  if (file.size > 2 * 1024 * 1024) {
-    toast('Image file too large (maximum 2 MB)', 'bad');
+  if (file.size > 10 * 1024 * 1024) {
+    toast('Image file too large (maximum 10 MB)', 'bad');
     return;
   }
 
-  const formData = new FormData();
-  formData.append('icon', file);
-
   try {
-    toast('Uploading server icon...');
+    toast('Resizing & formatting icon to 64×64 PNG...');
+    const processedBlob = await resizeImageTo64x64(file);
+    const formData = new FormData();
+    formData.append('icon', processedBlob, 'server-icon.png');
+
     const res = await api(srvApiPath(srv, '/icon'), {
       method: 'POST',
       body: formData
@@ -12811,7 +12850,7 @@ async function uploadServerIcon(srvId, file) {
       srv.icon_url = res.icon_url;
       const img = $('#set-srv-icon-img');
       if (img) img.src = res.icon_url + '?t=' + Date.now();
-      toast('Server icon updated (server-icon.png)', 'ok');
+      toast('Server icon updated to 64×64 PNG (server-icon.png)', 'ok');
       R();
     }
   } catch (err) {
