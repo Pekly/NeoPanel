@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,25 +67,77 @@ func parseGithubRepo(rawURL string) (owner, repo string, ok bool) {
 	return "", "", false
 }
 
-// getLocalCommit attempts to find the current git commit hash if running in a git workspace
-func getLocalCommit() string {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	out, err := cmd.Output()
-	if err == nil {
-		return strings.TrimSpace(string(out))
+// BuildCommit can be injected at compile time via:
+// -ldflags "-X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=<sha>'"
+var BuildCommit string
+
+// getLocalCommit attempts to find the current git commit hash through all available sources
+func getLocalCommit(db *database.DB) string {
+	// 1. Injected via -ldflags at compile time
+	if c := strings.TrimSpace(BuildCommit); len(c) >= 7 {
+		return c
 	}
-	// Fallback to reading from .git/HEAD directly if git binary is not installed
+
+	// 2. Go runtime VCS revision (embedded automatically by Go 1.18+ when built inside a git repo)
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" && len(strings.TrimSpace(s.Value)) >= 7 {
+				return strings.TrimSpace(s.Value)
+			}
+		}
+	}
+
+	// 3. Persistent commit marker written by installer in /etc/neopanel/current_commit
+	if data, err := os.ReadFile("/etc/neopanel/current_commit"); err == nil {
+		if c := strings.TrimSpace(string(data)); len(c) >= 7 {
+			return c
+		}
+	}
+
+	// 4. Persistent commit marker in /var/lib/neopanel/current_commit
+	if data, err := os.ReadFile("/var/lib/neopanel/current_commit"); err == nil {
+		if c := strings.TrimSpace(string(data)); len(c) >= 7 {
+			return c
+		}
+	}
+
+	// 5. Database setting saved after successful update
+	if db != nil {
+		if c, _ := db.GetPanelSetting("installed_git_commit"); len(strings.TrimSpace(c)) >= 7 {
+			return strings.TrimSpace(c)
+		}
+	}
+
+	// 6. Check /tmp/neopanel-build git workspace if present
+	if out, err := exec.Command("git", "-C", "/tmp/neopanel-build", "rev-parse", "HEAD").Output(); err == nil {
+		if c := strings.TrimSpace(string(out)); len(c) >= 7 {
+			return c
+		}
+	}
+
+	// 7. Check current working directory git workspace
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	if out, err := cmd.Output(); err == nil {
+		if c := strings.TrimSpace(string(out)); len(c) >= 7 {
+			return c
+		}
+	}
+
+	// 8. Fallback to reading .git/HEAD
 	if headData, err := os.ReadFile(".git/HEAD"); err == nil {
 		ref := strings.TrimSpace(string(headData))
 		if strings.HasPrefix(ref, "ref: ") {
 			refPath := strings.TrimSpace(strings.TrimPrefix(ref, "ref: "))
 			if commitData, err := os.ReadFile(".git/" + refPath); err == nil {
-				return strings.TrimSpace(string(commitData))
+				if c := strings.TrimSpace(string(commitData)); len(c) >= 7 {
+					return c
+				}
 			}
 		} else if len(ref) >= 7 {
 			return ref
 		}
 	}
+
 	return ""
 }
 
@@ -106,7 +159,7 @@ func getEffectiveUpdateConfig(db *database.DB) UpdateConfig {
 func HandleGetUpdateStatus(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := getEffectiveUpdateConfig(db)
-		localCommit := getLocalCommit()
+		localCommit := getLocalCommit(db)
 
 		status := UpdateStatus{
 			RepoURL:        cfg.RepoURL,
@@ -176,9 +229,11 @@ func HandleGetUpdateStatus(db *database.DB) http.HandlerFunc {
 		status.RemoteDate = ghResp.Commit.Committer.Date
 
 		if localCommit != "" && status.RemoteCommit != "" {
-			status.UpdateAvailable = !strings.HasPrefix(status.RemoteCommit, localCommit) && !strings.HasPrefix(localCommit, status.RemoteCommit)
-		} else if status.RemoteCommit != "" {
-			status.UpdateAvailable = true
+			loc := strings.ToLower(strings.TrimSpace(localCommit))
+			rem := strings.ToLower(strings.TrimSpace(status.RemoteCommit))
+			status.UpdateAvailable = (loc != rem) && !strings.HasPrefix(rem, loc) && !strings.HasPrefix(loc, rem)
+		} else {
+			status.UpdateAvailable = false
 		}
 
 		writeJSON(w, http.StatusOK, status)
@@ -247,7 +302,7 @@ func HandleApplyUpdate(db *database.DB) http.HandlerFunc {
 		cfg := getEffectiveUpdateConfig(db)
 		logAudit(db, r, "admin_update_apply", fmt.Sprintf("Triggered panel binary update from %s (%s)", cfg.RepoURL, cfg.Branch))
 
-		go executeSystemUpdate(cfg.RepoURL, cfg.Branch)
+		go executeSystemUpdate(db, cfg.RepoURL, cfg.Branch)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status":   "updating",
@@ -258,7 +313,7 @@ func HandleApplyUpdate(db *database.DB) http.HandlerFunc {
 	}
 }
 
-func executeSystemUpdate(repoURL, branch string) {
+func executeSystemUpdate(db *database.DB, repoURL, branch string) {
 	defer func() {
 		updateMu.Lock()
 		updateRunning = false
@@ -305,6 +360,19 @@ func executeSystemUpdate(repoURL, branch string) {
 	} else {
 		successMsg := fmt.Sprintf("\n[NeoPanel Update SUCCESS] Finished update successfully at %s\n", time.Now().Format("2006-01-02 15:04:05"))
 		_, _ = logFile.WriteString(successMsg)
+		if db != nil {
+			if commitData, err := os.ReadFile("/etc/neopanel/current_commit"); err == nil {
+				c := strings.TrimSpace(string(commitData))
+				if len(c) >= 7 {
+					_ = db.SetPanelSetting("installed_git_commit", c)
+				}
+			} else if commitData, err := os.ReadFile("/var/lib/neopanel/current_commit"); err == nil {
+				c := strings.TrimSpace(string(commitData))
+				if len(c) >= 7 {
+					_ = db.SetPanelSetting("installed_git_commit", c)
+				}
+			}
+		}
 	}
 }
 

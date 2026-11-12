@@ -469,14 +469,25 @@ step_build_neopanel() {
     go_tags=(-tags node)
   fi
 
+  local git_commit=""
   if [ -f "./cmd/neopanel/main.go" ] && [ -f "./cmd/neopanel/cli.go" ]; then
+    git_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+    if [ -n "$git_commit" ]; then
+      echo "$git_commit" > "$CONFIG_DIR/current_commit"
+      echo "$git_commit" > "$DATA_DIR/current_commit"
+    fi
     go mod tidy
-    go build "${go_tags[@]}" -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
+    go build "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
   else
     rm -rf "$BUILD_DIR"
     git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$BUILD_DIR"
     if [ -f "$BUILD_DIR/cmd/neopanel/main.go" ]; then
-      (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
+      git_commit="$(cd "$BUILD_DIR" && git rev-parse HEAD 2>/dev/null || true)"
+      if [ -n "$git_commit" ]; then
+        echo "$git_commit" > "$CONFIG_DIR/current_commit"
+        echo "$git_commit" > "$DATA_DIR/current_commit"
+      fi
+      (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
       rm -rf "$BUILD_DIR"
     else
       echo "Failed to clone repository or main.go missing." >&2
@@ -1140,12 +1151,24 @@ step_update_compile() {
   if [ "$INSTALL_ROLE" = "node" ]; then
     go_tags=(-tags node)
   fi
-  (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w" -o "$BUILD_DIR/neopanel_new" ./cmd/neopanel)
+  local git_commit=""
+  git_commit="$(cd "$BUILD_DIR" && git rev-parse HEAD 2>/dev/null || true)"
+  (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$BUILD_DIR/neopanel_new" ./cmd/neopanel)
 }
 
 step_update_swap() {
   if [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
     cp "$INSTALL_DIR/$BINARY_NAME" "$INSTALL_DIR/${BINARY_NAME}.bak"
+  fi
+
+  local git_commit=""
+  if [ -d "$BUILD_DIR" ]; then
+    git_commit="$(cd "$BUILD_DIR" && git rev-parse HEAD 2>/dev/null || true)"
+  fi
+  if [ -n "$git_commit" ]; then
+    mkdir -p "$CONFIG_DIR" "$DATA_DIR"
+    echo "$git_commit" > "$CONFIG_DIR/current_commit"
+    echo "$git_commit" > "$DATA_DIR/current_commit"
   fi
 
   mv "$BUILD_DIR/neopanel_new" "$INSTALL_DIR/$BINARY_NAME"
