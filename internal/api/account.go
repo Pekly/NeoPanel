@@ -38,8 +38,15 @@ func (h *AccountHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.GetUserByUsername(claims.Username)
-	if err != nil {
+	var user *database.User
+	var err error
+	if claims.UserID > 0 {
+		user, err = h.db.GetUserByID(claims.UserID)
+	}
+	if user == nil || err != nil {
+		user, err = h.db.GetUserByUsername(claims.Username)
+	}
+	if err != nil || user == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
 	}
@@ -50,6 +57,8 @@ func (h *AccountHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":                 user.ID,
 		"username":           user.Username,
+		"first_name":         user.FirstName,
+		"last_name":          user.LastName,
 		"email":              user.Email,
 		"role":               user.Role,
 		"avatar_url":         user.AvatarURL,
@@ -67,13 +76,23 @@ func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.GetUserByUsername(claims.Username)
-	if err != nil {
+	var user *database.User
+	var err error
+	if claims.UserID > 0 {
+		user, err = h.db.GetUserByID(claims.UserID)
+	}
+	if user == nil || err != nil {
+		user, err = h.db.GetUserByUsername(claims.Username)
+	}
+	if err != nil || user == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
 	}
 
 	var req struct {
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
 		Email     string `json:"email"`
 		AvatarURL string `json:"avatar_url"`
 	}
@@ -82,28 +101,69 @@ func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Username = strings.TrimSpace(req.Username)
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
 	req.Email = strings.TrimSpace(req.Email)
-	if req.Email != "" {
-		if !strings.Contains(req.Email, "@") || !strings.Contains(req.Email, ".") {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid email address"})
-			return
-		}
-		if err := h.db.UpdateUserEmail(user.ID, req.Email); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Email address already in use"})
-			return
-		}
-		user.Email = req.Email
+
+	if req.Username == "" {
+		req.Username = user.Username
 	}
+	if len(req.Username) < 2 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Account name must be at least 2 characters long"})
+		return
+	}
+
+	if req.Email == "" || !strings.Contains(req.Email, "@") || !strings.Contains(req.Email, ".") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "A valid email address is required"})
+		return
+	}
+
+	// Check if username taken by another user
+	if existing, _ := h.db.GetUserByUsername(req.Username); existing != nil && existing.ID != user.ID {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Account name already taken by another user"})
+		return
+	}
+
+	// Check if email taken by another user
+	if existing, _ := h.db.GetUserByEmailOrUsername(req.Email); existing != nil && existing.ID != user.ID {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Email address already in use by another account"})
+		return
+	}
+
+	if err := h.db.UpdateUserProfile(user.ID, req.Username, req.FirstName, req.LastName, req.Email); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update profile: " + err.Error()})
+		return
+	}
+
+	user.Username = req.Username
+	user.FirstName = req.FirstName
+	user.LastName = req.LastName
+	user.Email = req.Email
 
 	if req.AvatarURL != "" {
 		_ = h.db.UpdateUserAvatar(user.ID, req.AvatarURL)
 		user.AvatarURL = req.AvatarURL
 	}
 
-	_ = h.db.LogActivity(user.ID, "profile_update", "Updated account profile", extractClientIP(r))
+	newToken, _ := h.auth.GenerateToken(user)
+	if newToken != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "jwt",
+			Value:    newToken,
+			Path:     "/",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   r.TLS != nil,
+			MaxAge:   86400 * 7,
+		})
+	}
+
+	_ = h.db.LogActivity(user.ID, "profile_update", fmt.Sprintf("Updated account profile: %s (%s)", user.Username, user.Email), extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Profile updated successfully",
+		"token":   newToken,
 		"user":    user,
 	})
 }

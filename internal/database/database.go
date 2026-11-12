@@ -198,6 +198,8 @@ func (db *DB) migrate() error {
 
 	// Safe automatic schema column migrations
 	_ = db.addColumnIfNotExists("users", "email", "TEXT NOT NULL DEFAULT ''")
+	_ = db.addColumnIfNotExists("users", "first_name", "TEXT NOT NULL DEFAULT ''")
+	_ = db.addColumnIfNotExists("users", "last_name", "TEXT NOT NULL DEFAULT ''")
 	_ = db.addColumnIfNotExists("users", "avatar_url", "TEXT NOT NULL DEFAULT ''")
 	_ = db.addColumnIfNotExists("users", "two_factor_enabled", "BOOLEAN NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("users", "two_factor_secret", "TEXT NOT NULL DEFAULT ''")
@@ -244,10 +246,10 @@ func (db *DB) GetUserCount() (int, error) {
 }
 
 func (db *DB) GetUserByUsername(username string) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ?", username)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ?", username)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -256,10 +258,10 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 }
 
 func (db *DB) GetUserByID(id int) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE id = ?", id)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE id = ?", id)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -269,10 +271,10 @@ func (db *DB) GetUserByID(id int) (*User, error) {
 
 func (db *DB) GetUserByEmailOrUsername(lookup string) (*User, error) {
 	lookup = strings.TrimSpace(lookup)
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ? OR (email != '' AND LOWER(email) = LOWER(?))", lookup, lookup)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ? OR (email != '' AND LOWER(email) = LOWER(?))", lookup, lookup)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -285,14 +287,20 @@ func (db *DB) CreateUser(username, passwordHash, role string) (*User, error) {
 }
 
 func (db *DB) CreateUserWithDetails(username, email, passwordHash, role, avatarURL string) (*User, error) {
+	return db.CreateUserWithFullDetails(username, "", "", email, passwordHash, role, avatarURL)
+}
+
+func (db *DB) CreateUserWithFullDetails(username, firstName, lastName, email, passwordHash, role, avatarURL string) (*User, error) {
 	now := time.Now().UTC()
 	username = strings.TrimSpace(username)
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
 	email = strings.TrimSpace(email)
 	if role != "admin" {
 		role = "user"
 	}
-	res, err := db.conn.Exec("INSERT INTO users (username, email, password_hash, role, avatar_url, two_factor_enabled, two_factor_secret, recovery_codes, created_at) VALUES (?, ?, ?, ?, ?, 0, '', '', ?)",
-		username, email, passwordHash, role, avatarURL, now)
+	res, err := db.conn.Exec("INSERT INTO users (username, first_name, last_name, email, password_hash, role, avatar_url, two_factor_enabled, two_factor_secret, recovery_codes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', ?)",
+		username, firstName, lastName, email, passwordHash, role, avatarURL, now)
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +311,8 @@ func (db *DB) CreateUserWithDetails(username, email, passwordHash, role, avatarU
 	return &User{
 		ID:               int(id),
 		Username:         username,
+		FirstName:        firstName,
+		LastName:         lastName,
 		Email:            email,
 		PasswordHash:     passwordHash,
 		Role:             role,
@@ -310,6 +320,41 @@ func (db *DB) CreateUserWithDetails(username, email, passwordHash, role, avatarU
 		TwoFactorEnabled: false,
 		CreatedAt:        now,
 	}, nil
+}
+
+func (db *DB) UpdateUserProfile(id int, username, firstName, lastName, email string) error {
+	username = strings.TrimSpace(username)
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	email = strings.TrimSpace(email)
+
+	if username != "" {
+		_, err := db.conn.Exec("UPDATE users SET username = ?, first_name = ?, last_name = ?, email = ? WHERE id = ?",
+			username, firstName, lastName, email, id)
+		return err
+	}
+	_, err := db.conn.Exec("UPDATE users SET first_name = ?, last_name = ?, email = ? WHERE id = ?",
+		firstName, lastName, email, id)
+	return err
+}
+
+func (db *DB) AdminUpdateUser(id int, username, firstName, lastName, email, role, newPasswordHash string) error {
+	username = strings.TrimSpace(username)
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	email = strings.TrimSpace(email)
+	if role != "admin" {
+		role = "user"
+	}
+
+	if newPasswordHash != "" {
+		_, err := db.conn.Exec("UPDATE users SET username = ?, first_name = ?, last_name = ?, email = ?, role = ?, password_hash = ? WHERE id = ?",
+			username, firstName, lastName, email, role, newPasswordHash, id)
+		return err
+	}
+	_, err := db.conn.Exec("UPDATE users SET username = ?, first_name = ?, last_name = ?, email = ?, role = ? WHERE id = ?",
+		username, firstName, lastName, email, role, id)
+	return err
 }
 
 func (db *DB) UpdateUserEmail(id int, email string) error {
@@ -341,7 +386,7 @@ func (db *DB) UpdateUserRole(id int, role string) error {
 }
 
 func (db *DB) ListUsers() ([]*User, error) {
-	rows, err := db.conn.Query("SELECT id, username, COALESCE(email, ''), role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), created_at FROM users ORDER BY created_at ASC")
+	rows, err := db.conn.Query("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), created_at FROM users ORDER BY created_at ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -351,7 +396,7 @@ func (db *DB) ListUsers() ([]*User, error) {
 	for rows.Next() {
 		u := &User{}
 		var tfa int
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Role, &u.AvatarURL, &tfa, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.AvatarURL, &tfa, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.TwoFactorEnabled = tfa == 1

@@ -314,6 +314,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("DELETE /api/admin/mods/{id}", r.requireAdmin(r.mods.DeleteAdminMod))
 	r.mux.HandleFunc("GET /api/admin/users", r.requireAdmin(r.auth.ListUsers))
 	r.mux.HandleFunc("POST /api/admin/users", r.requireAdmin(r.auth.AdminCreateUser))
+	r.mux.HandleFunc("PUT /api/admin/users/{id}", r.requireAdmin(r.auth.AdminUpdateUser))
 	r.mux.HandleFunc("DELETE /api/admin/users/{id}", r.requireAdmin(r.auth.AdminDeleteUser))
 	r.mux.HandleFunc("POST /api/admin/users/{id}/avatar", r.requireAdmin(r.account.AdminUploadUserAvatar))
 

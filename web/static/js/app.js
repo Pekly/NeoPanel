@@ -7910,6 +7910,7 @@ const V = {
                       ${userAvatarHtml(u, 32)}
                       <div>
                         <b>${esc(u.username)}</b>
+                        ${(u.first_name || u.last_name) ? `<span class="mu" style="font-size:12px; margin-left:6px;">(${esc([u.first_name, u.last_name].filter(Boolean).join(' '))})</span>` : ''}
                         ${isMe ? '<span class="chip" style="margin-left:6px; font-size:10px;">You</span>' : ''}
                       </div>
                     </div>
@@ -7928,6 +7929,7 @@ const V = {
                   <td class="mu">${u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
+                      <button type="button" class="btn sm" data-id="${u.id}" onclick="openEditUserModal(${u.id})">${ic('edit', 12)} Edit</button>
                       <button type="button" class="btn sm" data-id="${u.id}" data-name="${esc(u.username)}" onclick="adminTriggerUserAvatarUpload(this.dataset.id)">${ic('image', 12)} Icon</button>
                       ${!isMe ? `
                         <button class="btn sm dg" data-id="${u.id}" data-name="${esc(u.username)}" onclick="deleteAdminUser(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Delete</button>
@@ -8394,13 +8396,13 @@ const V = {
         </div>
         <div class="pbody">
           <div class="grid g2">
-            <label class="f"><span>First name</span><input type="text" id="afn" value="${esc(a.fn)}"></label>
-            <label class="f"><span>Last name</span><input type="text" id="aln" value="${esc(a.ln)}"></label>
+            <label class="f"><span>First name</span><input type="text" id="afn" value="${esc(a.fn || '')}" placeholder="First name"></label>
+            <label class="f"><span>Last name</span><input type="text" id="aln" value="${esc(a.ln || '')}" placeholder="Last name"></label>
           </div>
-          <label class="f"><span>Username</span><input type="text" id="aun" value="${esc(a.un)}" readonly style="opacity:0.8; cursor:not-allowed;" title="Username is assigned by administrators"></label>
-          <label class="f"><span>Email Address <b style="color:var(--err); font-size:12px;">*required</b></span><input type="email" id="aem" value="${esc(a.em)}"></label>
+          <label class="f"><span>Username / Account Name <b style="color:var(--err); font-size:12px;">*required</b></span><input type="text" id="aun" value="${esc(a.un || '')}" placeholder="Username" autocomplete="username"></label>
+          <label class="f"><span>Email Address <b style="color:var(--err); font-size:12px;">*required</b></span><input type="email" id="aem" value="${esc(a.em || '')}" placeholder="name@example.com" autocomplete="email"></label>
           <div class="row" style="justify-content:flex-end">
-            <button class="btn pr" onclick="updateAccountProfile()">Update Profile</button>
+            <button class="btn pr" onclick="updateAccountProfile()">${ic('check', 14)} Update Profile</button>
           </div>
         </div>
       </div>
@@ -11363,12 +11365,29 @@ async function loadSFTPDetails(skipRender = false) {
 // --- Account Management ---
 async function loadAccountData(skipRender = false) {
   try {
-    const savedProf = JSON.parse(localStorage.getItem('neopanel_profile') || '{}');
     const prof = await api('/api/account/profile');
-    S.acct.un = savedProf.un || prof.username || S.acct.un;
-    S.acct.em = savedProf.em || prof.email || S.acct.em;
-    S.acct.fn = savedProf.fn || prof.first_name || 'Admin';
-    S.acct.ln = savedProf.ln !== undefined ? savedProf.ln : (prof.last_name || '');
+    if (prof) {
+      S.acct.un = prof.username || S.acct.un || '';
+      S.acct.em = prof.email || S.acct.em || '';
+      S.acct.fn = prof.first_name !== undefined ? prof.first_name : (S.acct.fn || '');
+      S.acct.ln = prof.last_name !== undefined ? prof.last_name : (S.acct.ln || '');
+      S.acct.avatar_url = prof.avatar_url || S.acct.avatar_url || '';
+      S.acct.two_factor_enabled = Boolean(prof.two_factor_enabled);
+
+      if (S.user) {
+        S.user.username = S.acct.un;
+        S.user.email = S.acct.em;
+        S.user.first_name = S.acct.fn;
+        S.user.last_name = S.acct.ln;
+      }
+
+      localStorage.setItem('neopanel_profile', JSON.stringify({
+        un: S.acct.un,
+        em: S.acct.em,
+        fn: S.acct.fn,
+        ln: S.acct.ln
+      }));
+    }
     S.acct.h = await computeGravatarHash(S.acct.em);
 
     if (S.acct.tab === 2) {
@@ -11383,29 +11402,49 @@ async function loadAccountData(skipRender = false) {
 }
 
 async function updateAccountProfile() {
+  const un = $('#aun')?.value?.trim() || '';
   const fn = $('#afn')?.value?.trim() || '';
   const ln = $('#aln')?.value?.trim() || '';
   const em = $('#aem')?.value?.trim() || '';
 
+  if (!un) {
+    toast('Account name / username is required', 'bad');
+    return;
+  }
   if (!em || !em.includes('@') || !em.includes('.')) {
     toast('A valid email address is required', 'bad');
     return;
   }
 
   try {
-    await api('/api/account/profile', {
+    const res = await api('/api/account/profile', {
       method: 'PUT',
-      body: JSON.stringify({ email: em })
+      body: JSON.stringify({ username: un, first_name: fn, last_name: ln, email: em })
     });
-    if (S.user) S.user.email = em;
-    S.acct.em = em;
+
+    if (res?.token) {
+      S.token = res.token;
+      localStorage.setItem('neopanel_token', res.token);
+    }
+    if (S.user) {
+      S.user.username = un;
+      S.user.first_name = fn;
+      S.user.last_name = ln;
+      S.user.email = em;
+    }
+    S.acct.un = un;
     S.acct.fn = fn;
     S.acct.ln = ln;
+    S.acct.em = em;
     S.acct.h = await computeGravatarHash(em);
+
+    const profObj = { un, fn, ln, em };
+    localStorage.setItem('neopanel_profile', JSON.stringify(profObj));
     if (S.user?.id) {
-      localStorage.setItem(`neopanel_names_${S.user.id}`, JSON.stringify({ fn, ln }));
+      localStorage.setItem(`neopanel_names_${S.user.id}`, JSON.stringify(profObj));
     }
-    toast('Profile updated successfully!', 'ok');
+
+    toast('Account profile updated successfully!', 'ok');
     R();
   } catch (err) {
     toast(err.message || 'Failed to update profile', 'bad');
@@ -13589,9 +13628,20 @@ function openAddUserModal() {
 
       <form id="add-user-form" onsubmit="submitAddUser(event)">
         <label class="f" style="margin-bottom:12px;">
-          <span>Username <b style="color:var(--err); font-size:12px;">*required</b></span>
+          <span>Username / Account Name <b style="color:var(--err); font-size:12px;">*required</b></span>
           <input type="text" id="nu-username" required placeholder="e.g. operator" autocomplete="off">
         </label>
+
+        <div class="grid g2" style="margin-bottom:12px;">
+          <label class="f">
+            <span>First Name</span>
+            <input type="text" id="nu-firstname" placeholder="Optional" autocomplete="off">
+          </label>
+          <label class="f">
+            <span>Last Name</span>
+            <input type="text" id="nu-lastname" placeholder="Optional" autocomplete="off">
+          </label>
+        </div>
 
         <label class="f" style="margin-bottom:12px;">
           <span>Email Address <b style="color:var(--err); font-size:12px;">*required</b></span>
@@ -13637,6 +13687,8 @@ async function submitAddUser(e) {
   if (btn) btn.disabled = true;
 
   const username = $('#nu-username')?.value.trim();
+  const firstName = $('#nu-firstname')?.value.trim() || '';
+  const lastName = $('#nu-lastname')?.value.trim() || '';
   const email = $('#nu-email')?.value.trim();
   const password = $('#nu-password')?.value;
   const role = $('#nu-role')?.value || 'user';
@@ -13656,7 +13708,7 @@ async function submitAddUser(e) {
   try {
     const newUser = await api('/api/admin/users', {
       method: 'POST',
-      body: JSON.stringify({ username, email, password, role })
+      body: JSON.stringify({ username, first_name: firstName, last_name: lastName, email, password, role })
     });
 
     if (avatarFile && newUser?.id) {
@@ -13683,6 +13735,138 @@ async function submitAddUser(e) {
       message: `Failed to create user account <b>${esc(username)}</b>:<br><br>${esc(err.message || 'Username or email already exists')}`,
       type: 'error'
     });
+  }
+}
+
+function openEditUserModal(userId) {
+  const container = $('#modal-container');
+  if (!container) return;
+  const u = (S.adminUsers || []).find(x => x.id === Number(userId));
+  if (!u) {
+    toast('User not found', 'bad');
+    return;
+  }
+
+  const isMe = (S.user && (u.id === S.user.id || u.username === S.user.username)) || u.username === S.acct.un;
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:480px; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:16px;">
+        <h2 style="font-size:20px; margin:0; color:#fff;">${ic('edit', 18)} Edit User Account</h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <form id="edit-user-form" onsubmit="submitEditUser(event, ${u.id})">
+        <label class="f" style="margin-bottom:12px;">
+          <span>Username / Account Name <b style="color:var(--err); font-size:12px;">*required</b></span>
+          <input type="text" id="eu-username" required value="${esc(u.username)}" placeholder="Username" autocomplete="off">
+        </label>
+
+        <div class="grid g2" style="margin-bottom:12px;">
+          <label class="f">
+            <span>First Name</span>
+            <input type="text" id="eu-firstname" value="${esc(u.first_name || '')}" placeholder="First name" autocomplete="off">
+          </label>
+          <label class="f">
+            <span>Last Name</span>
+            <input type="text" id="eu-lastname" value="${esc(u.last_name || '')}" placeholder="Last name" autocomplete="off">
+          </label>
+        </div>
+
+        <label class="f" style="margin-bottom:12px;">
+          <span>Email Address <b style="color:var(--err); font-size:12px;">*required</b></span>
+          <input type="email" id="eu-email" required value="${esc(u.email || '')}" placeholder="user@example.com" autocomplete="off">
+        </label>
+
+        <label class="f" style="margin-bottom:12px;">
+          <span>New Password <span class="mu" style="font-size:12px;">(leave blank to keep current)</span></span>
+          <input type="password" id="eu-password" placeholder="Leave blank to keep current" autocomplete="new-password">
+        </label>
+
+        <label class="f" style="margin-bottom:20px;">
+          <span>Role</span>
+          <select id="eu-role" style="height:38px;" ${isMe ? 'disabled title="You cannot change your own role"' : ''}>
+            <option value="user" ${u.role !== 'admin' ? 'selected' : ''}>Standard User (Access assigned servers)</option>
+            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrator (Full cluster management)</option>
+          </select>
+        </label>
+
+        <div class="row" style="justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="eu-submit-btn" class="btn pr">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+  enhanceSelects(container);
+}
+
+async function submitEditUser(e, userId) {
+  e.preventDefault();
+  const btn = $('#eu-submit-btn');
+  if (btn) btn.disabled = true;
+
+  const username = $('#eu-username')?.value.trim();
+  const firstName = $('#eu-firstname')?.value.trim() || '';
+  const lastName = $('#eu-lastname')?.value.trim() || '';
+  const email = $('#eu-email')?.value.trim();
+  const password = $('#eu-password')?.value || '';
+  const role = $('#eu-role')?.value || 'user';
+
+  if (!username) {
+    toast('Username / Account name is required', 'bad');
+    if (btn) btn.disabled = false;
+    return;
+  }
+  if (!email || !email.includes('@') || !email.includes('.')) {
+    toast('A valid email address is required', 'bad');
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  try {
+    const payload = {
+      username,
+      first_name: firstName,
+      last_name: lastName,
+      email,
+      role
+    };
+    if (password) {
+      payload.password = password;
+    }
+
+    await api(`/api/admin/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    });
+
+    closeModal();
+    toast(`User "${username}" updated successfully`, 'ok');
+
+    if (S.user && S.user.id === userId) {
+      S.user.username = username;
+      S.user.first_name = firstName;
+      S.user.last_name = lastName;
+      S.user.email = email;
+      S.acct.un = username;
+      S.acct.fn = firstName;
+      S.acct.ln = lastName;
+      S.acct.em = email;
+      localStorage.setItem('neopanel_profile', JSON.stringify({
+        un: username,
+        em: email,
+        fn: firstName,
+        ln: lastName
+      }));
+    }
+
+    await loadAdminData();
+    R();
+  } catch (err) {
+    toast(err.message || 'Failed to update user', 'bad');
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -16282,6 +16466,8 @@ window.openReinstallModal = openReinstallModal;
 window.submitReinstall = submitReinstall;
 window.openAddUserModal = openAddUserModal;
 window.submitAddUser = submitAddUser;
+window.openEditUserModal = openEditUserModal;
+window.submitEditUser = submitEditUser;
 window.deleteAdminUser = deleteAdminUser;
 window.adminTriggerUserAvatarUpload = adminTriggerUserAvatarUpload;
 window.onAdminUserAvatarSelected = onAdminUserAvatarSelected;

@@ -427,6 +427,8 @@ func (h *AuthHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
 		Email     string `json:"email"`
 		Password  string `json:"password"`
 		Role      string `json:"role"`
@@ -437,6 +439,8 @@ func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Username = strings.TrimSpace(req.Username)
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
 	req.Email = strings.TrimSpace(req.Email)
 	if req.Username == "" || req.Password == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username and password are required"})
@@ -456,7 +460,7 @@ func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.CreateUserWithDetails(req.Username, req.Email, hash, req.Role, req.AvatarURL)
+	user, err := h.db.CreateUserWithFullDetails(req.Username, req.FirstName, req.LastName, req.Email, hash, req.Role, req.AvatarURL)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username or email already taken or invalid"})
 		return
@@ -465,6 +469,80 @@ func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 	logAudit(h.db, r, "admin_user_create", fmt.Sprintf("Created panel user '%s' (%s, role: %s)", user.Username, user.Email, user.Role))
 
 	writeJSON(w, http.StatusCreated, user)
+}
+
+func (h *AuthHandler) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
+	idStr := getURLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid user ID"})
+		return
+	}
+
+	var req struct {
+		Username  string `json:"username"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Email     string `json:"email"`
+		Role      string `json:"role"`
+		Password  string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
+		return
+	}
+
+	req.Username = strings.TrimSpace(req.Username)
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
+	req.Email = strings.TrimSpace(req.Email)
+
+	if req.Username == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username is required"})
+		return
+	}
+	if req.Email == "" || !strings.Contains(req.Email, "@") || !strings.Contains(req.Email, ".") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "A valid email address is required"})
+		return
+	}
+	if req.Role != "admin" {
+		req.Role = "user"
+	}
+
+	// Check if username taken by another user
+	if existing, _ := h.db.GetUserByUsername(req.Username); existing != nil && existing.ID != id {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Username already taken by another account"})
+		return
+	}
+	// Check if email taken by another user
+	if existing, _ := h.db.GetUserByEmailOrUsername(req.Email); existing != nil && existing.ID != id {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Email already in use by another account"})
+		return
+	}
+
+	var passwordHash string
+	if strings.TrimSpace(req.Password) != "" {
+		if len(req.Password) < 6 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Password must be at least 6 characters"})
+			return
+		}
+		hash, err := h.HashPassword(req.Password)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to hash password"})
+			return
+		}
+		passwordHash = hash
+	}
+
+	if err := h.db.AdminUpdateUser(id, req.Username, req.FirstName, req.LastName, req.Email, req.Role, passwordHash); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update user: " + err.Error()})
+		return
+	}
+
+	updatedUser, _ := h.db.GetUserByID(id)
+	logAudit(h.db, r, "admin_user_update", fmt.Sprintf("Updated panel user '%s' (ID %d, role: %s)", req.Username, id, req.Role))
+
+	writeJSON(w, http.StatusOK, updatedUser)
 }
 
 func (h *AuthHandler) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -502,12 +580,21 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
-	dbUser, err := h.db.GetUserByID(claims.UserID)
+	var dbUser *database.User
+	var err error
+	if claims.UserID > 0 {
+		dbUser, err = h.db.GetUserByID(claims.UserID)
+	}
+	if dbUser == nil || err != nil {
+		dbUser, err = h.db.GetUserByUsername(claims.Username)
+	}
 	if err == nil && dbUser != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id":                 dbUser.ID,
 			"user_id":            dbUser.ID,
 			"username":           dbUser.Username,
+			"first_name":         dbUser.FirstName,
+			"last_name":          dbUser.LastName,
 			"email":              dbUser.Email,
 			"role":               dbUser.Role,
 			"avatar_url":         dbUser.AvatarURL,
