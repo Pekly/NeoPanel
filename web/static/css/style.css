@@ -5063,22 +5063,57 @@ a.sift-server-card {
 }
 
 .sift-server-card.vm-dash-row {
+  position: relative;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   padding: 12px 18px;
   gap: 16px;
   flex-wrap: wrap;
-  background: var(--card-bg);
+  background: #0b0f19;
   border: 1px solid var(--border);
   border-radius: var(--np-radius, 14px);
+  overflow: hidden;
   transition: all 0.22s ease;
 }
 
 .sift-server-card.vm-dash-row:hover {
   border-color: var(--border-accent);
   transform: translateY(-1px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.vm-dash-row-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center 30%;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.22;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.vm-dash-row-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, 
+    rgba(11, 15, 25, 0.78) 0%, 
+    rgba(11, 15, 25, 0.18) 42%, 
+    rgba(11, 15, 25, 0.68) 100%);
+  pointer-events: none;
+}
+
+.sift-server-card.vm-dash-row:hover .vm-dash-row-bg {
+  opacity: 0.34;
+  transform: scale(1.015);
+}
+
+.sift-server-card.vm-dash-row > *:not(.vm-dash-row-bg) {
+  position: relative;
+  z-index: 1;
 }
 
 .vm-dash-row-main {
@@ -5096,7 +5131,8 @@ a.sift-server-card {
   background-size: cover;
   background-position: center;
   background-color: #141b2b;
-  border: 1px solid var(--border-light);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   flex-shrink: 0;
 }
 

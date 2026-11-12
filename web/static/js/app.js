@@ -5612,6 +5612,7 @@ const V = {
           if (dashVm === 'list') {
             return `
             <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
+              <div class="vm-dash-row-bg" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');" aria-hidden="true"></div>
               <div class="vm-dash-row-main">
                 <div class="srv-row-thumb" style="background-image: url('${esc(s.icon_url || coverUrl)}'), url('/img/banner.jpg');"></div>
                 <div style="min-width: 0; flex: 1;">
