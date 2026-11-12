@@ -5610,11 +5610,13 @@ const V = {
           const srvUrl = serverRouteUrl(nid, s.id, 'con');
 
           if (dashVm === 'list') {
+            const defaultSrvIcon = getBrand('default_server_icon_url') || '/static/img/default-server-icon.png';
+            const srvLogoUrl = (s.icon_url && String(s.icon_url).trim()) ? s.icon_url : defaultSrvIcon;
             return `
             <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
               <div class="vm-dash-row-bg" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');" aria-hidden="true"></div>
               <div class="vm-dash-row-main">
-                <div class="srv-row-thumb" style="background-image: url('${esc(s.icon_url || coverUrl)}'), url('/img/banner.jpg');"></div>
+                <div class="srv-row-thumb" style="background-image: url('${esc(srvLogoUrl)}'), url('/static/img/default-server-icon.png'), url('/img/default-server-icon.png');"></div>
                 <div style="min-width: 0; flex: 1;">
                   <div class="row" style="gap: 10px; align-items: center; flex-wrap: wrap;">
                     <span class="srv-card-title" title="${esc(s.name)}">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>

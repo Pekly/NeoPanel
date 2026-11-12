@@ -638,7 +638,7 @@ func (h *ServerHandler) GetServerIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "https://cdn.iconscout.com/icon/free/png-256/free-minecraft-logo-icon-download-in-svg-png-gif-file-formats--brand-social-media-pack-logos-icons-8149830.png", http.StatusTemporaryRedirect)
+	http.Redirect(w, r, "/static/img/default-server-icon.png", http.StatusTemporaryRedirect)
 }
 
 // DeleteServerIcon removes the custom icon
