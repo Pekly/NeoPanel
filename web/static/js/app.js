@@ -289,7 +289,7 @@ function renderSftpCardHtml(srv, compact = false) {
       </div>
     </div>
     <div class="sftp-pass-callout" style="margin-bottom: 14px;">
-      <b>SFTP Password:</b> Use your <b>NeoPanel account password</b> (or add an SSH Public Key in Account Settings).${d.isRemote ? ' Remote cluster nodes also accept their <code>node_token</code> (<code>sudo neopanel node-token</code>).' : ''}
+      <b>SFTP password:</b> Use your <b>NeoPanel account password</b> (or add an SSH key under Account).${d.isRemote ? ' Remote nodes also accept their <code>node_token</code> (<code>sudo neopanel node-token</code>).' : ''}
     </div>
     <div class="row" style="gap: 8px; flex-wrap: wrap;">
       <button type="button" class="btn pr sm" onclick="launchSftpClient()">${ic('external', 13)} Launch SFTP Client</button>
@@ -879,7 +879,7 @@ const SERVER_HERO_URL = 'https://m.media-amazon.com/images/I/71rzlQ2XMOL.jpg';
 
 const DEFAULT_BRANDING = {
   brand_name: 'NeoPanel',
-  brand_subtitle: 'Ultra-Lightweight Minecraft Server Manager',
+  brand_subtitle: 'Minecraft server management',
   logo_url: '',
   favicon_url: '',
   login_bg_url: '',
@@ -1365,6 +1365,36 @@ SLUG_TO_VIEW.servers = 'dash';
 SLUG_TO_VIEW.subusers = 'team';
 
 const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email'];
+const ADMIN_SECTIONS = [
+  { label: 'Overview', icon: 'activity', description: 'Panel health, resource usage, and updates.' },
+  { label: 'Nodes', icon: 'network', description: 'Connect and manage the machines that run your servers.' },
+  { label: 'Servers', icon: 'server', description: 'Manage all your servers from one place.' },
+  { label: 'Users', icon: 'users', description: 'Manage panel accounts and access.' },
+  { label: 'Appearance', icon: 'layers', description: 'Customize your branding, theme, and panel defaults.' },
+  { label: 'Audit logs', icon: 'clock', description: 'Review activity and changes across your panel.' },
+  { label: 'Extensions', icon: 'package', description: 'Add and manage panel extensions.' },
+  { label: 'Email & SMTP', icon: 'mail', description: 'Set up email for invitations and password resets.' }
+];
+let adminStatusRefreshing = false;
+async function refreshAdminStatus(button) {
+  if (adminStatusRefreshing) return;
+  adminStatusRefreshing = true;
+  setBtnLoading(button, true, 'Refreshing…');
+  try {
+    await Promise.all([loadDashboard(true), loadAdminData(true)]);
+    S.adminRefreshedAt = Date.now();
+  } finally {
+    adminStatusRefreshing = false;
+    if (S.view === 'admin') R();
+    else if (button?.isConnected) setBtnLoading(button, false);
+  }
+}
+
+function displayNodeName(nodeId, name = '') {
+  const label = String(name || '').trim();
+  if ((nodeId || 'local') === 'local' && (!label || ['Local Master Node', 'Local Master'].includes(label))) return 'Local node';
+  return label || nodeId || 'Node';
+}
 const ACC_TAB_SLUGS = ['general', 'security', 'ssh', 'api', 'activity'];
 
 function shortServerId(id) {
@@ -1590,23 +1620,23 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
 function getViewDisplayLabel(view) {
   const isMod = isModdedEngine(curServer()?.type || S.core);
   const map = {
-    dash: 'Servers Overview',
-    con: 'Server Console',
-    set: 'Settings & Startup',
-    act: 'Activity Log',
-    fi: 'File Manager',
+    dash: 'Servers',
+    con: 'Console',
+    set: 'Settings',
+    act: 'Activity',
+    fi: 'Files',
     db: 'Databases',
     bk: 'Backups',
     sc: 'Schedules',
-    team: 'Team & Access',
-    net: 'Network Allocations',
-    sub: 'Subdomains',
-    stp: 'Settings & Startup',
+    team: 'Team',
+    net: 'Network',
+    sub: 'Subdomain',
+    stp: 'Settings',
     pl: 'Players',
-    plug: isMod ? 'Mods & Store' : 'Plugins & Store',
-    ver: 'Software & Versions',
-    admin: 'Admin Area',
-    acc: 'Account Settings',
+    plug: isMod ? 'Mods' : 'Plugins',
+    ver: 'Software',
+    admin: 'Admin',
+    acc: 'Account',
     client: getBrand('client_area_label') || 'Client Area',
     notfound: 'Page Not Found',
     maintenance: 'Scheduled Maintenance',
@@ -4356,9 +4386,9 @@ async function power(action, skipConfirm = false) {
         icon: 'alert'
       },
       kill: {
-        title: 'Force Kill Server Process',
+        title: 'Force stop server?',
         message: `Are you sure you want to <b>force kill</b> <b>${esc(srv.name)}</b>? This immediately terminates the Java process without saving chunks and may cause world data loss.`,
-        confirmText: 'Force Kill',
+        confirmText: 'Force stop',
         isDanger: true,
         icon: 'alert'
       }
@@ -4500,7 +4530,7 @@ async function runCmd(cmd) {
 // --- Categorized Navigation (PG) with Vector SVGs ---
 const PG = [
   ['con', 'Console', 'terminal', 'General'],
-  ['set', 'Settings & Startup', 'settings', 'General'],
+  ['set', 'Settings', 'settings', 'General'],
   ['act', 'Activity', 'activity', 'General'],
   ['fi', 'Files', 'files', 'Management'],
   ['db', 'Databases', 'database', 'Management'],
@@ -4510,8 +4540,8 @@ const PG = [
   ['net', 'Network', 'network', 'Management'],
   ['sub', 'Subdomain', 'link', 'Management'],
   ['pl', 'Players', 'users', 'Management'],
-  ['plug', 'Plugins & Store', 'puzzle', 'Minecraft'],
-  ['ver', 'Software & Versions', 'cpu', 'Minecraft']
+  ['plug', 'Plugins', 'puzzle', 'Minecraft'],
+  ['ver', 'Software', 'cpu', 'Minecraft']
 ];
 
 const CMDS = [
@@ -4889,7 +4919,7 @@ function srvh() {
   const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
   const hostAddr = `${srvHost(srv)}:${srv ? srv.port : 25565}`;
   const nodeId = srv?.node_id || 'local';
-  const nodeLabel = srv?.node_name || getNodeById(nodeId)?.name || (nodeId === 'local' ? 'Local Master Node' : nodeId);
+  const nodeLabel = displayNodeName(nodeId, srv?.node_name || getNodeById(nodeId)?.name);
   const heroUrl = getBrand('server_hero_url');
   const srvType = srv?.type || S.core || 'paper';
   const eng = engineMeta(srvType);
@@ -4915,7 +4945,7 @@ function srvh() {
       <div id="srv-hero-title" class="srv-hero-sub" style="display:${rawMotd ? 'block' : 'none'};">${rawMotd ? renderMinecraftTextHtml(rawMotd, { allowNewlines: true }) : ''}</div>
       <div id="srv-hero-desc" class="srv-hero-sub" style="display:${panelDesc ? 'block' : 'none'};">${esc(panelDesc)}</div>
       <div class="srv-connection">
-        <span id="srv-hero-engine" class="eng-pill" title="Server Software Engine">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
+        <span id="srv-hero-engine" class="eng-pill" title="Server software">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
         <div id="hst" class="row hst" style="margin-top: 0;">
           <button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy server address" aria-label="Copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button>
           <span class="mono mu">CPU ${c.toFixed(1)}%</span>
@@ -4928,7 +4958,7 @@ function srvh() {
       <button class="btn pr" data-power-btn="start" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
       <button class="btn stop" data-power-btn="stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
-      <button class="btn dg" onclick="power('kill')">Kill</button>
+      <button class="btn dg" onclick="power('kill')" title="Stop immediately; unsaved data may be lost">Force stop</button>
     </div>
   </div>`;
 }
@@ -5123,7 +5153,7 @@ const ACTIVITY_META_MAP = {
   power_start: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Started Server' },
   power_stop: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Stopped Server' },
   power_restart: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Restarted Server' },
-  power_kill: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Force Killed Server' },
+  power_kill: { category: 'power', badgeLabel: 'Power', cls: 'act-cat-power', title: 'Server force-stopped' },
   startup_failed: { category: 'power', badgeLabel: 'Timeout', cls: 'act-cat-security', title: 'Startup Halted (2/2)' },
   server_create: { category: 'admin', badgeLabel: 'Server', cls: 'act-cat-admin', title: 'Created Server Instance' },
   server_update: { category: 'software', badgeLabel: 'Settings', cls: 'act-cat-software', title: 'Updated Server Config' },
@@ -5611,7 +5641,7 @@ const V = {
             <option value="all" ${activeNodeFilter === 'all' ? 'selected' : ''}>All Locations (${totalCount})</option>
             ${nodesList.map(n => {
               const cnt = S.servers.filter(x => (x.node_id || 'local') === n.id).length;
-              return `<option value="${esc(n.id)}" ${activeNodeFilter === n.id ? 'selected' : ''}>${esc(n.name)} (${cnt})</option>`;
+              return `<option value="${esc(n.id)}" ${activeNodeFilter === n.id ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))} (${cnt})</option>`;
             }).join('')}
           </select>
         ` : ''}
@@ -5624,7 +5654,7 @@ const V = {
 
     ${(errEntries.length > 0 && S.user?.role === 'admin') ? `
       <div class="node-error-note" style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-        <span><b>Cluster Sync Warning:</b> ${errEntries.map(([nid, msg]) => `${esc(getNodeById(nid)?.name || nid)} (${esc(msg)})`).join(' &bull; ')}</span>
+        <span><b>Node connection issues:</b> ${errEntries.map(([nid, msg]) => `${esc(displayNodeName(nid, getNodeById(nid)?.name))} (${esc(msg)})`).join(' &bull; ')}</span>
         <a href="/admin/nodes" class="btn sm" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="text-decoration: none;">Inspect Nodes</a>
       </div>
     ` : ''}
@@ -5645,7 +5675,7 @@ const V = {
           </div>
         `).join('') : visibleServers.map(({ s, origIdx }) => {
           const nid = s.node_id || 'local';
-          const nodeName = s.node_name || getNodeById(nid)?.name || nid;
+          const nodeName = displayNodeName(nid, s.node_name || getNodeById(nid)?.name);
           const isRemote = nid !== 'local';
           const canDelete = S.user?.role === 'admin' || (s.owner_id && S.user?.id && s.owner_id === S.user.id);
           const st = origIdx === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
@@ -6600,7 +6630,7 @@ const V = {
       <span class="mu">${S.bk.length} backups recorded</span>
       <div class="row" style="gap:8px;">
         ${renderViewModeToggle('bk', 'list')}
-        <button class="btn pr" onclick="createBackup()">${ic('plus', 14)} Create Full Backup</button>
+        <button class="btn pr" onclick="createBackup()">${ic('plus', 14)} Create backup</button>
       </div>
     </div>
     ${body}`;
@@ -7133,7 +7163,7 @@ const V = {
           <div class="np-status-code warn">${ic('link', 14)} 422 URL MISSING</div>
           <h1 style="font-size:24px; margin:0 0 10px; color:var(--tx);">Storefront URL Is Empty</h1>
           <p class="mu" style="font-size:13.5px; line-height:1.6; margin:0;">
-            ${esc(label)} is enabled, but the external storefront URL is empty or invalid. Provide a valid <span class="mono">https://...</span> portal URL in Admin Panel Branding.
+            ${esc(label)} is enabled, but its website address is missing or invalid. Add a valid <span class="mono">https://...</span> address under Admin → Appearance.
           </p>
           <div class="row" style="justify-content:center; gap:10px; margin-top:22px; flex-wrap:wrap;">
             <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn pr" style="text-decoration:none;">${ic('server', 14)} Back to Servers</a>
@@ -7334,7 +7364,7 @@ const V = {
         </div>
 
         <div class="card" style="padding: 20px;">
-          <h2 style="font-size: 16px; margin-bottom: 12px;">Java Runtime Environment</h2>
+          <h2 style="font-size: 16px; margin-bottom: 12px;">Java version</h2>
           <label class="f" style="margin-bottom: 8px;">
             <span class="row sb">
               <span>Java Runtime Version</span>
@@ -7551,17 +7581,17 @@ const V = {
 
   // Dedicated Admin Area View
   admin() {
-    const sys = S.system || { os: 'linux', arch: 'amd64', cpus: 2, total_ram_mb: 4096, free_ram_mb: 2048, version: '1.0.0', go_version: 'go1.27.0', goroutines: 24 };
-    const usedRam = (sys.total_ram_mb - sys.free_ram_mb) || 0;
-    const ramPct = Math.round((usedRam / (sys.total_ram_mb || 1)) * 100) || 50;
+    const sys = S.system || {};
+    const usedRam = Math.max(0, Number(sys.total_ram_mb || 0) - Number(sys.free_ram_mb || 0));
+    const ramPct = Math.round((usedRam / (sys.total_ram_mb || 1)) * 100);
     const t = S.adminTab || 0;
     const nodesList = (Array.isArray(S.nodes) && S.nodes.length > 0) ? S.nodes : [{
       id: 'local',
-      name: 'Local Master Node',
-      location: 'Primary Host',
+      name: 'Local node',
+      location: 'This machine',
       fqdn: S.brandingDaemon?.fqdn || window.location.hostname,
       is_local: true,
-      online: true,
+      online: Boolean(S.system),
       latency_ms: 0,
       server_count: S.servers.filter(x => (x.node_id || 'local') === 'local').length,
       system: sys,
@@ -7579,16 +7609,9 @@ const V = {
       auto_restart_policy: S.brandingDaemon?.auto_restart_policy !== undefined ? Boolean(S.brandingDaemon.auto_restart_policy) : true
     };
 
-    const tabs = [
-      ['Cluster & Health', 0],
-      ['Cluster Nodes', 1],
-      ['Managed Servers', 2],
-      ['Users & Roles', 3],
-      ['Panel Look & Branding', 4],
-      ['Audit Logs', 5],
-      ['Mods & Extensions', 6],
-      ['Email & SMTP', 7]
-    ];
+    const section = ADMIN_SECTIONS[t] || ADMIN_SECTIONS[0];
+    const runningServers = S.servers.filter(server => ['online', 'starting'].includes(normalizeServerStatus(server.stats?.status || server.status))).length;
+    const updateStatus = (up.is_updating || S.updateProgress?.running) ? 'Updating' : up.error ? 'Check failed' : up.update_available === true ? 'Update available' : up.update_available === false ? 'Up to date' : 'Not checked';
 
     let content = '';
 
@@ -7596,51 +7619,51 @@ const V = {
       content = `
         <div class="grid g4" style="margin-bottom:18px;">
           <div class="card stat">
-            <span>Host Platform</span>
-            <b style="font-size:18px; padding:6px 0;">${esc(sys.os)} (${esc(sys.arch)})</b>
-            <span class="mu">${sys.cpus} CPU Cores &bull; ${esc(sys.go_version || 'Go Runtime')}</span>
+            <span>Operating system</span>
+            <b style="font-size:18px; padding:6px 0;">${sys.os ? `${esc(sys.os)} (${esc(sys.arch)})` : 'Not loaded'}</b>
+            <span class="mu">${sys.cpus ?? '—'} CPU cores &bull; ${esc(sys.go_version || 'Go')}</span>
           </div>
           <div class="card stat">
-            <span>Host Memory</span>
-            <b style="font-size:18px; padding:6px 0;">${(usedRam/1024).toFixed(1)} / ${(sys.total_ram_mb/1024).toFixed(1)} GB</b>
+            <span>Memory usage</span>
+            <b style="font-size:18px; padding:6px 0;">${sys.total_ram_mb ? `${(usedRam/1024).toFixed(1)} / ${(sys.total_ram_mb/1024).toFixed(1)} GB` : '—'}</b>
             <div class="bar"><i style="width:${ramPct}%"></i></div>
           </div>
           <div class="card stat">
-            <span>Cluster Nodes</span>
-            <b style="font-size:18px; padding:6px 0;">${onlineNodesCount} / ${nodesList.length} Online</b>
-            <span class="mu"><a href="/admin/nodes" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="color:var(--ac);text-decoration:none;">Manage linked daemons &rarr;</a></span>
+            <span>Nodes</span>
+            <b style="font-size:18px; padding:6px 0;">${onlineNodesCount} / ${nodesList.length} online</b>
+            <span class="mu"><a href="/admin/nodes" onclick="return handleNavClick(event, 'admin', { adminTab: 1 })" style="color:var(--ac);text-decoration:none;">Manage nodes &rarr;</a></span>
           </div>
           <div class="card stat">
-            <span>SFTP Daemon</span>
+            <span>SFTP</span>
             <b style="font-size:18px; padding:6px 0;">Port ${daemonDraft.sftp_port || 2022}</b>
-            <span class="badge online"><i class="dot"></i>Active</span>
+            <span class="mu">Configured file-transfer port</span>
           </div>
         </div>
 
         <div class="card tw np-admin-info-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:var(--tx);">System Optimization &amp; Garbage Collection</h2>
-              <span class="mu" style="font-size:13px;">Manage host process memory, reclaim unused buffers, and inspect runtime allocations.</span>
+              <h2 style="margin:0 0 4px; color:var(--tx);">Panel memory</h2>
+              <span class="mu" style="font-size:13px;">Clean up unused panel memory and view system details. This does not change Minecraft-server memory.</span>
             </div>
-            <button class="btn pr" onclick="triggerAdminGC()">${ic('refresh', 14)} Run Garbage Collection (runtime.GC)</button>
+            <button class="btn pr" onclick="triggerAdminGC()">${ic('refresh', 14)} Clean up unused memory</button>
           </div>
           <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px;">
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
-              <span class="mu">Daemon Binary Version</span>
-              <span class="mono" style="color:var(--tx);">NeoPanel v${esc(sys.version || '1.0.0')} (Target: Ubuntu 24.04 LTS)</span>
+              <span class="mu">Panel version</span>
+              <span class="mono" style="color:var(--tx);">${sys.version ? `v${esc(sys.version)}` : '—'}</span>
             </div>
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
-              <span class="mu">Go Compiler Version</span>
-              <span class="mono" style="color:var(--tx);">${esc(sys.go_version || 'go1.27.0')}</span>
+              <span class="mu">Go version</span>
+              <span class="mono" style="color:var(--tx);">${esc(sys.go_version || '—')}</span>
             </div>
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border);">
-              <span class="mu">Active Goroutines</span>
-              <span class="mono" style="color:var(--tx);">${sys.goroutines || 24}</span>
+              <span class="mu" title="Active Go routines in the panel process">Go routines</span>
+              <span class="mono" style="color:var(--tx);">${sys.goroutines ?? '—'}</span>
             </div>
             <div class="row sb" style="padding:6px 0;">
-              <span class="mu">Process Architecture</span>
-              <span class="mono" style="color:var(--tx);">${esc(sys.arch)} on ${esc(sys.os)}</span>
+              <span class="mu">Platform</span>
+              <span class="mono" style="color:var(--tx);">${sys.os ? `${esc(sys.arch)} on ${esc(sys.os)}` : '—'}</span>
             </div>
           </div>
         </div>
@@ -7649,49 +7672,49 @@ const V = {
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx); display:flex; align-items:center; gap:8px;">
-                ${ic('cpu', 18)} Panel Software &amp; System Updates
+                ${ic('cpu', 18)} Panel updates
               </h2>
-              <span class="mu" style="font-size:13px;">Manage panel version, track upstream commits, and configure GitHub update repository source/branch.</span>
+              <span class="mu" style="font-size:13px;">Check for updates and choose which repository and branch supply them.</span>
             </div>
             <div class="row" style="gap:8px; align-items:center;" id="admin-update-actions-wrap">
-              <button type="button" class="btn sm" onclick="checkAdminUpdates()">${ic('refresh', 13)} Check Updates</button>
+              <button type="button" class="btn sm" onclick="checkAdminUpdates()">${ic('refresh', 13)} Check for updates</button>
               ${renderAdminUpdateBtn(up)}
             </div>
           </div>
 
           <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:16px;">
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
-              <span class="mu">Binary Version &amp; Commit</span>
+              <span class="mu">Installed version</span>
               <div class="row" style="gap:8px; align-items:center;">
-                <span class="mono" style="color:var(--tx);">NeoPanel v${esc(sys.version || '1.0.0')}</span>
+                <span class="mono" style="color:var(--tx);">${sys.version ? `v${esc(sys.version)}` : '—'}</span>
                 ${up?.current_commit ? `<span class="chip mono" style="font-size:11px;">#${esc(up.current_commit.slice(0, 7))}</span>` : ''}
               </div>
             </div>
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
-              <span class="mu">Upstream Git Status</span>
+              <span class="mu">Update status</span>
               <div class="row" style="gap:8px; align-items:center;">
-                ${(up?.is_updating || S.updateProgress?.running) ? '<span class="badge starting"><i class="dot"></i>Update In Progress</span>' :
-                  up?.error ? `<span class="badge offline" title="${esc(up.error)}"><i class="dot"></i>Check Note: ${esc(up.error)}</span>` :
-                  up?.update_available ? `<span class="badge starting"><i class="dot"></i>New Commit Available (${esc(up.remote_commit?.slice(0, 7) || 'latest')})</span>` :
-                  '<span class="badge online"><i class="dot"></i>Up to Date</span>'}
+                ${(up?.is_updating || S.updateProgress?.running) ? '<span class="badge starting"><i class="dot"></i>Updating</span>' :
+                  up?.error ? `<span class="badge offline" title="${esc(up.error)}"><i class="dot"></i>Check failed: ${esc(up.error)}</span>` :
+                  up?.update_available === true ? `<span class="badge starting"><i class="dot"></i>Update available (${esc(up.remote_commit?.slice(0, 7) || 'latest')})</span>` :
+                  up?.update_available === false ? '<span class="badge online"><i class="dot"></i>Up to date</span>' : '<span class="chip">Not checked</span>'}
               </div>
             </div>
             ${up?.remote_message ? `
             <div class="row sb" style="padding:6px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;">
-              <span class="mu">Latest Upstream Commit</span>
+              <span class="mu">Latest change</span>
               <div class="row" style="gap:8px; align-items:center;">
                 <span class="mono mu" style="font-size:11px;">#${esc(up.remote_commit?.slice(0, 7) || '')}</span>
                 <span style="color:var(--tx); font-size:12px;">${esc(up.remote_message)}</span>
               </div>
             </div>` : ''}
             <div class="row sb" style="padding:6px 0; flex-wrap:wrap; gap:8px;">
-              <span class="mu">Live Build Logs</span>
-              <button type="button" class="btn sm" onclick="openUpdateLogsModal()">${ic('terminal', 12)} View Installer Logs (/tmp/neopanel-install.log)</button>
+              <span class="mu">Update logs</span>
+              <button type="button" class="btn sm" onclick="openUpdateLogsModal()">${ic('terminal', 12)} View update logs</button>
             </div>
           </div>
 
           <div style="background:rgba(255,255,255,0.015); border:1px solid var(--border); border-radius:8px; padding:16px;">
-            <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx);">GitHub Source Repository &amp; Branch</h3>
+            <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx);">Update source</h3>
             <p class="mu" style="font-size:12px; margin:0 0 12px;">Point NeoPanel to your own GitHub fork or a custom development branch for automated builds.</p>
             <div class="grid g2" style="gap:12px; margin-bottom:12px;">
               <div>
@@ -7704,8 +7727,8 @@ const V = {
               </div>
             </div>
             <div class="row" style="justify-content:flex-end; gap:8px;">
-              <button type="button" class="btn sm" onclick="resetAdminUpdateRepo()">${ic('refresh', 12)} Reset to Default</button>
-              <button type="button" class="btn sm pr" onclick="saveAdminUpdateConfig()">${ic('save', 12)} Save Repository Settings</button>
+              <button type="button" class="btn sm" onclick="resetAdminUpdateRepo()">${ic('refresh', 12)} Reset to default</button>
+              <button type="button" class="btn sm pr" onclick="saveAdminUpdateConfig()">${ic('save', 12)} Save update source</button>
             </div>
           </div>
         </div>
@@ -7713,7 +7736,7 @@ const V = {
         <div class="card tw np-admin-info-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:10px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:var(--tx);">Local Java Runtimes (25, 21, 17 &amp; 8)</h2>
+              <h2 style="margin:0 0 4px; color:var(--tx);">Java versions (25, 21, 17 &amp; 8)</h2>
               <span class="mu" style="font-size:13px;">Monitor detected OpenJDK / Eclipse Temurin runtimes on the master host and install missing premade versions.</span>
             </div>
             <button class="btn sm" onclick="loadJavaRuntimes(true, 'local')">${ic('refresh', 13)} Refresh</button>
@@ -7729,7 +7752,7 @@ const V = {
         <div class="node-callout">
           <div class="row sb" style="gap: 12px; flex-wrap: wrap; align-items: center;">
             <div style="flex: 1 1 380px;">
-              <b>Dedicated Cluster Nodes:</b> Install remote Ubuntu nodes with <code>--node</code> (builds only the cluster daemon &amp; SFTP agent) and pair automatically using an Admin API key, or connect an existing node via <code>sudo neopanel node-token</code> / <code>sudo neopanel node connect</code>.
+              <b>Add another machine:</b> Install NeoPanel on an Ubuntu host with <code>--node</code> and connect it using an admin API key, or pair an existing node with <code>sudo neopanel node-token</code> / <code>sudo neopanel node connect</code>.
             </div>
             <button type="button" class="btn sm ${S.nodePairOpen ? 'pr' : ''}" onclick="toggleClusterNodeHelper()">
               ${ic('terminal', 13)} ${S.nodePairOpen ? 'Hide Installer Command' : 'Node Install Command'}
@@ -7741,8 +7764,8 @@ const V = {
         <div class="card node-cli-card" style="margin-bottom: 16px;">
           <div class="row sb" style="margin-bottom: 10px; gap: 10px; flex-wrap: wrap;">
             <div>
-              <h3 style="margin: 0 0 3px; font-size: 15px; color: var(--tx);">1-Command Cluster Node Installer &amp; Auto-Pairing</h3>
-              <span class="mu" style="font-size: 12.5px;">Installs the lightweight node daemon &amp; SFTP agent and registers directly with this Master Panel.</span>
+              <h3 style="margin: 0 0 3px; font-size: 15px; color: var(--tx);">Install and connect a node</h3>
+              <span class="mu" style="font-size: 12.5px;">Installs a node with SFTP and connects it to this panel.</span>
             </div>
             <button type="button" class="btn sm pr" onclick="generateNodePairingKey(this)">
               ${ic('key', 13)} Generate API Key
@@ -7758,7 +7781,7 @@ const V = {
               <input type="text" id="nh-loc" value="${esc(h.location || '')}" oninput="onNodeHelperInput('location', this.value)" placeholder="Frankfurt, DE">
             </label>
             <label class="f" style="margin: 0;">
-              <span>Daemon Port</span>
+              <span>Node port</span>
               <input type="number" id="nh-port" value="${esc(h.port || '8080')}" min="1024" max="65535" oninput="onNodeHelperInput('port', this.value)" placeholder="8080">
             </label>
           </div>
@@ -7802,7 +7825,7 @@ const V = {
                   <td>
                     <div class="row" style="gap:8px;">
                       <span class="node-status-dot ${n.online ? 'online' : 'offline'}"></span>
-                      <b>${esc(n.name)}</b>
+                      <b>${esc(displayNodeName(n.id, n.name))}</b>
                       ${n.is_local ? '<span class="chip" style="font-size:10px;">Local</span>' : ''}
                     </div>
                   </td>
@@ -7837,8 +7860,8 @@ const V = {
                 <div style="min-width: 0;">
                   <div class="row" style="gap: 8px; align-items: center;">
                     <span class="node-status-dot ${n.online ? 'online' : 'offline'}"></span>
-                    <b style="font-size: 16px; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(n.name)}</b>
-                    ${n.is_local ? '<span class="chip" style="font-size:10.5px;">Local Master</span>' : ''}
+                    <b style="font-size: 16px; color: var(--tx); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${esc(displayNodeName(n.id, n.name))}</b>
+                    ${n.is_local ? '<span class="chip" style="font-size:10.5px;">This machine</span>' : ''}
                   </div>
                   <div class="mu mono" style="font-size: 11.5px; margin-top: 3px;">
                     ${esc(n.location || 'Unspecified Region')} &bull; ${esc(n.fqdn || window.location.hostname)}
@@ -7875,7 +7898,7 @@ const V = {
                 <div class="row" style="gap: 6px;">
                   <button type="button" class="btn sm" onclick="testClusterNode('${esc(n.id)}', this)">${ic('refresh', 12)} Test</button>
                   ${n.is_local
-                    ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Configure Host</button>`
+                    ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Panel settings</button>`
                     : `
                       <button type="button" class="btn sm" onclick="openNodeModal('${esc(n.id)}')">${ic('edit', 12)} Edit</button>
                       <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Disconnect</button>
@@ -7892,14 +7915,14 @@ const V = {
         <div class="card tw np-admin-cluster-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:var(--tx);">All Cluster Servers (${S.servers.length})</h2>
+              <h2 style="margin:0 0 4px; color:var(--tx);">All servers (${S.servers.length})</h2>
               <span class="mu" style="font-size:13px;">Overview and controls for all server instances across local and linked remote nodes.</span>
             </div>
             <div class="row" style="gap:8px; flex-wrap:wrap;">
               ${renderViewModeToggle('admin_servers', 'list')}
               <button class="btn sm" onclick="bulkRestartServers()">${ic('refresh', 14)} Restart All</button>
               <button class="btn sm dg" onclick="bulkStopServers()">Stop All</button>
-              <button class="btn sm pr" onclick="openCreateServerModal()">+ Deploy Server</button>
+              <button class="btn sm pr" onclick="openCreateServerModal()">${ic('plus', 13)} Create server</button>
             </div>
           </div>
           ${admSrvVm === 'list' ? `
@@ -7908,7 +7931,7 @@ const V = {
             <tbody>
               ${S.servers.length ? S.servers.map((s, idx) => {
                 const nid = s.node_id || 'local';
-                const nodeName = s.node_name || getNodeById(nid)?.name || (nid === 'local' ? 'Local Master' : nid);
+                const nodeName = displayNodeName(nid, s.node_name || getNodeById(nid)?.name);
                 const normSt = normalizeServerStatus(s.stats?.status || s.status);
                 const isRun = normSt === 'online' || normSt === 'starting';
                 const srvUrl = serverRouteUrl(nid, s.id, 'con');
@@ -7940,7 +7963,7 @@ const V = {
           <div class="${admSrvVm === 'icons' ? 'vm-icons-grid wide' : 'vm-tiles-grid'}">
             ${S.servers.length ? S.servers.map((s, idx) => {
               const nid = s.node_id || 'local';
-              const nodeName = s.node_name || getNodeById(nid)?.name || (nid === 'local' ? 'Local Master' : nid);
+              const nodeName = displayNodeName(nid, s.node_name || getNodeById(nid)?.name);
               const normSt = normalizeServerStatus(s.stats?.status || s.status);
               const isRun = normSt === 'online' || normSt === 'starting';
               const srvUrl = serverRouteUrl(nid, s.id, 'con');
@@ -7977,7 +8000,7 @@ const V = {
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:var(--tx);">Panel Users &amp; Permissions</h2>
+              <h2 style="margin:0 0 4px; color:var(--tx);">Panel accounts</h2>
               <span class="mu" style="font-size:13px;">Manage operators, administrators, and client user accounts with independent roles and avatars.</span>
             </div>
             <button class="btn pr" onclick="openAddUserModal()">+ Create User</button>
@@ -8055,7 +8078,7 @@ const V = {
               <div class="row" style="gap: 8px;">
                 <button type="button" class="btn sm" onclick="discardBrandDraft()">Discard</button>
                 <button type="button" class="btn sm dg" onclick="resetBrandingDefaults()">Reset Defaults</button>
-                <button type="button" id="brand-save-btn" class="btn sm pr" onclick="saveBrandingAndDaemon()">${ic('check', 13)} Save Look</button>
+                <button type="button" id="brand-save-btn" class="btn sm pr" onclick="saveBrandingAndDaemon()">${ic('check', 13)} Save appearance</button>
               </div>
             </div>
 
@@ -8083,10 +8106,10 @@ const V = {
               </label>
               <label class="f" style="margin-bottom: 0;">
                 <span>Brand Subtitle / Page Title Suffix</span>
-                <input type="text" value="${esc(draft.brand_subtitle || '')}" maxlength="120" oninput="onBrandInputChange('brand_subtitle', this.value)" placeholder="Ultra-Lightweight Minecraft Server Manager">
+                <input type="text" value="${esc(draft.brand_subtitle || '')}" maxlength="120" oninput="onBrandInputChange('brand_subtitle', this.value)" placeholder="Minecraft server management">
               </label>
               <label class="f" style="margin-bottom: 0;">
-                <span>Footer / Login Subtext</span>
+                <span>Footer and sign-in text</span>
                 <input type="text" value="${esc(draft.footer_text || '')}" maxlength="120" oninput="onBrandInputChange('footer_text', this.value)" placeholder="[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026">
               </label>
               <label class="f" style="margin-bottom: 0;">
@@ -8226,14 +8249,14 @@ const V = {
               Changes apply live as you edit so you can inspect colors, glass blur, typography, and banners before saving to SQLite.
             </p>
             <div class="row" style="gap: 8px; flex-wrap: wrap;">
-              <button type="button" class="btn pr" style="flex: 1;" onclick="saveBrandingAndDaemon()">${ic('check', 14)} Save Global Look</button>
+              <button type="button" class="btn pr" style="flex: 1;" onclick="saveBrandingAndDaemon()">${ic('check', 14)} Save appearance</button>
               <button type="button" class="btn" onclick="discardBrandDraft()">Discard</button>
             </div>
           </div>
         </div>
 
         <div class="card" style="margin-bottom:18px;">
-          <h2 style="margin:0 0 6px; color:var(--tx);">Daemon Network &amp; Cluster Defaults</h2>
+          <h2 style="margin:0 0 6px; color:var(--tx);">Network and server defaults</h2>
           <span class="mu" style="font-size:13px; display:block; margin-bottom:18px;">
             Persisted host FQDN, SFTP port, default instance memory, and auto-restart policy for the local master daemon.
           </span>
@@ -8244,7 +8267,7 @@ const V = {
                 <input type="text" id="adm-fqdn" value="${esc(daemonDraft.fqdn || '')}" placeholder="${esc(window.location.hostname || 'play.example.com')}" oninput="onDaemonInputChange('fqdn', this.value)">
               </label>
               <label class="f">
-                <span>SFTP Daemon Port</span>
+                <span>SFTP port</span>
                 <input type="number" id="adm-sftp" value="${daemonDraft.sftp_port || 2022}" min="1" max="65535" required oninput="onDaemonInputChange('sftp_port', Number(this.value))">
               </label>
             </div>
@@ -8254,7 +8277,7 @@ const V = {
                 <input type="number" id="adm-upload" value="${daemonDraft.max_upload_mb || 500}" min="10" max="25000" required oninput="onDaemonInputChange('max_upload_mb', Number(this.value))">
               </label>
               <label class="f">
-                <span>Default Instance RAM (MB)</span>
+                <span>Default server memory (MB)</span>
                 <input type="number" id="adm-ram" value="${daemonDraft.default_ram_mb || 2048}" min="256" max="131072" required oninput="onDaemonInputChange('default_ram_mb', Number(this.value))">
               </label>
             </div>
@@ -8271,7 +8294,7 @@ const V = {
               </label>
             </div>
             <div class="row" style="justify-content:flex-end; margin-top:18px;">
-              <button type="submit" class="btn pr">${ic('download', 14)} Save Daemon Settings</button>
+              <button type="submit" class="btn pr">${ic('download', 14)} Save defaults</button>
             </div>
           </form>
         </div>
@@ -8416,7 +8439,7 @@ const V = {
             <div style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px;">
               <div class="row sb" style="margin-bottom: 8px;">
                 <div>
-                  <b style="color: var(--tx); font-size: 13.5px; display: block;">Automated Billing &amp; Server Provisioning API</b>
+                  <b style="color: var(--tx); font-size: 13.5px; display: block;">Server management API</b>
                   <span class="mu" style="font-size: 12px;">Call <code>POST /api/client-api/v1/provision</code> from WHMCS, Blesta, or billing systems when an order is placed</span>
                 </div>
               </div>
@@ -8437,7 +8460,7 @@ const V = {
     } else if (t === 5) {
       content = renderActivityLogSection({
         scope: 'all',
-        title: 'Global Daemon Audit Log',
+        title: 'Audit logs',
         subtitle: 'Cluster-wide security, node connections, databases, user management, power, console, file & software audit events',
         showActor: true
       });
@@ -8447,19 +8470,17 @@ const V = {
       content = renderAdminEmailTabHtml();
     }
 
-    return `<header class="top">
-      ${ic('shield', 26)}
-      <h1>Daemon Administration Panel</h1>
-      <span class="sp"></span>
-      <span class="badge online"><i class="dot"></i>System Healthy</span>
+    return `<header class="np-admin-heading">
+      ${ic(section.icon, 26)}
+      <div><div class="np-eyebrow">Admin</div><h1>${esc(section.label)}</h1><p>${esc(section.description)}</p></div>
     </header>
-
-    <div class="tabs" style="margin-top: 16px; margin-bottom: 16px;">
-      ${tabs.map(([lbl, idx]) => `
-        <button class="${t === idx ? 'active' : ''}" onclick="selectAdminTab(${idx})">${lbl}</button>
-      `).join('')}
-    </div>
-
+    <section class="np-admin-summary" aria-label="Panel status summary">
+      <div><span class="mu">Servers running</span><strong>${runningServers} / ${S.servers.length}</strong></div>
+      <div><span class="mu">Nodes online</span><strong>${S.system || S.nodes?.length ? `${onlineNodesCount} / ${nodesList.length}` : '—'}</strong></div>
+      <div><span class="mu">Panel version</span><strong>${sys.version ? `v${esc(sys.version)}` : '—'}</strong></div>
+      <div><span class="mu">Updates</span><strong>${esc(updateStatus)}</strong></div>
+      <div class="np-admin-summary-actions"><button class="btn sm" onclick="refreshAdminStatus(this)" ${adminStatusRefreshing ? 'disabled' : ''}>${ic('refresh', 13)} Refresh status</button>${S.adminRefreshedAt ? `<span class="mu">Updated ${esc(new Date(S.adminRefreshedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</span>` : ''}</div>
+    </section>
     ${content}`;
   },
 
@@ -8525,7 +8546,7 @@ const V = {
       tabContent = `<div class="card">
         <h2>Update Password</h2>
         <label class="f"><span>Current Password</span><input type="password" id="cur-pw"></label>
-        <label class="f"><span>New Master Password</span><input type="password" id="new-pw"></label>
+        <label class="f"><span>New password</span><input type="password" id="new-pw"></label>
         <button class="btn pr" onclick="updatePassword()">Update Password</button>
       </div>
       <div class="card" style="margin-top:14px">
@@ -8582,7 +8603,7 @@ const V = {
         </div>
       ` : ''}
       <div class="card">
-        <h2>Create Automation API Key</h2>
+        <h2>Create API key</h2>
         <div class="row">
           <input type="text" id="ad" placeholder="Key description (e.g. CI/CD Deployer)" style="max-width:340px">
           <button class="btn pr" onclick="createAPIKey()">${ic('plus', 14)} Generate Key</button>
@@ -8629,7 +8650,7 @@ const V = {
           ${ic('user', 22)}
         </div>
         <div>
-          <h1 style="font-size: 24px; font-weight: 800; color: var(--tx); margin: 0; letter-spacing: -0.01em;">Account Settings</h1>
+          <h1 style="font-size: 24px; font-weight: 800; color: var(--tx); margin: 0; letter-spacing: -0.01em;">Account</h1>
         </div>
       </div>
       <button class="btn dg sm" onclick="logout()">Log Out</button>
@@ -8837,48 +8858,18 @@ function navHtml() {
     </button>
 
     <a class="nb" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="margin-bottom: 8px; text-decoration:none;">
-      &larr; Back to Servers
+      &larr; All servers
     </a>
 
-    <div class="ng">ADMINISTRATION</div>
-
-    <a class="nav-item ${t === 0 ? 'on' : ''}" href="/admin" onclick="return selectAdminTabNav(event, 0)" ${t === 0 ? 'aria-current="page"' : ''}>
-      ${ic('activity', 16)}
-      <span>Overview &amp; Health</span>
-    </a>
-    <a class="nav-item ${t === 1 ? 'on' : ''}" href="/admin/nodes" onclick="return selectAdminTabNav(event, 1)" ${t === 1 ? 'aria-current="page"' : ''}>
-      ${ic('network', 16)}
-      <span>Cluster Nodes</span>
-    </a>
-    <a class="nav-item ${t === 2 ? 'on' : ''}" href="/admin/servers" onclick="return selectAdminTabNav(event, 2)" ${t === 2 ? 'aria-current="page"' : ''}>
-      ${ic('server', 16)}
-      <span>Managed Servers</span>
-    </a>
-    <a class="nav-item ${t === 3 ? 'on' : ''}" href="/admin/users" onclick="return selectAdminTabNav(event, 3)" ${t === 3 ? 'aria-current="page"' : ''}>
-      ${ic('users', 16)}
-      <span>Users &amp; Roles</span>
-    </a>
-    <a class="nav-item ${t === 4 ? 'on' : ''}" href="/admin/branding" onclick="return selectAdminTabNav(event, 4)" ${t === 4 ? 'aria-current="page"' : ''}>
-      ${ic('layers', 16)}
-      <span>Branding &amp; OEM</span>
-    </a>
-    <a class="nav-item ${t === 5 ? 'on' : ''}" href="/admin/audit" onclick="return selectAdminTabNav(event, 5)" ${t === 5 ? 'aria-current="page"' : ''}>
-      ${ic('clock', 16)}
-      <span>Audit Logs</span>
-    </a>
-    <a class="nav-item ${t === 6 ? 'on' : ''}" href="/admin/mods" onclick="return selectAdminTabNav(event, 6)" ${t === 6 ? 'aria-current="page"' : ''}>
-      ${ic('package', 16)}
-      <span>Extensions &amp; Mods</span>
-    </a>
-    <a class="nav-item ${t === 7 ? 'on' : ''}" href="/admin/email" onclick="return selectAdminTabNav(event, 7)" ${t === 7 ? 'aria-current="page"' : ''}>
-      ${ic('mail', 16)}
-      <span>Email &amp; SMTP</span>
-    </a>
+    <div class="ng">Admin</div>
+    ${ADMIN_SECTIONS.map((section, index) => `<a class="nav-item ${t === index ? 'on' : ''}" data-admin-section="${index}" href="${esc(routeUrl('admin', { adminTab: index }))}" onclick="return selectAdminTabNav(event, ${index})" ${t === index ? 'aria-current="page"' : ''}>
+      ${ic(section.icon, 16)}<span>${esc(section.label)}</span>
+    </a>`).join('')}
 
     <div class="np-slot-container" data-np-slot="nav:bottom"></div>
     <span class="sp"></span>
 
-    <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
+    <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
       ${av(34)}
       <span class="who" title="${esc(S.acct.em || S.user?.email || '')}">
         <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
@@ -8930,10 +8921,10 @@ function navHtml() {
     ${S.user?.role === 'admin' ? `
     <a class="nav-item" href="${esc(adminHref)}" onclick="return handleNavClick(event, 'admin')" style="margin-bottom:6px;">
       ${ic('shield', 16)}
-      <span>Open Admin Area</span>
+      <span>Admin</span>
     </a>` : ''}
 
-    <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
+    <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
       ${av(34)}
       <span class="who" title="${esc(S.acct.em || S.user?.email || '')}">
         <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
@@ -8968,7 +8959,7 @@ function navHtml() {
       group = grp;
       const active = S.view === key ? 'on' : '';
       const href = routeUrl(key);
-      const displayLabel = (key === 'plug' && isModSrv) ? 'Mods &amp; Store' : label;
+      const displayLabel = (key === 'plug' && isModSrv) ? 'Mods' : label;
       return `${header}
     <a class="nav-item ${active}" href="${esc(href)}" onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
       ${ic(iconName, 16)}
@@ -8982,7 +8973,7 @@ function navHtml() {
 
   <span class="sp"></span>
 
-  <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
+  <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
     ${av(34)}
     <span class="who" title="${esc(S.acct.em || S.user?.email || '')}">
       <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
@@ -9393,7 +9384,7 @@ function openNodeModal(nodeId = null) {
         </div>
 
         <label class="f">
-          <span>Daemon API Base URL</span>
+          <span>Node address</span>
           <input type="url" id="nm-url" required value="${esc(existing?.base_url || '')}" placeholder="http://192.168.1.50:8080 or https://node2.example.com">
         </label>
 
@@ -9431,21 +9422,21 @@ function openNodeModal(nodeId = null) {
         <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
           <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 8px;">Non-Admin Permissions Policy</div>
           <label class="row sb" style="cursor: pointer; margin-bottom: 6px;">
-            <span style="font-size: 13px; color: var(--tx);">Allow Non-Admin Subusers to Modify RAM Allocation</span>
+            <span style="font-size: 13px; color: var(--tx);">Allow users to change memory limits</span>
             <span class="sw">
               <input type="checkbox" id="nm-allow-ram" ${existing?.allow_user_ram !== false ? 'checked' : ''}>
               <i></i>
             </span>
           </label>
           <label class="row sb" style="cursor: pointer; margin-bottom: 6px;">
-            <span style="font-size: 13px; color: var(--tx);">Allow Non-Admin Subusers to Modify Server Port</span>
+            <span style="font-size: 13px; color: var(--tx);">Allow users to change server ports</span>
             <span class="sw">
               <input type="checkbox" id="nm-allow-ports" ${existing?.allow_user_ports !== false ? 'checked' : ''}>
               <i></i>
             </span>
           </label>
           <label class="row sb" style="cursor: pointer;">
-            <span style="font-size: 13px; color: var(--tx);">Allow Non-Admin Subusers to Change Java Version</span>
+            <span style="font-size: 13px; color: var(--tx);">Allow users to change Java versions</span>
             <span class="sw">
               <input type="checkbox" id="nm-allow-java" ${existing?.allow_user_java !== false ? 'checked' : ''}>
               <i></i>
@@ -10941,7 +10932,7 @@ async function createBackup() {
   const srv = curServer();
   if (!srv) return;
   const ok = await uiConfirm({
-    title: 'Create Full Server Backup',
+    title: 'Create backup',
     message: `Create a new compressed <code>.tar.gz</code> backup snapshot of <b>${esc(srv.name)}</b> (including worlds, plugins, and configs)?`,
     confirmText: 'Create Backup',
     cancelText: 'Cancel',
@@ -11002,7 +10993,7 @@ function askInstallSoftwareModal(srv, software, version) {
     const needsJavaSwitch = curJava !== recJava;
     const javaInfo = getPremadeJavaStatusMap(srv?.node_id || 'local').get(recJava);
     const javaMissingNote = javaInfo && !javaInfo.installed
-      ? `<span class="mu" style="font-size: 11.5px; display: block; margin-top: 4px; color: #fbbf24;">Note: Java ${esc(recJava)} is not installed yet — install it from Startup Settings or Admin Area before starting.</span>`
+      ? `<span class="mu" style="font-size: 11.5px; display: block; margin-top: 4px; color: #fbbf24;">Java ${esc(recJava)} is not installed yet. Install it from Settings or Admin before starting the server.</span>`
       : '';
 
     const container = $('#modal-container') || document.body;
@@ -11741,10 +11732,10 @@ function paletteItems() {
     ? window.NP._paletteCommands.map(c => [c.group || 'Extensions', c.label || 'Extension Action', c.subtitle || 'Mod command', () => c.action && c.action()])
     : [];
   const items = [
-    ...PG.map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods & Store' : p[1], 'Go to page', () => go(p[0])]),
-    ...(showClientArea ? [['Pages', clientLabel, 'External storefront & billing portal', () => go('client')]] : []),
-    ...(S.user?.role === 'admin' ? [['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')]] : []),
-    ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
+    ...PG.map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods' : p[1], 'Go to page', () => go(p[0])]),
+    ...(showClientArea ? [['Pages', clientLabel, 'External storefront and billing', () => go('client')]] : []),
+    ...(S.user?.role === 'admin' ? [['Pages', 'Admin', 'Panel settings, nodes, and users', () => go('admin')]] : []),
+    ['Pages', 'Account', 'Profile, appearance, and security', () => go('acc')],
     ...S.servers.map(s => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => {
       applyRoute(serverRouteUrl(s.node_id || 'local', s.id, 'con'));
     }]),
@@ -11975,7 +11966,7 @@ function openCreateServerModal() {
 
   const nodesList = (Array.isArray(S.nodes) && S.nodes.length > 0)
     ? S.nodes
-    : [{ id: 'local', name: 'Local Master Node', location: 'Primary Host', online: true }];
+    : [{ id: 'local', name: 'Local node', location: 'This machine', online: true }];
   const defaultNodeId = (S.nodeFilter && S.nodeFilter !== 'all' && nodesList.some(n => n.id === S.nodeFilter))
     ? S.nodeFilter
     : (nodesList.find(n => n.id === 'local')?.id || nodesList[0].id);
@@ -11997,14 +11988,14 @@ function openCreateServerModal() {
         <!-- Instance Name & Target Node -->
         <div class="${nodesList.length > 1 ? 'grid g2' : ''}" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
-            <span>Server Instance Name</span>
+            <span>Server name</span>
             <input type="text" id="cs-name" required placeholder="e.g. Survival SMP, Proxy Network, Minigames" value="Survival Server">
           </label>
           ${nodesList.length > 1 ? `
           <label class="f" style="margin-bottom:0;">
-            <span>Target Cluster Node</span>
+            <span>Node</span>
             <select id="cs-node" onchange="onCreateNodeChange(this.value)">
-              ${nodesList.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNodeId ? 'selected' : ''}>${esc(n.name)}${n.location ? ` (${esc(n.location)})` : ''}${n.online ? '' : ' [Offline]'}</option>`).join('')}
+              ${nodesList.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNodeId ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))}${n.location ? ` (${esc(n.location)})` : ''}${n.online ? '' : ' [Offline]'}</option>`).join('')}
             </select>
           </label>` : `<input type="hidden" id="cs-node" value="${esc(defaultNodeId)}">`}
         </div>
@@ -12169,7 +12160,7 @@ async function handleCreateServer(e) {
   const btn = $('#cs-submit-btn');
   if (btn) {
     btn.disabled = true;
-    btn.textContent = 'Provisioning server...';
+    btn.textContent = 'Creating server...';
   }
 
   const targetNodeId = $('#cs-node')?.value || 'local';
@@ -12568,8 +12559,8 @@ function renderSubusersListHtml(srv) {
   if (!subusers.length) {
     return `<div class="card mu" style="text-align: center; padding: 24px 16px; background: rgba(255,255,255,0.01);">
       <div style="font-size: 26px; margin-bottom: 6px;">👥</div>
-      <b style="color: var(--tx); display: block; margin-bottom: 4px;">No Subusers Assigned</b>
-      <span style="font-size: 12.5px;">Add teammates or moderators to grant them scoped server access without sharing your master credentials.</span>
+      <b style="color: var(--tx); display: block; margin-bottom: 4px;">No team members yet</b>
+      <span style="font-size: 12.5px;">Add teammates and choose what they can access without sharing your password.</span>
     </div>`;
   }
 
@@ -12629,7 +12620,7 @@ function openSubuserModal(subuserId = null) {
     <div class="card pbox" style="padding: 26px; max-width: 600px; max-height: 90vh; overflow-y: auto;">
       <div class="row sb" style="margin-bottom: 14px;">
         <h2 style="font-size: 20px; margin: 0; display: flex; align-items: center; gap: 8px;">
-          ${ic('user', 18)} ${isEdit ? `Edit Subuser: ${esc(existing.username)}` : 'Add Existing User'}
+          ${ic('user', 18)} ${isEdit ? `Edit member: ${esc(existing.username)}` : 'Add existing user'}
         </h2>
         <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
       </div>
@@ -12696,13 +12687,13 @@ async function submitSubuserModal(e, subuserId = '') {
         method: 'PUT',
         body: JSON.stringify({ permissions: perms })
       });
-      toast('Subuser permissions updated', 'ok');
+      toast('Member permissions updated', 'ok');
     } else {
       await api(srvApiPath(srv, '/subusers'), {
         method: 'POST',
         body: JSON.stringify({ username: identifier, permissions: perms })
       });
-      toast(`User "${identifier}" added as subuser`, 'ok');
+      toast(`User "${identifier}" added to the team`, 'ok');
     }
     closeModal();
     await loadServerSubusers(srv.id);
@@ -12716,7 +12707,7 @@ async function deleteServerSubuser(subuserId) {
   const srv = curServer();
   if (!srv) return;
   const ok = await uiConfirm({
-    title: 'Revoke Subuser Access',
+    title: 'Remove team access',
     message: 'Are you sure you want to revoke this user\'s access to the server?',
     confirmText: 'Revoke Access',
     isDanger: true,
@@ -12726,7 +12717,7 @@ async function deleteServerSubuser(subuserId) {
 
   try {
     await api(srvApiPath(srv, `/subusers/${encodeURIComponent(subuserId)}`), { method: 'DELETE' });
-    toast('Subuser access revoked', 'ok');
+    toast('Team access removed', 'ok');
     await loadServerSubusers(srv.id);
   } catch (err) {
     toast(err.message || 'Failed to revoke subuser', 'bad');
@@ -13556,9 +13547,9 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
         <!-- Node & Port -->
         <div class="grid g2" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
-            <span>Assigned Cluster Node</span>
+            <span>Node</span>
             <select id="adm-set-node">
-              ${(S.nodes || [{ id: 'local', name: 'Local Master Node' }]).map(n => `<option value="${esc(n.id)}" ${n.id === curNid ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}
+              ${(S.nodes || [{ id: 'local', name: 'Local node' }]).map(n => `<option value="${esc(n.id)}" ${n.id === curNid ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))}</option>`).join('')}
             </select>
           </label>
           <label class="f" style="margin-bottom:0;">
@@ -14020,22 +14011,22 @@ async function deleteAdminUser(id, username) {
 
 async function triggerAdminGC() {
   const ok = await uiConfirm({
-    title: 'Run Daemon Garbage Collection',
-    message: 'Trigger an immediate Go runtime garbage collection cycle across the NeoPanel daemon to reclaim unused heap memory?',
-    confirmText: 'Run Garbage Collection',
+    title: 'Clean up panel memory?',
+    message: 'Run Go garbage collection to clean up unused memory in the panel process? This does not change Minecraft-server memory, and the amount released may vary.',
+    confirmText: 'Clean up memory',
     cancelText: 'Cancel',
     isDanger: false,
     icon: 'cpu'
   });
   if (!ok) return;
 
-  toast('Running Go runtime garbage collection...');
+  toast('Cleaning up unused panel memory...');
   try {
     const res = await api('/api/admin/gc', { method: 'POST' });
-    toast(res.message || 'Garbage collection completed', 'ok');
+    toast(res.message || 'Panel memory cleanup completed', 'ok');
     await loadAdminData();
   } catch (err) {
-    toast(err.message || 'Failed to run GC', 'bad');
+    toast(err.message || 'Panel memory cleanup failed', 'bad');
   }
 }
 
@@ -14132,7 +14123,7 @@ function renderAdminUpdateBtn(up) {
   }
 
   const hasUpdate = up?.update_available;
-  const label = hasUpdate ? `Update to Latest (${esc(up.remote_commit?.slice(0, 7) || 'new')})` : 'Update Panel Now';
+  const label = hasUpdate ? `Update panel (${esc(up.remote_commit?.slice(0, 7) || 'new')})` : 'Update panel';
   return `
     <button type="button" class="btn sm pr np-update-btn" id="admin-update-now-btn" onclick="openApplyUpdateModal()">
       ${ic('download', 13)} <span>${label}</span>
@@ -14301,7 +14292,7 @@ function renderAdminEmailTabHtml() {
       <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
         <div>
           <h2 style="margin:0 0 4px; color:var(--tx); display:flex; align-items:center; gap:8px;">
-            ${ic('mail', 18)} Email &amp; SMTP Delivery Setup
+            ${ic('mail', 18)} Email delivery
           </h2>
           <span class="mu" style="font-size:13px;">Configure outgoing SMTP mail server credentials to send password reset links, notification alerts, and subuser invitations.</span>
         </div>
@@ -14911,7 +14902,7 @@ async function saveAdminDaemonSettings(e) {
       autoRestartPolicy: Boolean(S.brandingDaemon.auto_restart_policy)
     };
     localStorage.setItem('neopanel_admin_cfg', JSON.stringify(S.adminDaemonCfg));
-    toast('Daemon network & cluster defaults saved!', 'ok');
+    toast('Network and server defaults saved.', 'ok');
     loadAdminNodes();
     R();
   } catch (err) {
@@ -16166,8 +16157,8 @@ function showSetupScreen() {
   d.className = 'login';
   d.innerHTML = `<div class="lbox">
     <div class="llogo">${brandLogoHtml(true)}</div>
-    <div class="lg">First-Time Initialization</div>
-    <h1 class="lt">Create Admin Master Account</h1>
+    <div class="lg">Welcome</div>
+    <h1 class="lt">Create your admin account</h1>
     <label class="lf">
       ${ic('user', 16)}
       <input id="su-name" type="text" placeholder="Admin Username" autocomplete="username" onkeydown="if(event.key==='Enter')submitSetup()">
@@ -16178,14 +16169,14 @@ function showSetupScreen() {
     </label>
     <label class="lf">
       ${ic('lock', 16)}
-      <input id="su-pw" type="password" placeholder="Master Password" autocomplete="new-password" onkeydown="if(event.key==='Enter')submitSetup()">
+      <input id="su-pw" type="password" placeholder="Password" autocomplete="new-password" onkeydown="if(event.key==='Enter')submitSetup()">
       <button class="eye" type="button" onclick="const p=$('#su-pw'); p.type=p.type==='password'?'text':'password';" aria-label="Toggle password visibility">
         ${ic('eye', 16)}
       </button>
     </label>
     ${S.turnstileEnabled ? '<div id="turnstile-setup" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
-    <button class="lbtn" onclick="submitSetup()">Initialize &amp; Launch</button>
+    <button class="lbtn" onclick="submitSetup()">Complete setup</button>
     <div class="lsm foot">${renderFooterHtml(footTxt)}</div>
   </div>`;
   applyLoginOverlayBackground(d);
@@ -16285,7 +16276,7 @@ function showLoginScreen() {
     <div class="llogo">${brandLogoHtml(true)}</div>
     ${maintEnabled ? `<div class="np-status-code warn" style="margin-bottom:10px;">${ic('alert', 13)} MAINTENANCE MODE &bull; ADMIN LOGIN</div>` : ''}
     <div class="lg">${greeting}</div>
-    <h1 class="lt">Log in to ${esc(brandName)}</h1>
+    <h1 class="lt">Sign in to ${esc(brandName)}</h1>
     <label class="lf">
       ${ic('user', 16)}
       <input id="lu" type="text" placeholder="Username or email" autocomplete="username" onkeydown="if(event.key==='Enter')submitLogin()">
@@ -16303,7 +16294,7 @@ function showLoginScreen() {
     </div>
     ${S.turnstileEnabled ? '<div id="turnstile-login" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
-    <button class="lbtn" onclick="submitLogin()">Login</button>
+    <button class="lbtn" onclick="submitLogin()">Sign in</button>
     ${maintEnabled ? `<button type="button" class="btn sm" style="width:100%; margin-top:10px; justify-content:center;" onclick="S.maintAdminSignInOpen=false; $('#login')?.remove(); showLoginScreen();">Back to Maintenance Notice</button>` : ''}
     <div class="lsm foot">${renderFooterHtml(footTxt)}</div>
   </div>`;

@@ -98,7 +98,7 @@ func NewBrandingHandler(db *database.DB, cfg *config.Config) *BrandingHandler {
 func defaultPanelBranding() PanelBrandingConfig {
 	return PanelBrandingConfig{
 		BrandName:            "NeoPanel",
-		BrandSubtitle:        "Ultra-Lightweight Minecraft Server Manager",
+		BrandSubtitle:        "Minecraft server management",
 		LogoURL:              "",
 		FaviconURL:           "",
 		LoginBgURL:           "",

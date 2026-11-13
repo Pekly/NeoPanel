@@ -647,15 +647,12 @@ main::-webkit-scrollbar-thumb {
   border-radius: 4px;
 }
 
-main>*,
-main>.card,
-main>.tw,
-main>.card.tw {
+/* One alignment contract for every workspace section, regardless of its element/class. */
+#main > * {
   width: 100%;
   min-width: 0;
-  max-width: 1400px;
-  margin-left: auto;
-  margin-right: auto;
+  max-width: var(--np-content-width, 1440px);
+  margin-inline: auto;
 }
 
 /* Top Header Bar */

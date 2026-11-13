@@ -81,7 +81,7 @@ test('password mismatch and byte limit prevent registration requests',async()=>{
 });
 test('existing subuser edit resolves numeric IDs and retains permissions',()=>{
   const {c,elements}=setup();c.S.teamState={permission:{is_owner:true}};c.S.serverSubusers=[{id:7,username:'member',permissions:['subusers.manage']}];elements['#modal-container']={innerHTML:''};
-  const start=app.indexOf('function openSubuserModal('),end=app.indexOf('\nasync function submitSubuserModal',start);vm.runInContext(app.slice(start,end),c);c.openSubuserModal('7');assert.match(elements['#modal-container'].innerHTML,/Edit Subuser: member/);assert.match(elements['#modal-container'].innerHTML,/value="subusers.manage" checked/);
+  const start=app.indexOf('function openSubuserModal('),end=app.indexOf('\nasync function submitSubuserModal',start);vm.runInContext(app.slice(start,end),c);c.openSubuserModal('7');assert.match(elements['#modal-container'].innerHTML,/Edit member: member/);assert.match(elements['#modal-container'].innerHTML,/value="subusers.manage" checked/);
 });
 test('existing user form sends the backend username field, not identifier',async()=>{
   const {c,elements}=setup();c.team.memberServer=c.curServer();elements['#sub-ident']={value:'member@example.test'};c.loadServerSubusers=async()=>{};let body;c.api=async(url,opts)=>{body=JSON.parse(opts.body);};

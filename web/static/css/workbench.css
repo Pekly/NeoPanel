@@ -11,12 +11,12 @@
   --np-fast: 120ms ease-out;
   --np-settle: 240ms cubic-bezier(.2, .8, .2, 1);
   --np-shadow: 0 12px 40px rgb(0 0 0 / 18%);
+  --np-content-width: 1440px;
 }
 
 /* Shell and navigation */
 .app { grid-template-columns: 224px minmax(0, 1fr); }
 main { padding: 32px 32px 64px; overflow-x: auto; }
-main > * { max-width: 1440px; }
 #nav { padding: 24px 12px 16px; gap: 4px; backdrop-filter: none; }
 .brand { padding: 0 12px 24px; font-size: 18px; letter-spacing: -.6px; color: var(--tx); }
 .brand .cube, .brand-icon { box-shadow: none; background: var(--ac); }
@@ -89,9 +89,9 @@ html body :is(button, a, input, select, textarea, [tabindex]):focus-visible { ou
 .srv-power-actions { flex-wrap: wrap; gap: 8px; }
 .srvh .btn:not(.pr):not(.stop):not(.dg) { background: var(--card-inner); border-color: var(--border-light); color: var(--tx); backdrop-filter: none; }
 .srvh .btn:not(.pr):not(.stop):not(.dg):hover:not(:disabled) { background: var(--card-hover); border-color: var(--border-light); }
-.srvh .btn.dg { background: transparent; border-color: transparent; backdrop-filter: none; }
-.srvh .btn.stop { color: var(--er); background: var(--er-glow); border-color: transparent; }
-.srvh .btn.stop:hover { border-color: var(--er); }
+.srvh .srv-power-actions .btn:is(.stop, .dg) { background: color-mix(in srgb, var(--card-bg-solid) 85%, var(--er)); border: 1px solid color-mix(in srgb, var(--er) 50%, var(--card-bg-solid)); color: var(--er); backdrop-filter: none; }
+.srvh .srv-power-actions .btn:is(.stop, .dg):hover:not(:disabled) { background: color-mix(in srgb, var(--card-bg-solid) 70%, var(--er)); border-color: var(--er); }
+.srvh .srv-power-actions .btn:disabled { opacity: 1; background: var(--card-bg-solid); color: var(--tx-dim); border-color: var(--border-light); cursor: not-allowed; }
 
 /* Dashboard: summary strip, fleet, and activity with configured card artwork. */
 .dash-grid { grid-template-columns: minmax(0, 1fr) 280px; grid-template-areas: 'overview overview' 'fleet activity'; gap: 24px; }
@@ -337,3 +337,24 @@ main.np-invitation-card { width: 100%; max-width: 520px; padding: 28px; margin: 
 .np-restore-notice { margin-top: 16px; }
 .np-restore-notice p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .pal:has(> .np-team-modal), .pal:has(> .np-schedule-modal) { padding: 32px 16px; }
+
+/* Admin navigation lives in the sidebar; this strip reports useful live context. */
+.np-admin-heading { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+.np-admin-heading > svg { flex-shrink: 0; color: var(--tx-muted); }
+.np-admin-heading .np-eyebrow { margin-bottom: 5px; }
+.np-admin-heading h1 { margin: 0; }
+.np-admin-heading p { margin: 6px 0 0; font-size: 13px; color: var(--tx-muted); }
+.np-admin-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; align-items: center; gap: 20px; padding: 16px 20px; margin-bottom: 24px; background: var(--card-inner); border: 1px solid var(--border); border-radius: var(--np-radius); }
+.np-admin-summary .mu { display: block; font-size: 11px; margin-bottom: 5px; }
+.np-admin-summary strong { font-size: 13px; font-weight: 600; color: var(--tx); overflow-wrap: anywhere; }
+.np-admin-summary-actions { display: grid; justify-items: end; gap: 5px; }
+.np-admin-summary-actions .mu { margin: 0; }
+@media (max-width: 1100px) {
+  .np-admin-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .np-admin-summary-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; }
+}
+@media (max-width: 600px) {
+  .np-admin-heading { align-items: flex-start; gap: 12px; }
+  .np-admin-heading h1 { font-size: 24px; }
+  .np-admin-summary { padding: 16px; }
+}

@@ -232,7 +232,7 @@ MIT. Made for Minecraft admins who would rather spend their RAM on players than 
 
 ## Regression checks
 
-Run `go test ./...` for backend safeguards, SMTP invitation flows, restore, and schedule-chain tests. Run `node --test web/tests/qol.test.cjs web/tests/team-automation.test.cjs` for frontend state/validation regressions. JavaScript syntax can be checked with `node --check` on `web/static/js/app.js`, `qol.js`, `team.js`, and `automation.js`.
+Run `go test ./...` for backend safeguards, SMTP invitation flows, restore, and schedule-chain tests. Run `node --test web/tests/qol.test.cjs web/tests/team-automation.test.cjs web/tests/navigation.test.cjs` for frontend state, validation, and navigation consistency regressions. JavaScript syntax can be checked with `node --check` on `web/static/js/app.js`, `qol.js`, `team.js`, and `automation.js`.
 
 Backups are published only after archive creation and closure succeed, and existing archive names are not overwritten. These are file archives, not application-consistent live snapshots: stop the Minecraft server before backing up when a fully consistent world snapshot is required. Browser upload retries restart the transfer; cancellation cannot retract a file the server has already received.
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NeoPanel — Popout Console</title>
+  <title>NeoPanel — Console</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -93,7 +93,7 @@
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>
           Stop
         </button>
-        <button class="btn btn-danger btn-sm" onclick="sendPower('kill')" title="Force Kill">
+        <button class="btn btn-danger btn-sm" onclick="sendPower('kill')" title="Force stop" aria-label="Force stop server">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
         </button>
       </div>
@@ -109,7 +109,7 @@
           <span class="mac-dot yellow"></span>
           <span class="mac-dot green"></span>
         </div>
-        <span style="font-family: var(--font-mono); font-size: 0.775rem; letter-spacing: 0.04em;">neo-console://stream</span>
+        <span style="font-family: var(--font-mono); font-size: 0.775rem; letter-spacing: 0.04em;">Live console</span>
         <div style="display: flex; gap: 0.75rem; align-items: center;">
           <button class="btn btn-secondary btn-sm" onclick="consoleMgr.clear()" style="padding: 0.2rem 0.55rem; font-size: 0.725rem;">Clear</button>
           <span style="font-size: 0.75rem; color: var(--text-dim);">&uarr; &darr; History</span>
@@ -118,7 +118,7 @@
       <div id="terminal-logs" class="terminal-logs"></div>
       <div class="terminal-input-bar">
         <span class="terminal-prompt-sym">&gt;</span>
-        <input id="terminal-input" type="text" placeholder="Type server command (e.g. 'say Hello', 'whitelist on', 'tps')...">
+        <input id="terminal-input" type="text" placeholder="Enter a command (e.g. 'say Hello')">
         <button onclick="document.getElementById('terminal-input').dispatchEvent(new KeyboardEvent('keydown', {'key': 'Enter'}))">
           Send &crarr;
         </button>
