@@ -6087,15 +6087,15 @@ const V = {
     let filesContainerHtml = '';
     if (vm === 'list') {
       filesContainerHtml = `
-      <div class="card tw" style="padding: 0; overflow: visible;">
+      <div class="card tw np-file-table-card">
         <table class="file-table" style="width: 100%;">
           <thead>
             <tr style="border-bottom: 1px solid var(--ln); color: var(--tx-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
-              <th style="width: 36px; padding: 12px 0 12px 18px; text-align: left;">
+              <th class="file-select-cell">
                 <input type="checkbox" id="chk-all-files" onchange="toggleSelectAllFiles(this.checked)" ${allSelected ? 'checked' : ''} aria-label="Select all files">
               </th>
-              <th style="width: 40px; padding: 12px 4px;"></th>
-              <th style="padding: 12px 10px; text-align: left;">
+              <th class="file-icon-cell" aria-label="File type"></th>
+              <th class="file-name-cell">
                 <button type="button" class="file-th-btn ${sortBy === 'name' ? 'active' : ''}" onclick="setFileSort('name')">Name ${sortArrow('name')}</button>
               </th>
               <th style="width: 90px; padding: 12px 10px; text-align: left;">
@@ -6113,9 +6113,9 @@ const V = {
           <tbody>
             ${isSubdir ? `
               <tr onclick="browseFolder('..')">
-                <td style="padding-left: 18px;"></td>
-                <td style="width: 40px; padding: 8px 4px;"><span class="fi-badge up" title="Parent folder">${ic('folderUp', 15)}</span></td>
-                <td colspan="5" style="font-weight: 600; color: var(--tx);">.. (Parent folder)</td>
+                <td class="file-select-cell"></td>
+                <td class="file-icon-cell"><span class="fi-badge up" title="Parent folder">${ic('folderUp', 15)}</span></td>
+                <td class="file-name-cell" colspan="5" style="font-weight: 600; color: var(--tx);">.. (Parent folder)</td>
               </tr>
             ` : ''}
             ${sortedFiles.map((item, idx) => {
@@ -6131,13 +6131,13 @@ const V = {
               <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
                   onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
                   oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
-                <td style="width: 36px; padding-left: 18px;" onclick="event.stopPropagation();">
+                <td class="file-select-cell" onclick="event.stopPropagation();">
                   <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''}
                          onchange="toggleFileSelect('${esc(itemPath)}', this.checked)"
                          aria-label="Select ${esc(item.name)}">
                 </td>
-                <td style="width: 40px; padding: 8px 4px;">${icon}</td>
-                <td style="font-weight: 500; color: var(--tx);"><button type="button" class="np-file-open" onclick="event.stopPropagation(); ${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">${esc(item.name)}</button></td>
+                <td class="file-icon-cell">${icon}</td>
+                <td class="file-name-cell" style="font-weight: 500; color: var(--tx);"><button type="button" class="np-file-open" onclick="event.stopPropagation(); ${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">${esc(item.name)}</button></td>
                 <td class="mu mono" style="font-size: 12px; width: 90px;">${esc(extLabel)}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 130px;">${sizeStr}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 170px;">${dateStr}</td>
@@ -8558,7 +8558,7 @@ const V = {
             </div>
             <span class="mu" style="font-size:13px; display:block; margin-top:4px;">
               ${is2FA
-                ? 'Your account is secured with two-factor authentication. An authenticator app code is required at sign in.'
+                ? 'Password sign-in requires an authenticator or recovery code. A verified passkey signs you in directly.'
                 : 'Protect your account from unauthorized sign-ins using Google Authenticator, Authy, 1Password, or standard TOTP app.'}
             </span>
           </div>

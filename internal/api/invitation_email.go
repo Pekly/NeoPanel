@@ -35,7 +35,21 @@ func invitationEmail(brand PanelBrandingConfig, i *database.Invitation, serverNa
 	if name == "" {
 		name = "NeoPanel"
 	}
-	permissions := strings.Join(i.Permissions, ", ")
+	labels := map[string]string{
+		"console.view": "View console", "console.command": "Send console commands", "server.power": "Control server power",
+		"files.view": "Browse files", "files.edit": "Create and edit files", "files.delete": "Delete files",
+		"settings.view": "View settings", "settings.edit": "Edit settings", "settings.ram": "Change memory limits",
+		"database.manage": "Manage databases", "backup.manage": "Manage backups", "subusers.manage": "Manage team", "schedules.manage": "Manage schedules",
+	}
+	permissionNames := make([]string, 0, len(i.Permissions))
+	for _, key := range i.Permissions {
+		if label, ok := labels[key]; ok {
+			permissionNames = append(permissionNames, label)
+		} else {
+			permissionNames = append(permissionNames, key)
+		}
+	}
+	permissions := strings.Join(permissionNames, ", ")
 	if permissions == "" {
 		permissions = "No additional permissions"
 	}

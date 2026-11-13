@@ -190,21 +190,16 @@ func (h *PasskeyHandler) relyingParty(r *http.Request) (*webauthn.WebAuthn, stri
 		publicURL, mode = cfg.Server.PublicURL, cfg.Server.Mode
 	}
 	h.auth.mu.RUnlock()
+	// Request headers are not trusted configuration: an ordinary user must not
+	// choose the panel-wide RP hostname by making the first registration.
+	if strings.TrimSpace(publicURL) == "" {
+		return nil, "", errors.New("Ask an administrator to configure server.public_url before using passkeys")
+	}
 	requestHost, err := url.Parse("http://" + r.Host)
 	if err != nil || requestHost.Host != r.Host || requestHost.User != nil {
 		return nil, "", errors.New("Invalid panel host")
 	}
-	scheme := "http"
-	host := strings.ToLower(requestHost.Hostname())
-	local := host == "localhost" || host == "127.0.0.1" || host == "::1"
-	if r.TLS != nil || (mode == "behind_proxy" && !local) {
-		scheme = "https"
-	}
-	derived := scheme + "://" + r.Host
-	if strings.TrimSpace(publicURL) != "" {
-		derived = strings.TrimSpace(publicURL)
-	}
-	origin, rpID, err := canonicalPasskeyOrigin(derived)
+	origin, rpID, err := canonicalPasskeyOrigin(strings.TrimSpace(publicURL))
 	if err != nil {
 		return nil, "", err
 	}
@@ -538,7 +533,7 @@ func (h *PasskeyHandler) LoginFinish(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil, errPasskeyVerification
 	}, f.session, parsed)
-	if err != nil || owner == nil || credential.Authenticator.CloneWarning {
+	if err != nil || owner == nil || credential == nil || !credential.Flags.UserVerified || credential.Authenticator.CloneWarning {
 		passkeyError(w, http.StatusUnauthorized, errPasskeyVerification)
 		return
 	}
@@ -556,7 +551,7 @@ func (h *PasskeyHandler) LoginFinish(w http.ResponseWriter, r *http.Request) {
 		passkeyError(w, http.StatusUnauthorized, errPasskeyVerification)
 		return
 	}
-	// Fresh account lookup preserves deletion, password-change and current 2FA policy.
+	// Recheck the account before issuing a session; do not change its password-login 2FA setting.
 	user, err := h.auth.db.GetUserByID(owner.user.ID)
 	if err != nil || user.PasswordHash != owner.user.PasswordHash {
 		passkeyError(w, http.StatusUnauthorized, errPasskeyVerification)
@@ -566,5 +561,6 @@ func (h *PasskeyHandler) LoginFinish(w http.ResponseWriter, r *http.Request) {
 		passkeyError(w, http.StatusServiceUnavailable, errors.New("Panel is currently under maintenance"))
 		return
 	}
-	h.auth.completePrimaryLogin(w, r, user)
+	// The verified, user-verifying passkey replaces password plus TOTP for this sign-in.
+	h.auth.completeVerifiedLogin(w, r, user)
 }

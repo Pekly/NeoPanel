@@ -50,10 +50,10 @@ function passkeyErrorMessage(error) {
 }
 function abortPasskeyOperation() { PasskeyUI.controller?.abort(); }
 function closePasskeyDialog() { abortPasskeyOperation(); closeModal(); }
-async function passkeyRequest(url, body, authenticated = true, signal) {
+async function passkeyRequest(url, body, authenticated = true, signal, method = 'POST') {
   const headers = { 'Content-Type': 'application/json' };
   if (authenticated && S.token) headers.Authorization = `Bearer ${S.token}`;
-  const response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), cache: 'no-store', signal });
+  const response = await fetch(url, { method, headers, body: JSON.stringify(body), cache: 'no-store', signal });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || `Passkey request failed (HTTP ${response.status}).`);
   return result;
@@ -80,7 +80,7 @@ function renderPasskeySettings() {
   const support = passkeySupportIssue();
   const loading = PasskeyUI.loading || PasskeyUI.owner !== S.user?.id;
   const disabled = support || !PasskeyUI.available || PasskeyUI.busy || loading;
-  return `<section class="card np-passkey-card" style="margin-top:14px"><div class="np-team-heading"><div><h2>Passkeys</h2><p class="mu">Sign in with your device’s screen lock or a security key. Password sign-in remains available, and existing two-factor verification still applies.</p></div><div class="row"><button type="button" class="btn sm" onclick="loadPasskeys()">Refresh</button><button type="button" class="btn sm pr" id="add-passkey-btn" onclick="openPasskeyRegistration()" ${disabled ? 'disabled' : ''}>${ic('key', 14)} Add passkey</button></div></div>
+  return `<section class="card np-passkey-card" style="margin-top:14px"><div class="np-team-heading"><div><h2>Passkeys</h2><p class="mu">Sign in with your device’s screen lock or a security key, without a separate two-factor code. Password sign-in remains available and still requires 2FA when enabled.</p></div><div class="row"><button type="button" class="btn sm" onclick="loadPasskeys()">Refresh</button><button type="button" class="btn sm pr" id="add-passkey-btn" onclick="openPasskeyRegistration()" ${disabled ? 'disabled' : ''}>${ic('key', 14)} Add passkey</button></div></div>
     ${support || PasskeyUI.reason ? `<p class="np-team-notice" role="status">${esc(support || PasskeyUI.reason)}</p>` : ''}
     ${loading ? loaderHtml('Loading passkeys…') : !PasskeyUI.items.length ? '<div class="np-empty-state"><b>No passkeys yet</b><p class="mu">Add a passkey on a trusted device. Your private key never leaves your authenticator.</p></div>' : `<div class="np-table-scroll"><table class="np-passkey-table"><thead><tr><th>Name</th><th>Added</th><th>Last used</th><th>Actions</th></tr></thead><tbody>${PasskeyUI.items.map(key => `<tr><td><b>${esc(key.label || 'Passkey')}</b></td><td class="mu">${esc(formatFileDate(key.created_at))}</td><td class="mu">${key.last_used_at ? esc(formatFileDate(key.last_used_at)) : 'Not used yet'}</td><td><button class="btn sm dg" type="button" data-passkey-id="${esc(String(key.id))}" onclick="openRemovePasskey(this.dataset.passkeyId)" ${PasskeyUI.busy ? 'disabled' : ''}>Remove</button></td></tr>`).join('')}</tbody></table></div>`}</section>`;
 }
@@ -130,7 +130,7 @@ async function removePasskey(event) {
   PasskeyUI.busy = true; setBtnLoading(button, true, 'Removing…');
   let success = false;
   try {
-    const result = await api(`/api/account/passkeys/${encodeURIComponent(form.dataset.passkeyId)}`, { method: 'DELETE', body: JSON.stringify({ password }), suppressToast: true });
+    const result = await passkeyRequest(`/api/account/passkeys/${encodeURIComponent(form.dataset.passkeyId)}`, { password }, true, undefined, 'DELETE');
     success = true; if (document.querySelector('#passkey-remove-form') === form) closeModal(); toast(result.message || 'Passkey removed.', 'ok');
   } catch (failure) { if (error.isConnected) error.textContent = passkeyErrorMessage(failure); }
   finally { PasskeyUI.busy = false; if (button.isConnected) setBtnLoading(button, false); if (success && S.user?.id === owner) await loadPasskeys(); }

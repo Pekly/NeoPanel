@@ -377,3 +377,18 @@ html body .login .lf input:focus-visible { outline: none !important; outline-off
 .np-passkey-modal > p { margin: 10px 0 18px; font-size: 13px; line-height: 1.6; }
 .pal:has(> .np-passkey-modal) { padding: 32px 16px; }
 @media (max-width: 600px) { .np-passkey-modal { padding: 18px; } }
+
+/* Keep file icons centered and row labels aligned with the Name heading. */
+.np-file-table-card { padding: 0; overflow: visible; }
+.np-file-table-card .file-table { border-collapse: separate; border-spacing: 0; border-radius: inherit; }
+.np-file-table-card .file-select-cell { width: 44px; padding: 12px 12px 12px 16px; }
+.np-file-table-card .file-select-cell input { display: block; margin: 0; }
+.np-file-table-card .file-icon-cell { width: 44px; padding: 12px 8px; text-align: center; line-height: 0; vertical-align: middle; }
+.np-file-table-card .file-icon-cell > .fi-badge { display: flex; margin-inline: auto; }
+.np-file-table-card .file-name-cell { padding: 12px; text-align: left; }
+/* Round the cell backgrounds rather than clipping menus outside the table. */
+.np-file-table-card thead tr:first-child th:first-child { border-top-left-radius: max(0px, calc(var(--np-radius) - 1px)); }
+.np-file-table-card thead tr:first-child th:last-child { border-top-right-radius: max(0px, calc(var(--np-radius) - 1px)); }
+.np-file-table-card tbody tr:last-child td:first-child { border-bottom-left-radius: max(0px, calc(var(--np-radius) - 1px)); }
+.np-file-table-card tbody tr:last-child td:last-child { border-bottom-right-radius: max(0px, calc(var(--np-radius) - 1px)); }
+.np-file-table-card .file-th-btn { margin-inline: 0; padding-inline: 0; }

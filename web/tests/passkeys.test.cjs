@@ -27,3 +27,16 @@ test('passkey 2FA handoff never installs a full session token',async()=>{const {
 test('successful passkey sign-in clears busy state before rendering account controls',async()=>{const {c,storage}=setup();c.state.busy=true;c.checkAuth=async()=>assert.equal(c.state.busy,false);await c.completePasskeySignIn({token:'signed-session'});assert.equal(storage.get('neopanel_token'),'signed-session');});
 test('public passkey requests do not attach the previous account bearer token',async()=>{const {c}=setup();let headers;c.fetch=async(url,options)=>{headers=options.headers;return {ok:true,json:async()=>({flow_id:'flow'})}};await c.passkeyRequest('/api/auth/passkeys/login/begin',{},false);assert.equal(headers.Authorization,undefined);await c.passkeyRequest('/api/account/passkeys/register/begin',{},true);assert.equal(headers.Authorization,'Bearer session');});
 test('registration stops if the account changes while the authenticator is open',async()=>{const {c,elements}=setup();const form={reportValidity:()=>true};elements['#passkey-register-form']=form;elements['#passkey-label']={value:'Laptop'};elements['#passkey-password']={value:'current-password'};elements['#passkey-register-error']={isConnected:true};elements['#passkey-register-submit']={isConnected:true};const calls=[];c.passkeyRequest=async url=>{calls.push(url);return {flow_id:'flow',options:{publicKey:{challenge:'AAEC',user:{id:'AwQ'}}}}};c.navigator.credentials.create=async()=>{c.S.user={id:2};return {}};await c.registerPasskey({preventDefault(){}});assert.equal(calls.length,1);assert.equal(c.state.busy,false);assert.equal(elements['#passkey-password'].value,'');assert.match(elements['#passkey-register-error'].textContent,/cancelled/);});
+
+test('wrong removal password stays in its dialog and does not invalidate the session',async()=>{
+  const {c,elements}=setup();elements['#passkey-remove-form']={reportValidity:()=>true,dataset:{passkeyId:'key'}};elements['#passkey-remove-password']={value:'wrong'};elements['#passkey-remove-error']={isConnected:true};elements['#passkey-remove-submit']={isConnected:true};let method;
+  c.api=async()=>{throw Error('generic API helper must not handle password-proof failures')};
+  c.fetch=async(url,options)=>{method=options.method;return {ok:false,status:401,json:async()=>({error:'Current password is incorrect'})}};
+  await c.removePasskey({preventDefault(){}});assert.equal(method,'DELETE');assert.equal(c.S.token,'session');assert.match(elements['#passkey-remove-error'].textContent,/password is incorrect/);assert.equal(c.state.busy,false);
+});
+
+test('verified passkey session completes without prompting for account 2FA',async()=>{
+  const {c}=setup();c.S.user.two_factor_enabled=true;let prompted=false;c.show2FALoginScreen=()=>{prompted=true};
+  await c.completePasskeySignIn({token:'verified-passkey-session'});
+  assert.equal(prompted,false);assert.equal(c.S.token,'verified-passkey-session');assert.equal(c.S.user.two_factor_enabled,true);
+});

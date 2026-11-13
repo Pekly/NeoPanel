@@ -29,7 +29,7 @@ I built it because running Pterodactyl for a Minecraft-only setup meant PHP, Ngi
 - **MOTD rendering** for legacy `§` and `&` codes, hex colors, Iridium gradients and MiniMessage tags, so your server header and the settings preview look right.
 - **Multi-node clustering**. Run a master panel and add worker VPSes with the same binary.
 - **Branding and themes**: six built-in themes, custom accent colors and CSS, uploadable logo, favicon, wallpaper and avatars, and a maintenance mode that still lets admins in.
-- **Auth and security**: bcrypt passwords, JWT sessions, API keys (`neo_...`), optional Cloudflare Turnstile, and automatic HTTPS through Caddy.
+- **Auth and security**: bcrypt passwords, JWT sessions, API keys (`neo_...`), optional Cloudflare Turnstile, passkey registration/sign-in through WebAuthn, and automatic HTTPS through Caddy. User-verified passkeys complete sign-in without a separate 2FA code; password sign-in still requires configured 2FA.
 - **Client area link** for connecting an external billing or storefront site (Paymenter, WHMCS, Tebex and similar) as a sidebar page or an iframe.
 - **Mods and extensions** through a small JavaScript SDK. More on that below.
 
@@ -232,7 +232,7 @@ MIT. Made for Minecraft admins who would rather spend their RAM on players than 
 
 ## Regression checks
 
-Run `go test ./...` for backend safeguards, SMTP invitation flows, restore, and schedule-chain tests. Run `node --test web/tests/qol.test.cjs web/tests/team-automation.test.cjs web/tests/navigation.test.cjs` for frontend state, validation, and navigation consistency regressions. JavaScript syntax can be checked with `node --check` on `web/static/js/app.js`, `qol.js`, `team.js`, and `automation.js`.
+Run `go test ./...` for backend safeguards, SMTP invitation flows, WebAuthn security checks, restore, and schedule-chain tests. Run `node --test web/tests/qol.test.cjs web/tests/team-automation.test.cjs web/tests/navigation.test.cjs web/tests/passkeys.test.cjs` for frontend state, validation, navigation, and passkey regressions. JavaScript syntax can be checked with `node --check` on `web/static/js/app.js`, `qol.js`, `team.js`, `automation.js`, and `passkeys.js`.
 
 Backups are published only after archive creation and closure succeed, and existing archive names are not overwritten. These are file archives, not application-consistent live snapshots: stop the Minecraft server before backing up when a fully consistent world snapshot is required. Browser upload retries restart the transfer; cancellation cannot retract a file the server has already received.
 
@@ -245,3 +245,20 @@ When deploying this update, update the panel and all worker nodes. Non-admin rem
 - **Public invite URL:** ensure the configured master FQDN points to the public panel (an explicit `https://panel.example.com` origin is supported), not a game-only hostname. With no configured FQDN, links use the validated request host and direct HTTP/TLS scheme.
 - **Restore:** stop the server, open **Backups**, and choose **Restore**. Confirming performs a full replacement: files not present in the archive disappear from the active directory. Archives are validated/extracted into staging before the swap; traversal, links/devices, truncation, and extraction-budget violations are rejected. Concurrent power/reinstall/deletion operations are excluded. The previous server directory is retained as a safety copy, with its relative path shown after success; verify the restored server before manually removing it to reclaim disk space. Two directory renames with rollback are used, not a crash-atomic filesystem exchange. Do not modify files through another process during restoration.
 - **Multi-step schedules:** add/reorder up to 20 steps. Each delay is 0–3600 seconds before that step. Actions are console command, backup, start, stop, and restart. A failure stops the sequence unless that step has **Continue to the next step if this one fails** enabled; any failure still marks the overall run failed. Edits affect subsequent runs, not a sequence already executing. Console-command success means successful delivery to stdin, not game-level acknowledgment.
+
+## Passkeys and invitation delivery
+
+To enable passkeys, set `public_url` under the existing `server` section in your configuration, then restart the panel:
+
+```yaml
+server:
+  public_url: "https://panel.example.com"
+```
+
+- Use the exact browser-facing panel origin, without a path, and preserve that Host through your reverse proxy. HTTPS is required in production; an explicitly configured `http://localhost:PORT` is supported for development. The application does not choose its passkey identity from untrusted request headers. Without `server.public_url`, password sign-in continues to work but passkeys remain unavailable.
+- Open **Account → Security → Add passkey**, provide a name and your current password, then approve the request on your device or FIDO2 security key. Up to ten passkeys can be registered. NeoPanel stores public credential data, not private keys. Removal also requires your current password.
+- Choose **Sign in with a passkey** on the sign-in screen. A valid passkey assertion with user verification completes sign-in without a separate authenticator/recovery code. This does not disable the account's 2FA setting: password sign-in still requires it, and Turnstile checks remain in effect. Keep the panel hostname stable: passkeys are bound to it and the RP hostname is pinned after first registration. `security.passkeys_disabled: true` disables ceremonies without deleting registered keys.
+- Team invitations reject conflicting username/email identities and people who already have access to the target server. A matching existing account may still be invited to another server and must sign in as that account. If someone is added manually while their invite is pending, accepting the old invitation cannot overwrite the membership or its permissions.
+- Invitation emails contain a branded HTML card, readable permission names, an acceptance button, explicit expiry, and a plain-text alternative. SMTP settings are still required; delivery errors are reported rather than labeled successful. Update the panel and workers together for remote invitation-overlap checks.
+
+Passkey tests include signed assertions and replay/origin/user-verification checks. Browser integration was exercised with Chromium’s virtual authenticator against a real temporary panel, including direct passkey sign-in for a 2FA-enabled account, continued TOTP enforcement for password sign-in, removal, and password fallback. Invitation delivery tests use a local SMTP receiver; delivery through your own email provider and behavior on physical authenticators depend on your deployment.

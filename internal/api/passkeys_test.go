@@ -38,6 +38,7 @@ func newPasskeyTest(t *testing.T) (*PasskeyHandler, *database.User, *database.Us
 	t.Cleanup(func() { db.Close() })
 	cfg := config.DefaultConfig()
 	cfg.Server.Mode = "standalone"
+	cfg.Server.PublicURL = passkeyTestOrigin
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatal(err)
@@ -247,7 +248,7 @@ func TestPasskeySignedRegistrationLoginReplayAndCounter(t *testing.T) {
 	}
 }
 
-func TestPasskeySyncedZeroCounterAndTwoFactor(t *testing.T) {
+func TestPasskeySyncedZeroCounterBypassesTOTPButPasswordRequiresIt(t *testing.T) {
 	h, user, _ := newPasskeyTest(t)
 	a, _ := registerPasskey(t, h, user, 0x1d) // UP, UV, BE, BS
 	for i := 0; i < 2; i++ {
@@ -258,20 +259,39 @@ func TestPasskeySyncedZeroCounterAndTwoFactor(t *testing.T) {
 	if err := h.auth.db.UpdateUserTwoFactor(user.ID, true, "secret", ""); err != nil {
 		t.Fatal(err)
 	}
+	if unverified := loginPasskey(t, h, a, 0x19, 0); unverified.Code != http.StatusUnauthorized {
+		t.Fatal("passkey without user verification bypassed 2FA", unverified.Body.String())
+	}
 	w := loginPasskey(t, h, a, 0x1d, 0)
 	var response struct {
 		Required  bool   `json:"two_factor_required"`
 		TempToken string `json:"temp_token"`
 		Token     string `json:"token"`
 	}
-	if json.Unmarshal(w.Body.Bytes(), &response) != nil || !response.Required || response.TempToken == "" || response.Token != "" || len(w.Result().Cookies()) != 0 {
-		t.Fatal("passkey bypassed TOTP", w.Body.String())
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Required || response.TempToken != "" || response.Token == "" || len(w.Result().Cookies()) != 1 {
+		t.Fatal("verified passkey did not complete sign-in", w.Body.String())
+	}
+	if claims, err := h.auth.ValidateToken(response.Token); err != nil || claims.UserID != user.ID {
+		t.Fatal("passkey did not issue the correct full session", err)
+	}
+	password := passkeyRequest(t, h.auth.Login, nil, map[string]string{"username": user.Username, "password": "correct-password"})
+	response = struct {
+		Required  bool   `json:"two_factor_required"`
+		TempToken string `json:"temp_token"`
+		Token     string `json:"token"`
+	}{}
+	if password.Code != http.StatusOK || json.Unmarshal(password.Body.Bytes(), &response) != nil || !response.Required || response.TempToken == "" || response.Token != "" || len(password.Result().Cookies()) != 0 {
+		t.Fatal("password sign-in bypassed 2FA", password.Body.String())
 	}
 	if _, err := h.auth.ValidateToken(response.TempToken); err == nil {
-		t.Fatal("2FA token grants session")
+		t.Fatal("2FA token grants a full session")
 	}
 	if _, err := h.auth.Validate2FATempToken(response.TempToken); err != nil {
 		t.Fatal(err)
+	}
+	fresh, err := h.auth.db.GetUserByID(user.ID)
+	if err != nil || !fresh.TwoFactorEnabled {
+		t.Fatal("passkey sign-in changed the account's 2FA setting", err)
 	}
 }
 
@@ -453,6 +473,7 @@ func TestPasskeyOriginModeCSRFAndTurnstileGuards(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := config.DefaultConfig()
 			cfg.Server.Mode = "standalone"
+			cfg.Server.PublicURL = passkeyTestOrigin
 			h.auth.cfg = cfg
 			body := "{}"
 			if name == "oversize" {
@@ -474,6 +495,7 @@ func TestPasskeyOriginModeCSRFAndTurnstileGuards(t *testing.T) {
 			case "wrong_type":
 				req.Header.Set("Content-Type", "text/plain")
 			case "insecure":
+				cfg.Server.PublicURL = "http://panel.test"
 				req.Host = "panel.test"
 				req.Header.Set("Origin", "http://panel.test")
 				req.Header.Set("X-Forwarded-Proto", "https")
@@ -496,6 +518,7 @@ func TestPasskeyOriginModeCSRFAndTurnstileGuards(t *testing.T) {
 	}
 	h.auth.cfg = config.DefaultConfig()
 	h.auth.cfg.Server.Mode = "standalone"
+	h.auth.cfg.Server.PublicURL = passkeyTestOrigin
 	req := httptest.NewRequest("GET", passkeyTestOrigin+"/api/account/passkeys", nil)
 	req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &JWTClaims{UserID: user.ID}))
 	h.auth.cfg.Security.PasskeysDisabled = true
@@ -513,6 +536,7 @@ func TestPasskeyOriginModeCSRFAndTurnstileGuards(t *testing.T) {
 	// Behind-proxy mode uses configured policy, never attacker-supplied forwarded host.
 	h2, _, _ := newPasskeyTest(t)
 	h2.auth.cfg.Server.Mode = "behind_proxy"
+	h2.auth.cfg.Server.PublicURL = "https://panel.test"
 	req = httptest.NewRequest("POST", "http://panel.test/api/test", nil)
 	req.Header.Set("X-Forwarded-Host", "evil.test")
 	req.Header.Set("X-Forwarded-Proto", "http")
@@ -587,5 +611,25 @@ func TestPasskeyAuthRateBucket(t *testing.T) {
 		if allowed := lim.Allow(req); allowed != (i < 5) {
 			t.Fatalf("request %d used wrong bucket", i)
 		}
+	}
+}
+
+func TestPasskeysRequireConfiguredOriginBeforeFirstRegistration(t *testing.T) {
+	h, user, _ := newPasskeyTest(t)
+	h.auth.cfg.Server.PublicURL = ""
+	for _, origin := range []string{"https://attacker.example", passkeyTestOrigin} {
+		body := strings.NewReader(`{"label":"Untrusted first key","password":"correct-password"}`)
+		req := httptest.NewRequest(http.MethodPost, origin+"/api/account/passkeys/register/begin", body)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Content-Type", "application/json")
+		req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &JWTClaims{UserID: user.ID, Username: user.Username, Role: user.Role}))
+		response := httptest.NewRecorder()
+		h.RegisterBegin(response, req)
+		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "server.public_url") {
+			t.Fatalf("unconfigured origin %s accepted: %d %s", origin, response.Code, response.Body.String())
+		}
+	}
+	if pinned, err := h.auth.db.PasskeyRPID(); err != nil || pinned != "" {
+		t.Fatalf("untrusted request pinned RP: %q %v", pinned, err)
 	}
 }

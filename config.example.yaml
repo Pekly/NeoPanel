@@ -5,9 +5,9 @@ server:
   mode: "behind_proxy" # "behind_proxy" or "standalone"
   role: "panel"        # "panel" (Master Panel) or "node" (Cluster Node Daemon)
   startup_timeout_seconds: 180
-  # Recommended: canonical browser-facing panel origin (no path), e.g. https://panel.example.com.
+  # Required to enable passkeys: exact browser-facing panel origin (no path), e.g. https://panel.example.com.
   # Passkeys require HTTPS, except http://localhost[:port] development. Forwarded headers are ignored.
-  # If empty, derive from Host and TLS; behind_proxy assumes HTTPS for non-localhost hosts.
+  # If empty, passkeys stay unavailable; password sign-in continues to work.
   # The RP hostname is pinned when the first passkey is registered; keep it stable.
   public_url: ""
 

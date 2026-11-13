@@ -307,7 +307,7 @@ func TestInvitationStyledEmailMIME(t *testing.T) {
 	if strings.Count(html, `href="`+link+`"`) != 2 || !strings.Contains(html, ">Accept invitation</a>") {
 		t.Fatal("CTA/fallback does not match plain single-use link")
 	}
-	for _, text := range []string{"Acme &lt;b&gt;Cloud&lt;/b&gt; &amp; Co", "Game &lt;img src=x onerror=alert(1)&gt; &amp; friends", "#123456", "htmluser", "console.view, files.view", i.ExpiresAt.UTC().Format("02 Jan 2006 at 15:04 UTC"), "max-width:600px", "Sign in", "Register", "ignore this email"} {
+	for _, text := range []string{"Acme &lt;b&gt;Cloud&lt;/b&gt; &amp; Co", "Game &lt;img src=x onerror=alert(1)&gt; &amp; friends", "#123456", "htmluser", "View console, Browse files", i.ExpiresAt.UTC().Format("02 Jan 2006 at 15:04 UTC"), "max-width:600px", "Sign in", "Register", "ignore this email"} {
 		if !strings.Contains(html, text) {
 			t.Errorf("HTML missing %q", text)
 		}

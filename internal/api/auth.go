@@ -310,8 +310,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.completePrimaryLogin(w, r, user)
 }
 
-// completePrimaryLogin is shared by password and passkey authentication. A passkey
-// proves the primary factor only and must never bypass the account's TOTP policy.
+// completePrimaryLogin applies the account's second-factor policy after password verification.
 func (h *AuthHandler) completePrimaryLogin(w http.ResponseWriter, r *http.Request, user *database.User) {
 	if user.TwoFactorEnabled {
 		tempToken, err := h.Generate2FATempToken(user)
@@ -326,6 +325,12 @@ func (h *AuthHandler) completePrimaryLogin(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
+	h.completeVerifiedLogin(w, r, user)
+}
+
+// completeVerifiedLogin issues a session only after the caller has verified all
+// required factors. A user-verified WebAuthn assertion is sufficient on its own.
+func (h *AuthHandler) completeVerifiedLogin(w http.ResponseWriter, r *http.Request, user *database.User) {
 
 	token, err := h.GenerateToken(user)
 	if err != nil {
