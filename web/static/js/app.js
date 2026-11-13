@@ -1413,11 +1413,66 @@ function resolveServerByParam(param, nodeId = null) {
   const shortP = shortServerId(p);
   const nid = nodeId ? String(nodeId).trim() : null;
   const list = Array.isArray(S.servers) ? S.servers : [];
-  if (nid) {
-    const exact = list.find(s => (s.node_id || 'local') === nid && (s.id === p || shortServerId(s.id) === shortP));
-    if (exact) return exact;
+  const matches = list.filter(s => (!nid || (s.node_id || 'local') === nid) &&
+    (s.id === p || shortServerId(s.id) === shortP));
+  // A node-qualified URL must never silently open a different node's server.
+  if (nid) return matches.length === 1 ? matches[0] : null;
+  return matches.find(s => (s.node_id || 'local') === 'local') || (matches.length === 1 ? matches[0] : null);
+}
+
+// Absence is authoritative only after the relevant authorized inventory loaded.
+function missingServerView(route, url, attempts = 0) {
+  const catalog = S.serverCatalog;
+  const complete = catalog && !catalog.loading && (catalog.denied || (route.nodeId === 'local'
+    ? catalog.localComplete
+    : catalog.clusterComplete && (route.nodeId
+      ? !Object.prototype.hasOwnProperty.call(catalog.nodeErrors, route.nodeId)
+      : Object.keys(catalog.nodeErrors).length === 0)));
+  clearActiveServerSelection();
+  if (complete) {
+    S.notFoundPath = new URL(url, window.location.origin).pathname;
+    S.serverRoutePending = null;
+    return 'notfound';
   }
-  return list.find(s => s.id === p || shortServerId(s.id) === shortP) || null;
+  S.serverRoutePending = { url, attempts, busy: false, token: S.token };
+  return 'serverpending';
+}
+
+function scheduleServerRouteRetry() {
+  const pending = S.serverRoutePending;
+  if (!pending || pending.attempts >= 2 || pending.timer || pending.busy) return;
+  pending.timer = setTimeout(() => {
+    pending.timer = null;
+    if (S.serverRoutePending === pending) retryServerRoute();
+  }, 1000 * (pending.attempts + 1));
+}
+
+async function retryServerRoute() {
+  const pending = S.serverRoutePending;
+  if (!pending || pending.busy || !S.token || S.token !== pending.token) return;
+  clearTimeout(pending.timer);
+  pending.timer = null;
+  pending.busy = true;
+  pending.attempts++;
+  R();
+  await loadDashboard(true);
+  if (S.serverRoutePending !== pending || S.token !== pending.token) return;
+  applyRoute(pending.url, { replace: true, retryAttempts: pending.attempts });
+}
+
+function clearActiveServerSelection() {
+  S.cs = -1;
+  S.activeServerId = null;
+  S.activeNodeId = null;
+  clearTimeout(S.wsReconnectTimer);
+  clearInterval(S.wsPingTimer);
+  S.wsReconnectTimer = S.wsPingTimer = null;
+  if (S.activeWs) {
+    S.activeWs.onopen = S.activeWs.onmessage = S.activeWs.onerror = S.activeWs.onclose = null;
+    try { S.activeWs.close(); } catch (e) {}
+    S.activeWs = null;
+  }
+  S.wsState = 'disconnected';
 }
 
 function saveActiveServerRef(srv) {
@@ -1645,6 +1700,7 @@ function getViewDisplayLabel(view) {
     acc: 'Account',
     client: getBrand('client_area_label') || 'Client Area',
     notfound: 'Page Not Found',
+    serverpending: 'Server Unavailable',
     maintenance: 'Scheduled Maintenance',
     mod: 'Extension Page'
   };
@@ -1729,6 +1785,8 @@ function applyRoute(urlStr, opts = {}) {
     });
   }
   ++QOL.openSequence;
+  clearTimeout(S.serverRoutePending?.timer);
+  S.serverRoutePending = null;
   const { replace = false, fromPopState = false } = opts;
   if (fromPopState && Number.isInteger(opts.historyIndex)) QOL.historyIndex = opts.historyIndex;
   flushPendingSettingsBeforeLeave();
@@ -1769,8 +1827,7 @@ function applyRoute(urlStr, opts = {}) {
   } else if (route.serverId) {
     const srv = resolveServerByParam(route.serverId, route.nodeId || null);
     if (!srv) {
-      S.notFoundPath = new URL(targetUrlStr, window.location.origin).pathname;
-      resolvedView = 'notfound';
+      resolvedView = missingServerView(route, targetUrlStr, opts.retryAttempts || 0);
     } else {
       syncActiveServerState(srv);
       if (route.plugTab !== undefined) S.plugTab = route.plugTab;
@@ -1828,6 +1885,7 @@ function applyRoute(urlStr, opts = {}) {
     });
   }
   onEnterView(S.view);
+  scheduleServerRouteRetry();
   finishPageProgress();
 }
 
@@ -3181,11 +3239,15 @@ async function api(endpoint, options = {}) {
     const res = await fetch(endpoint, { ...fetchOpts, headers });
     if (res.status === 401) {
       logout();
-      throw new Error('Session expired. Please sign in again.');
+      const error = new Error('Session expired. Please sign in again.');
+      error.status = 401;
+      throw error;
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.error || `HTTP ${res.status}`);
+      const error = new Error(data.error || `HTTP ${res.status}`);
+      error.status = res.status;
+      throw error;
     }
     return data;
   } catch (err) {
@@ -3197,6 +3259,7 @@ async function api(endpoint, options = {}) {
 }
 
 function curServer() {
+  if (S.cs === -1) return null;
   if (!S.servers || S.servers.length === 0) return null;
   return S.servers[S.cs] || S.servers[0];
 }
@@ -7227,6 +7290,18 @@ const V = {
     </div>`;
   },
 
+  serverpending() {
+    const busy = S.serverRoutePending?.busy;
+    return `<div class="np-status-shell"><div class="card np-status-card" role="status">
+      <h1>${busy ? 'Loading server…' : 'Server temporarily unavailable'}</h1>
+      <p class="mu">The server list could not be fully loaded. The panel or a node may be offline. This does not mean the server was deleted.</p>
+      <div class="row" style="justify-content:center; gap:10px; margin-top:20px;">
+        <button type="button" class="btn pr" onclick="retryServerRoute()" ${busy ? 'disabled' : ''}>${busy ? 'Loading…' : 'Retry'}</button>
+        <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn">Back to Servers</a>
+      </div>
+    </div></div>`;
+  },
+
   notfound() {
     const path = S.notFoundPath || window.location.pathname || '/unknown';
     const srv = curServer();
@@ -9182,57 +9257,71 @@ function setNodeFilter(nodeId) {
 }
 
 // --- Backend Data Loaders ---
+let dashboardLoadSequence = 0;
 async function loadDashboard(skipRender = false, preferredRef = null) {
+  const sequence = ++dashboardLoadSequence;
+  const token = S.token;
   if (!S.loading) S.loading = {};
-  if (!skipRender && S.servers.length === 0) S.loading.dash = true;
-  const prevCur = curServer();
-  const prevId = preferredRef?.id || prevCur?.id || S.activeServerId;
-  const prevNodeId = preferredRef?.nodeId || prevCur?.node_id || S.activeNodeId || 'local';
-
+  S.loading.dash = true;
+  S.serverCatalog = { ...S.serverCatalog, loading: true };
+  // Bound hung network requests as well as the number of route recovery attempts.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  const request = endpoint => api(endpoint, { signal: controller.signal, suppressToast: true });
+  const live = () => sequence === dashboardLoadSequence && token === S.token;
+  const metadataJobs = [];
   try {
-    const [clusterRes, nodesRes, act] = await Promise.all([
-      api('/api/cluster/servers').catch(() => null),
-      api('/api/nodes').catch(() => null),
-      api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null)
-    ]);
-
-    if (clusterRes && Array.isArray(clusterRes.servers)) {
-      S.servers = clusterRes.servers.map(s => ({ ...s, node_id: s.node_id || 'local' }));
-      S.clusterNodeErrors = clusterRes.node_errors || {};
-    } else {
-      const srvs = await api('/api/servers').catch(() => []);
-      S.servers = (Array.isArray(srvs) ? srvs : []).map(s => ({ ...s, node_id: s.node_id || 'local' }));
-      S.clusterNodeErrors = {};
-    }
-
-    if (Array.isArray(nodesRes)) {
-      S.nodes = nodesRes;
-    }
-    if (Array.isArray(act)) S.acct.act = act;
-
-    if (S.servers.length > 0) {
-      let idx = -1;
-      if (prevId) {
-        const matched = resolveServerByParam(prevId, prevNodeId);
-        if (matched) {
-          idx = S.servers.findIndex(s => s.id === matched.id && (s.node_id || 'local') === (matched.node_id || 'local'));
-        }
+    const clusterJob = request('/api/cluster/servers').then(value => ({ value }), error => ({ error }));
+    // Optional metadata must not hold up server routing or invalidate the inventory.
+    metadataJobs.push(request('/api/nodes').then(nodes => {
+      if (live() && Array.isArray(nodes)) {
+        S.nodes = nodes;
+        if (!skipRender && S.view === 'dash') R();
       }
-      if (idx === -1) idx = 0;
-      S.cs = idx;
-      const cur = curServer();
-      saveActiveServerRef(cur);
-      applyServerStatsSnapshot(cur, cur.stats, false);
-      syncPropsFromServer(cur, false);
-      S.ver = cur.version || S.ver;
-      S.core = (cur.type || 'paper').charAt(0).toUpperCase() + (cur.type || 'paper').slice(1);
-      connectWs(cur.id, false, cur.node_id || 'local');
-    } else {
-      S.cs = 0;
+    }).catch(() => {}));
+    metadataJobs.push(request(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).then(act => {
+      if (live() && Array.isArray(act)) S.acct.act = act;
+    }).catch(() => {}));
+    const { value: clusterRes, error: clusterError } = await clusterJob;
+    const clusterComplete = Array.isArray(clusterRes?.servers);
+    const denied = [401, 403].includes(clusterError?.status);
+    let servers = clusterComplete ? clusterRes.servers : [];
+    let localComplete = clusterComplete;
+    if (!clusterComplete && !denied && live()) {
+      try {
+        const local = await request('/api/servers');
+        localComplete = Array.isArray(local);
+        if (localComplete) servers = local.map(s => ({ ...s, node_id: 'local' }));
+      } catch (error) { localComplete = [401, 403].includes(error.status); }
     }
-  } catch (e) {} finally {
-    S.loading.dash = false;
-    if (!skipRender) R();
+    if (!live()) return;
+    // Capture selection at commit time, not before awaiting the network.
+    const current = curServer();
+    const route = parseCurrentRoute();
+    const ref = route.serverId ? { id: route.serverId, nodeId: route.nodeId } :
+      (current ? { id: current.id, nodeId: current.node_id || 'local' } : preferredRef);
+    S.servers = servers.map(s => ({ ...s, node_id: s.node_id || 'local' }));
+    S.clusterNodeErrors = clusterComplete ? (clusterRes.node_errors || {}) : {};
+    S.serverCatalog = { clusterComplete, localComplete, denied, nodeErrors: S.clusterNodeErrors, loading: false };
+    // Never restore unverified cached servers or select the first server for a missing deep link.
+    const selected = (ref && resolveServerByParam(ref.id, ref.nodeId || null)) ||
+      (!route.serverId ? S.servers[0] : null);
+    if (selected) syncActiveServerState(selected);
+    else clearActiveServerSelection();
+  } finally {
+    // Let optional metadata finish independently, still subject to the deadline.
+    Promise.allSettled(metadataJobs).then(() => { clearTimeout(timer); controller.abort(); });
+    if (live()) {
+      S.loading.dash = false;
+      S.serverCatalog.loading = false;
+      if (!skipRender) {
+        if (parseCurrentRoute().serverId) {
+          applyRoute(window.location.pathname + window.location.search, {
+            replace: true, retryAttempts: S.serverRoutePending?.attempts || 0
+          });
+        } else R();
+      }
+    }
   }
 }
 
@@ -11707,9 +11796,14 @@ function toggleTheme() {
 }
 
 async function switchServer(index) {
-  if (!await guardEditorLeave()) return;
-  const srv = S.servers[index];
+  const requested = S.servers[index];
+  if (!requested || !await guardEditorLeave()) return;
+  const srv = resolveServerByParam(requested.id, requested.node_id || 'local');
   if (!srv) return;
+  if (S.serverRoutePending) {
+    applyRoute(serverRouteUrl(srv.node_id || 'local', srv.id, 'con'));
+    return;
+  }
   flushPendingSettingsBeforeLeave();
   syncActiveServerState(srv);
 
@@ -16143,14 +16237,14 @@ async function checkAuth() {
   if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
   if (await openPendingInvitation()) { finishPageProgress(); return; }
 
-  const route = parseCurrentRoute(window.location.pathname + window.location.search, window.location.hash);
+  let route = parseCurrentRoute(window.location.pathname + window.location.search, window.location.hash);
   if (route.safeMode) S.modsSafeMode = true;
   S.view = route.notFoundPath ? 'notfound' : normalizeRoute(route.view || 'dash');
   if (route.notFoundPath) S.notFoundPath = route.notFoundPath;
   if (route.adminTab !== undefined) S.adminTab = route.adminTab;
   if (route.acctTab !== undefined && S.acct) S.acct.tab = route.acctTab;
   if (route.plugTab !== undefined) S.plugTab = route.plugTab;
-  const preferredRef = route.serverId ? { id: route.serverId, nodeId: route.nodeId || 'local' } : null;
+  const preferredRef = route.serverId ? { id: route.serverId, nodeId: route.nodeId || null } : null;
 
   try {
     setPageProgress(42);
@@ -16208,6 +16302,12 @@ async function checkAuth() {
 
     setPageProgress(65);
     await loadDashboard(true, preferredRef || getSavedActiveServerRef());
+    // Navigation can change while authentication/inventory requests are in flight.
+    route = parseCurrentRoute(window.location.pathname + window.location.search, window.location.hash);
+    S.view = route.notFoundPath ? 'notfound' : normalizeRoute(route.view || 'dash');
+    if (route.adminTab !== undefined) S.adminTab = route.adminTab;
+    if (route.acctTab !== undefined) S.acct.tab = route.acctTab;
+    if (route.plugTab !== undefined) S.plugTab = route.plugTab;
 
     const globalOnlyViews = ['dash', 'client', 'admin', 'acc', 'notfound', 'maintenance', 'mod'];
     if (route.notFoundPath) {
@@ -16224,8 +16324,7 @@ async function checkAuth() {
     } else if (route.serverId) {
       const matched = resolveServerByParam(route.serverId, route.nodeId || null);
       if (!matched) {
-        S.notFoundPath = window.location.pathname;
-        S.view = 'notfound';
+        S.view = missingServerView(route, window.location.pathname + window.location.search);
       } else {
         syncActiveServerState(matched);
         if (route.canonicalRedirect || route.legacyHash) {
@@ -16244,15 +16343,16 @@ async function checkAuth() {
     }
 
     setPageProgress(82);
-    if (!['notfound', 'maintenance'].includes(S.view)) {
+    if (!['notfound', 'serverpending', 'maintenance'].includes(S.view)) {
       await loadInitialRouteData(S.view);
     }
-    if (!['plug', 'set', 'ver', 'notfound', 'maintenance'].includes(S.view)) {
+    if (!['plug', 'set', 'ver', 'notfound', 'serverpending', 'maintenance'].includes(S.view)) {
       loadVersionsCatalog();
     }
 
     applyBranding(S.branding);
     R();
+    scheduleServerRouteRetry();
     finishPageProgress();
   } catch (e) {
     S.token = '';
@@ -16551,6 +16651,11 @@ async function logout() {
 
   S.token = '';
   S.user = null;
+  clearTimeout(S.serverRoutePending?.timer);
+  S.serverRoutePending = null;
+  S.serverCatalog = null;
+  S.servers = [];
+  ++dashboardLoadSequence;
   S.acct = {
     un: '',
     em: '',

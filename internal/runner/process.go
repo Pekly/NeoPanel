@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bufio"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"os"
@@ -46,6 +47,11 @@ const (
 )
 
 type ProcessInstance struct {
+	lifecycleMu      sync.Mutex
+	runDone          chan struct{}
+	owned            *ownedCommand
+	runLock          *os.File
+	cleanupErr       error
 	mu               sync.RWMutex
 	server           *database.Server
 	workingDir       string
@@ -186,12 +192,29 @@ func (p *ProcessInstance) GetStats() database.ServerStats {
 }
 
 func (p *ProcessInstance) Start() error {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
 	p.mu.Lock()
-	if p.status == "online" || p.status == "starting" {
+	if p.status != "offline" || p.cmd != nil {
 		p.mu.Unlock()
-		return fmt.Errorf("server is already running")
+		return fmt.Errorf("server is running or still stopping; wait for shutdown to complete")
 	}
 
+	runLock, err := acquireRunLock(p.workingDir)
+	if err != nil {
+		p.mu.Unlock()
+		p.broadcast("[NeoPanel] Start refused: " + err.Error())
+		return err
+	}
+	launched := false
+	defer func() {
+		if !launched {
+			runLock.Close()
+			p.mu.Lock()
+			p.status = "offline"
+			p.mu.Unlock()
+		}
+	}()
 	p.stopStartupTimerLocked()
 	p.status = "starting"
 	p.stopExpected = false
@@ -207,6 +230,10 @@ func (p *ProcessInstance) Start() error {
 		timeout = DefaultStartupTimeout
 	}
 	p.mu.Unlock()
+	if err := checkServerWorldLocks(p.workingDir, srv.Type); err != nil {
+		p.broadcast("[NeoPanel] Start refused: " + err.Error())
+		return err
+	}
 
 	// Build Java command
 	javaBinary, javaLabel := ResolveJavaBinary(srv.JavaPath)
@@ -293,8 +320,13 @@ func (p *ProcessInstance) Start() error {
 		args = append(args, "--port", fmt.Sprintf("%d", port))
 	}
 
-	cmd, isolationMode := p.buildCommand(javaBinary, args)
-	p.broadcast(fmt.Sprintf("\x1b[35m[NeoPanel Security] Isolation Engine: %s\x1b[0m", isolationMode))
+	cmd, isolationMode, err := p.buildCommand(javaBinary, args)
+	if err != nil {
+		p.broadcast("[NeoPanel] Isolation unavailable: " + err.Error())
+		return err
+	}
+	configureProcessOwnership(cmd, runLock)
+	p.broadcast(fmt.Sprintf("\x1b[35m[NeoPanel Security] Isolation: %s\x1b[0m", isolationMode))
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -305,7 +337,7 @@ func (p *ProcessInstance) Start() error {
 		return fmt.Errorf("failed to open stdin pipe: %w", err)
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
 		stdin.Close()
 		p.mu.Lock()
@@ -315,10 +347,11 @@ func (p *ProcessInstance) Start() error {
 		return fmt.Errorf("failed to open stdout pipe: %w", err)
 	}
 
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
 		stdin.Close()
 		stdout.Close()
+		stdoutWriter.Close()
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
@@ -326,10 +359,13 @@ func (p *ProcessInstance) Start() error {
 		return fmt.Errorf("failed to open stderr pipe: %w", err)
 	}
 
+	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
 	if err := cmd.Start(); err != nil {
 		stdin.Close()
 		stdout.Close()
 		stderr.Close()
+		stdoutWriter.Close()
+		stderrWriter.Close()
 		p.mu.Lock()
 		p.status = "offline"
 		p.mu.Unlock()
@@ -341,11 +377,20 @@ func (p *ProcessInstance) Start() error {
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		return fmt.Errorf("failed to start Java process: %w", err)
 	}
+	stdoutWriter.Close()
+	stderrWriter.Close()
+	launched = true
+	done := make(chan struct{})
 
 	stopTimerCh := make(chan struct{})
 	startedAt := time.Now()
 	p.mu.Lock()
 	p.cmd = cmd
+	p.runDone = done
+	p.owned = &ownedCommand{cmd: cmd}
+	owned := p.owned
+	p.runLock = runLock
+	p.cleanupErr = nil
 	p.stdin = stdin
 	p.startedAt = startedAt
 	p.metrics = NewProcessMetrics(cmd.Process.Pid)
@@ -369,7 +414,7 @@ func (p *ProcessInstance) Start() error {
 					return
 				}
 				p.timedOut = true
-				proc := p.cmd
+				proc := p.owned
 				p.mu.Unlock()
 
 				p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
@@ -377,14 +422,16 @@ func (p *ProcessInstance) Start() error {
 				p.broadcast("\x1b[31mThe server did not finish starting before the timeout elapsed. Terminating stalled process...\x1b[0m")
 				p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 
-				if proc != nil && proc.Process != nil {
-					_ = proc.Process.Kill()
+				if proc != nil {
+					if err := proc.stop(false); err != nil {
+						p.broadcast("[NeoPanel] Could not terminate startup process tree: " + err.Error())
+					}
 				}
 			}
 		}(currentRunID, stopTimerCh, timeout)
 	}
 
-	// Stream stdout & stderr concurrently and wait for EOF before cmd.Wait()
+	// Own the pipes: Wait must reap the launcher before draining child-held streams.
 	var streamWg sync.WaitGroup
 	streamWg.Add(2)
 	go func() {
@@ -398,8 +445,20 @@ func (p *ProcessInstance) Start() error {
 
 	// Wait for process exit in background
 	go func(runID uint64, started time.Time) {
-		streamWg.Wait()
 		waitErr := cmd.Wait()
+		cleanupErr := owned.stop(true)
+		drained := make(chan struct{})
+		go func() { streamWg.Wait(); close(drained) }()
+		select {
+		case <-drained:
+		case <-time.After(2 * time.Second):
+			stdout.Close()
+			stderr.Close()
+			<-drained
+		}
+		stdout.Close()
+		stderr.Close()
+		stdin.Close()
 
 		p.mu.Lock()
 		if p.runID != runID {
@@ -407,9 +466,18 @@ func (p *ProcessInstance) Start() error {
 			return
 		}
 		p.stopStartupTimerLocked()
-		p.status = "offline"
-		p.cmd = nil
+		p.cleanupErr = cleanupErr
+		if cleanupErr == nil {
+			runLock.Close()
+			p.runLock = nil
+			p.status = "offline"
+			p.cmd = nil
+		} else {
+			// Keep ownership and block restarts when cleanup cannot be confirmed.
+			p.status = "stopping"
+		}
 		p.stdin = nil
+		close(done)
 		p.onlinePlayers = make(map[string]*OnlinePlayer)
 		expected := p.stopExpected
 		reached := p.reachedOnline
@@ -417,6 +485,10 @@ func (p *ProcessInstance) Start() error {
 		onExit := p.onExit
 		srvID := p.server.ID
 		p.mu.Unlock()
+		if cleanupErr != nil {
+			p.broadcast("[NeoPanel] Process cleanup failed; restart blocked: " + cleanupErr.Error())
+			return
+		}
 
 		uptime := time.Since(started)
 
@@ -789,6 +861,8 @@ func (p *ProcessInstance) WriteInput(cmd string) error {
 }
 
 func (p *ProcessInstance) Stop(graceful bool) error {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
 	p.mu.Lock()
 	if p.cmd == nil || p.status == "offline" {
 		p.mu.Unlock()
@@ -797,45 +871,35 @@ func (p *ProcessInstance) Stop(graceful bool) error {
 	p.stopExpected = true
 	p.stopStartupTimerLocked()
 	p.status = "stopping"
-	cmd := p.cmd
-	stdin := p.stdin
+	owned, stdin, done := p.owned, p.stdin, p.runDone
 	p.mu.Unlock()
-
+	if done == nil {
+		return fmt.Errorf("server process completion is unavailable; restart refused")
+	}
 	if graceful && stdin != nil {
-		p.broadcast("\x1b[36m[NeoPanel] Sending 'stop' command to server...\x1b[0m")
-		_, _ = io.WriteString(stdin, "stop\n")
-
-		// Wait up to 15 seconds for clean exit
-		done := make(chan struct{})
-		go func() {
-			for i := 0; i < 30; i++ {
-				p.mu.RLock()
-				st := p.status
-				p.mu.RUnlock()
-				if st == "offline" {
-					close(done)
-					return
-				}
-				time.Sleep(500 * time.Millisecond)
-			}
-			close(done)
-		}()
-
+		p.broadcast("[NeoPanel] Sending 'stop' command; waiting for the server to exit...")
+		// A full stdin pipe must not prevent the shutdown timeout from firing.
+		go func() { _, _ = io.WriteString(stdin, "stop\n") }()
 		select {
 		case <-done:
-			if p.GetStatus() == "offline" {
-				return nil
-			}
+			p.mu.RLock()
+			defer p.mu.RUnlock()
+			return p.cleanupErr
 		case <-time.After(15 * time.Second):
 		}
 	}
-
-	// Force kill if still alive
-	p.broadcast("\x1b[31m[NeoPanel] Force killing process...\x1b[0m")
-	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+	p.broadcast("[NeoPanel] Terminating the owned server process tree...")
+	if err := owned.stop(false); err != nil {
+		return fmt.Errorf("could not terminate server process tree: %w", err)
 	}
-	return nil
+	select {
+	case <-done:
+		p.mu.RLock()
+		defer p.mu.RUnlock()
+		return p.cleanupErr
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("server has not exited; restart is blocked until shutdown completes")
+	}
 }
 
 func (p *ProcessInstance) broadcast(msg string) {
@@ -986,10 +1050,11 @@ func syncBungeePort(workingDir string, port int) {
 // sandbox jailing the filesystem so malicious plugins cannot read host files
 // or traverse into other servers. If `systemd-run` is available, it applies slice
 // resource limits (e.g. TasksMax=512) to thwart fork bombs.
-func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.Cmd, string) {
+func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.Cmd, string, error) {
 	p.mu.RLock()
 	isoEngine := p.isolationEngine
 	tasksMax := p.tasksMax
+	srv := *p.server
 	p.mu.RUnlock()
 	if isoEngine == "" {
 		isoEngine = "auto"
@@ -1001,33 +1066,54 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 	if isoEngine == "none" || isoEngine == "process" {
 		cmd := exec.Command(javaBinary, args...)
 		cmd.Dir = p.workingDir
-		return cmd, "Unrestricted Process (Host Namespace)"
+		return cmd, "Unrestricted process (no filesystem isolation)", nil
 	}
 
 	bwrapPath, bwrapErr := exec.LookPath("bwrap")
 	systemdPath, sysErr := exec.LookPath("systemd-run")
+	if isoEngine == "bwrap" && bwrapErr != nil {
+		return nil, "", fmt.Errorf("Bubblewrap was requested but bwrap is not installed; install bubblewrap on this node")
+	}
+	if isoEngine == "systemd" && sysErr != nil {
+		return nil, "", fmt.Errorf("systemd isolation was requested but systemd-run is unavailable")
+	}
+	if isoEngine != "auto" && isoEngine != "bwrap" && isoEngine != "systemd" {
+		return nil, "", fmt.Errorf("unknown isolation engine %q", isoEngine)
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, "", err
+	}
+	unitArg := fmt.Sprintf("--unit=neopanel-%x.scope", nonce)
 
 	// If user specifically requested systemd-only or bwrap isn't installed
 	if (isoEngine == "systemd" || bwrapErr != nil || bwrapPath == "") && sysErr == nil && systemdPath != "" {
 		sysArgs := []string{
 			"--scope",
+			unitArg,
+			"--property=KillMode=control-group",
 			"-q",
 			fmt.Sprintf("--property=TasksMax=%d", tasksMax),
 		}
-		if p.server != nil && p.server.CPULimitPercent > 0 {
-			sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", p.server.CPULimitPercent))
+		if srv.CPULimitPercent > 0 {
+			sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", srv.CPULimitPercent))
 		}
 		sysArgs = append(sysArgs, javaBinary)
 		sysArgs = append(sysArgs, args...)
 
 		cmd := exec.Command(systemdPath, sysArgs...)
 		cmd.Dir = p.workingDir
-		return cmd, fmt.Sprintf("Systemd Slice (TasksMax=%d)", tasksMax)
+		return cmd, fmt.Sprintf("Systemd resource limits only (TasksMax=%d; NO filesystem isolation)", tasksMax), nil
 	}
 
 	if bwrapErr == nil && bwrapPath != "" && isoEngine != "systemd" {
 		bwrapArgs := []string{
 			"--unshare-all",
+			"--cap-drop", "ALL",
+			"--clearenv",
+			"--setenv", "PATH", "/usr/bin:/bin",
+			"--setenv", "LANG", "C.UTF-8",
+			"--setenv", "HOME", filepath.Clean(p.workingDir),
 			"--share-net",
 			"--die-with-parent",
 			"--ro-bind", "/usr", "/usr",
@@ -1038,9 +1124,11 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 			"--tmpfs", "/tmp",
 		}
 
-		// Read-only system directories (including /etc for Java security, certificates & host configs)
+		// Allowlist public runtime configuration; never mount all host /etc or /opt.
 		for _, optDir := range []string{
-			"/lib64", "/sbin", "/etc", "/usr/lib/jvm", "/opt",
+			"/lib64", "/sbin", "/usr/lib/jvm",
+			"/etc/hosts", "/etc/hostname", "/etc/nsswitch.conf", "/etc/passwd", "/etc/group",
+			"/etc/ssl/certs", "/etc/ssl/openssl.cnf", "/etc/pki/tls/certs", "/etc/pki/ca-trust", "/etc/pki/java", "/etc/crypto-policies", "/etc/localtime", "/etc/timezone",
 			"/var/lib/ca-certificates", "/usr/share/ca-certificates",
 			"/run/systemd/resolve", "/run/resolvconf", "/run/NetworkManager",
 		} {
@@ -1049,17 +1137,9 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 			}
 		}
 
-		// Critical for DNS resolution: resolve /etc/resolv.conf symlink and bind its real location & file
-		if realResolv, err := filepath.EvalSymlinks("/etc/resolv.conf"); err == nil {
-			resolvDir := filepath.Dir(realResolv)
-			if _, err := os.Stat(resolvDir); err == nil {
-				bwrapArgs = append(bwrapArgs, "--ro-bind-try", resolvDir, resolvDir)
-			}
-			bwrapArgs = append(bwrapArgs, "--ro-bind-try", realResolv, realResolv)
-		}
-		if _, err := os.Stat("/etc/resolv.conf"); err == nil {
-			bwrapArgs = append(bwrapArgs, "--ro-bind-try", "/etc/resolv.conf", "/etc/resolv.conf")
-		}
+		// Bind the resolved DNS file directly at /etc/resolv.conf. Binding its
+		// parent would expose all /etc on hosts using a regular resolver file.
+		bwrapArgs = append(bwrapArgs, sandboxResolverArgs("/etc/resolv.conf")...)
 
 		// Security mask: hide sensitive host credentials from the jail
 		for _, maskPath := range []string{"/etc/shadow", "/etc/gshadow", "/etc/sudoers"} {
@@ -1121,28 +1201,30 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 		if sysErr == nil && systemdPath != "" {
 			sysArgs := []string{
 				"--scope",
+				unitArg,
+				"--property=KillMode=control-group",
 				"-q",
 				fmt.Sprintf("--property=TasksMax=%d", tasksMax),
 			}
-			if p.server != nil && p.server.CPULimitPercent > 0 {
-				sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", p.server.CPULimitPercent))
+			if srv.CPULimitPercent > 0 {
+				sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", srv.CPULimitPercent))
 			}
 			sysArgs = append(sysArgs, bwrapPath)
 			sysArgs = append(sysArgs, bwrapArgs...)
 
 			cmd := exec.Command(systemdPath, sysArgs...)
 			cmd.Dir = p.workingDir
-			return cmd, fmt.Sprintf("Bubblewrap Jailed Filesystem + Systemd Slice (TasksMax=%d)", tasksMax)
+			return cmd, fmt.Sprintf("Bubblewrap filesystem sandbox + Systemd resource limits (TasksMax=%d)", tasksMax), nil
 		}
 
 		cmd := exec.Command(bwrapPath, bwrapArgs...)
 		cmd.Dir = p.workingDir
-		return cmd, "Bubblewrap Jailed Filesystem (unprivileged user namespace)"
+		return cmd, "Bubblewrap filesystem sandbox (no systemd resource limits)", nil
 	}
 
 	cmd := exec.Command(javaBinary, args...)
 	cmd.Dir = p.workingDir
-	return cmd, "Native Host Process"
+	return cmd, "Unrestricted process: bwrap/systemd-run unavailable (NO filesystem isolation)", nil
 }
 
 // GetIdleDuration returns how long the server has been online with 0 players connected.

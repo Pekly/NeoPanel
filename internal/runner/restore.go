@@ -75,6 +75,11 @@ func (m *ServerManager) RestoreBackup(ctx context.Context, srv *database.Server,
 	if m.GetStatus(srv.ID) != "offline" {
 		return result, ErrServerNotStopped
 	}
+	lock, err := acquireRunLock(m.GetWorkingDir(srv.ID))
+	if err != nil {
+		return result, fmt.Errorf("restore refused: %w", err)
+	}
+	defer lock.Close()
 	m.mu.Lock()
 	m.cancelRetryLocked(srv.ID)
 	m.restorePaused.Store(srv.ID, true)

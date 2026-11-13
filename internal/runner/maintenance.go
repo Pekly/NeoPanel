@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -53,7 +54,13 @@ func (m *ServerManager) BeginServerMaintenance(ctx context.Context, id string) (
 		release()
 		return nil, err
 	}
-	return release, nil
+	lock, err := acquireRunLock(m.GetWorkingDir(id))
+	if err != nil {
+		release()
+		return nil, fmt.Errorf("maintenance refused: %w", err)
+	}
+	var once sync.Once
+	return func() { once.Do(func() { lock.Close(); release() }) }, nil
 }
 
 // DeleteServer keeps the gate through runtime removal and the caller's complete

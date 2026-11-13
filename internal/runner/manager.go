@@ -322,6 +322,16 @@ func (m *ServerManager) startLocked(srv *database.Server) error {
 	m.mu.Unlock()
 
 	inst := m.getOrCreateInstance(srv)
+	// Settings changes take effect on the next launch, including reused instances.
+	if m.db != nil {
+		nodeID := srv.NodeID
+		if nodeID == "" {
+			nodeID = "local"
+		}
+		if node, err := m.db.GetNode(nodeID); err == nil && node != nil {
+			inst.SetIsolationConfig(node.IsolationEngine, node.TasksMax)
+		}
+	}
 	return inst.Start()
 }
 
@@ -379,10 +389,8 @@ func (m *ServerManager) Restart(srv *database.Server) error {
 	m.mu.Unlock()
 
 	if ok && inst != nil && inst.GetStatus() != "offline" {
-		_ = inst.Stop(true)
-		deadline := time.Now().Add(2 * time.Second)
-		for inst.GetStatus() != "offline" && time.Now().Before(deadline) {
-			time.Sleep(50 * time.Millisecond)
+		if err := inst.Stop(true); err != nil {
+			return fmt.Errorf("restart refused because shutdown did not complete: %w", err)
 		}
 	}
 	return m.startLocked(srv)
