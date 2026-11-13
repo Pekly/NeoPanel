@@ -26,6 +26,7 @@ type ServerConfig struct {
 	Mode              string `yaml:"mode"` // "standalone" or "behind_proxy"
 	Role              string `yaml:"role"` // "panel" (Master Panel + Daemon) or "node" (Cluster Node Daemon)
 	StartupTimeoutSec int    `yaml:"startup_timeout_seconds"`
+	PublicURL         string `yaml:"public_url"` // Canonical panel origin for passkeys; never a game/node FQDN.
 }
 
 type SFTPConfig struct {
@@ -47,10 +48,11 @@ type TurnstileConfig struct {
 }
 
 type SecurityConfig struct {
-	JWTSecret       string          `yaml:"jwt_secret"`
-	TokenExpiration int             `yaml:"token_expiration_hours"` // in hours (default 72)
-	NodeToken       string          `yaml:"node_token"`             // cluster node authentication token (neo_node_...)
-	Turnstile       TurnstileConfig `yaml:"turnstile"`
+	JWTSecret        string          `yaml:"jwt_secret"`
+	TokenExpiration  int             `yaml:"token_expiration_hours"` // in hours (default 72)
+	NodeToken        string          `yaml:"node_token"`             // cluster node authentication token (neo_node_...)
+	Turnstile        TurnstileConfig `yaml:"turnstile"`
+	PasskeysDisabled bool            `yaml:"passkeys_disabled"`
 }
 
 type JavaConfig struct {

@@ -117,6 +117,21 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) registerRoutes(db *database.DB) {
 	// Public auth, branding & mods runtime routes
+	passkeys := NewPasskeyHandler(r.auth)
+	for route, handler := range map[string]http.HandlerFunc{
+		"POST /api/auth/passkeys/login/begin":  passkeys.LoginBegin,
+		"POST /api/auth/passkeys/login/finish": passkeys.LoginFinish,
+	} {
+		if r.authLimiter != nil {
+			r.mux.Handle(route, r.authLimiter.Middleware(handler))
+		} else {
+			r.mux.HandleFunc(route, handler)
+		}
+	}
+	r.mux.HandleFunc("GET /api/account/passkeys", r.requireAuth(passkeys.List))
+	r.mux.HandleFunc("POST /api/account/passkeys/register/begin", r.requireAuth(passkeys.RegisterBegin))
+	r.mux.HandleFunc("POST /api/account/passkeys/register/finish", r.requireAuth(passkeys.RegisterFinish))
+	r.mux.HandleFunc("DELETE /api/account/passkeys/{passkeyId}", r.requireAuth(passkeys.Delete))
 	r.mux.HandleFunc("GET /api/auth/status", r.auth.Status)
 	r.mux.HandleFunc("POST /api/auth/setup", r.auth.Setup)
 	if r.authLimiter != nil {

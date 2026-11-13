@@ -45,6 +45,10 @@ func InitDB(dbPath string) (*DB, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("schedule task migration failed: %w", err)
 	}
+	if err := db.MigratePasskeys(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("passkey migration failed: %w", err)
+	}
 
 	return db, nil
 }

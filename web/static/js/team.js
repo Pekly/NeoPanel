@@ -71,7 +71,7 @@ function openTeamInviteModal() {
   if (!S.teamState.smtp_configured) { uiAlert({ title: 'Email is not configured', message: 'Ask a panel administrator to enable SMTP under Admin → Email &amp; SMTP, then refresh this page.' }); return; }
   TeamUI.inviteServer = { ...curServer() };
   const container = document.querySelector('#modal-container');
-  container.innerHTML = `<div class="pal" onclick="if(event.target===this&&!TeamUI.sending)closeModal()"><div class="card pbox np-team-modal" role="dialog" aria-modal="true" aria-labelledby="team-invite-title"><div class="np-team-heading"><h2 id="team-invite-title">Invite a teammate</h2><button class="btn sm" onclick="closeModal()" aria-label="Close invitation">×</button></div><p class="mu">Send a registration link for <b>${esc(TeamUI.inviteServer.name)}</b>. The recipient chooses their password; no account is created until they accept.</p>
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this&&!TeamUI.sending)closeModal()"><div class="card pbox np-team-modal" role="dialog" aria-modal="true" aria-labelledby="team-invite-title"><div class="np-team-heading"><h2 id="team-invite-title">Invite a teammate</h2><button class="btn sm" onclick="closeModal()" aria-label="Close invitation">×</button></div><p class="mu">Invite someone to <b>${esc(TeamUI.inviteServer.name)}</b>. New users register through the email link; existing users sign in with their current account. Use the existing account’s username and email if they already have one. People who already have server access cannot be invited again.</p>
     <form id="team-invite-form" onsubmit="submitTeamInvitation(event)"><div class="grid g2"><label class="f"><span>Requested username</span><input id="team-invite-username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{2,31}" autocomplete="off" placeholder="teammate"></label><label class="f"><span>Email address</span><input id="team-invite-email" type="email" required maxlength="254" autocomplete="off" placeholder="teammate@example.com"></label></div><h3>Server permissions</h3><p class="mu">Grant only what this person needs. Permissions apply after acceptance.</p>${teamPermissionChecklist()}<p id="team-invite-error" class="upload-error" role="alert"></p><div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn" type="button" onclick="closeModal()">Cancel</button><button id="team-invite-submit" class="btn pr" type="submit">Send invitation</button></div></form></div></div>`;
   document.querySelector('#team-invite-username').focus();
 }
@@ -82,6 +82,8 @@ async function submitTeamInvitation(event) {
   const form = document.querySelector('#team-invite-form');
   if (!form?.reportValidity()) return;
   const body = { server_id: srv.id, node_id: srv.node_id || 'local', username: document.querySelector('#team-invite-username').value.trim(), email: document.querySelector('#team-invite-email').value.trim(), permissions: [...form.querySelectorAll('[name=permissions]:checked')].map(el => el.value) };
+  const conflict = teamInvitationConflict(body.username, body.email, srv);
+  if (conflict) { document.querySelector('#team-invite-error').textContent = conflict; return; }
   TeamUI.sending = true;
   const button = document.querySelector('#team-invite-submit'); setBtnLoading(button, true, 'Sending…');
   try {
@@ -225,4 +227,18 @@ function formatInvitationExpiry(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+}
+
+function teamInvitationConflict(username, email, server = curServer()) {
+  const name = String(username || '').trim().toLowerCase();
+  const address = String(email || '').trim().toLowerCase();
+  const matches = account => (name && String(account.username || '').toLowerCase() === name) || (address && String(account.email || '').toLowerCase() === address);
+  if ((S.serverSubusers || []).some(matches)) return 'This person already has access to this server. Edit their member permissions instead.';
+  if (S.user && (S.user.role === 'admin' || server?.owner_id === S.user.id) && matches(S.user)) return 'This account already has access as a server owner or panel administrator.';
+  const pending = (S.teamState?.invitations || []).some(invite => {
+    if (!matches(invite)) return false;
+    if (invite.status === 'granting') return true;
+    return invite.status === 'pending' && (!invite.expires_at || new Date(invite.expires_at).getTime() > Date.now());
+  });
+  return pending ? 'An invitation already exists for this person. Use Resend or Revoke in the invitations list.' : '';
 }

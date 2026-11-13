@@ -29,11 +29,12 @@ type Invitation struct {
 
 var (
 	ErrInvitationGone      = errors.New("invitation expired, revoked or already accepted")
-	ErrInvitationConflict  = errors.New("invitation or account conflicts with existing data")
+	ErrInvitationConflict  = errors.New("invitation conflicts with an existing account or pending invitation; use the account's exact username and email, or manage the pending invitation")
 	ErrInvitationIdentity  = errors.New("sign in to the existing account with the invited email; invitations cannot change passwords")
 	ErrInvitationForbidden = errors.New("inviter no longer has permission or server was deleted")
 	ErrInvitationBusy      = errors.New("remote acceptance is unresolved; retry acceptance or revoke before resending")
 	ErrInvitationCooldown  = errors.New("wait at least one minute before resending")
+	ErrInvitationMember    = fmt.Errorf("%w: this account already has server access; manage its existing permissions instead", ErrInvitationConflict)
 )
 
 func (db *DB) MigrateInvitations() error {
@@ -98,21 +99,11 @@ func (db *DB) CreateInvitation(i *Invitation) error {
 	if _, err = tx.Exec(`UPDATE team_invitations SET status='expired' WHERE status='pending' AND expires_at<=?`, time.Now().UTC()); err != nil {
 		return err
 	}
-	// Reserve pending identities across servers without preventing the same established account from being invited elsewhere.
-	var n int
-	err = tx.QueryRow(`SELECT count(*) FROM users WHERE (lower(username)=lower(?) OR lower(email)=?) AND NOT (lower(username)=lower(?) AND lower(email)=?)`, i.Username, i.Email, i.Username, i.Email).Scan(&n)
-	if err != nil {
+	if err = invitationTarget(tx, i, 0); err != nil {
 		return err
 	}
-	if n > 0 {
-		return ErrInvitationConflict
-	}
-	err = tx.QueryRow(`SELECT count(*) FROM team_invitations WHERE status IN ('pending','granting') AND (lower(username)=lower(?) OR email=?) AND NOT (lower(username)=lower(?) AND email=?)`, i.Username, i.Email, i.Username, i.Email).Scan(&n)
-	if err != nil {
+	if err = invitationPending(tx, i); err != nil {
 		return err
-	}
-	if n > 0 {
-		return ErrInvitationConflict
 	}
 	p, _ := json.Marshal(i.Permissions)
 	_, err = tx.Exec(`INSERT INTO team_invitations (`+invitationColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, i.ID, i.ServerID, i.NodeID, i.Username, i.Email, string(p), i.InviterID, i.TokenHash, i.Status, i.DeliveryStatus, i.ExpiresAt, i.CreatedAt, i.LastSentAt)
@@ -143,6 +134,12 @@ func (db *DB) RotateInvitation(id, hash string, now time.Time) (*Invitation, err
 	}
 	if i.Status != "pending" && i.Status != "expired" {
 		return nil, ErrInvitationGone
+	}
+	if err = invitationTarget(tx, i, 0); err != nil {
+		return nil, err
+	}
+	if err = invitationPending(tx, i); err != nil {
+		return nil, err
 	}
 	if now.Sub(i.LastSentAt) < time.Minute {
 		return nil, ErrInvitationCooldown
@@ -318,6 +315,9 @@ func (db *DB) AcceptInvitation(id, hash string, sessionID int, passwordHash stri
 	if err != nil {
 		return nil, err
 	}
+	if err = invitationTarget(tx, i, u.ID); err != nil {
+		return nil, err
+	}
 	if remote != nil {
 		err = remote(i, u, inviter)
 	} else {
@@ -420,6 +420,13 @@ func (db *DB) InvitationMembership(id, server string, userID, inviterID int, rol
 		if n != 1 {
 			return ErrInvitationConflict
 		}
+		var username, email string
+		if err = tx.QueryRow(`SELECT username,email FROM users WHERE id=?`, userID).Scan(&username, &email); err != nil {
+			return err
+		}
+		if err = invitationTarget(tx, &Invitation{ServerID: server, NodeID: "local", Username: username, Email: email}, userID); err != nil {
+			return err
+		}
 		res, e := tx.Exec(`INSERT INTO server_subusers(server_id,user_id,permissions,created_at) VALUES(?,?,?,?)`, server, userID, raw, time.Now().UTC())
 		if e != nil {
 			return ErrInvitationConflict
@@ -477,4 +484,82 @@ func (db *DB) ProvisionInvitationUser(u *User) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// Target checks never grant access. The same checks run under the write transaction
+// at local acceptance and on the worker, after its durable receipt lookup.
+func invitationTarget(tx *sql.Tx, i *Invitation, expectedID int) error {
+	rows, err := tx.Query(`SELECT id,username,email,role FROM users WHERE lower(username)=lower(?) OR lower(email)=lower(?) OR (?<>0 AND id=?)`, i.Username, i.Email, expectedID, expectedID)
+	if err != nil {
+		return err
+	}
+	var u User
+	count := 0
+	for rows.Next() {
+		count++
+		if err = rows.Scan(&u.ID, &u.Username, &u.Email, &u.Role); err != nil {
+			rows.Close()
+			return err
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return nil
+	}
+	if count != 1 || u.Username != i.Username || !strings.EqualFold(u.Email, i.Email) || (expectedID != 0 && expectedID != u.ID) {
+		return ErrInvitationConflict
+	}
+	if u.Role == "admin" {
+		return ErrInvitationMember
+	}
+	if i.NodeID != "local" {
+		return nil
+	}
+	var n int
+	err = tx.QueryRow(`SELECT (SELECT count(*) FROM servers WHERE id=? AND owner_id=?) + (SELECT count(*) FROM server_subusers WHERE server_id=? AND user_id=?)`, i.ServerID, u.ID, i.ServerID, u.ID).Scan(&n)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrInvitationMember
+	}
+	return nil
+}
+
+func invitationPending(tx *sql.Tx, i *Invitation) error {
+	var n int
+	err := tx.QueryRow(`SELECT count(*) FROM team_invitations WHERE id<>? AND (status='granting' OR (status='pending' AND expires_at>?)) AND (lower(username)=lower(?) OR lower(email)=lower(?)) AND (node_id=? AND server_id=? OR NOT (username=? AND lower(email)=lower(?)))`, i.ID, time.Now().UTC(), i.Username, i.Email, i.NodeID, i.ServerID, i.Username, i.Email).Scan(&n)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrInvitationConflict
+	}
+	return nil
+}
+
+func (db *DB) CheckInvitationTarget(i *Invitation) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return invitationTarget(tx, i, 0)
+}
+
+// CheckInvitationTargetOnNode uses the original caller, never the node-token role.
+func (db *DB) CheckInvitationTargetOnNode(server, username, email string, expectedID, callerID int, role string) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err = invitationPermission(tx, server, callerID, role); err != nil {
+		return err
+	}
+	return invitationTarget(tx, &Invitation{ServerID: server, NodeID: "local", Username: username, Email: email}, expectedID)
 }

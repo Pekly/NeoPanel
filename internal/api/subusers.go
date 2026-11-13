@@ -54,6 +54,7 @@ func (h *SubuserHandler) AddSubuser(w http.ResponseWriter, r *http.Request) {
 		InvitationID        string    `json:"invitation_id"`
 		InvitationAction    string    `json:"invitation_action"`
 		InvitationExpiresAt time.Time `json:"invitation_expires_at"`
+		InvitationUserID    int       `json:"invitation_user_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -64,6 +65,19 @@ func (h *SubuserHandler) AddSubuser(w http.ResponseWriter, r *http.Request) {
 		claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
 		if claims == nil || r.Header.Get("X-NeoPanel-User-ID") != strconv.Itoa(claims.UserID) || !invitationID.MatchString(req.InvitationID) {
 			writeError(w, 403, "Invitation grants require a trusted original-caller node hop")
+			return
+		}
+		if req.InvitationAction == "check" {
+			if !invitationUsername.MatchString(req.Username) || req.UserEmail == "" {
+				writeError(w, 400, "Invitation username and email required")
+				return
+			}
+			if err := h.db.CheckInvitationTargetOnNode(serverID, req.Username, req.UserEmail, req.InvitationUserID, claims.UserID, claims.Role); err != nil {
+				invitationError(w, err)
+				return
+			}
+			w.Header().Set("X-NeoPanel-Invitation-Check", "1")
+			writeJSON(w, 200, map[string]string{"status": "available"})
 			return
 		}
 		if req.InvitationAction != "grant" && req.InvitationAction != "revoke" {
@@ -208,6 +222,7 @@ func (h *SubuserHandler) DeleteSubuser(w http.ResponseWriter, r *http.Request) {
 // GetMyPermissions returns current user's effective permissions for a server
 func (h *SubuserHandler) GetMyPermissions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-NeoPanel-Invitations", "1")
+	w.Header().Set("X-NeoPanel-Invitation-Check", "1")
 	serverID := extractIDFromPath(r.URL.Path, "/api/servers/", "/permissions")
 	if serverID == "" {
 		writeError(w, http.StatusBadRequest, "Missing server ID")

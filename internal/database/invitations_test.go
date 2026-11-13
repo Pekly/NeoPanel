@@ -235,3 +235,91 @@ func TestInvitationWorkerReceiptsTombstonesAndProvisioning(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestInvitationOverlapTransactionalChecks(t *testing.T) {
+	for _, kind := range []string{"member", "owner", "admin", "identity"} {
+		t.Run(kind, func(t *testing.T) {
+			db, owner := invitationDB(t)
+			u, err := db.CreateUserWithDetails("pending", "pending@example.test", "original", "user", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			i := seedInvitation(t, db, owner, "pending")
+			switch kind {
+			case "member":
+				_, err = db.AddServerSubuser("server", u.ID, []string{"files.edit"})
+			case "owner":
+				// Keep the original inviter authorized after ownership changes.
+				_, err = db.conn.Exec(`UPDATE users SET role='admin' WHERE id=?`, owner.ID)
+				if err == nil {
+					err = db.UpdateServerOwner("server", u.ID)
+				}
+			case "admin":
+				_, err = db.conn.Exec(`UPDATE users SET role='admin' WHERE id=?`, u.ID)
+			case "identity":
+				_, err = db.conn.Exec(`UPDATE users SET email='changed@example.test' WHERE id=?`, u.ID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = db.RotateInvitation(i.ID, "rotated", time.Now().Add(2*time.Minute)); !errors.Is(err, ErrInvitationConflict) {
+				t.Fatalf("rotate: %v", err)
+			}
+			if _, err = db.AcceptInvitation(i.ID, i.TokenHash, u.ID, "replacement", nil); !errors.Is(err, ErrInvitationConflict) {
+				t.Fatalf("accept: %v", err)
+			}
+			stored, err := db.GetInvitation(i.ID)
+			if err != nil || stored.TokenHash != i.TokenHash || stored.Status != "pending" {
+				t.Fatalf("conflict mutated invite: %+v %v", stored, err)
+			}
+			user, err := db.GetUserByID(u.ID)
+			if err != nil || user.PasswordHash != "original" {
+				t.Fatal("password reset")
+			}
+			if kind != "identity" {
+				if err = db.InvitationMembership("worker-grant", "server", u.ID, owner.ID, "admin", i.Permissions, i.ExpiresAt, false); !errors.Is(err, ErrInvitationMember) {
+					t.Fatalf("worker accepted overlap: %v", err)
+				}
+			}
+			if kind == "member" {
+				ps, err := db.GetUserServerPermissions("server", u.ID)
+				if err != nil || len(ps) != 1 || ps[0] != "files.edit" {
+					t.Fatalf("permissions changed: %v %v", ps, err)
+				}
+			}
+		})
+	}
+}
+
+func TestInvitationExpiredResendCannotStealNewReservation(t *testing.T) {
+	db, owner := invitationDB(t)
+	i := seedInvitation(t, db, owner, "reserved")
+	if _, err := db.conn.Exec(`UPDATE team_invitations SET expires_at=?,last_sent_at=? WHERE id=?`, time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(-2*time.Hour), i.ID); err != nil {
+		t.Fatal(err)
+	}
+	copy := *i
+	copy.ID, copy.TokenHash, copy.Email = "new-reservation", "new-hash", "different@example.test"
+	if err := db.CreateInvitation(&copy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.RotateInvitation(i.ID, "rotated", time.Now()); !errors.Is(err, ErrInvitationConflict) {
+		t.Fatalf("expired resend stole identity: %v", err)
+	}
+}
+
+func TestInvitationWorkerCheckUsesOriginalCaller(t *testing.T) {
+	db, _ := invitationDB(t)
+	u, err := db.CreateUserWithDetails("outsider", "outsider@example.test", "hash", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.CheckInvitationTargetOnNode("server", "available", "available@example.test", 0, u.ID, u.Role); !errors.Is(err, ErrInvitationForbidden) {
+		t.Fatalf("unauthorized target check: %v", err)
+	}
+	if _, err = db.AddServerSubuser("server", u.ID, []string{"subusers.manage"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.CheckInvitationTargetOnNode("server", "available", "available@example.test", 0, u.ID, u.Role); err != nil {
+		t.Fatal(err)
+	}
+}

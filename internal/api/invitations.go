@@ -172,6 +172,9 @@ func (h *InvitationHandler) remote(r *http.Request, node *database.ClusterNode, 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		resp.Body.Close()
 		code := 502
+		if resp.StatusCode == 409 {
+			return nil, &invitationRemoteError{409, "Remote invitation conflicts with an account or existing server access; check the exact username/email and account synchronization, or manage existing permissions"}
+		}
 		if resp.StatusCode == 403 || resp.StatusCode == 404 || resp.StatusCode == 409 || resp.StatusCode == 410 {
 			code = resp.StatusCode
 		}
@@ -201,7 +204,7 @@ func (h *InvitationHandler) authorize(r *http.Request, server string, node *data
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.Header.Get("X-NeoPanel-Invitations") != "1" {
+	if resp.Header.Get("X-NeoPanel-Invitations") != "1" || resp.Header.Get("X-NeoPanel-Invitation-Check") != "1" {
 		return "", &invitationRemoteError{502, "Update the remote node before using invitations"}
 	}
 	var p struct {
@@ -272,8 +275,11 @@ func (h *InvitationHandler) smtp() (*database.SMTPSettings, error) {
 	}
 	return s, nil
 }
-func (h *InvitationHandler) deliver(w http.ResponseWriter, i *database.Invitation, raw, origin string, s *database.SMTPSettings, code int) {
-	err := h.email.SendEmail(s, i.Email, i.Username, "NeoPanel team invitation", "", "You have been invited to join a NeoPanel server as "+i.Username+".\r\nRegister or sign in using this link (expires in 72 hours):\r\n"+origin+"/#invite-token="+raw+"\r\n")
+func (h *InvitationHandler) deliver(w http.ResponseWriter, i *database.Invitation, raw, origin, serverName string, s *database.SMTPSettings, code int) {
+	bodyHTML, bodyPlain, err := invitationEmail(LoadBrandingConfig(h.db), i, serverName, origin+"/#invite-token="+raw)
+	if err == nil {
+		err = h.email.SendEmail(s, i.Email, i.Username, "Team invitation", bodyHTML, bodyPlain)
+	}
 	status := "sent"
 	if err != nil {
 		status = "failed"
@@ -360,7 +366,8 @@ func (h *InvitationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		invitationError(w, e)
 		return
 	}
-	if _, e = h.authorize(r, req.ServerID, n, c); e != nil {
+	serverName, e := h.authorize(r, req.ServerID, n, c)
+	if e != nil {
 		invitationError(w, e)
 		return
 	}
@@ -386,11 +393,15 @@ func (h *InvitationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	i := &database.Invitation{ID: id, ServerID: req.ServerID, NodeID: req.NodeID, Username: req.Username, Email: req.Email, Permissions: req.Permissions, InviterID: c.UserID, TokenHash: hash, Status: "pending", DeliveryStatus: "sending", CreatedAt: now, LastSentAt: now, ExpiresAt: now.Add(72 * time.Hour)}
+	if e = h.checkTarget(r, n, c, i); e != nil {
+		invitationError(w, e)
+		return
+	}
 	if e = h.db.CreateInvitation(i); e != nil {
 		invitationError(w, e)
 		return
 	}
-	h.deliver(w, i, raw, origin, s, 201)
+	h.deliver(w, i, raw, origin, serverName, s, 201)
 }
 func (h *InvitationHandler) managed(r *http.Request) (*database.Invitation, *database.ClusterNode, *JWTClaims, error) {
 	i, e := h.db.GetInvitation(r.PathValue("inviteId"))
@@ -412,7 +423,25 @@ func (h *InvitationHandler) Resend(w http.ResponseWriter, r *http.Request) {
 	if !h.master(w, r) {
 		return
 	}
-	i, _, _, e := h.managed(r)
+	i, n, c, e := h.managed(r)
+	if e != nil {
+		invitationError(w, e)
+		return
+	}
+	// Do not rotate tokens or send mail for an account already granted access.
+	if i.Status == "granting" {
+		invitationError(w, database.ErrInvitationBusy)
+		return
+	}
+	if i.Status != "pending" && i.Status != "expired" {
+		invitationError(w, database.ErrInvitationGone)
+		return
+	}
+	if e = h.checkTarget(r, n, c, i); e != nil {
+		invitationError(w, e)
+		return
+	}
+	serverName, e := h.authorize(r, i.ServerID, n, c)
 	if e != nil {
 		invitationError(w, e)
 		return
@@ -437,7 +466,7 @@ func (h *InvitationHandler) Resend(w http.ResponseWriter, r *http.Request) {
 		invitationError(w, e)
 		return
 	}
-	h.deliver(w, i, raw, origin, s, 200)
+	h.deliver(w, i, raw, origin, serverName, s, 200)
 }
 func (h *InvitationHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	if !h.master(w, r) {
@@ -610,4 +639,32 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"message": "Invitation accepted. Sign in normally to continue.", "server_id": i.ServerID, "node_id": i.NodeID, "username": u.Username, "email": u.Email, "login_required": true})
+}
+
+// Preflight is intentionally read-only; acceptance checks again transactionally.
+// Never run it ahead of remote receipt recovery during acceptance.
+func (h *InvitationHandler) checkTarget(r *http.Request, n *database.ClusterNode, c *JWTClaims, i *database.Invitation) error {
+	if err := h.db.CheckInvitationTarget(i); err != nil {
+		return err
+	}
+	if n == nil {
+		return nil
+	}
+	uid := 0
+	u, err := h.db.GetUserByUsername(i.Username)
+	if err == nil {
+		uid = u.ID
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	body := map[string]any{"invitation_id": i.ID, "invitation_action": "check", "username": i.Username, "user_email": i.Email, "invitation_user_id": uid}
+	resp, err := h.remote(r, n, c, "POST", "/api/servers/"+i.ServerID+"/subusers", body, false)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.Header.Get("X-NeoPanel-Invitation-Check") != "1" {
+		return &invitationRemoteError{502, "Update the remote node before using invitations: safe target checks required"}
+	}
+	return nil
 }

@@ -8544,16 +8544,16 @@ const V = {
     } else if (t === 1) {
       const is2FA = Boolean(S.user?.two_factor_enabled || a.two_factor_enabled);
       tabContent = `<div class="card">
-        <h2>Update Password</h2>
-        <label class="f"><span>Current Password</span><input type="password" id="cur-pw"></label>
+        <h2>Update password</h2>
+        <label class="f"><span>Current password</span><input type="password" id="cur-pw" autocomplete="current-password"></label>
         <label class="f"><span>New password</span><input type="password" id="new-pw"></label>
-        <button class="btn pr" onclick="updatePassword()">Update Password</button>
+        <button class="btn pr" onclick="updatePassword()">Update password</button>
       </div>
       <div class="card" style="margin-top:14px">
         <div class="row sb" style="align-items:center; flex-wrap:wrap; gap:12px;">
           <div>
             <div class="row" style="gap:8px; align-items:center;">
-              <h2 style="margin:0;">Two-Factor Authentication (TOTP)</h2>
+              <h2 style="margin:0;">Two-factor authentication</h2>
               ${is2FA ? '<span class="badge online"><i class="dot"></i>Active</span>' : '<span class="badge offline"><i class="dot"></i>Disabled</span>'}
             </div>
             <span class="mu" style="font-size:13px; display:block; margin-top:4px;">
@@ -8565,10 +8565,11 @@ const V = {
           ${is2FA ? `
             <button type="button" class="btn sm dg" onclick="openDisable2FAModal()">${ic('lock', 13)} Disable 2FA</button>
           ` : `
-            <button type="button" class="btn sm pr" onclick="openEnable2FAWizard()">${ic('shield', 13)} Setup 2FA</button>
+            <button type="button" class="btn sm pr" onclick="openEnable2FAWizard()">${ic('shield', 13)} Set up 2FA</button>
           `}
         </div>
       </div>`;
+      tabContent += renderPasskeySettings();
     } else if (t === 2) {
       tabContent = `<div class="card">
         <h2>Add OpenSSH Public Key</h2>
@@ -11344,6 +11345,7 @@ async function loadAccountData(skipRender = false) {
       }));
     }
     S.acct.h = await computeGravatarHash(S.acct.em);
+    if (S.acct.tab === 1) await loadPasskeys(true);
 
     if (S.acct.tab === 2) {
       S.acct.ssh = (await api('/api/account/ssh-keys')) || [];
@@ -12145,6 +12147,7 @@ function openCreateServerModal() {
 }
 
 function closeModal() {
+  if (typeof abortPasskeyOperation === 'function') abortPasskeyOperation();
   closeAllCustomSelects();
   const container = $('#modal-container');
   if (container) container.innerHTML = '';
@@ -16295,6 +16298,7 @@ function showLoginScreen() {
     ${S.turnstileEnabled ? '<div id="turnstile-login" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
     <button class="lbtn" onclick="submitLogin()">Sign in</button>
+    ${renderPasskeySignIn()}
     ${maintEnabled ? `<button type="button" class="btn sm" style="width:100%; margin-top:10px; justify-content:center;" onclick="S.maintAdminSignInOpen=false; $('#login')?.remove(); showLoginScreen();">Back to Maintenance Notice</button>` : ''}
     <div class="lsm foot">${renderFooterHtml(footTxt)}</div>
   </div>`;
@@ -16367,18 +16371,18 @@ function show2FALoginScreen(tempToken) {
     <div style="width:48px; height:48px; border-radius:14px; background:linear-gradient(135deg,#6366f1,#8b5cf6); color:#fff; display:grid; place-items:center; margin:0 auto 16px; box-shadow:0 4px 14px rgba(99,102,241,0.35);">
       ${ic('shield', 24)}
     </div>
-    <h1 class="lt" style="margin-bottom:6px; font-size:22px;">Two-Factor Authentication</h1>
+    <h1 class="lt" style="margin-bottom:6px; font-size:22px;">Two-factor authentication</h1>
     <p class="mu" style="font-size:13px; line-height:1.45; margin:0 0 18px; text-align:center;">
       Enter the 6-digit code from your authenticator app, or an 8-character recovery code.
     </p>
     <label class="lf" style="margin-bottom:14px;">
       ${ic('key', 16)}
-      <input id="l2fa-code" type="text" maxlength="9" placeholder="000000 or Recovery Code" autofocus autocomplete="one-time-code" style="text-align:center; font-size:18px; font-weight:700; letter-spacing:2px;" onkeydown="if(event.key==='Enter')submit2FALogin('${esc(tempToken)}')">
+      <input id="l2fa-code" type="text" maxlength="9" placeholder="Authentication code" aria-label="Authentication or recovery code" autofocus autocomplete="one-time-code" autocapitalize="off" spellcheck="false" onkeydown="if(event.key==='Enter')submit2FALogin('${esc(tempToken)}')">
     </label>
     <div class="lerr" id="lerr" role="alert"></div>
-    <button class="lbtn" onclick="submit2FALogin('${esc(tempToken)}')">Verify &amp; Sign In</button>
+    <button class="lbtn" onclick="submit2FALogin('${esc(tempToken)}')">Verify &amp; sign in</button>
     <button type="button" class="btn sm" style="width:100%; margin-top:12px; justify-content:center;" onclick="$('#login')?.remove(); showLoginScreen();">
-      &larr; Back to standard login
+      &larr; Back to sign in
     </button>
   `;
   $('#l2fa-code')?.focus();

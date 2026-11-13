@@ -307,6 +307,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.completePrimaryLogin(w, r, user)
+}
+
+// completePrimaryLogin is shared by password and passkey authentication. A passkey
+// proves the primary factor only and must never bypass the account's TOTP policy.
+func (h *AuthHandler) completePrimaryLogin(w http.ResponseWriter, r *http.Request, user *database.User) {
 	if user.TwoFactorEnabled {
 		tempToken, err := h.Generate2FATempToken(user)
 		if err != nil {

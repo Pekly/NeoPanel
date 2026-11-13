@@ -106,3 +106,19 @@ test('future invitation expiry is an explicit date, not a past-file relative lab
   const {c}=setup();const expiry=c.formatInvitationExpiry('2035-06-15T12:00:00Z');
   assert.match(expiry,/2035/);assert.doesNotMatch(expiry,/just now/i);assert.equal(c.formatInvitationExpiry('invalid'),'—');
 });
+
+test('team invitation preflight rejects existing members case-insensitively',()=>{
+  const {c}=setup();c.S.serverSubusers=[{username:'Member',email:'member@example.test'}];
+  assert.match(c.teamInvitationConflict('MEMBER','other@example.test'),/already has access/);
+  assert.match(c.teamInvitationConflict('other','MEMBER@example.test'),/already has access/);
+  assert.equal(c.teamInvitationConflict('newuser','new@example.test'),'');
+});
+test('pending invitation duplicates use resend while expired invites can be replaced',()=>{
+  const {c}=setup();c.S.teamState={invitations:[{username:'invitee',email:'invitee@example.test',status:'pending',expires_at:'2099-01-01'}]};
+  assert.match(c.teamInvitationConflict('invitee','invitee@example.test'),/Resend/);
+  c.S.teamState.invitations[0].expires_at='2000-01-01';assert.equal(c.teamInvitationConflict('invitee','invitee@example.test'),'');
+});
+test('an unresolved granting invitation cannot be duplicated even after its expiry',()=>{
+  const {c}=setup();c.S.teamState={invitations:[{username:'invitee',email:'invitee@example.test',status:'granting',expires_at:'2000-01-01'}]};
+  assert.match(c.teamInvitationConflict('invitee','invitee@example.test'),/invitation already exists/);
+});

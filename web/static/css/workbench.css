@@ -358,3 +358,22 @@ main.np-invitation-card { width: 100%; max-width: 520px; padding: 28px; margin: 
   .np-admin-heading h1 { font-size: 24px; }
   .np-admin-summary { padding: 16px; }
 }
+
+/* Decorated sign-in fields use their wrapper as the single visible focus target. */
+.login .lf input { min-width: 0; }
+html body .login .lf input:focus-visible { outline: none !important; outline-offset: 0; }
+.login .lf:focus-within { border-color: var(--ac); box-shadow: 0 0 0 3px var(--ac-glow); }
+#l2fa-code { text-align: center; font-size: 17px; font-weight: 600; letter-spacing: .08em; font-variant-numeric: tabular-nums; }
+#l2fa-code::placeholder { font-size: 14px; font-weight: 400; letter-spacing: normal; }
+
+.np-auth-divider { display: flex; align-items: center; gap: 12px; color: var(--tx-dim); font-size: 12px; margin: 16px 0; }
+.np-auth-divider::before, .np-auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.np-passkey-signin { width: 100%; min-height: 42px; justify-content: center; background: var(--card-inner); }
+.np-passkey-support { margin-top: 10px; line-height: 1.5; }
+.np-passkey-card > .np-team-heading { align-items: flex-start; }
+.np-passkey-card > .np-team-heading > div:first-child { flex: 1 1 340px; }
+.np-passkey-table { min-width: 520px; }
+.np-passkey-modal { max-width: 480px; padding: 24px; max-height: calc(100dvh - 64px); overflow-y: auto; }
+.np-passkey-modal > p { margin: 10px 0 18px; font-size: 13px; line-height: 1.6; }
+.pal:has(> .np-passkey-modal) { padding: 32px 16px; }
+@media (max-width: 600px) { .np-passkey-modal { padding: 18px; } }
