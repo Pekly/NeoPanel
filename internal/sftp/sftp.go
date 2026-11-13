@@ -1,11 +1,9 @@
-// fix applied on 2026-11-13 17:18
 package sftp
 
 import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/subtle"
 	"crypto/x509"
 	"encoding/binary"
 	"encoding/pem"
@@ -222,23 +220,16 @@ func (s *SFTPServer) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permiss
 		return nil, srvErr
 	}
 
-	authenticated := false
-	if s.cfg != nil && s.cfg.IsNode() {
-		if nodeTok := strings.TrimSpace(s.cfg.Security.NodeToken); nodeTok != "" && len(pass) == len(nodeTok) &&
-			subtle.ConstantTimeCompare(pass, []byte(nodeTok)) == 1 {
-			authenticated = true
-		}
+	// Always authenticate via NeoPanel user credentials.
+	// Node token auth is never valid for SFTP connections – that prevents
+	// clients from connecting as "node-daemon" using the node secret.
+	user, err := s.db.GetUserByEmailOrUsername(username)
+	if err != nil || user == nil {
+		return nil, fmt.Errorf("authentication failed for user %q", rawUser)
 	}
 
-	if !authenticated {
-		user, err := s.db.GetUserByEmailOrUsername(username)
-		if err != nil || user == nil {
-			return nil, fmt.Errorf("authentication failed for user %q", rawUser)
-		}
-
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), pass); err != nil {
-			return nil, fmt.Errorf("invalid password for user %q", rawUser)
-		}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), pass); err != nil {
+		return nil, fmt.Errorf("invalid password for user %q", rawUser)
 	}
 
 	jailPath := s.cfg.Paths.ServersDir
