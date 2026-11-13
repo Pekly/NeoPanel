@@ -10524,12 +10524,18 @@ async function deleteSelectedFiles() {
   toast(`Deleting ${count} items...`);
   const paths = Array.from(S.selectedFiles);
   let failed = 0;
-  for (const path of paths) {
-    try {
-      await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`), { method: 'DELETE' });
-    } catch (e) {
-      failed++;
-    }
+  // Batch deletions to avoid rate-limiting (5 at a time, 350 ms gap between batches)
+  const BATCH = 5;
+  for (let b = 0; b < paths.length; b += BATCH) {
+    const chunk = paths.slice(b, b + BATCH);
+    await Promise.all(chunk.map(async path => {
+      try {
+        await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`), { method: 'DELETE' });
+      } catch (e) {
+        failed++;
+      }
+    }));
+    if (b + BATCH < paths.length) await new Promise(r => setTimeout(r, 350));
   }
   S.selectedFiles.clear();
   if (failed > 0) {
@@ -13500,6 +13506,41 @@ function onReinstallEngineChange(sw) {
     if (typeof sel._cselectRebuild === 'function') sel._cselectRebuild();
   }
   updateReinstallJavaPreview();
+
+  // Show wipe recommendation when switching to an incompatible engine family
+  const form = $('#reinstall-form');
+  const origType = (form?.dataset?.origType || '').toLowerCase();
+  const wipeWarn = $('#reinst-wipe-warn');
+  if (!wipeWarn || !origType) { updateReinstallJavaPreview(); return; }
+
+  // Define incompatible engine families: switching between families requires a wipe
+  const family = t => {
+    if (['paper','purpur','leaf','folia','spigot'].includes(t)) return 'bukkit';
+    if (['fabric','quilt'].includes(t)) return 'fabric';
+    if (['forge','neoforge'].includes(t)) return 'forge';
+    if (['velocity','waterfall','bungeecord'].includes(t)) return 'proxy';
+    if (t === 'vanilla') return 'vanilla';
+    return t;
+  };
+  const changed = origType && sw && origType !== sw;
+  const incompatible = changed && family(origType) !== family(sw);
+  wipeWarn.style.display = incompatible ? '' : 'none';
+  wipeWarn.innerHTML = incompatible ? `
+    <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.45);border-radius:8px;padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start;">
+      <span style="font-size:18px;line-height:1;">⚠️</span>
+      <div>
+        <b style="color:#f87171;">Incompatible engine change detected</b>
+        <p style="margin:4px 0 0;font-size:12.5px;color:var(--text-muted);line-height:1.5;">
+          You are switching from <b>${esc(origType)}</b> to <b>${esc(sw)}</b> which use different plugin/mod formats.
+          Leftover files from the previous engine may cause crashes or conflicts.<br>
+          <b style="color:#fbbf24;">Recommended: wipe all server files before reinstalling.</b>
+        </p>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;cursor:pointer;">
+          <input type="checkbox" id="reinst-wipe-files" style="accent-color:#ef4444;width:14px;height:14px;">
+          <span>Wipe all server files before reinstalling <span style="color:var(--text-muted)">(keeps world &amp; config if checked above)</span></span>
+        </label>
+      </div>
+    </div>` : '';
 }
 
 function openReinstallModal(srvId, nodeId = null) {
@@ -13531,7 +13572,8 @@ function openReinstallModal(srvId, nodeId = null) {
         Reinstalls the server software from <b>mcjarfiles.com</b> official upstream distribution. This will replace the server executable JAR.
       </p>
 
-      <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
+      <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" data-orig-type="${esc(curType)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
+        <div id="reinst-wipe-warn" style="display:none;"></div>
         <label class="f" style="margin-bottom:12px;">
           <span style="display:flex; align-items:center; gap:8px;">
             <span id="reinst-eng-icon">${engineIcon(curType, 18, true)}</span>
@@ -13617,6 +13659,7 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
   const preserveConfig = $('#reinst-config')?.checked ?? true;
   const preservePlugins = $('#reinst-plugins')?.checked ?? true;
   const syncJava = $('#reinst-sync-java')?.checked ?? false;
+  const wipeFiles = $('#reinst-wipe-files')?.checked ?? false;
 
   toast(`Initiating reinstallation of ${software} ${version}...`);
 
@@ -13628,7 +13671,8 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
         version,
         preserve_world: preserveWorld,
         preserve_config: preserveConfig,
-        preserve_plugins: preservePlugins
+        preserve_plugins: preservePlugins,
+        wipe_files: wipeFiles
       })
     });
 

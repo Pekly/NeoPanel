@@ -134,6 +134,7 @@ type ReinstallRequest struct {
 	PreserveWorld   bool   `json:"preserve_world"`
 	PreserveConfig  bool   `json:"preserve_config"`
 	PreservePlugins bool   `json:"preserve_plugins"`
+	WipeFiles       bool   `json:"wipe_files"` // true = wipe all files before reinstall (incompatible egg change)
 }
 
 func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request) {
