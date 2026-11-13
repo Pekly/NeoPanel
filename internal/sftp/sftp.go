@@ -13,6 +13,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -65,9 +67,23 @@ func NewSFTPServer(cfg *config.Config, db *database.DB) (*SFTPServer, error) {
 	if edSigner != nil {
 		sshConf.AddHostKey(edSigner)
 	}
-	sshConf.AddHostKey(rsaSigner)
-	s.sshConf = sshConf
 
+	// Support modern RSA SHA-2 signature algorithms (rsa-sha2-256, rsa-sha2-512) for OpenSSH 8.8+ & modern SFTP clients
+	if algSigner, ok := rsaSigner.(ssh.AlgorithmSigner); ok {
+		if sha2Signer, err := ssh.NewSignerWithAlgorithms(algSigner, []string{
+			ssh.KeyAlgoRSASHA512,
+			ssh.KeyAlgoRSASHA256,
+			ssh.KeyAlgoRSA,
+		}); err == nil {
+			sshConf.AddHostKey(sha2Signer)
+		} else {
+			sshConf.AddHostKey(rsaSigner)
+		}
+	} else {
+		sshConf.AddHostKey(rsaSigner)
+	}
+
+	s.sshConf = sshConf
 	return s, nil
 }
 
@@ -83,6 +99,11 @@ func (s *SFTPServer) Start() error {
 	}
 	s.listener = listener
 	log.Printf("[SFTP] Built-in SFTP server listening on %s", addr)
+
+	// Ensure firewall allows SFTP port on Linux host
+	if _, err := exec.LookPath("ufw"); err == nil {
+		_ = exec.Command("ufw", "allow", fmt.Sprintf("%d/tcp", s.cfg.SFTP.Port)).Run()
+	}
 
 	s.wg.Add(1)
 	go s.acceptLoop()
@@ -111,7 +132,8 @@ func (s *SFTPServer) findServer(targetServer string) *database.Server {
 	for _, sv := range servers {
 		if strings.EqualFold(sv.ID, targetServer) ||
 			strings.EqualFold(sv.Name, targetServer) ||
-			strings.EqualFold(sv.ID, "srv-"+targetServer) {
+			strings.EqualFold(sv.ID, "srv-"+targetServer) ||
+			strings.HasPrefix(strings.ToLower(sv.ID), strings.ToLower(targetServer)) {
 			return sv
 		}
 	}
@@ -124,19 +146,72 @@ func (s *SFTPServer) resolveUsernameAndServer(rawUser string) (string, *database
 		return "", nil, fmt.Errorf("empty username")
 	}
 
-	if idx := strings.LastIndex(rawUser, "."); idx > 0 && idx < len(rawUser)-1 {
-		candUser := rawUser[:idx]
-		candSrv := rawUser[idx+1:]
-		if srv := s.findServer(candSrv); srv != nil {
-			return candUser, srv, nil
+	var candUser, candSrv string
+
+	// 1. Support '#' or '/' delimiter (e.g. user#srv-1 or user/srv-1)
+	if idx := strings.IndexAny(rawUser, "#/"); idx > 0 && idx < len(rawUser)-1 {
+		candUser = rawUser[:idx]
+		candSrv = rawUser[idx+1:]
+	} else if idx := strings.LastIndex(rawUser, "."); idx > 0 && idx < len(rawUser)-1 {
+		// 2. Support '.' delimiter (e.g. user.srv-1)
+		part1 := rawUser[:idx]
+		part2 := rawUser[idx+1:]
+		if srv := s.findServer(part2); srv != nil {
+			candUser = part1
+			candSrv = part2
+		} else if u, _ := s.db.GetUserByEmailOrUsername(rawUser); u != nil {
+			candUser = u.Username
+			candSrv = ""
+		} else {
+			candUser = part1
+			candSrv = part2
 		}
-		if u, err := s.db.GetUserByUsername(rawUser); err == nil && u != nil {
-			return rawUser, nil, nil
-		}
-		return candUser, nil, fmt.Errorf("server %q not found", candSrv)
+	} else {
+		candUser = rawUser
+		candSrv = ""
 	}
 
-	return rawUser, nil, nil
+	u, err := s.db.GetUserByEmailOrUsername(candUser)
+	if err != nil || u == nil {
+		if u2, err2 := s.db.GetUserByEmailOrUsername(rawUser); err2 == nil && u2 != nil {
+			u = u2
+			candSrv = ""
+		} else {
+			return "", nil, fmt.Errorf("user %q not found", candUser)
+		}
+	}
+
+	actualUsername := u.Username
+
+	if candSrv != "" {
+		srv := s.findServer(candSrv)
+		if srv == nil {
+			return actualUsername, nil, fmt.Errorf("server %q not found", candSrv)
+		}
+		if u.Role != "admin" && srv.OwnerID != u.ID {
+			perms, _ := s.db.GetUserServerPermissions(srv.ID, u.ID)
+			if len(perms) == 0 {
+				return actualUsername, nil, fmt.Errorf("access denied to server %q", candSrv)
+			}
+		}
+		return actualUsername, srv, nil
+	}
+
+	// Auto-route single server accounts directly
+	srvs, err := s.db.ListServersForUser(u.ID, u.Role)
+	if err == nil && len(srvs) == 1 {
+		return actualUsername, srvs[0], nil
+	}
+
+	if u.Role == "admin" {
+		return actualUsername, nil, nil
+	}
+
+	if len(srvs) > 0 {
+		return actualUsername, srvs[0], nil
+	}
+
+	return actualUsername, nil, nil
 }
 
 func (s *SFTPServer) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
@@ -155,7 +230,7 @@ func (s *SFTPServer) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permiss
 	}
 
 	if !authenticated {
-		user, err := s.db.GetUserByUsername(username)
+		user, err := s.db.GetUserByEmailOrUsername(username)
 		if err != nil || user == nil {
 			return nil, fmt.Errorf("authentication failed for user %q", rawUser)
 		}
@@ -249,14 +324,19 @@ func (s *SFTPServer) acceptLoop() {
 }
 
 func isSFTPSubsystemRequest(req *ssh.Request) bool {
-	if req == nil || req.Type != "subsystem" || len(req.Payload) < 4 {
+	if req == nil || req.Type != "subsystem" {
 		return false
 	}
-	nameLen := int(binary.BigEndian.Uint32(req.Payload[:4]))
-	if nameLen <= 0 || 4+nameLen > len(req.Payload) {
-		return false
+	if string(req.Payload) == "sftp" {
+		return true
 	}
-	return string(req.Payload[4:4+nameLen]) == "sftp"
+	if len(req.Payload) >= 4 {
+		nameLen := int(binary.BigEndian.Uint32(req.Payload[:4]))
+		if nameLen > 0 && 4+nameLen <= len(req.Payload) {
+			return string(req.Payload[4:4+nameLen]) == "sftp"
+		}
+	}
+	return false
 }
 
 func (s *SFTPServer) handleConnection(netConn net.Conn) {
@@ -264,9 +344,12 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 
 	sshConn, chans, reqs, err := ssh.NewServerConn(netConn, s.sshConf)
 	if err != nil {
+		log.Printf("[SFTP] Handshake/auth failed from %s: %v", netConn.RemoteAddr(), err)
 		return
 	}
 	defer sshConn.Close()
+
+	log.Printf("[SFTP] Client %s connected as %q", netConn.RemoteAddr(), sshConn.User())
 
 	go ssh.DiscardRequests(reqs)
 
@@ -292,16 +375,50 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 		go func(ch ssh.Channel, in <-chan *ssh.Request, root string) {
 			defer ch.Close()
 
+			subsystemAccepted := false
+			for req := range in {
+				ok := false
+				switch req.Type {
+				case "subsystem":
+					if isSFTPSubsystemRequest(req) {
+						ok = true
+						subsystemAccepted = true
+					}
+				case "exec":
+					// Fallback for SFTP clients that issue exec sftp-server
+					cmd := string(req.Payload)
+					if len(req.Payload) >= 4 {
+						cmdLen := int(binary.BigEndian.Uint32(req.Payload[:4]))
+						if 4+cmdLen <= len(req.Payload) {
+							cmd = string(req.Payload[4 : 4+cmdLen])
+						}
+					}
+					if strings.Contains(strings.ToLower(cmd), "sftp") {
+						ok = true
+						subsystemAccepted = true
+					}
+				case "pty-req", "env", "window-change":
+					// Accept terminal/environment requests from WinSCP/Cyberduck without failing
+					ok = true
+				case "shell":
+					_ = req.Reply(true, nil)
+					fmt.Fprintf(ch, "NeoPanel SFTP Service\r\n\r\nThis port is reserved exclusively for SFTP file transfers (FileZilla, WinSCP, Cyberduck, etc.).\r\nDirect interactive shell commands are disabled.\r\n")
+					return
+				}
+				_ = req.Reply(ok, nil)
+				if subsystemAccepted {
+					break
+				}
+			}
+
+			if !subsystemAccepted {
+				return
+			}
+
+			// Drain any remaining out-of-band requests in background
 			go func() {
 				for req := range in {
-					ok := false
-					switch req.Type {
-					case "subsystem":
-						ok = isSFTPSubsystemRequest(req)
-					case "env":
-						ok = true
-					}
-					_ = req.Reply(ok, nil)
+					_ = req.Reply(req.Type == "env" || req.Type == "window-change", nil)
 				}
 			}()
 
@@ -389,12 +506,20 @@ type chrootHandler struct {
 	rootDir string
 }
 
-func (h *chrootHandler) safePath(reqPath string) (string, error) {
-	cleanRel := filepath.Clean("/" + reqPath)
-	cleanRel = strings.TrimPrefix(cleanRel, "/")
-	cleanRel = strings.TrimPrefix(cleanRel, "\\")
+func (h *chrootHandler) RealPath(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" || p == "." || p == "/" {
+		return "/", nil
+	}
+	clean := path.Clean("/" + strings.ReplaceAll(p, "\\", "/"))
+	return clean, nil
+}
 
-	full := filepath.Clean(filepath.Join(h.rootDir, cleanRel))
+func (h *chrootHandler) safePath(reqPath string) (string, error) {
+	p := path.Clean("/" + strings.ReplaceAll(reqPath, "\\", "/"))
+	p = strings.TrimPrefix(p, "/")
+
+	full := filepath.Clean(filepath.Join(h.rootDir, filepath.FromSlash(p)))
 
 	rel, err := filepath.Rel(h.rootDir, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -422,10 +547,8 @@ func (h *chrootHandler) openFileInternal(r *sftp.Request) (*os.File, error) {
 	var flags int
 	wantsWrite := pflags.Write || pflags.Append || pflags.Creat || pflags.Trunc
 	switch {
-	case pflags.Read && wantsWrite:
-		flags = os.O_RDWR
 	case wantsWrite:
-		flags = os.O_WRONLY
+		flags = os.O_RDWR
 	default:
 		flags = os.O_RDONLY
 	}
@@ -480,6 +603,20 @@ func (h *chrootHandler) Filecmd(r *sftp.Request) error {
 		return os.RemoveAll(absPath)
 	case "Mkdir":
 		return os.MkdirAll(absPath, 0755)
+	case "Symlink":
+		targetPath, err := h.safePath(r.Target)
+		if err != nil {
+			return err
+		}
+		_ = os.Remove(targetPath)
+		return os.Symlink(absPath, targetPath)
+	case "Link":
+		targetPath, err := h.safePath(r.Target)
+		if err != nil {
+			return err
+		}
+		_ = os.Remove(targetPath)
+		return os.Link(absPath, targetPath)
 	case "Setstat":
 		attrFlags := r.AttrFlags()
 		attrs := r.Attributes()
@@ -523,6 +660,15 @@ func (f fileListerAt) ListAt(ls []os.FileInfo, offset int64) (int, error) {
 	return n, nil
 }
 
+type symlinkFileInfo struct {
+	os.FileInfo
+	target string
+}
+
+func (s symlinkFileInfo) Name() string {
+	return s.target
+}
+
 func (h *chrootHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 	absPath, err := h.safePath(r.Filepath)
 	if err != nil {
@@ -554,6 +700,16 @@ func (h *chrootHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 			return nil, err
 		}
 		return fileListerAt([]os.FileInfo{fi}), nil
+	case "Readlink":
+		target, err := os.Readlink(absPath)
+		if err != nil {
+			return nil, err
+		}
+		fi, err := os.Lstat(absPath)
+		if err != nil {
+			return nil, err
+		}
+		return fileListerAt([]os.FileInfo{symlinkFileInfo{FileInfo: fi, target: target}}), nil
 	default:
 		return nil, fmt.Errorf("unsupported list method: %s", r.Method)
 	}

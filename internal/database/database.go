@@ -635,11 +635,59 @@ func (db *DB) DeleteSSHKey(userID, keyID int) error {
 }
 
 func (db *DB) GetAllSSHKeysForUser(username string) ([]*SSHKey, error) {
-	user, err := db.GetUserByUsername(username)
+	user, err := db.GetUserByEmailOrUsername(username)
 	if err != nil || user == nil {
 		return nil, err
 	}
 	return db.ListSSHKeys(user.ID)
+}
+
+func (db *DB) GetAllSSHKeys() ([]*SSHKey, error) {
+	rows, err := db.conn.Query("SELECT id, user_id, name, fingerprint, public_key, created_at FROM ssh_keys")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var keys []*SSHKey
+	for rows.Next() {
+		k := &SSHKey{}
+		if err := rows.Scan(&k.ID, &k.UserID, &k.Name, &k.Fingerprint, &k.PublicKey, &k.CreatedAt); err == nil {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+func (db *DB) UpsertSyncedSSHKey(id, userID int, name, publicKey string) error {
+	publicKey = strings.TrimSpace(publicKey)
+	if publicKey == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	var existingID int
+	err := db.conn.QueryRow("SELECT id FROM ssh_keys WHERE id = ?", id).Scan(&existingID)
+	if err == nil {
+		_, err = db.conn.Exec("UPDATE ssh_keys SET user_id=?, name=?, public_key=? WHERE id=?", userID, name, publicKey, id)
+		return err
+	}
+	_, err = db.conn.Exec("INSERT INTO ssh_keys (id, user_id, name, fingerprint, public_key, created_at) VALUES (?, ?, ?, '', ?, ?)", id, userID, name, publicKey, now)
+	return err
+}
+
+func (db *DB) UpsertSyncedUser(id int, username, email, passwordHash, role string) error {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return fmt.Errorf("empty username")
+	}
+	now := time.Now().UTC()
+	var existingID int
+	err := db.conn.QueryRow("SELECT id FROM users WHERE username = ? OR id = ?", username, id).Scan(&existingID)
+	if err == nil {
+		_, err = db.conn.Exec("UPDATE users SET username=?, email=?, password_hash=?, role=? WHERE id=?", username, email, passwordHash, role, existingID)
+		return err
+	}
+	_, err = db.conn.Exec("INSERT INTO users (id, username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, username, email, passwordHash, role, now)
+	return err
 }
 
 // --- API Keys ---

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -14,7 +15,9 @@ import (
 	"image/png"
 	"io"
 	"math"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,16 +33,18 @@ import (
 )
 
 type ServerHandler struct {
-	cfg     *config.Config
-	db      *database.DB
-	manager *runner.ServerManager
+	cfg        *config.Config
+	db         *database.DB
+	manager    *runner.ServerManager
+	httpClient *http.Client
 }
 
 func NewServerHandler(cfg *config.Config, db *database.DB, manager *runner.ServerManager) *ServerHandler {
 	return &ServerHandler{
-		cfg:     cfg,
-		db:      db,
-		manager: manager,
+		cfg:        cfg,
+		db:         db,
+		manager:    manager,
+		httpClient: &http.Client{Timeout: 6 * time.Second},
 	}
 }
 
@@ -89,10 +94,18 @@ func (h *ServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
 
 	result := make([]ServerWithStats, len(servers))
 	for i, s := range servers {
+		workDir := h.manager.GetWorkingDir(s.ID)
+		if s.IconURL == "" {
+			if s.NodeID != "" && s.NodeID != "local" {
+				s.IconURL = fmt.Sprintf("/api/servers/%s/icon", s.ID)
+			} else if fi, err := os.Stat(filepath.Join(workDir, "server-icon.png")); err == nil && !fi.IsDir() {
+				s.IconURL = fmt.Sprintf("/api/servers/%s/icon", s.ID)
+			}
+		}
 		result[i] = ServerWithStats{
 			Server: s,
 			Stats:  h.manager.GetStats(s),
-			MOTD:   readServerMOTD(h.manager.GetWorkingDir(s.ID)),
+			MOTD:   readServerMOTD(workDir),
 		}
 	}
 
@@ -115,6 +128,15 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "Access denied to this server"})
 				return
 			}
+		}
+	}
+
+	workDir := h.manager.GetWorkingDir(server.ID)
+	if server.IconURL == "" {
+		if server.NodeID != "" && server.NodeID != "local" {
+			server.IconURL = fmt.Sprintf("/api/servers/%s/icon", server.ID)
+		} else if fi, err := os.Stat(filepath.Join(workDir, "server-icon.png")); err == nil && !fi.IsDir() {
+			server.IconURL = fmt.Sprintf("/api/servers/%s/icon", server.ID)
 		}
 	}
 
@@ -645,6 +667,33 @@ func (h *ServerHandler) UploadServerIcon(w http.ResponseWriter, r *http.Request)
 	iconURL := fmt.Sprintf("/api/servers/%s/icon?t=%d", serverID, time.Now().Unix())
 	_ = h.db.UpdateServerIcon(serverID, iconURL)
 
+	if server.NodeID != "" && server.NodeID != "local" {
+		if node, _ := h.db.GetNode(server.NodeID); node != nil && node.BaseURL != "" {
+			go func() {
+				if f, err := os.Open(destPath); err == nil {
+					defer f.Close()
+					var b bytes.Buffer
+					mw := multipart.NewWriter(&b)
+					if part, err := mw.CreateFormFile("icon", "server-icon.png"); err == nil {
+						_, _ = io.Copy(part, f)
+						_ = mw.Close()
+						targetURL := strings.TrimRight(node.BaseURL, "/") + "/api/servers/" + url.PathEscape(serverID) + "/icon"
+						req, err := http.NewRequest(http.MethodPost, targetURL, &b)
+						if err == nil {
+							req.Header.Set("Authorization", "Bearer "+node.APIToken)
+							req.Header.Set("Content-Type", mw.FormDataContentType())
+							client := &http.Client{Timeout: 10 * time.Second}
+							resp, err := client.Do(req)
+							if err == nil {
+								_ = resp.Body.Close()
+							}
+						}
+					}
+				}
+			}()
+		}
+	}
+
 	logAudit(h.db, r, "server_icon_upload", fmt.Sprintf("Uploaded custom 64x64 server-icon.png for %s (%s)", server.Name, header.Filename))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -758,6 +807,36 @@ func colorToRGBA(c color.Color) color.RGBA {
 // GetServerIcon returns the server's server-icon.png
 func (h *ServerHandler) GetServerIcon(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	server, _ := h.db.GetServer(serverID)
+	if server != nil && server.NodeID != "" && server.NodeID != "local" {
+		node, _ := h.db.GetNode(server.NodeID)
+		if node != nil && node.BaseURL != "" {
+			targetURL := strings.TrimRight(node.BaseURL, "/") + "/api/servers/" + url.PathEscape(serverID) + "/icon"
+			if r.URL.RawQuery != "" {
+				targetURL += "?" + r.URL.RawQuery
+			}
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
+			if err == nil {
+				if node.APIToken != "" {
+					req.Header.Set("Authorization", "Bearer "+node.APIToken)
+				}
+				resp, err := h.httpClient.Do(req)
+				if err == nil {
+					defer resp.Body.Close()
+					if resp.StatusCode == http.StatusOK {
+						if ct := resp.Header.Get("Content-Type"); ct != "" {
+							w.Header().Set("Content-Type", ct)
+						}
+						w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+						w.WriteHeader(http.StatusOK)
+						_, _ = io.Copy(w, resp.Body)
+						return
+					}
+				}
+			}
+		}
+	}
+
 	workDir := h.manager.GetWorkingDir(serverID)
 	iconPath := filepath.Join(workDir, "server-icon.png")
 
@@ -768,12 +847,37 @@ func (h *ServerHandler) GetServerIcon(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, "/static/img/default-server-icon.png", http.StatusTemporaryRedirect)
+	if r.URL.Query().Get("default") == "none" {
+		http.NotFound(w, r)
+		return
+	}
+
+	defaultPath := filepath.Join("web", "static", "img", "default-server-icon.png")
+	if fi, err := os.Stat(defaultPath); err == nil && !fi.IsDir() {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		http.ServeFile(w, r, defaultPath)
+		return
+	}
+
+	http.NotFound(w, r)
 }
 
 // DeleteServerIcon removes the custom icon
 func (h *ServerHandler) DeleteServerIcon(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	server, _ := h.db.GetServer(serverID)
+	if server != nil && server.NodeID != "" && server.NodeID != "local" {
+		if node, _ := h.db.GetNode(server.NodeID); node != nil && node.BaseURL != "" {
+			targetURL := strings.TrimRight(node.BaseURL, "/") + "/api/servers/" + url.PathEscape(serverID) + "/icon"
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodDelete, targetURL, nil)
+			if err == nil {
+				req.Header.Set("Authorization", "Bearer "+node.APIToken)
+				_, _ = h.httpClient.Do(req)
+			}
+		}
+	}
+
 	workDir := h.manager.GetWorkingDir(serverID)
 	_ = os.Remove(filepath.Join(workDir, "server-icon.png"))
 	_ = h.db.UpdateServerIcon(serverID, "")

@@ -246,6 +246,17 @@ func (r *Router) registerRoutes(db *database.DB) {
 			username = userClaims.Username
 		}
 		host := r.nodes.resolveLocalFQDN(req.Host)
+		if srv.NodeID != "" && srv.NodeID != "local" {
+			if node, _ := db.GetNode(srv.NodeID); node != nil {
+				if strings.TrimSpace(node.FQDN) != "" {
+					host = strings.TrimSpace(node.FQDN)
+				} else if node.BaseURL != "" {
+					if u, err := url.Parse(node.BaseURL); err == nil && u.Hostname() != "" {
+						host = u.Hostname()
+					}
+				}
+			}
+		}
 		portStr := fmt.Sprintf("%d", r.cfg.SFTP.Port)
 		sftpUser := fmt.Sprintf("%s.%s", username, srv.ID)
 		listening := false

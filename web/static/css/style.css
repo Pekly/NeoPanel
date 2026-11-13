@@ -4635,7 +4635,7 @@ html[data-theme="light"] .act-cat-nodes {
   width: 24px;
   height: 24px;
   border-radius: 0;
-  object-fit: contain;
+  object-fit: cover;
   flex-shrink: 0;
   border: none;
   background: transparent;
@@ -5108,10 +5108,10 @@ a.sift-server-card {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, 
-    rgba(11, 15, 25, 0.78) 0%, 
-    rgba(11, 15, 25, 0.18) 42%, 
-    rgba(11, 15, 25, 0.68) 100%);
+  background: linear-gradient(90deg,
+      rgba(11, 15, 25, 0.78) 0%,
+      rgba(11, 15, 25, 0.18) 42%,
+      rgba(11, 15, 25, 0.68) 100%);
   pointer-events: none;
 }
 
@@ -5120,7 +5120,7 @@ a.sift-server-card {
   transform: scale(1.015);
 }
 
-.sift-server-card.vm-dash-row > *:not(.vm-dash-row-bg) {
+.sift-server-card.vm-dash-row>*:not(.vm-dash-row-bg) {
   position: relative;
   z-index: 1;
 }

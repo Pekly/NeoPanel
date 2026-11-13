@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -210,6 +211,10 @@ func (h *NodeHandler) probeRemote(ctx context.Context, baseURL, apiToken string)
 			}
 		}
 	}
+
+	go func() {
+		_ = h.SyncAuthToNode(context.Background(), baseURL, apiToken)
+	}()
 
 	return true, &sysInfo, srvCount, latency, ""
 }
@@ -907,4 +912,93 @@ func (h *NodeHandler) ProxyWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	<-errCh
+}
+
+type SyncAuthRequest struct {
+	Users []SyncedUser `json:"users"`
+	Keys  []SyncedKey  `json:"keys"`
+}
+
+type SyncedUser struct {
+	ID           int    `json:"id"`
+	Username     string `json:"username"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"password_hash"`
+	Role         string `json:"role"`
+}
+
+type SyncedKey struct {
+	ID        int    `json:"id"`
+	UserID    int    `json:"user_id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+}
+
+func (h *NodeHandler) SyncAuthHandler(w http.ResponseWriter, r *http.Request) {
+	var req SyncAuthRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid auth sync payload: " + err.Error()})
+		return
+	}
+	for _, u := range req.Users {
+		_ = h.db.UpsertSyncedUser(u.ID, u.Username, u.Email, u.PasswordHash, u.Role)
+	}
+	for _, k := range req.Keys {
+		_ = h.db.UpsertSyncedSSHKey(k.ID, k.UserID, k.Name, k.PublicKey)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":       "success",
+		"synced_users": len(req.Users),
+		"synced_keys":  len(req.Keys),
+	})
+}
+
+func (h *NodeHandler) SyncAuthToNode(ctx context.Context, baseURL, apiToken string) error {
+	users, err := h.db.ListUsers()
+	if err != nil || len(users) == 0 {
+		return err
+	}
+	var syncUsers []SyncedUser
+	for _, u := range users {
+		syncUsers = append(syncUsers, SyncedUser{
+			ID:           u.ID,
+			Username:     u.Username,
+			Email:        u.Email,
+			PasswordHash: u.PasswordHash,
+			Role:         u.Role,
+		})
+	}
+	keys, _ := h.db.GetAllSSHKeys()
+	var syncKeys []SyncedKey
+	for _, k := range keys {
+		syncKeys = append(syncKeys, SyncedKey{
+			ID:        k.ID,
+			UserID:    k.UserID,
+			Name:      k.Name,
+			PublicKey: k.PublicKey,
+		})
+	}
+
+	payload, err := json.Marshal(SyncAuthRequest{
+		Users: syncUsers,
+		Keys:  syncKeys,
+	})
+	if err != nil {
+		return err
+	}
+
+	targetURL := strings.TrimRight(baseURL, "/") + "/api/cluster/sync-auth"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	return nil
 }
