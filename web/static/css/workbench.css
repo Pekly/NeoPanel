@@ -298,3 +298,42 @@ tr:hover td { background: var(--pn2); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
+
+/* Team access, invitation registration and ordered automation. */
+.np-team-stack { display: grid; gap: 20px; }
+.np-team-stack > .card { padding: 22px; }
+.np-team-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.np-team-heading h2, .np-team-heading h3 { margin: 0; }
+.np-team-heading p, .np-team-modal > p, .np-schedule-modal > p { margin-top: 6px; font-size: 13px; line-height: 1.6; }
+.np-team-heading .row, .np-team-invitations .row { flex-wrap: wrap; gap: 8px; }
+.np-team-stack #subusers-list-wrap table { min-width: 620px; }
+.np-team-invitations { min-width: 720px; }
+.np-team-invitations td:first-child { overflow-wrap: anywhere; }
+.np-team-notice { padding: 12px 14px; border: 1px solid var(--border-light); border-radius: 8px; background: var(--card-inner); color: var(--tx-muted); font-size: 13px; line-height: 1.6; margin: 14px 0; }
+.np-team-modal, .np-schedule-modal { padding: 24px; max-width: 680px; max-height: calc(100dvh - 64px); overflow-y: auto; }
+.np-team-modal form, .np-schedule-modal form { margin-top: 18px; }
+.np-team-modal .subuser-perm-item b, .np-team-modal .subuser-perm-item .mu { display: block; }
+.np-team-modal .subuser-perm-item b { font-size: 13px; }
+.np-team-modal .subuser-perm-item .mu { font-size: 11px; line-height: 1.4; }
+.np-invitation-shell { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px 16px; overflow-y: auto; background: var(--bg-deep); }
+main.np-invitation-card { width: 100%; max-width: 520px; padding: 28px; margin: auto; }
+.np-invitation-card h1 { font-size: 25px; overflow-wrap: anywhere; margin: 0 0 12px; }
+.np-invitation-card > p { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; margin-bottom: 16px; }
+.np-invitation-card .brand { padding: 0 0 26px; }
+.np-invite-permissions { padding: 12px; border: 1px solid var(--border); border-radius: 8px; margin: 16px 0; font-size: 13px; }
+.np-invite-permissions summary, .np-task-summary summary { cursor: pointer; }
+.np-invite-permissions ul, .np-task-summary ol { margin: 10px 0 0 20px; line-height: 1.7; }
+.np-schedule-step { padding: 16px; background: var(--card-inner); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
+.np-schedule-step .np-team-heading { margin-bottom: 12px; }
+.np-continue-step { margin: 16px 0; font-size: 12px; gap: 10px; align-items: flex-start; }
+.np-continue-step input { flex-shrink: 0; }
+.np-task-summary { min-width: 90px; max-width: 260px; font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .np-team-stack > .card, .np-team-modal, .np-schedule-modal, main.np-invitation-card { padding: 18px; }
+  .np-team-heading > .row { width: 100%; }
+  .np-team-heading .btn { min-height: 38px; }
+  .np-schedule-step { padding: 12px; }
+}
+.np-restore-notice { margin-top: 16px; }
+.np-restore-notice p { margin: 8px 0 0; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.pal:has(> .np-team-modal), .pal:has(> .np-schedule-modal) { padding: 32px 16px; }

@@ -940,11 +940,35 @@ func (h *NodeHandler) SyncAuthHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid auth sync payload: " + err.Error()})
 		return
 	}
+	if r.Header.Get("X-NeoPanel-Invitation-Provision") == "1" {
+		if len(req.Users) != 1 || len(req.Keys) != 0 {
+			writeError(w, 400, "Expected one invitation account")
+			return
+		}
+		u := req.Users[0]
+		if u.ID <= 0 || !invitationUsername.MatchString(u.Username) || (u.Role != "user" && u.Role != "admin") {
+			writeError(w, 400, "Invalid invitation account")
+			return
+		}
+		if err := h.db.ProvisionInvitationUser(&database.User{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Role: u.Role}); err != nil {
+			invitationError(w, err)
+			return
+		}
+		w.Header().Set("X-NeoPanel-Invitation-Provision", "1")
+		writeJSON(w, 200, map[string]string{"status": "success"})
+		return
+	}
 	for _, u := range req.Users {
-		_ = h.db.UpsertSyncedUser(u.ID, u.Username, u.Email, u.PasswordHash, u.Role)
+		if err := h.db.UpsertSyncedUser(u.ID, u.Username, u.Email, u.PasswordHash, u.Role); err != nil {
+			writeError(w, 409, "User synchronization failed")
+			return
+		}
 	}
 	for _, k := range req.Keys {
-		_ = h.db.UpsertSyncedSSHKey(k.ID, k.UserID, k.Name, k.PublicKey)
+		if err := h.db.UpsertSyncedSSHKey(k.ID, k.UserID, k.Name, k.PublicKey); err != nil {
+			writeError(w, 409, "Key synchronization failed")
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"status":       "success",
@@ -1000,5 +1024,8 @@ func (h *NodeHandler) SyncAuthToNode(ctx context.Context, baseURL, apiToken stri
 		return err
 	}
 	_ = resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("node auth synchronization failed: HTTP %d", resp.StatusCode)
+	}
 	return nil
 }

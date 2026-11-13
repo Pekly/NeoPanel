@@ -91,7 +91,7 @@ func (lim *IPRateLimiter) Allow(r *http.Request) bool {
 	}
 
 	now := time.Now()
-	isAuth := strings.HasPrefix(r.URL.Path, "/api/auth/login") || strings.HasPrefix(r.URL.Path, "/api/auth/setup")
+	isAuth := strings.HasPrefix(r.URL.Path, "/api/auth/login") || strings.HasPrefix(r.URL.Path, "/api/auth/setup") || strings.HasPrefix(r.URL.Path, "/api/auth/invitations/")
 
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
@@ -162,4 +162,3 @@ func (lim *IPRateLimiter) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-

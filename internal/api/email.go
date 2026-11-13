@@ -7,7 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"mime"
+	"net"
 	"net/http"
+	"net/mail"
 	"net/smtp"
 	"strconv"
 	"strings"
@@ -114,7 +117,6 @@ func (h *EmailHandler) SendEmail(cfg *database.SMTPSettings, toEmail, toName, su
 	if cfg == nil || !cfg.Enabled || cfg.Host == "" {
 		return fmt.Errorf("SMTP is not configured or disabled")
 	}
-
 	from := cfg.FromEmail
 	if from == "" {
 		from = cfg.Username
@@ -123,110 +125,63 @@ func (h *EmailHandler) SendEmail(cfg *database.SMTPSettings, toEmail, toName, su
 	if fromName == "" {
 		fromName = "NeoPanel"
 	}
-
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-
-	// Build MIME multipart email
-	var msg bytes.Buffer
-	msg.WriteString(fmt.Sprintf("From: %s <%s>\r\n", fromName, from))
-	if toName != "" {
-		msg.WriteString(fmt.Sprintf("To: %s <%s>\r\n", toName, toEmail))
-	} else {
-		msg.WriteString(fmt.Sprintf("To: %s\r\n", toEmail))
+	for _, value := range []string{from, toEmail, fromName, toName, subject} {
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("invalid email header")
+		}
 	}
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
-	msg.WriteString("MIME-Version: 1.0\r\n")
-
+	for _, value := range []string{from, toEmail} {
+		address, err := mail.ParseAddress(value)
+		if err != nil || address.Address != value {
+			return fmt.Errorf("invalid email address")
+		}
+	}
+	var msg bytes.Buffer
+	msg.WriteString("From: " + (&mail.Address{Name: fromName, Address: from}).String() + "\r\n")
+	msg.WriteString("To: " + (&mail.Address{Name: toName, Address: toEmail}).String() + "\r\n")
+	msg.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\nMIME-Version: 1.0\r\n")
 	boundary := fmt.Sprintf("np_boundary_%d", time.Now().UnixNano())
 	msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary))
-
-	// Plain text body
-	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
-	msg.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
-	msg.WriteString("Content-Transfer-Encoding: 7bit\r\n\r\n")
-	msg.WriteString(bodyPlain)
-	msg.WriteString("\r\n\r\n")
-
-	// HTML body
+	msg.WriteString("--" + boundary + "\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + bodyPlain + "\r\n\r\n")
 	if bodyHTML != "" {
-		msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
-		msg.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
-		msg.WriteString("Content-Transfer-Encoding: 7bit\r\n\r\n")
-		msg.WriteString(bodyHTML)
-		msg.WriteString("\r\n\r\n")
+		msg.WriteString("--" + boundary + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + bodyHTML + "\r\n\r\n")
 	}
-	msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
-
-	var auth smtp.Auth
-	if cfg.Username != "" {
-		auth = smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
-	}
-
-	tlsConfig := &tls.Config{
-		ServerName:         cfg.Host,
-		InsecureSkipVerify: false,
-	}
-
-	// Port 465 or direct SSL/TLS
-	if cfg.Port == 465 || strings.ToLower(cfg.Encryption) == "tls" || strings.ToLower(cfg.Encryption) == "ssl" {
-		conn, err := tls.Dial("tcp", addr, tlsConfig)
-		if err != nil {
-			return fmt.Errorf("SSL/TLS connection to %s failed: %w", addr, err)
-		}
-		defer conn.Close()
-
-		client, err := smtp.NewClient(conn, cfg.Host)
-		if err != nil {
-			return fmt.Errorf("SMTP client initialization failed: %w", err)
-		}
-		defer client.Close()
-
-		if auth != nil {
-			if ok, _ := client.Extension("AUTH"); ok {
-				if err = client.Auth(auth); err != nil {
-					return fmt.Errorf("SMTP authentication failed: %w", err)
-				}
-			}
-		}
-		if err = client.Mail(from); err != nil {
-			return fmt.Errorf("MAIL FROM failed: %w", err)
-		}
-		if err = client.Rcpt(toEmail); err != nil {
-			return fmt.Errorf("RCPT TO failed: %w", err)
-		}
-		w, err := client.Data()
-		if err != nil {
-			return fmt.Errorf("DATA command failed: %w", err)
-		}
-		if _, err = w.Write(msg.Bytes()); err != nil {
-			return fmt.Errorf("failed to write email body: %w", err)
-		}
-		return w.Close()
-	}
-
-	// Port 587 or STARTTLS / Plain
-	client, err := smtp.Dial(addr)
+	msg.WriteString("--" + boundary + "--\r\n")
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to connect to SMTP host %s: %w", addr, err)
+		return fmt.Errorf("SMTP connection failed: %w", err)
+	}
+	defer conn.Close()
+	if err = conn.SetDeadline(time.Now().Add(20 * time.Second)); err != nil {
+		return err
+	}
+	tlsConfig := &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}
+	enc := strings.ToLower(cfg.Encryption)
+	directTLS := cfg.Port == 465 || enc == "tls" || enc == "ssl"
+	if directTLS {
+		conn = tls.Client(conn, tlsConfig)
+	}
+	client, err := smtp.NewClient(conn, cfg.Host)
+	if err != nil {
+		return fmt.Errorf("SMTP initialization failed: %w", err)
 	}
 	defer client.Close()
-
-	if strings.ToLower(cfg.Encryption) != "none" {
-		if ok, _ := client.Extension("STARTTLS"); ok {
-			if err = client.StartTLS(tlsConfig); err != nil {
-				return fmt.Errorf("STARTTLS negotiation failed: %w", err)
-			}
+	if !directTLS && enc != "none" {
+		if ok, _ := client.Extension("STARTTLS"); !ok {
+			return fmt.Errorf("SMTP server does not support required STARTTLS")
+		}
+		if err = client.StartTLS(tlsConfig); err != nil {
+			return fmt.Errorf("SMTP STARTTLS failed: %w", err)
 		}
 	}
-
-	if auth != nil {
-		if ok, _ := client.Extension("AUTH"); ok {
-			if err = client.Auth(auth); err != nil {
-				return fmt.Errorf("SMTP authentication failed: %w", err)
-			}
+	if cfg.Username != "" {
+		if ok, _ := client.Extension("AUTH"); !ok {
+			return fmt.Errorf("SMTP server does not support authentication")
+		}
+		if err = client.Auth(smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)); err != nil {
+			return fmt.Errorf("SMTP authentication failed: %w", err)
 		}
 	}
-
 	if err = client.Mail(from); err != nil {
 		return fmt.Errorf("MAIL FROM failed: %w", err)
 	}
@@ -235,10 +190,10 @@ func (h *EmailHandler) SendEmail(cfg *database.SMTPSettings, toEmail, toName, su
 	}
 	w, err := client.Data()
 	if err != nil {
-		return fmt.Errorf("DATA command failed: %w", err)
+		return fmt.Errorf("SMTP DATA failed: %w", err)
 	}
 	if _, err = w.Write(msg.Bytes()); err != nil {
-		return fmt.Errorf("failed to write email body: %w", err)
+		return fmt.Errorf("SMTP write failed: %w", err)
 	}
 	return w.Close()
 }
@@ -487,4 +442,3 @@ func (h *EmailHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Reque
 		"username": user.Username,
 	})
 }
-

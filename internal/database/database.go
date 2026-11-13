@@ -37,6 +37,14 @@ func InitDB(dbPath string) (*DB, error) {
 	if err := db.migrate(); err != nil {
 		return nil, fmt.Errorf("migration failed: %w", err)
 	}
+	if err := db.MigrateInvitations(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("invitation migration failed: %w", err)
+	}
+	if err := db.MigrateScheduleTasks(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("schedule task migration failed: %w", err)
+	}
 
 	return db, nil
 }
@@ -1182,7 +1190,7 @@ func (db *DB) DeletePanelSetting(key string) error {
 
 func (db *DB) ListServerSubusers(serverID string) ([]*ServerSubuser, error) {
 	rows, err := db.conn.Query(`
-		SELECT su.id, su.server_id, su.user_id, u.username, su.permissions, su.created_at
+		SELECT su.id, su.server_id, su.user_id, u.username, COALESCE(u.email, ''), su.permissions, su.created_at
 		FROM server_subusers su
 		JOIN users u ON su.user_id = u.id
 		WHERE su.server_id = ?
@@ -1197,7 +1205,7 @@ func (db *DB) ListServerSubusers(serverID string) ([]*ServerSubuser, error) {
 	for rows.Next() {
 		su := &ServerSubuser{}
 		var permJSON string
-		if err := rows.Scan(&su.ID, &su.ServerID, &su.UserID, &su.Username, &permJSON, &su.CreatedAt); err != nil {
+		if err := rows.Scan(&su.ID, &su.ServerID, &su.UserID, &su.Username, &su.Email, &permJSON, &su.CreatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal([]byte(permJSON), &su.Permissions)

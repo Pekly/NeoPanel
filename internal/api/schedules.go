@@ -24,8 +24,10 @@ func NewScheduleHandler(db *database.DB, manager *runner.ServerManager) *Schedul
 
 type scheduleView struct {
 	*database.ServerSchedule
-	Timezone string     `json:"timezone"`
-	LastRun  *time.Time `json:"last_run"` // alias; last_run_at is retained for existing clients
+	Timezone  string                  `json:"timezone"`
+	LastRun   *time.Time              `json:"last_run"` // alias; last_run_at is retained for existing clients
+	Tasks     []database.ScheduleTask `json:"tasks"`
+	TaskCount int                     `json:"task_count"`
 }
 
 func viewSchedule(s *database.ServerSchedule) scheduleView {
@@ -36,7 +38,7 @@ func viewSchedule(s *database.ServerSchedule) scheduleView {
 			copy.NextRunAt = cron.Next(time.Now().UTC())
 		}
 	}
-	return scheduleView{&copy, "UTC", copy.LastRunAt}
+	return scheduleView{ServerSchedule: &copy, Timezone: "UTC", LastRun: copy.LastRunAt, Tasks: []database.ScheduleTask{{Order: 1, Action: s.Action, Payload: s.Payload}}, TaskCount: 1}
 }
 
 func (h *ScheduleHandler) ListSchedules(w http.ResponseWriter, r *http.Request) {
@@ -47,17 +49,23 @@ func (h *ScheduleHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 	}
 	views := make([]scheduleView, 0, len(schedules))
 	for _, s := range schedules {
-		views = append(views, viewSchedule(s))
+		v, err := h.scheduleView(s)
+		if err != nil {
+			writeError(w, 500, "Failed to load schedule tasks: "+err.Error())
+			return
+		}
+		views = append(views, v)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"schedules": views})
 }
 
 type scheduleUpdate struct {
-	Name     *string `json:"name"`
-	CronExpr *string `json:"cron_expr"`
-	Action   *string `json:"action"`
-	Payload  *string `json:"payload"`
-	IsActive *bool   `json:"is_active"`
+	Name     *string         `json:"name"`
+	CronExpr *string         `json:"cron_expr"`
+	Action   *string         `json:"action"`
+	Payload  *string         `json:"payload"`
+	IsActive *bool           `json:"is_active"`
+	Tasks    json.RawMessage `json:"tasks"`
 }
 
 func (u scheduleUpdate) apply(s *database.ServerSchedule) error {
@@ -76,27 +84,25 @@ func (u scheduleUpdate) apply(s *database.ServerSchedule) error {
 	if u.IsActive != nil {
 		s.IsActive = *u.IsActive
 	}
+	if u.Tasks != nil {
+		tasks, err := u.parseTasks()
+		if err != nil {
+			return err
+		}
+		s.Action, s.Payload = tasks[0].Action, tasks[0].Payload
+	}
 	if s.Name == "" {
 		return fmt.Errorf("schedule name is required")
 	}
 	if _, err := database.ParseCron(s.CronExpr); err != nil {
 		return err
 	}
-	switch s.Action {
-	case "command":
-		if s.Payload == "" {
-			return fmt.Errorf("command payload is required")
-		}
-	case "restart", "backup", "stop":
-	default:
-		return fmt.Errorf("supported actions: command, restart, backup, stop")
-	}
-	return nil
+	return database.ValidateScheduleTasks([]database.ScheduleTask{{Action: s.Action, Payload: s.Payload}})
 }
 
 func (h *ScheduleHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
 	var req scheduleUpdate
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&req); err != nil {
 		writeError(w, 400, "Invalid request body")
 		return
 	}
@@ -105,12 +111,13 @@ func (h *ScheduleHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		writeError(w, 400, err.Error())
 		return
 	}
-	if err := h.db.CreateServerSchedule(s); err != nil {
+	tasks, _ := req.parseTasks() // apply already validated the request
+	if err := h.db.SaveScheduleWithTasks(s, tasks, true); err != nil {
 		writeError(w, 500, "Failed to create schedule: "+err.Error())
 		return
 	}
 	logAudit(h.db, r, "schedule.create", "Created schedule "+s.Name+" on "+s.ServerID)
-	writeJSON(w, http.StatusCreated, map[string]interface{}{"status": "success", "schedule": viewSchedule(s)})
+	h.respondSchedule(w, http.StatusCreated, s)
 }
 
 func (h *ScheduleHandler) scopedSchedule(w http.ResponseWriter, r *http.Request) *database.ServerSchedule {
@@ -132,7 +139,7 @@ func (h *ScheduleHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var req scheduleUpdate
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&req); err != nil {
 		writeError(w, 400, "Invalid request body")
 		return
 	}
@@ -140,12 +147,22 @@ func (h *ScheduleHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		writeError(w, 400, err.Error())
 		return
 	}
-	if err := h.db.UpdateServerSchedule(s); err != nil {
+	tasks, _ := req.parseTasks()
+	if req.Tasks == nil && (req.Action != nil || req.Payload != nil) {
+		var err error
+		tasks, err = h.db.ListScheduleTasks(s)
+		if err != nil {
+			writeError(w, 500, "Failed to load schedule tasks: "+err.Error())
+			return
+		}
+		tasks[0].Action, tasks[0].Payload = s.Action, s.Payload
+	}
+	if err := h.db.SaveScheduleWithTasks(s, tasks, false); err != nil {
 		writeError(w, 500, "Failed to update schedule: "+err.Error())
 		return
 	}
 	logAudit(h.db, r, "schedule.update", "Updated schedule "+s.ID)
-	writeJSON(w, 200, map[string]interface{}{"status": "success", "schedule": viewSchedule(s)})
+	h.respondSchedule(w, http.StatusOK, s)
 }
 
 func (h *ScheduleHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +209,7 @@ func (h *ScheduleHandler) ToggleSchedule(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.IsActive = *req.IsActive
-	writeJSON(w, 200, map[string]interface{}{"status": "success", "is_active": s.IsActive, "schedule": viewSchedule(s)})
+	h.respondSchedule(w, http.StatusOK, s)
 }
 
 func (h *ScheduleHandler) RunScheduleNow(w http.ResponseWriter, r *http.Request) {
@@ -214,4 +231,49 @@ func (h *ScheduleHandler) RunScheduleNow(w http.ResponseWriter, r *http.Request)
 	}
 	logAudit(h.db, r, "schedule.run_now", "Started schedule "+s.ID)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "message": "Schedule accepted; inspect last_status for completion"})
+}
+
+func (u scheduleUpdate) parseTasks() ([]database.ScheduleTask, error) {
+	if u.Tasks == nil {
+		return nil, nil
+	}
+	var tasks []database.ScheduleTask
+	if err := json.Unmarshal(u.Tasks, &tasks); err != nil {
+		return nil, fmt.Errorf("invalid tasks: %w", err)
+	}
+	var raw []map[string]json.RawMessage
+	if err := json.Unmarshal(u.Tasks, &raw); err != nil {
+		return nil, fmt.Errorf("invalid task objects: %w", err)
+	}
+	for i, fields := range raw {
+		for _, field := range []string{"action", "payload", "time_offset", "continue_on_failure"} {
+			if string(fields[field]) == "null" {
+				return nil, fmt.Errorf("task %d: %s must not be null", i+1, field)
+			}
+		}
+	}
+	for i := range tasks {
+		tasks[i].Action = strings.ToLower(strings.TrimSpace(tasks[i].Action))
+		tasks[i].Payload = strings.TrimSpace(tasks[i].Payload)
+	}
+	if err := database.ValidateScheduleTasks(tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
+}
+
+func (h *ScheduleHandler) scheduleView(s *database.ServerSchedule) (scheduleView, error) {
+	v := viewSchedule(s)
+	tasks, err := h.db.ListScheduleTasks(s)
+	v.Tasks, v.TaskCount = tasks, len(tasks)
+	return v, err
+}
+
+func (h *ScheduleHandler) respondSchedule(w http.ResponseWriter, status int, s *database.ServerSchedule) {
+	v, err := h.scheduleView(s)
+	if err != nil {
+		writeError(w, 500, "Failed to load schedule tasks: "+err.Error())
+		return
+	}
+	writeJSON(w, status, map[string]interface{}{"status": "success", "is_active": s.IsActive, "schedule": v})
 }

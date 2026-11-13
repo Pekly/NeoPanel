@@ -1339,6 +1339,7 @@ const VIEW_TO_SLUG = {
   db: 'databases',
   bk: 'backups',
   sc: 'schedules',
+  team: 'team',
   net: 'network',
   sub: 'subdomain',
   stp: 'settings',
@@ -1361,6 +1362,7 @@ SLUG_TO_VIEW.mods = 'plug';
 SLUG_TO_VIEW.startup = 'set';
 SLUG_TO_VIEW.stp = 'set';
 SLUG_TO_VIEW.servers = 'dash';
+SLUG_TO_VIEW.subusers = 'team';
 
 const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email'];
 const ACC_TAB_SLUGS = ['general', 'security', 'ssh', 'api', 'activity'];
@@ -1596,6 +1598,7 @@ function getViewDisplayLabel(view) {
     db: 'Databases',
     bk: 'Backups',
     sc: 'Schedules',
+    team: 'Team & Access',
     net: 'Network Allocations',
     sub: 'Subdomains',
     stp: 'Settings & Startup',
@@ -1629,6 +1632,10 @@ function syncActiveServerState(srv) {
   if (changed) {
     ++QOL.openSequence;
     QOL.editor = null;
+    ++TeamUI.sequence;
+    S.teamState = null;
+    S.teamLoading = false;
+    S.serverSubusers = [];
     clearSettingsAutoSaveTimer();
     _settingsUiState = { status: 'saved', text: 'Real-time auto-save active' };
     S.log = [];
@@ -4499,6 +4506,7 @@ const PG = [
   ['db', 'Databases', 'database', 'Management'],
   ['bk', 'Backups', 'backup', 'Management'],
   ['sc', 'Schedules', 'clock', 'Management'],
+  ['team', 'Team', 'users', 'Management'],
   ['net', 'Network', 'network', 'Management'],
   ['sub', 'Subdomain', 'link', 'Management'],
   ['pl', 'Players', 'users', 'Management'],
@@ -5554,6 +5562,7 @@ function renderBrandPreviewMarkup(b) {
 
 // --- Views Implementation (V) ---
 const V = {
+  team() { return renderTeamPage(); },
   dash() {
     const runningCount = S.servers.filter((s, i) => {
       const st = i === S.cs ? S.status : normalizeServerStatus(s.stats?.status || s.status);
@@ -6559,6 +6568,7 @@ const V = {
             <div class="mu" style="font-size: 12px;">${esc(bDate)}</div>
             <div class="vm-item-foot">
               <button class="btn sm" onclick="downloadBackup('${esc(bName)}')">${ic('download', 13)} Download</button>
+              <button class="btn sm" data-backup-name="${esc(bName)}" onclick="restoreBackup(this.dataset.backupName, this)">${ic('refresh', 13)} Restore</button>
               <button class="btn sm dg" onclick="deleteBackup('${esc(bName)}')">${ic('trash', 13)} Delete</button>
             </div>
           </div>`;
@@ -6576,6 +6586,7 @@ const V = {
               <td style="text-align:right">
                 <div class="row" style="justify-content:flex-end">
                   <button class="btn sm" onclick="downloadBackup('${esc(b.name || b[0])}')">${ic('download', 14)} Download</button>
+                  <button class="btn sm" data-backup-name="${esc(b.name || b[0])}" onclick="restoreBackup(this.dataset.backupName, this)">${ic('refresh', 14)} Restore</button>
                   <button class="btn sm dg" onclick="deleteBackup('${esc(b.name || b[0])}')">${ic('trash', 14)} Delete</button>
                 </div>
               </td>
@@ -6584,7 +6595,7 @@ const V = {
         </tbody>
       </table></div>`;
     }
-    return `${srvh()}
+    return `${srvh()}${renderRestoreNotice()}` + `
     <div class="row sb" style="margin-top:14px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
       <span class="mu">${S.bk.length} backups recorded</span>
       <div class="row" style="gap:8px;">
@@ -6645,7 +6656,7 @@ const V = {
               </thead>
               <tbody>
                 ${schedules.map(sch => {
-                  const actBadge = getScheduleActionBadge(sch.action);
+                  const actBadge = renderScheduleTaskSummary(sch);
                   const cronHuman = describeCron(sch.cron_expr);
                   return `<tr>
                     <td>
@@ -7481,26 +7492,6 @@ const V = {
         </div>
       </div>` : ''}
 
-      ${(isAdmin || isOwner) ? `
-      <!-- Server Subusers & Team Access -->
-      <div class="card" style="padding: 22px;">
-        <div class="row sb" style="align-items: flex-start; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;">
-          <div>
-            <h2 style="font-size: 16px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; color: var(--tx);">
-              ${ic('users', 16)} Server Subusers &amp; Team Access
-            </h2>
-            <p class="mu" style="font-size: 13px; margin: 0; max-width: 650px;">
-              Invite teammates or staff members to manage this server with fine-grained RBAC permissions (console access, file management, power controls, databases, backups, and schedules).
-            </p>
-          </div>
-          <button type="button" class="btn pr sm" onclick="openSubuserModal()" style="height: 36px; padding: 0 16px;">
-            ${ic('plus', 14)} Add Subuser
-          </button>
-        </div>
-        <div id="subusers-list-wrap">
-          ${renderSubusersListHtml(srv)}
-        </div>
-      </div>` : ''}
 
       <!-- Quick SFTP Access -->
       ${renderSftpCardHtml(srv, true)}
@@ -9029,6 +9020,7 @@ window.go = function(view, opts = {}) {
 };
 
 window.addEventListener('hashchange', () => {
+  if (new URLSearchParams(window.location.hash.slice(1)).has('invite-token')) { checkAuth(); return; }
   checkUrlResetToken();
   if (!S.token || $('#login')) return;
   const raw = window.location.hash.replace('#', '');
@@ -9134,12 +9126,12 @@ async function loadInitialRouteData(view) {
   }
   else if (view === 'bk') jobs.push(loadBackupsList(true));
   else if (view === 'sc') jobs.push(loadServerSchedules(curServer()?.id, true));
+  else if (view === 'team') jobs.push(loadTeamPage(true));
   else if (view === 'set' || view === 'stp') {
     jobs.push(loadProperties(true));
     jobs.push(loadVersionsCatalog());
     jobs.push(loadSFTPDetails(true));
     jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
-    jobs.push(loadServerSubusers(curServer()?.id, true));
   }
   else if (view === 'ver') {
     jobs.push(loadVersionsCatalog());
@@ -9168,12 +9160,12 @@ window.onEnterView = function(view) {
   }
   else if (view === 'bk') loadBackupsList();
   else if (view === 'sc') loadServerSchedules();
+  else if (view === 'team') loadTeamPage();
   else if (view === 'set' || view === 'stp') {
     loadProperties();
     loadVersionsCatalog();
     loadSFTPDetails();
     loadJavaRuntimes(false, curServer()?.node_id || 'local');
-    loadServerSubusers();
   }
   else if (view === 'ver') { loadVersionsCatalog(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
   else if (view === 'sub') loadSubdomainData();
@@ -11719,7 +11711,7 @@ async function switchServer(index) {
   flushPendingSettingsBeforeLeave();
   syncActiveServerState(srv);
 
-  const serverViews = ['con', 'set', 'act', 'fi', 'db', 'bk', 'sc', 'net', 'sub', 'stp', 'pl', 'plug', 'ver'];
+  const serverViews = ['con', 'set', 'act', 'fi', 'db', 'bk', 'sc', 'team', 'net', 'sub', 'stp', 'pl', 'plug', 'ver'];
   if (serverViews.includes(S.view) && !(S.view === 'act' && !window.location.pathname.startsWith('/server/'))) {
     try {
       const nextUrl = serverRouteUrl(srv.node_id || 'local', srv.id, S.view, { plugTab: S.plugTab });
@@ -12491,137 +12483,14 @@ function getScheduleActionBadge(action) {
   return `<span class="chip">${esc(action)}</span>`;
 }
 
-function openScheduleModal(schedId = null) {
-  const container = $('#modal-container');
-  if (!container) return;
-  const srv = curServer();
-  const existing = schedId && Array.isArray(S.serverSchedules)
-    ? S.serverSchedules.find(s => s.id === schedId)
-    : null;
-  const isEdit = Boolean(existing);
-
-  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
-    <div class="card pbox" style="padding: 26px; max-width: 540px; max-height: 90vh; overflow-y: auto;">
-      <div class="row sb" style="margin-bottom: 14px;">
-        <h2 style="font-size: 20px; margin: 0; display: flex; align-items: center; gap: 8px;">
-          ${ic('clock', 18)} ${isEdit ? 'Edit Automated Schedule' : 'Create Automated Schedule'}
-        </h2>
-        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
-      </div>
-
-      <p class="mu" style="font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
-        Run recurring actions in <b>UTC</b>. Choose a time below or use a standard five-field numeric cron expression. Execution is checked every 30 seconds.
-      </p>
-
-      <form onsubmit="submitScheduleModal(event, '${isEdit ? esc(existing.id) : ''}')">
-        <label class="f">
-          <span>Schedule Name</span>
-          <input type="text" id="sch-name" required value="${esc(existing?.name || '')}" placeholder="e.g. Daily 4 AM Restart, World Save Broadcast">
-        </label>
-
-        <div class="grid g2">
-          <label class="f">
-            <span>Action Type</span>
-            <select id="sch-action" onchange="onScheduleActionChange(this.value)">
-              <option value="command" ${(existing?.action || 'command') === 'command' ? 'selected' : ''}>Console Command</option>
-              <option value="restart" ${existing?.action === 'restart' ? 'selected' : ''}>Server Restart</option>
-              <option value="backup" ${existing?.action === 'backup' ? 'selected' : ''}>World Backup Archive</option>
-              <option value="stop" ${existing?.action === 'stop' ? 'selected' : ''}>Graceful Stop</option>
-            </select>
-          </label>
-
-          <label class="f">
-            <span>Cron Preset</span>
-            <select onchange="if(this.value){$('#sch-cron').value=this.value;$('#sch-frequency').value='custom';updateSchedulePreview();}">
-              <option value="">Select a preset...</option>
-              <option value="0 4 * * *">Daily at 04:00 AM</option>
-              <option value="0 0 * * *">Daily at Midnight (00:00)</option>
-              <option value="0 * * * *">Every Hour (Minute 0)</option>
-              <option value="*/30 * * * *">Every 30 Minutes</option>
-              <option value="*/15 * * * *">Every 15 Minutes</option>
-              <option value="0 0 * * 0">Weekly (Every Sunday)</option>
-            </select>
-          </label>
-        </div>
-        <div class="grid g2">
-          <label class="f"><span>Simple schedule</span><select id="sch-frequency" onchange="applyScheduleTimePicker()"><option value="custom">Custom cron / preset</option><option value="daily">Daily</option><option value="hourly">Hourly (minute from time)</option><option value="weekly">Weekly</option></select></label>
-          <label class="f"><span>Time (UTC)</span><input id="sch-time" type="time" value="04:00" onchange="applyScheduleTimePicker()"></label>
-          <label class="f"><span>Weekly day</span><select id="sch-weekday" onchange="applyScheduleTimePicker()">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, i) => `<option value="${i}">${day}</option>`).join('')}</select></label>
-        </div>
-
-        <label class="f">
-          <span>Cron Expression (5 fields: min hour dom mon dow)</span>
-          <input type="text" id="sch-cron" required class="mono" value="${esc(existing?.cron_expr || '0 4 * * *')}" placeholder="0 4 * * *" oninput="$('#sch-frequency').value='custom';updateSchedulePreview()">
-        </label>
-        <p id="sch-preview" class="mu" role="status"></p>
-
-        <div id="sch-payload-wrap" style="display: ${(existing?.action || 'command') === 'command' ? 'block' : 'none'};">
-          <label class="f">
-            <span>Console Command Payload</span>
-            <input type="text" id="sch-payload" value="${esc(existing?.payload || '')}" placeholder="e.g. say Server restarting in 5 minutes! or save-all">
-          </label>
-        </div>
-
-        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px;">
-          <label class="row sb" style="cursor: pointer;">
-            <div>
-              <b style="color: var(--tx); display: block;">Enable Schedule</b>
-              <span class="mu" style="font-size: 12px;">Active schedules are evaluated by the background cron worker every 30 seconds</span>
-            </div>
-            <span class="sw">
-              <input type="checkbox" id="sch-active" ${existing ? (existing.is_active ? 'checked' : '') : 'checked'}>
-              <i></i>
-            </span>
-          </label>
-        </div>
-
-        <div class="row sb" style="gap: 10px;">
-          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
-          <button type="submit" id="sch-submit-btn" class="btn pr">
-            ${ic('check', 14)} ${isEdit ? 'Save Changes' : 'Create Schedule'}
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>`;
-  updateSchedulePreview();
-  setTimeout(() => $('#sch-name')?.focus(), 40);
-}
+function openScheduleModal(schedId = null) { return openScheduleChainModal(schedId); }
 
 function onScheduleActionChange(act) {
   const wrap = $('#sch-payload-wrap');
   if (wrap) wrap.style.display = (act === 'command') ? 'block' : 'none';
 }
 
-async function submitScheduleModal(e, schedId = '') {
-  e.preventDefault();
-  const srv = curServer();
-  if (!srv) return;
-  const btn = $('#sch-submit-btn');
-  if (btn) setBtnLoading(btn, true, schedId ? 'Saving...' : 'Creating...');
-
-  const payload = {
-    name: $('#sch-name')?.value.trim() || 'Schedule',
-    cron_expr: $('#sch-cron')?.value.trim() || '0 4 * * *',
-    action: $('#sch-action')?.value || 'command',
-    payload: $('#sch-payload')?.value.trim() || '',
-    is_active: $('#sch-active') ? $('#sch-active').checked : true
-  };
-
-  try {
-    const isEdit = Boolean(schedId);
-    await api(srvApiPath(srv, isEdit ? `/schedules/${encodeURIComponent(schedId)}` : '/schedules'), {
-      method: isEdit ? 'PUT' : 'POST',
-      body: JSON.stringify(payload)
-    });
-    closeModal();
-    toast(isEdit ? 'Schedule updated successfully' : 'Schedule created successfully', 'ok');
-    await loadServerSchedules(srv.id);
-  } catch (err) {
-    toast(err.message || 'Failed to save schedule', 'bad');
-    if (btn) setBtnLoading(btn, false);
-  }
-}
+async function submitScheduleModal(event, schedId = '') { return submitScheduleChain(event); }
 
 async function toggleServerSchedule(schedId, active) {
   const srv = curServer();
@@ -12690,19 +12559,8 @@ const SUBUSER_PERMS = [
 ];
 
 async function loadServerSubusers(srvId = null, skipRender = false) {
-  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
-  if (!srv) return;
-  try {
-    const list = await api(srvApiPath(srv, '/subusers'));
-    S.serverSubusers = Array.isArray(list) ? list : [];
-    if (!skipRender && S.view === 'set') {
-      const wrap = $('#subusers-list-wrap');
-      if (wrap) wrap.innerHTML = renderSubusersListHtml(srv);
-    }
-  } catch (err) {
-    console.error('Failed to load subusers:', err);
-    S.serverSubusers = [];
-  }
+  if (srvId && curServer()?.id !== srvId) return;
+  return loadTeamPage(skipRender);
 }
 
 function renderSubusersListHtml(srv) {
@@ -12730,7 +12588,7 @@ function renderSubusersListHtml(srv) {
         ${subusers.map(sub => {
           const permsCount = Array.isArray(sub.permissions) ? sub.permissions.length : 0;
           const permSummary = permsCount === SUBUSER_PERMS.length
-            ? '<span class="badge online">All Permissions (Admin)</span>'
+            ? '<span class="badge online">All server permissions</span>'
             : `<span class="chip">${permsCount} of ${SUBUSER_PERMS.length} allowed</span>`;
           return `<tr>
             <td>
@@ -12739,13 +12597,13 @@ function renderSubusersListHtml(srv) {
                 <b style="color: var(--tx);">${esc(sub.username)}</b>
               </div>
             </td>
-            <td class="mu pv">${esc(sub.email)}</td>
+            <td class="mu pv">${esc(sub.email || '—')}</td>
             <td>${permSummary}</td>
             <td class="mu" style="font-size: 12px;">${formatFileDate(sub.created_at)}</td>
             <td style="text-align: right;">
               <div class="row" style="justify-content: flex-end; gap: 6px;">
                 <button type="button" class="btn sm" onclick="openSubuserModal('${esc(sub.id)}')">${ic('sliders', 12)} Edit</button>
-                <button type="button" class="btn sm dg" onclick="deleteServerSubuser('${esc(sub.id)}')">${ic('trash', 12)}</button>
+                <button type="button" class="btn sm dg" onclick="deleteServerSubuser('${esc(sub.id)}')" aria-label="Revoke access for ${esc(sub.username)}">${ic('trash', 12)}</button>
               </div>
             </td>
           </tr>`;
@@ -12759,8 +12617,10 @@ function openSubuserModal(subuserId = null) {
   const container = $('#modal-container');
   if (!container) return;
   const srv = curServer();
+  if (!canManageTeam()) return;
+  TeamUI.memberServer = { ...srv };
   const existing = subuserId && Array.isArray(S.serverSubusers)
-    ? S.serverSubusers.find(s => s.id === subuserId)
+    ? S.serverSubusers.find(s => String(s.id) === String(subuserId))
     : null;
   const isEdit = Boolean(existing);
   const curPerms = new Set(existing ? (existing.permissions || []) : ['console.view', 'files.view', 'settings.view']);
@@ -12769,13 +12629,13 @@ function openSubuserModal(subuserId = null) {
     <div class="card pbox" style="padding: 26px; max-width: 600px; max-height: 90vh; overflow-y: auto;">
       <div class="row sb" style="margin-bottom: 14px;">
         <h2 style="font-size: 20px; margin: 0; display: flex; align-items: center; gap: 8px;">
-          ${ic('user', 18)} ${isEdit ? `Edit Subuser: ${esc(existing.username)}` : 'Add Server Subuser'}
+          ${ic('user', 18)} ${isEdit ? `Edit Subuser: ${esc(existing.username)}` : 'Add Existing User'}
         </h2>
         <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
       </div>
 
       <p class="mu" style="font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
-        ${isEdit ? `Update RBAC permissions for <b>${esc(existing.username)}</b> on this server.` : `Invite an existing NeoPanel user by email or username to collaborate on <b>${esc(srv?.name || 'this server')}</b>.`}
+        ${isEdit ? `Update server permissions for <b>${esc(existing.username)}</b>.` : `Add an existing NeoPanel account to <b>${esc(srv?.name || 'this server')}</b>. For someone without an account, use Invite by email on the Team page.`}
       </p>
 
       <form onsubmit="submitSubuserModal(event, '${isEdit ? esc(existing.id) : ''}')">
@@ -12821,8 +12681,8 @@ function openSubuserModal(subuserId = null) {
 
 async function submitSubuserModal(e, subuserId = '') {
   e.preventDefault();
-  const srv = curServer();
-  if (!srv) return;
+  const srv = TeamUI.memberServer;
+  if (!srv || !sameQolServer(srv, curServer())) return;
   const btn = $('#sub-submit-btn');
   if (btn) setBtnLoading(btn, true, subuserId ? 'Saving...' : 'Granting...');
 
@@ -12840,7 +12700,7 @@ async function submitSubuserModal(e, subuserId = '') {
     } else {
       await api(srvApiPath(srv, '/subusers'), {
         method: 'POST',
-        body: JSON.stringify({ identifier, permissions: perms })
+        body: JSON.stringify({ username: identifier, permissions: perms })
       });
       toast(`User "${identifier}" added as subuser`, 'ok');
     }
@@ -16177,6 +16037,7 @@ async function checkAuth() {
   if (savedMode) setAppearanceMode(savedMode, true);
   if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
   if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
+  if (await openPendingInvitation()) { finishPageProgress(); return; }
 
   const route = parseCurrentRoute(window.location.pathname + window.location.search, window.location.hash);
   if (route.safeMode) S.modsSafeMode = true;

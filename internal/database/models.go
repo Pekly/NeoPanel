@@ -114,6 +114,7 @@ type ServerSubuser struct {
 	ServerID    string    `json:"server_id"`
 	UserID      int       `json:"user_id"`
 	Username    string    `json:"username"`
+	Email       string    `json:"email"`
 	Permissions []string  `json:"permissions"`
 	CreatedAt   time.Time `json:"created_at"`
 }

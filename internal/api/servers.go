@@ -382,25 +382,26 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Remove runtime instance and stop process immediately
-	h.manager.RemoveInstance(server.ID)
-
-	// Remove server working directory files
-	workingDir := h.manager.GetWorkingDir(serverID)
-	_ = os.RemoveAll(workingDir)
-
-	// Remove per-server databases on disk and metadata
-	if h.cfg != nil && h.cfg.Paths.DataDir != "" {
-		dbDir := filepath.Join(h.cfg.Paths.DataDir, "databases", serverID)
-		_ = os.RemoveAll(dbDir)
-	}
-	_ = h.db.DeleteAllServerDatabases(serverID)
-
-	// Remove all port allocations associated with this server
-	_ = h.db.DeleteAllServerPorts(serverID)
-
-	if err := h.db.DeleteServer(serverID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete from database"})
+	err = h.manager.DeleteServer(r.Context(), serverID, func() error {
+		// The manager retains the restore/power gate through all disk and DB work.
+		if err := os.RemoveAll(h.manager.GetWorkingDir(serverID)); err != nil {
+			return fmt.Errorf("remove server files: %w", err)
+		}
+		if h.cfg != nil && h.cfg.Paths.DataDir != "" {
+			if err := os.RemoveAll(filepath.Join(h.cfg.Paths.DataDir, "databases", serverID)); err != nil {
+				return fmt.Errorf("remove server databases: %w", err)
+			}
+		}
+		if err := h.db.DeleteAllServerDatabases(serverID); err != nil {
+			return err
+		}
+		if err := h.db.DeleteAllServerPorts(serverID); err != nil {
+			return err
+		}
+		return h.db.DeleteServer(serverID)
+	})
+	if err != nil {
+		writeServerOperationError(w, err)
 		return
 	}
 
@@ -441,7 +442,7 @@ func (h *ServerHandler) PowerAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if actionErr != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": actionErr.Error()})
+		writeServerOperationError(w, actionErr)
 		return
 	}
 

@@ -45,6 +45,7 @@ type Router struct {
 	schedules      *ScheduleHandler
 	clientAPI      *ClientAPIHandler
 	email          *EmailHandler
+	invitations    *InvitationHandler
 	globalLimiter  *IPRateLimiter
 	authLimiter    *IPRateLimiter
 	embeddedStatic fs.FS
@@ -95,6 +96,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		authLimiter:    NewIPRateLimiter(1, 15),
 		embeddedStatic: embeddedStatic,
 	}
+	r.invitations = NewInvitationHandler(r)
 
 	r.registerRoutes(db)
 	return r
@@ -122,11 +124,15 @@ func (r *Router) registerRoutes(db *database.DB) {
 		r.mux.Handle("POST /api/auth/login/2fa", r.authLimiter.Middleware(http.HandlerFunc(r.auth.Login2FA)))
 		r.mux.Handle("POST /api/auth/password-reset/request", r.authLimiter.Middleware(http.HandlerFunc(r.email.RequestPasswordReset)))
 		r.mux.Handle("POST /api/auth/password-reset/confirm", r.authLimiter.Middleware(http.HandlerFunc(r.email.ConfirmPasswordReset)))
+		r.mux.Handle("POST /api/auth/invitations/inspect", r.authLimiter.Middleware(http.HandlerFunc(r.invitations.Inspect)))
+		r.mux.Handle("POST /api/auth/invitations/accept", r.authLimiter.Middleware(http.HandlerFunc(r.invitations.Accept)))
 	} else {
 		r.mux.HandleFunc("POST /api/auth/login", r.auth.Login)
 		r.mux.HandleFunc("POST /api/auth/login/2fa", r.auth.Login2FA)
 		r.mux.HandleFunc("POST /api/auth/password-reset/request", r.email.RequestPasswordReset)
 		r.mux.HandleFunc("POST /api/auth/password-reset/confirm", r.email.ConfirmPasswordReset)
+		r.mux.HandleFunc("POST /api/auth/invitations/inspect", r.invitations.Inspect)
+		r.mux.HandleFunc("POST /api/auth/invitations/accept", r.invitations.Accept)
 	}
 	r.mux.HandleFunc("GET /api/branding", r.branding.GetPublicBranding)
 	r.mux.HandleFunc("GET /branding/{filename}", r.branding.ServeBrandingAsset)
@@ -165,6 +171,11 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("PUT /api/servers/{id}/subusers/{sub_id}", r.requireAuth(r.subusers.UpdateSubuser))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/subusers/{sub_id}", r.requireAuth(r.subusers.DeleteSubuser))
 	r.mux.HandleFunc("GET /api/servers/{id}/permissions", r.requireAuth(r.subusers.GetMyPermissions))
+	// Invitations are master-owned, including invitations to remote servers.
+	r.mux.HandleFunc("GET /api/team/invitations", r.requireAuth(r.invitations.List))
+	r.mux.HandleFunc("POST /api/team/invitations", r.requireAuth(r.invitations.Create))
+	r.mux.HandleFunc("POST /api/team/invitations/{inviteId}/resend", r.requireAuth(r.invitations.Resend))
+	r.mux.HandleFunc("DELETE /api/team/invitations/{inviteId}", r.requireAuth(r.invitations.Revoke))
 
 	// Schedules & Automation
 	r.mux.HandleFunc("GET /api/servers/{id}/schedules", r.requireAuth(r.schedules.ListSchedules))
@@ -212,6 +223,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/backups", r.requireAuth(r.backups.Create))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/backups", r.requireAuth(r.backups.Delete))
 	r.mux.HandleFunc("GET /api/servers/{id}/backups/download", r.requireAuth(r.backups.Download))
+	r.mux.HandleFunc("POST /api/servers/{id}/backups/restore", r.requireAuth(r.backups.Restore))
 
 	// Players routes
 	r.mux.HandleFunc("GET /api/servers/{id}/players", r.requireAuth(r.players.GetPlayers))

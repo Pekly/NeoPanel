@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -101,10 +102,10 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		baseName += ".tar.gz"
 	}
 
-	size, err := runner.CreateBackup(h.manager.GetWorkingDir(serverID), h.getBackupsDir(serverID), baseName)
+	size, err := h.manager.CreateServerBackup(serverID, baseName)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, os.ErrExist) {
+		if errors.Is(err, os.ErrExist) || errors.Is(err, runner.ErrServerOperation) {
 			status = http.StatusConflict
 		}
 		writeError(w, status, "Failed to create backup: "+err.Error())
@@ -163,4 +164,47 @@ func (h *BackupHandler) Download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
 	w.Header().Set("Content-Type", "application/gzip")
 	http.ServeFile(w, r, filePath)
+}
+
+// Restore requires explicit confirmation and a stopped server; the manager owns
+// the operation lock shared with manual/scheduled power and backup operations.
+func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name    string `json:"name"`
+		Confirm bool   `json:"confirm"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, 400, "Invalid request body: provide name and confirm:true")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		writeError(w, 400, "Invalid request body: expected exactly one JSON object")
+		return
+	}
+	if !req.Confirm {
+		writeError(w, 400, "Restore requires confirm:true; all current server files will be replaced")
+		return
+	}
+	srv, err := h.db.GetServer(getURLParam(r, "id"))
+	if err != nil {
+		writeError(w, 404, "Server not found")
+		return
+	}
+	result, err := h.manager.RestoreBackup(r.Context(), srv, req.Name)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, runner.ErrInvalidArchive):
+			status = http.StatusBadRequest
+		case errors.Is(err, runner.ErrServerNotStopped), errors.Is(err, runner.ErrServerOperation):
+			status = http.StatusConflict
+		case errors.Is(err, os.ErrNotExist):
+			status = http.StatusNotFound
+		}
+		writeError(w, status, "Restore failed: "+err.Error())
+		return
+	}
+	logAudit(h.db, r, "backup_restore", fmt.Sprintf("Restored backup %q for %s; safety copy %s", req.Name, srv.ID, result.SafetyCopy))
+	writeJSON(w, http.StatusOK, result)
 }

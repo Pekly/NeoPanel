@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Pekly/NeoPanel/internal/database"
 )
@@ -47,12 +48,47 @@ func (h *SubuserHandler) AddSubuser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		UserEmail   string   `json:"user_email"`
-		Username    string   `json:"username"`
-		Permissions []string `json:"permissions"`
+		UserEmail           string    `json:"user_email"`
+		Username            string    `json:"username"`
+		Permissions         []string  `json:"permissions"`
+		InvitationID        string    `json:"invitation_id"`
+		InvitationAction    string    `json:"invitation_action"`
+		InvitationExpiresAt time.Time `json:"invitation_expires_at"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.InvitationID != "" {
+		claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+		if claims == nil || r.Header.Get("X-NeoPanel-User-ID") != strconv.Itoa(claims.UserID) || !invitationID.MatchString(req.InvitationID) {
+			writeError(w, 403, "Invitation grants require a trusted original-caller node hop")
+			return
+		}
+		if req.InvitationAction != "grant" && req.InvitationAction != "revoke" {
+			writeError(w, 400, "Invalid invitation action")
+			return
+		}
+		if err := validateInvitationPermissions(req.Permissions); err != nil {
+			writeError(w, 400, err.Error())
+			return
+		}
+		uid := 0
+		if req.InvitationAction == "grant" {
+			u, err := h.db.GetUserByUsername(req.Username)
+			if err != nil {
+				writeError(w, 409, "Invitation account not provisioned")
+				return
+			}
+			uid = u.ID
+		}
+		if err := h.db.InvitationMembership(req.InvitationID, serverID, uid, claims.UserID, claims.Role, req.Permissions, req.InvitationExpiresAt, req.InvitationAction == "revoke"); err != nil {
+			invitationError(w, err)
+			return
+		}
+		w.Header().Set("X-NeoPanel-Invitations", "1")
+		writeJSON(w, 200, map[string]string{"status": "success"})
 		return
 	}
 
@@ -171,6 +207,7 @@ func (h *SubuserHandler) DeleteSubuser(w http.ResponseWriter, r *http.Request) {
 
 // GetMyPermissions returns current user's effective permissions for a server
 func (h *SubuserHandler) GetMyPermissions(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-NeoPanel-Invitations", "1")
 	serverID := extractIDFromPath(r.URL.Path, "/api/servers/", "/permissions")
 	if serverID == "" {
 		writeError(w, http.StatusBadRequest, "Missing server ID")

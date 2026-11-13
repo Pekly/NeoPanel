@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -49,6 +50,12 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Software and version are required"})
 		return
 	}
+	release, err := h.manager.BeginServerOperation(serverID)
+	if err != nil {
+		writeServerOperationError(w, err)
+		return
+	}
+	defer release()
 
 	serverDir := h.manager.GetWorkingDir(serverID)
 	jarName := fmt.Sprintf("%s-%s.jar", req.Software, req.Version)
@@ -166,13 +173,22 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// 1. Stop server if active
-	_ = h.manager.Stop(srv.ID, false)
+	// Keep the same gate as restore through stop, cleanup, download and DB update.
+	release, err := h.manager.BeginServerMaintenance(r.Context(), serverID)
+	if err != nil {
+		writeServerOperationError(w, err)
+		return
+	}
+	defer release()
 
 	serverDir := h.manager.GetWorkingDir(serverID)
 
 	// 2. Perform selective cleanup based on preservation flags
 	entries, err := os.ReadDir(serverDir)
+	if err != nil && !os.IsNotExist(err) {
+		writeServerOperationError(w, err)
+		return
+	}
 	if err == nil {
 		for _, entry := range entries {
 			name := entry.Name()
@@ -194,7 +210,10 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 			}
 
 			// Remove all other runtime files, old jars, cache directories
-			_ = os.RemoveAll(filepath.Join(serverDir, name))
+			if err := os.RemoveAll(filepath.Join(serverDir, name)); err != nil {
+				writeServerOperationError(w, err)
+				return
+			}
 		}
 	}
 
@@ -230,4 +249,12 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 		"version":  req.Version,
 		"jar_file": jarName,
 	})
+}
+
+func writeServerOperationError(w http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	if errors.Is(err, runner.ErrServerOperation) || errors.Is(err, runner.ErrRestoreRecovery) {
+		status = http.StatusConflict
+	}
+	writeJSON(w, status, map[string]string{"error": err.Error()})
 }

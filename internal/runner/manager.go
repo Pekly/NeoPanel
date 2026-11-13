@@ -1,6 +1,8 @@
 package runner
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -24,6 +26,9 @@ type ServerManager struct {
 	startupTimeout  time.Duration
 	shutdownCh      chan struct{}
 	shutdownOnce    sync.Once
+	operations      sync.Map // server ID -> *sync.Mutex; shared by power, backups and restore
+	restoreBlocked  sync.Map // unrecoverable publication failures block subsequent power operations
+	restorePaused   sync.Map // suppress late crash callbacks until an explicit start
 }
 
 func NewServerManager(baseDir string, db *database.DB) *ServerManager {
@@ -169,6 +174,10 @@ func (m *ServerManager) handleProcessExit(srvID string, unexpected bool, reached
 	stableRun := reachedOnline && !timedOut && uptime >= minStableUptime
 
 	m.mu.Lock()
+	if _, paused := m.restorePaused.Load(srvID); paused {
+		m.mu.Unlock()
+		return
+	}
 	if stableRun {
 		m.startupFailures[srvID] = 0
 		m.startupHalted[srvID] = false
@@ -228,6 +237,27 @@ func (m *ServerManager) waitAndRetryStart(srvID string, attemptNum int, cancelCh
 	case <-timer.C:
 	}
 
+	var unlock func()
+	for {
+		var err error
+		unlock, err = m.beginOperation(srvID)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, ErrServerOperation) {
+			return
+		}
+		// A live backup is temporary contention, not a cancelled restart.
+		timer.Reset(100 * time.Millisecond)
+		select {
+		case <-cancelCh:
+			return
+		case <-m.shutdownCh:
+			return
+		case <-timer.C:
+		}
+	}
+	defer unlock()
 	m.mu.Lock()
 	curCh, exists := m.retryCancels[srvID]
 	if !exists || curCh != cancelCh {
@@ -272,8 +302,21 @@ func (m *ServerManager) waitAndRetryStart(srvID string, attemptNum int, cancelCh
 }
 
 func (m *ServerManager) Start(srv *database.Server) error {
+	unlock, err := m.beginOperation(srv.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return m.startLocked(srv)
+}
+
+func (m *ServerManager) startLocked(srv *database.Server) error {
+	if m.isShuttingDown() {
+		return fmt.Errorf("daemon shutting down")
+	}
 	m.mu.Lock()
 	m.cancelRetryLocked(srv.ID)
+	m.restorePaused.Delete(srv.ID)
 	m.startupFailures[srv.ID] = 0
 	m.startupHalted[srv.ID] = false
 	m.mu.Unlock()
@@ -283,6 +326,17 @@ func (m *ServerManager) Start(srv *database.Server) error {
 }
 
 func (m *ServerManager) Stop(serverID string, graceful bool) error {
+	// Explicit stop cancels pending automatic retries even if another operation
+	// currently owns the filesystem gate. No process/files are changed on conflict.
+	m.mu.Lock()
+	m.cancelRetryLocked(serverID)
+	m.restorePaused.Store(serverID, true)
+	m.mu.Unlock()
+	unlock, err := m.beginOperation(serverID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	m.mu.Lock()
 	m.cancelRetryLocked(serverID)
 	inst, ok := m.instances[serverID]
@@ -295,7 +349,11 @@ func (m *ServerManager) Stop(serverID string, graceful bool) error {
 	return inst.Stop(graceful)
 }
 
-func (m *ServerManager) RemoveInstance(serverID string) {
+func (m *ServerManager) RemoveInstance(serverID string) error {
+	return m.DeleteServer(context.Background(), serverID, func() error { return nil })
+}
+
+func (m *ServerManager) removeInstanceLocked(serverID string) {
 	m.mu.Lock()
 	m.cancelRetryLocked(serverID)
 	delete(m.startupFailures, serverID)
@@ -310,6 +368,11 @@ func (m *ServerManager) RemoveInstance(serverID string) {
 }
 
 func (m *ServerManager) Restart(srv *database.Server) error {
+	unlock, err := m.beginOperation(srv.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	m.mu.Lock()
 	m.cancelRetryLocked(srv.ID)
 	inst, ok := m.instances[srv.ID]
@@ -322,7 +385,7 @@ func (m *ServerManager) Restart(srv *database.Server) error {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	return m.Start(srv)
+	return m.startLocked(srv)
 }
 
 func (m *ServerManager) StopServer(serverID string, graceful bool) error {
@@ -396,6 +459,11 @@ func (m *ServerManager) Subscribe(serverID string) (chan string, func(), error) 
 
 	if !ok {
 		// Server might not be running yet, but we still allow listening
+		unlock, err := m.beginOperation(serverID)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer unlock()
 		srv, err := m.db.GetServer(serverID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("server not found: %w", err)
@@ -610,15 +678,14 @@ func (m *ServerManager) startSchedule(sched *database.ServerSchedule, now time.T
 	if _, err := database.ParseCron(sched.CronExpr); err != nil {
 		return err
 	}
-	claimed, err := m.db.ClaimScheduleRun(sched.ID, now, scheduled)
+	snapshot, tasks, claimed, err := m.db.ClaimScheduleWithTasks(sched.ID, now, scheduled)
 	if err != nil {
 		return err
 	}
 	if !claimed {
 		return ErrScheduleRunning
 	}
-	copy := *sched
-	go m.executeClaimedSchedule(&copy)
+	go m.executeClaimedSchedule(snapshot, tasks)
 	return nil
 }
 
@@ -629,7 +696,7 @@ func (m *ServerManager) ExecuteSchedule(sched *database.ServerSchedule) {
 	}
 }
 
-func (m *ServerManager) executeClaimedSchedule(sched *database.ServerSchedule) {
+func (m *ServerManager) executeClaimedSchedule(sched *database.ServerSchedule, tasks []database.ScheduleTask) {
 	var runErr error
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -650,6 +717,14 @@ func (m *ServerManager) executeClaimedSchedule(sched *database.ServerSchedule) {
 	if _, runErr = m.db.GetServer(sched.ServerID); runErr != nil {
 		return
 	}
+	runErr = executeScheduleTasks(tasks, m.waitScheduleDelay, func(task database.ScheduleTask) error {
+		step := *sched
+		step.Action, step.Payload = task.Action, task.Payload
+		return m.executeScheduleAction(&step)
+	})
+}
+
+func (m *ServerManager) executeScheduleAction(sched *database.ServerSchedule) (runErr error) {
 	switch sched.Action {
 	case "command":
 		if strings.TrimSpace(sched.Payload) == "" {
@@ -658,11 +733,8 @@ func (m *ServerManager) executeClaimedSchedule(sched *database.ServerSchedule) {
 		}
 		runErr = m.SendCommand(sched.ServerID, sched.Payload)
 	case "backup":
-		m.mu.RLock()
-		dir := m.backupDir
-		m.mu.RUnlock()
 		name := fmt.Sprintf("backup-scheduled-%s-%d.tar.gz", sched.ID, time.Now().UTC().UnixNano())
-		_, runErr = CreateBackup(m.GetWorkingDir(sched.ServerID), filepath.Join(dir, sched.ServerID), name)
+		_, runErr = m.CreateServerBackup(sched.ServerID, name)
 	case "restart", "start", "stop":
 		target := "online"
 		if sched.Action == "restart" {
@@ -706,6 +778,7 @@ func (m *ServerManager) executeClaimedSchedule(sched *database.ServerSchedule) {
 	default:
 		runErr = fmt.Errorf("unsupported scheduled action %q", sched.Action)
 	}
+	return runErr
 }
 
 func MatchesCron(expr string, t time.Time) bool {
