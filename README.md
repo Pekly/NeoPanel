@@ -17,13 +17,15 @@ I built it because running Pterodactyl for a Minecraft-only setup meant PHP, Ngi
 ## What you get
 
 - **Live console** over WebSocket with colors, command history, a popout terminal, and a slide-out drawer you can open from any server page with `Ctrl + \``. CPU, memory and network charts sit alongside it.
-- **File manager** with an in-browser editor, drag-and-drop uploads, bulk select and move, zip/tar.gz archiving, and extracting `.zip`, `.tar.gz`, `.tgz`, `.tar` and `.jar`.
+- **File manager** with an in-browser editor, unsaved-change prompts, per-user/server draft recovery within the same browser tab, and `Ctrl/Cmd + S`. Drag-and-drop uploads have a queue with per-file errors, cancel/retry controls and a completion summary. Bulk select/move and zip/tar.gz archiving/extraction are also included.
 - **Built-in SFTP** on port 2022. Log in with your panel credentials or an SSH key, and each user is jailed to their server's directory.
 - **11 server engines**: Paper, Purpur, LeafMC, Folia, Vanilla, Fabric, Forge, NeoForge, Velocity, Waterfall and BungeeCord. Downloads come from mcjarfiles.com, the Paper, Purpur and Fabric APIs, and Mojang's manifest. Reinstalling lets you keep your worlds, configs and plugins.
 - **Java manager** for Java 25, 21, 17 and 8. It detects what's installed, installs what's missing, and picks the right version for each Minecraft release. If a server fails to start twice in a row, it stops retrying instead of crash-looping.
-- **Modrinth store** for plugins and mods, with filters for category, loader and Minecraft version, plus one-click install.
+- **Modrinth store** for plugins and mods. Installation verifies both Minecraft version and loader, offers compatible release selection, and refuses incompatible releases or existing filenames. Enable/disable switches persist as `.jar` / `.jar.disabled`; restart the server to apply changes.
 - **Per-server SQLite databases** with a small SQL studio in the browser, and `.sql` or `.db` export.
 - **Backups, ports and players**: `.tar.gz` world backups, port allocations with automatic UFW rules, and a player manager (OP, kick, ban, whitelist). There's also a searchable audit log you can export as CSV or JSON.
+- **Schedules** with a simple UTC time picker or validated five-field cron (lists, ranges, steps, month/day names), next-run previews, and persisted execution status/errors. Overlapping runs of the same schedule are rejected.
+- **Server sharing** with per-action subuser permissions enforced on server HTTP APIs and the WebSocket console. Owners and administrators retain full server access.
 - **MOTD rendering** for legacy `§` and `&` codes, hex colors, Iridium gradients and MiniMessage tags, so your server header and the settings preview look right.
 - **Multi-node clustering**. Run a master panel and add worker VPSes with the same binary.
 - **Branding and themes**: six built-in themes, custom accent colors and CSS, uploadable logo, favicon, wallpaper and avatars, and a maintenance mode that still lets admins in.
@@ -34,7 +36,6 @@ I built it because running Pterodactyl for a Minecraft-only setup meant PHP, Ngi
 ## What it doesn't do
 
 - No Docker eggs. Servers run as plain JVM processes, so no SteamCMD, Rust, Python or Discord bot eggs.
-- No per-server subuser permissions. There are two roles, `admin` and `user`.
 - No hosted MySQL or MariaDB. Databases are embedded SQLite.
 - No payment processing. You can link your own storefront, but NeoPanel won't handle checkout.
 
@@ -228,3 +229,11 @@ make run           # run in dev mode
 ## License
 
 MIT. Made for Minecraft admins who would rather spend their RAM on players than on PHP workers.
+
+## Regression checks
+
+Run `go test ./...` for backend safeguards and plugin compatibility tests, and `node --test web/tests/qol.test.cjs` for editor, upload queue, plugin toggle, and cron-preview state tests. JavaScript syntax can be checked with `node --check web/static/js/app.js` and `node --check web/static/js/qol.js`.
+
+Backups are published only after archive creation and closure succeed, and existing archive names are not overwritten. These are file archives, not application-consistent live snapshots: stop the Minecraft server before backing up when a fully consistent world snapshot is required. Browser upload retries restart the transfer; cancellation cannot retract a file the server has already received.
+
+When deploying this update, update the panel and all worker nodes. Non-admin remote access fails closed on older workers that do not enforce forwarded user permissions, or when the user has not been synchronized to the worker. Cron aliases such as `@daily` must be converted to five fields (for example `0 0 * * *`).

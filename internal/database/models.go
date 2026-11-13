@@ -18,25 +18,25 @@ type User struct {
 }
 
 type Server struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Type        string    `json:"type"`       // "paper", "purpur", "vanilla", "fabric", "spigot", "custom"
-	Version     string    `json:"version"`    // e.g. "1.20.4", "1.21.1"
-	JarFile     string    `json:"jar_file"`   // e.g. "server.jar"
-	Port        int       `json:"port"`       // e.g. 25565
-	MemoryMinMB int       `json:"memory_min"` // e.g. 1024
-	MemoryMaxMB int       `json:"memory_max"` // e.g. 2048
-	JavaArgs    string    `json:"java_args"`  // custom JVM flags
-	JavaPath    string    `json:"java_path"`  // custom Java binary path (optional)
-	AutoRestart bool      `json:"auto_restart"`
-	IconURL     string    `json:"icon_url,omitempty"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Description     string    `json:"description"`
+	Type            string    `json:"type"`       // "paper", "purpur", "vanilla", "fabric", "spigot", "custom"
+	Version         string    `json:"version"`    // e.g. "1.20.4", "1.21.1"
+	JarFile         string    `json:"jar_file"`   // e.g. "server.jar"
+	Port            int       `json:"port"`       // e.g. 25565
+	MemoryMinMB     int       `json:"memory_min"` // e.g. 1024
+	MemoryMaxMB     int       `json:"memory_max"` // e.g. 2048
+	JavaArgs        string    `json:"java_args"`  // custom JVM flags
+	JavaPath        string    `json:"java_path"`  // custom Java binary path (optional)
+	AutoRestart     bool      `json:"auto_restart"`
+	IconURL         string    `json:"icon_url,omitempty"`
 	OwnerID         int       `json:"owner_id"`
 	NodeID          string    `json:"node_id"`
 	CPULimitPercent int       `json:"cpu_limit_percent"`
 	DiskLimitMB     int64     `json:"disk_limit_mb"`
 	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type ServerStats struct {
@@ -119,17 +119,20 @@ type ServerSubuser struct {
 }
 
 type ServerSchedule struct {
-	ID        string     `json:"id"`
-	ServerID  string     `json:"server_id"`
-	Name      string     `json:"name"`
-	CronExpr  string     `json:"cron_expr"`
-	Action    string     `json:"action"` // "command", "restart", "backup", "start", "stop"
-	Payload   string     `json:"payload"`
-	IsActive  bool       `json:"is_active"`
-	LastRunAt *time.Time `json:"last_run_at,omitempty"`
-	NextRunAt *time.Time `json:"next_run_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID             string     `json:"id"`
+	ServerID       string     `json:"server_id"`
+	Name           string     `json:"name"`
+	CronExpr       string     `json:"cron_expr"`
+	Action         string     `json:"action"` // "command", "restart", "backup", "start", "stop"
+	Payload        string     `json:"payload"`
+	IsActive       bool       `json:"is_active"`
+	LastRunAt      *time.Time `json:"last_run_at"`
+	NextRunAt      *time.Time `json:"next_run_at"`
+	LastStatus     string     `json:"last_status"`
+	LastError      string     `json:"last_error"`
+	LastFinishedAt *time.Time `json:"last_finished_at"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type ServerDatabase struct {

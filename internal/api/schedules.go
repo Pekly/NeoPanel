@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,216 +22,196 @@ func NewScheduleHandler(db *database.DB, manager *runner.ServerManager) *Schedul
 	return &ScheduleHandler{db: db, manager: manager}
 }
 
-// ListSchedules returns all schedules for a server
+type scheduleView struct {
+	*database.ServerSchedule
+	Timezone string     `json:"timezone"`
+	LastRun  *time.Time `json:"last_run"` // alias; last_run_at is retained for existing clients
+}
+
+func viewSchedule(s *database.ServerSchedule) scheduleView {
+	copy := *s
+	copy.NextRunAt = nil
+	if copy.IsActive {
+		if cron, err := database.ParseCron(copy.CronExpr); err == nil {
+			copy.NextRunAt = cron.Next(time.Now().UTC())
+		}
+	}
+	return scheduleView{&copy, "UTC", copy.LastRunAt}
+}
+
 func (h *ScheduleHandler) ListSchedules(w http.ResponseWriter, r *http.Request) {
-	serverID := extractIDFromPath(r.URL.Path, "/api/servers/", "/schedules")
-	if serverID == "" {
-		writeError(w, http.StatusBadRequest, "Missing server ID")
-		return
-	}
-
-	schedules, err := h.db.ListServerSchedules(serverID)
+	schedules, err := h.db.ListServerSchedules(getURLParam(r, "id"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to list schedules: "+err.Error())
+		writeError(w, 500, "Failed to list schedules: "+err.Error())
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"schedules": schedules,
-	})
+	views := make([]scheduleView, 0, len(schedules))
+	for _, s := range schedules {
+		views = append(views, viewSchedule(s))
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"schedules": views})
 }
 
-// CreateSchedule creates a new scheduled task
-func (h *ScheduleHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
-	serverID := extractIDFromPath(r.URL.Path, "/api/servers/", "/schedules")
-	if serverID == "" {
-		writeError(w, http.StatusBadRequest, "Missing server ID")
-		return
-	}
+type scheduleUpdate struct {
+	Name     *string `json:"name"`
+	CronExpr *string `json:"cron_expr"`
+	Action   *string `json:"action"`
+	Payload  *string `json:"payload"`
+	IsActive *bool   `json:"is_active"`
+}
 
-	var req struct {
-		Name     string `json:"name"`
-		CronExpr string `json:"cron_expr"`
-		Action   string `json:"action"`
-		Payload  string `json:"payload"`
-		IsActive bool   `json:"is_active"`
+func (u scheduleUpdate) apply(s *database.ServerSchedule) error {
+	if u.Name != nil {
+		s.Name = strings.TrimSpace(*u.Name)
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
+	if u.CronExpr != nil {
+		s.CronExpr = strings.TrimSpace(*u.CronExpr)
 	}
-
-	if strings.TrimSpace(req.Name) == "" {
-		writeError(w, http.StatusBadRequest, "Schedule name is required")
-		return
+	if u.Action != nil {
+		s.Action = strings.ToLower(strings.TrimSpace(*u.Action))
 	}
-	if strings.TrimSpace(req.CronExpr) == "" {
-		writeError(w, http.StatusBadRequest, "Cron expression is required")
-		return
+	if u.Payload != nil {
+		s.Payload = strings.TrimSpace(*u.Payload)
 	}
-
-	// Validate action
-	act := strings.ToLower(strings.TrimSpace(req.Action))
-	switch act {
-	case "command", "restart", "start", "stop", "backup":
-		// valid
+	if u.IsActive != nil {
+		s.IsActive = *u.IsActive
+	}
+	if s.Name == "" {
+		return fmt.Errorf("schedule name is required")
+	}
+	if _, err := database.ParseCron(s.CronExpr); err != nil {
+		return err
+	}
+	switch s.Action {
+	case "command":
+		if s.Payload == "" {
+			return fmt.Errorf("command payload is required")
+		}
+	case "restart", "backup", "stop":
 	default:
-		writeError(w, http.StatusBadRequest, "Invalid action. Supported: command, restart, start, stop, backup")
-		return
+		return fmt.Errorf("supported actions: command, restart, backup, stop")
 	}
-
-	sched := &database.ServerSchedule{
-		ID:       fmt.Sprintf("sch-%x", time.Now().UnixNano()),
-		ServerID: serverID,
-		Name:     strings.TrimSpace(req.Name),
-		CronExpr: strings.TrimSpace(req.CronExpr),
-		Action:   act,
-		Payload:  strings.TrimSpace(req.Payload),
-		IsActive: req.IsActive,
-	}
-	if err := h.db.CreateServerSchedule(sched); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to create schedule: "+err.Error())
-		return
-	}
-
-	_ = h.db.CreateAuditLog("admin", "schedule.create", "Created schedule '"+sched.Name+"' on server "+serverID, getClientIP(r))
-
-	writeJSON(w, http.StatusCreated, map[string]interface{}{
-		"status":   "success",
-		"schedule": sched,
-	})
+	return nil
 }
 
-// UpdateSchedule updates an existing schedule
-func (h *ScheduleHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path, "/schedules/")
-	if len(parts) != 2 || parts[1] == "" {
-		writeError(w, http.StatusBadRequest, "Missing schedule ID")
-		return
-	}
-	schedID := parts[1]
-
-	var req struct {
-		Name     string `json:"name"`
-		CronExpr string `json:"cron_expr"`
-		Action   string `json:"action"`
-		Payload  string `json:"payload"`
-		IsActive bool   `json:"is_active"`
-	}
+func (h *ScheduleHandler) CreateSchedule(w http.ResponseWriter, r *http.Request) {
+	var req scheduleUpdate
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body")
+		writeError(w, 400, "Invalid request body")
 		return
 	}
-
-	sched, err := h.db.GetServerScheduleByID(schedID)
-	if err != nil || sched == nil {
-		writeError(w, http.StatusNotFound, "Schedule not found")
+	s := &database.ServerSchedule{ID: "sch-" + randomPasswordHex(12), ServerID: getURLParam(r, "id"), IsActive: true}
+	if err := req.apply(s); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
+	if err := h.db.CreateServerSchedule(s); err != nil {
+		writeError(w, 500, "Failed to create schedule: "+err.Error())
+		return
+	}
+	logAudit(h.db, r, "schedule.create", "Created schedule "+s.Name+" on "+s.ServerID)
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"status": "success", "schedule": viewSchedule(s)})
+}
 
-	if strings.TrimSpace(req.Name) != "" {
-		sched.Name = strings.TrimSpace(req.Name)
+func (h *ScheduleHandler) scopedSchedule(w http.ResponseWriter, r *http.Request) *database.ServerSchedule {
+	s, err := h.db.GetServerSchedule(getURLParam(r, "id"), getURLParam(r, "schedId"))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, 404, "Schedule not found")
+		} else {
+			writeError(w, 500, "Failed to load schedule")
+		}
+		return nil
 	}
-	if strings.TrimSpace(req.CronExpr) != "" {
-		sched.CronExpr = strings.TrimSpace(req.CronExpr)
+	return s
+}
+
+func (h *ScheduleHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request) {
+	s := h.scopedSchedule(w, r)
+	if s == nil {
+		return
 	}
-	if strings.TrimSpace(req.Action) != "" {
-		act := strings.ToLower(strings.TrimSpace(req.Action))
-		switch act {
-		case "command", "restart", "start", "stop", "backup":
-			sched.Action = act
-		default:
-			writeError(w, http.StatusBadRequest, "Invalid action")
+	var req scheduleUpdate
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, 400, "Invalid request body")
+		return
+	}
+	if err := req.apply(s); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if err := h.db.UpdateServerSchedule(s); err != nil {
+		writeError(w, 500, "Failed to update schedule: "+err.Error())
+		return
+	}
+	logAudit(h.db, r, "schedule.update", "Updated schedule "+s.ID)
+	writeJSON(w, 200, map[string]interface{}{"status": "success", "schedule": viewSchedule(s)})
+}
+
+func (h *ScheduleHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
+	s := h.scopedSchedule(w, r)
+	if s == nil {
+		return
+	}
+	if s.LastStatus == "started" || s.LastStatus == "running" {
+		writeError(w, 409, "Cannot delete a running schedule")
+		return
+	}
+	if err := h.db.DeleteServerSchedule(s.ServerID, s.ID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, 409, "Schedule was removed or started running; refresh and retry")
+			return
+		}
+		writeError(w, 500, "Failed to delete schedule: "+err.Error())
+		return
+	}
+	logAudit(h.db, r, "schedule.delete", "Deleted schedule "+s.ID)
+	writeJSON(w, 200, map[string]string{"status": "success"})
+}
+
+func (h *ScheduleHandler) ToggleSchedule(w http.ResponseWriter, r *http.Request) {
+	s := h.scopedSchedule(w, r)
+	if s == nil {
+		return
+	}
+	var req struct {
+		IsActive *bool `json:"is_active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.IsActive == nil {
+		writeError(w, 400, "is_active is required")
+		return
+	}
+	if *req.IsActive {
+		if _, err := database.ParseCron(s.CronExpr); err != nil {
+			writeError(w, 400, err.Error())
 			return
 		}
 	}
-	sched.Payload = strings.TrimSpace(req.Payload)
-	sched.IsActive = req.IsActive
-
-	if err := h.db.UpdateServerSchedule(sched); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to update schedule: "+err.Error())
+	if err := h.db.ToggleServerSchedule(s.ServerID, s.ID, *req.IsActive); err != nil {
+		writeError(w, 500, "Failed to toggle schedule: "+err.Error())
 		return
 	}
-
-	_ = h.db.CreateAuditLog("admin", "schedule.update", "Updated schedule '"+sched.Name+"' ("+schedID+")", getClientIP(r))
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":   "success",
-		"schedule": sched,
-	})
+	s.IsActive = *req.IsActive
+	writeJSON(w, 200, map[string]interface{}{"status": "success", "is_active": s.IsActive, "schedule": viewSchedule(s)})
 }
 
-// DeleteSchedule deletes a schedule
-func (h *ScheduleHandler) DeleteSchedule(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path, "/schedules/")
-	if len(parts) != 2 || parts[1] == "" {
-		writeError(w, http.StatusBadRequest, "Missing schedule ID")
-		return
-	}
-	schedID := parts[1]
-
-	if err := h.db.DeleteServerScheduleByID(schedID); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to delete schedule: "+err.Error())
-		return
-	}
-
-	_ = h.db.CreateAuditLog("admin", "schedule.delete", "Deleted schedule "+schedID, getClientIP(r))
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": "success",
-	})
-}
-
-// ToggleSchedule flips active state
-func (h *ScheduleHandler) ToggleSchedule(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path, "/schedules/")
-	if len(parts) != 2 {
-		writeError(w, http.StatusBadRequest, "Invalid schedule URL")
-		return
-	}
-	subparts := strings.Split(parts[1], "/toggle")
-	schedID := subparts[0]
-
-	var req struct {
-		IsActive bool `json:"is_active"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
-
-	if err := h.db.ToggleServerScheduleByID(schedID, req.IsActive); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to toggle schedule: "+err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":    "success",
-		"is_active": req.IsActive,
-	})
-}
-
-// RunScheduleNow triggers immediate execution of the schedule
 func (h *ScheduleHandler) RunScheduleNow(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path, "/schedules/")
-	if len(parts) != 2 {
-		writeError(w, http.StatusBadRequest, "Invalid schedule URL")
+	s := h.scopedSchedule(w, r)
+	if s == nil {
 		return
 	}
-	subparts := strings.Split(parts[1], "/run")
-	schedID := subparts[0]
-
-	sched, err := h.db.GetServerScheduleByID(schedID)
-	if err != nil || sched == nil {
-		writeError(w, http.StatusNotFound, "Schedule not found")
+	if _, err := database.ParseCron(s.CronExpr); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
-
-	_ = h.db.RecordScheduleRun(sched.ID, time.Now().UTC(), nil)
-	go h.manager.ExecuteSchedule(sched)
-
-	_ = h.db.CreateAuditLog("admin", "schedule.run_now", "Manually executed schedule '"+sched.Name+"'", getClientIP(r))
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":  "success",
-		"message": "Schedule execution triggered successfully",
-	})
+	if err := h.manager.StartSchedule(s); err != nil {
+		status := 500
+		if errors.Is(err, runner.ErrScheduleRunning) {
+			status = 409
+		}
+		writeError(w, status, "Failed to start schedule: "+err.Error())
+		return
+	}
+	logAudit(h.db, r, "schedule.run_now", "Started schedule "+s.ID)
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started", "message": "Schedule accepted; inspect last_status for completion"})
 }
-

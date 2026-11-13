@@ -1,11 +1,9 @@
 package api
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -24,6 +22,7 @@ type BackupHandler struct {
 }
 
 func NewBackupHandler(cfg *config.Config, db *database.DB, manager *runner.ServerManager) *BackupHandler {
+	manager.SetBackupDirectory(filepath.Join(cfg.Paths.DataDir, "backups"))
 	return &BackupHandler{
 		cfg:     cfg,
 		db:      db,
@@ -39,7 +38,7 @@ type BackupItem struct {
 
 func (h *BackupHandler) getBackupsDir(serverID string) string {
 	dir := filepath.Join(h.cfg.Paths.DataDir, "backups", serverID)
-	_ = os.MkdirAll(dir, 0755)
+	// Creation is handled by CreateBackup; reads must not hide filesystem errors.
 	return dir
 }
 
@@ -49,7 +48,11 @@ func (h *BackupHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		writeJSON(w, http.StatusOK, []BackupItem{})
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, []BackupItem{})
+		} else {
+			writeError(w, http.StatusInternalServerError, "Failed to list backups: "+err.Error())
+		}
 		return
 	}
 
@@ -88,7 +91,7 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	baseName := strings.TrimSpace(req.Name)
 	if baseName == "" {
-		baseName = fmt.Sprintf("backup-%s-%s", srv.Name, time.Now().Format("2006-01-02-150405"))
+		baseName = fmt.Sprintf("backup-%s-%s-%s", srv.Name, time.Now().UTC().Format("2006-01-02-150405"), randomPasswordHex(4))
 	}
 	// Sanitize name
 	baseName = strings.ReplaceAll(baseName, " ", "-")
@@ -98,63 +101,14 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 		baseName += ".tar.gz"
 	}
 
-	backupsDir := h.getBackupsDir(serverID)
-	destPath := filepath.Join(backupsDir, baseName)
-	serverDir := h.manager.GetWorkingDir(serverID)
-
-	// Create tar.gz archive
-	outFile, err := os.Create(destPath)
+	size, err := runner.CreateBackup(h.manager.GetWorkingDir(serverID), h.getBackupsDir(serverID), baseName)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create backup file: " + err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, os.ErrExist) {
+			status = http.StatusConflict
+		}
+		writeError(w, status, "Failed to create backup: "+err.Error())
 		return
-	}
-	defer outFile.Close()
-
-	gw := gzip.NewWriter(outFile)
-	defer gw.Close()
-
-	tw := tar.NewWriter(gw)
-	defer tw.Close()
-
-	err = filepath.Walk(serverDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		rel, err := filepath.Rel(serverDir, path)
-		if err != nil || rel == "." {
-			return nil
-		}
-
-		header, err := tar.FileInfoHeader(info, info.Name())
-		if err != nil {
-			return nil
-		}
-		header.Name = filepath.ToSlash(rel)
-
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-
-		if !info.IsDir() {
-			f, err := os.Open(path)
-			if err != nil {
-				return nil
-			}
-			defer f.Close()
-			_, _ = io.Copy(tw, f)
-		}
-		return nil
-	})
-
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Archive creation error: " + err.Error()})
-		return
-	}
-
-	fi, _ := outFile.Stat()
-	size := int64(0)
-	if fi != nil {
-		size = fi.Size()
 	}
 
 	logAudit(h.db, r, "backup_create", fmt.Sprintf("Created backup '%s' (%s) for %s (%s)", baseName, formatBytesAudit(size), srv.Name, serverID))

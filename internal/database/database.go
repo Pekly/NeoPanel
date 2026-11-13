@@ -197,6 +197,11 @@ func (db *DB) migrate() error {
 	}
 
 	// Safe automatic schema column migrations
+	_ = db.addColumnIfNotExists("server_schedules", "last_status", "TEXT NOT NULL DEFAULT ''")
+	_ = db.addColumnIfNotExists("server_schedules", "last_error", "TEXT NOT NULL DEFAULT ''")
+	_ = db.addColumnIfNotExists("server_schedules", "last_finished_at", "DATETIME")
+	// A daemon restart cannot resume an in-flight action.
+	_, _ = db.conn.Exec(`UPDATE server_schedules SET last_status = 'failed', last_error = 'Execution interrupted by daemon restart', last_finished_at = ? WHERE last_status IN ('started', 'running')`, time.Now().UTC())
 	_ = db.addColumnIfNotExists("users", "email", "TEXT NOT NULL DEFAULT ''")
 	_ = db.addColumnIfNotExists("users", "first_name", "TEXT NOT NULL DEFAULT ''")
 	_ = db.addColumnIfNotExists("users", "last_name", "TEXT NOT NULL DEFAULT ''")
@@ -1117,6 +1122,25 @@ func (db *DB) CreateServerDatabase(d *ServerDatabase) error {
 	return err
 }
 
+// InitializeServerDatabase reserves the unique name until initialization commits.
+// The callback must not use the metadata DB (its writer is held by this transaction).
+func (db *DB) InitializeServerDatabase(d *ServerDatabase, initialize func() error) error {
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	d.CreatedAt = time.Now().UTC()
+	_, err = tx.Exec(`INSERT INTO server_databases (id, server_id, name, engine, username, password, host, port, file_path, max_connections, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, d.ID, d.ServerID, d.Name, d.Engine, d.Username, d.Password, d.Host, d.Port, d.FilePath, d.MaxConnections, d.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if err = initialize(); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (db *DB) UpdateServerDatabasePassword(serverID, dbID, newPassword string) error {
 	_, err := db.conn.Exec(`UPDATE server_databases SET password = ? WHERE server_id = ? AND id = ?`, newPassword, serverID, dbID)
 	return err
@@ -1215,18 +1239,18 @@ func (db *DB) AddServerSubuser(serverID string, userID int, permissions []string
 	}, nil
 }
 
-func (db *DB) UpdateServerSubuser(id int, permissions []string) error {
+func (db *DB) UpdateServerSubuser(serverID string, id int, permissions []string) error {
 	if permissions == nil {
 		permissions = []string{}
 	}
 	permJSON, _ := json.Marshal(permissions)
-	_, err := db.conn.Exec(`UPDATE server_subusers SET permissions = ? WHERE id = ?`, string(permJSON), id)
-	return err
+	res, err := db.conn.Exec(`UPDATE server_subusers SET permissions = ? WHERE server_id = ? AND id = ?`, string(permJSON), serverID, id)
+	return affectedRow(res, err)
 }
 
 func (db *DB) DeleteServerSubuser(serverID string, id int) error {
-	_, err := db.conn.Exec(`DELETE FROM server_subusers WHERE server_id = ? AND id = ?`, serverID, id)
-	return err
+	res, err := db.conn.Exec(`DELETE FROM server_subusers WHERE server_id = ? AND id = ?`, serverID, id)
+	return affectedRow(res, err)
 }
 
 func (db *DB) GetUserServerPermissions(serverID string, userID int) ([]string, error) {
@@ -1251,175 +1275,124 @@ func (db *DB) IsServerSubuser(serverID string, userID int) (bool, error) {
 
 // --- Server Schedules ---
 
-func (db *DB) ListServerSchedules(serverID string) ([]*ServerSchedule, error) {
-	rows, err := db.conn.Query(`
-		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
-		FROM server_schedules
-		WHERE server_id = ?
-		ORDER BY created_at ASC
-	`, serverID)
+const scheduleColumns = `id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at, last_status, last_error, last_finished_at`
+
+func scanSchedule(row interface{ Scan(...any) error }) (*ServerSchedule, error) {
+	s := &ServerSchedule{}
+	var active int
+	var last, next, finished sql.NullTime
+	err := row.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &active, &last, &next, &s.CreatedAt, &s.UpdatedAt, &s.LastStatus, &s.LastError, &finished)
+	if err != nil {
+		return nil, err
+	}
+	s.IsActive = active == 1
+	if last.Valid {
+		s.LastRunAt = &last.Time
+	}
+	if next.Valid {
+		s.NextRunAt = &next.Time
+	}
+	if finished.Valid {
+		s.LastFinishedAt = &finished.Time
+	}
+	return s, nil
+}
+
+func (db *DB) listSchedules(where string, args ...any) ([]*ServerSchedule, error) {
+	rows, err := db.conn.Query(`SELECT `+scheduleColumns+` FROM server_schedules WHERE `+where+` ORDER BY created_at ASC`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var list []*ServerSchedule
+	list := []*ServerSchedule{}
 	for rows.Next() {
-		s := &ServerSchedule{}
-		var isActive int
-		var lastRun, nextRun sql.NullTime
-		if err := rows.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		s, err := scanSchedule(rows)
+		if err != nil {
 			return nil, err
-		}
-		s.IsActive = isActive == 1
-		if lastRun.Valid {
-			s.LastRunAt = &lastRun.Time
-		}
-		if nextRun.Valid {
-			s.NextRunAt = &nextRun.Time
 		}
 		list = append(list, s)
 	}
-	if list == nil {
-		list = []*ServerSchedule{}
-	}
-	return list, nil
+	return list, rows.Err()
+}
+
+func (db *DB) ListServerSchedules(serverID string) ([]*ServerSchedule, error) {
+	return db.listSchedules(`server_id = ?`, serverID)
+}
+
+func (db *DB) ListAllActiveSchedules() ([]*ServerSchedule, error) {
+	return db.listSchedules(`is_active = 1`)
 }
 
 func (db *DB) GetServerSchedule(serverID, id string) (*ServerSchedule, error) {
-	row := db.conn.QueryRow(`
-		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
-		FROM server_schedules
-		WHERE server_id = ? AND id = ?
-	`, serverID, id)
-	s := &ServerSchedule{}
-	var isActive int
-	var lastRun, nextRun sql.NullTime
-	if err := row.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
-		return nil, err
-	}
-	s.IsActive = isActive == 1
-	if lastRun.Valid {
-		s.LastRunAt = &lastRun.Time
-	}
-	if nextRun.Valid {
-		s.NextRunAt = &nextRun.Time
-	}
-	return s, nil
+	return scanSchedule(db.conn.QueryRow(`SELECT `+scheduleColumns+` FROM server_schedules WHERE server_id = ? AND id = ?`, serverID, id))
 }
 
 func (db *DB) GetServerScheduleByID(id string) (*ServerSchedule, error) {
-	row := db.conn.QueryRow(`
-		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
-		FROM server_schedules
-		WHERE id = ?
-	`, id)
-	s := &ServerSchedule{}
-	var isActive int
-	var lastRun, nextRun sql.NullTime
-	if err := row.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
-		return nil, err
-	}
-	s.IsActive = isActive == 1
-	if lastRun.Valid {
-		s.LastRunAt = &lastRun.Time
-	}
-	if nextRun.Valid {
-		s.NextRunAt = &nextRun.Time
-	}
-	return s, nil
+	return scanSchedule(db.conn.QueryRow(`SELECT `+scheduleColumns+` FROM server_schedules WHERE id = ?`, id))
 }
 
 func (db *DB) CreateServerSchedule(s *ServerSchedule) error {
-	now := time.Now().UTC()
-	s.CreatedAt = now
-	s.UpdatedAt = now
-	isActive := 0
-	if s.IsActive {
-		isActive = 1
+	if _, err := ParseCron(s.CronExpr); err != nil {
+		return err
 	}
-	_, err := db.conn.Exec(`
-		INSERT INTO server_schedules (id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, s.ID, s.ServerID, s.Name, s.CronExpr, s.Action, s.Payload, isActive, s.LastRunAt, s.NextRunAt, s.CreatedAt, s.UpdatedAt)
+	s.CreatedAt = time.Now().UTC()
+	s.UpdatedAt = s.CreatedAt
+	_, err := db.conn.Exec(`INSERT INTO server_schedules (id, server_id, name, cron_expr, action, payload, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, s.ID, s.ServerID, s.Name, s.CronExpr, s.Action, s.Payload, s.IsActive, s.CreatedAt, s.UpdatedAt)
 	return err
 }
 
 func (db *DB) UpdateServerSchedule(s *ServerSchedule) error {
-	s.UpdatedAt = time.Now().UTC()
-	isActive := 0
-	if s.IsActive {
-		isActive = 1
+	if _, err := ParseCron(s.CronExpr); err != nil {
+		return err
 	}
-	_, err := db.conn.Exec(`
-		UPDATE server_schedules
-		SET name = ?, cron_expr = ?, action = ?, payload = ?, is_active = ?, updated_at = ?
-		WHERE server_id = ? AND id = ?
-	`, s.Name, s.CronExpr, s.Action, s.Payload, isActive, s.UpdatedAt, s.ServerID, s.ID)
+	s.UpdatedAt = time.Now().UTC()
+	res, err := db.conn.Exec(`UPDATE server_schedules SET name = ?, cron_expr = ?, action = ?, payload = ?, is_active = ?, updated_at = ? WHERE server_id = ? AND id = ?`, s.Name, s.CronExpr, s.Action, s.Payload, s.IsActive, s.UpdatedAt, s.ServerID, s.ID)
+	return affectedRow(res, err)
+}
+
+func affectedRow(res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return sql.ErrNoRows
+	}
 	return err
 }
 
 func (db *DB) DeleteServerSchedule(serverID, id string) error {
-	_, err := db.conn.Exec(`DELETE FROM server_schedules WHERE server_id = ? AND id = ?`, serverID, id)
-	return err
-}
-
-func (db *DB) DeleteServerScheduleByID(id string) error {
-	_, err := db.conn.Exec(`DELETE FROM server_schedules WHERE id = ?`, id)
-	return err
+	res, err := db.conn.Exec(`DELETE FROM server_schedules WHERE server_id = ? AND id = ? AND last_status NOT IN ('started', 'running')`, serverID, id)
+	return affectedRow(res, err)
 }
 
 func (db *DB) ToggleServerSchedule(serverID, id string, active bool) error {
-	val := 0
-	if active {
-		val = 1
+	res, err := db.conn.Exec(`UPDATE server_schedules SET is_active = ?, updated_at = ? WHERE server_id = ? AND id = ?`, active, time.Now().UTC(), serverID, id)
+	return affectedRow(res, err)
+}
+
+// ClaimScheduleRun is atomic across manual/timer executions and daemon instances.
+func (db *DB) ClaimScheduleRun(id string, now time.Time, scheduled bool) (bool, error) {
+	query := `UPDATE server_schedules SET last_status = 'started', last_error = '', last_run_at = ?, last_finished_at = NULL WHERE id = ? AND last_status NOT IN ('started', 'running')`
+	args := []any{now.UTC(), id}
+	if scheduled {
+		query += ` AND is_active = 1 AND (last_run_at IS NULL OR last_run_at < ?)`
+		args = append(args, now.UTC().Truncate(time.Minute))
 	}
-	_, err := db.conn.Exec(`UPDATE server_schedules SET is_active = ?, updated_at = ? WHERE server_id = ? AND id = ?`, val, time.Now().UTC(), serverID, id)
-	return err
-}
-
-func (db *DB) ToggleServerScheduleByID(id string, active bool) error {
-	val := 0
-	if active {
-		val = 1
-	}
-	_, err := db.conn.Exec(`UPDATE server_schedules SET is_active = ?, updated_at = ? WHERE id = ?`, val, time.Now().UTC(), id)
-	return err
-}
-
-func (db *DB) RecordScheduleRun(id string, lastRun time.Time, nextRun *time.Time) error {
-	_, err := db.conn.Exec(`UPDATE server_schedules SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE id = ?`, lastRun, nextRun, time.Now().UTC(), id)
-	return err
-}
-
-func (db *DB) ListAllActiveSchedules() ([]*ServerSchedule, error) {
-	rows, err := db.conn.Query(`
-		SELECT id, server_id, name, cron_expr, action, payload, is_active, last_run_at, next_run_at, created_at, updated_at
-		FROM server_schedules
-		WHERE is_active = 1
-		ORDER BY created_at ASC
-	`)
+	res, err := db.conn.Exec(query, args...)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	defer rows.Close()
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
 
-	var list []*ServerSchedule
-	for rows.Next() {
-		s := &ServerSchedule{}
-		var isActive int
-		var lastRun, nextRun sql.NullTime
-		if err := rows.Scan(&s.ID, &s.ServerID, &s.Name, &s.CronExpr, &s.Action, &s.Payload, &isActive, &lastRun, &nextRun, &s.CreatedAt, &s.UpdatedAt); err != nil {
-			return nil, err
-		}
-		s.IsActive = isActive == 1
-		if lastRun.Valid {
-			s.LastRunAt = &lastRun.Time
-		}
-		if nextRun.Valid {
-			s.NextRunAt = &nextRun.Time
-		}
-		list = append(list, s)
+func (db *DB) SetScheduleRunStatus(id, status, message string) error {
+	var finished *time.Time
+	if status == "succeeded" || status == "failed" {
+		now := time.Now().UTC()
+		finished = &now
 	}
-	return list, nil
+	_, err := db.conn.Exec(`UPDATE server_schedules SET last_status = ?, last_error = ?, last_finished_at = ? WHERE id = ?`, status, message, finished, id)
+	return err
 }

@@ -123,8 +123,8 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
 	if claims != nil && claims.Role != "admin" {
 		if server.OwnerID != claims.UserID {
-			perms, _ := h.db.GetUserServerPermissions(server.ID, claims.UserID)
-			if len(perms) == 0 {
+			member, _ := h.db.IsServerSubuser(server.ID, claims.UserID)
+			if !member {
 				writeJSON(w, http.StatusForbidden, map[string]string{"error": "Access denied to this server"})
 				return
 			}
@@ -272,7 +272,15 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req database.Server
+	var req struct {
+		database.Server
+		Description     *string `json:"description"`
+		JavaArgs        *string `json:"java_args"`
+		JavaPath        *string `json:"java_path"`
+		AutoRestart     *bool   `json:"auto_restart"`
+		CPULimitPercent *int    `json:"cpu_limit_percent"`
+		DiskLimitMB     *int64  `json:"disk_limit_mb"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
@@ -293,7 +301,7 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering server network ports")
 				return
 			}
-			if !node.AllowUserJava && (req.JavaPath != "" && req.JavaPath != server.JavaPath) {
+			if !node.AllowUserJava && req.JavaPath != nil && *req.JavaPath != server.JavaPath {
 				writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering Java runtime binary")
 				return
 			}
@@ -303,7 +311,9 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Name) != "" {
 		server.Name = strings.TrimSpace(req.Name)
 	}
-	server.Description = req.Description
+	if req.Description != nil {
+		server.Description = *req.Description
+	}
 	if req.Port > 0 {
 		server.Port = req.Port
 	}
@@ -319,9 +329,15 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	if req.MemoryMaxMB > 0 {
 		server.MemoryMaxMB = req.MemoryMaxMB
 	}
-	server.JavaArgs = req.JavaArgs
-	server.JavaPath = req.JavaPath
-	server.AutoRestart = req.AutoRestart
+	if req.JavaArgs != nil {
+		server.JavaArgs = *req.JavaArgs
+	}
+	if req.JavaPath != nil {
+		server.JavaPath = *req.JavaPath
+	}
+	if req.AutoRestart != nil {
+		server.AutoRestart = *req.AutoRestart
+	}
 	if req.JarFile != "" {
 		server.JarFile = req.JarFile
 	}
@@ -329,11 +345,11 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		if req.OwnerID > 0 {
 			server.OwnerID = req.OwnerID
 		}
-		if req.CPULimitPercent >= 0 {
-			server.CPULimitPercent = req.CPULimitPercent
+		if req.CPULimitPercent != nil && *req.CPULimitPercent >= 0 {
+			server.CPULimitPercent = *req.CPULimitPercent
 		}
-		if req.DiskLimitMB >= 0 {
-			server.DiskLimitMB = req.DiskLimitMB
+		if req.DiskLimitMB != nil && *req.DiskLimitMB >= 0 {
+			server.DiskLimitMB = *req.DiskLimitMB
 		}
 		if req.NodeID != "" {
 			server.NodeID = req.NodeID

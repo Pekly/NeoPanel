@@ -37,15 +37,44 @@ type FileItem struct {
 
 // safePath ensures requested path cannot escape server working directory
 func (h *FileHandler) safePath(serverID, reqPath string) (string, error) {
-	baseDir := h.manager.GetWorkingDir(serverID)
-	cleanRel := filepath.Clean("/" + reqPath)
+	baseDir, err := filepath.Abs(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		return "", err
+	}
+	if resolved, e := filepath.EvalSymlinks(baseDir); e == nil {
+		baseDir = resolved
+	}
+	cleanRel := filepath.Clean("/" + strings.ReplaceAll(reqPath, "\\", "/"))
 	fullPath := filepath.Join(baseDir, cleanRel)
-
 	rel, err := filepath.Rel(baseDir, fullPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("access denied: path escapes server directory")
 	}
+	// Do not follow user-controlled symlinks, including symlinked parent folders.
+	for p := fullPath; p != baseDir; p = filepath.Dir(p) {
+		info, e := os.Lstat(p)
+		if e != nil && !os.IsNotExist(e) {
+			return "", e
+		}
+		if e == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("access denied: symbolic links are not supported")
+		}
+	}
+	return fullPath, nil
+}
 
+func (h *FileHandler) destructivePath(serverID, reqPath string) (string, error) {
+	fullPath, err := h.safePath(serverID, reqPath)
+	if err != nil {
+		return "", err
+	}
+	root, err := h.safePath(serverID, "")
+	if err != nil {
+		return "", err
+	}
+	if fullPath == root {
+		return "", fmt.Errorf("cannot modify server root directory")
+	}
 	return fullPath, nil
 }
 
@@ -204,7 +233,7 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath, err := h.safePath(serverID, reqPath)
+	fullPath, err := h.destructivePath(serverID, reqPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -288,12 +317,12 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 		return
 	}
-	oldFull, err := h.safePath(serverID, req.OldPath)
+	oldFull, err := h.destructivePath(serverID, req.OldPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	newFull, err := h.safePath(serverID, req.NewPath)
+	newFull, err := h.destructivePath(serverID, req.NewPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -335,7 +364,7 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot move server root directory"})
 			return
 		}
-		srcFull, err := h.safePath(serverID, fromRel)
+		srcFull, err := h.destructivePath(serverID, fromRel)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -442,7 +471,7 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[srcRel] = true
 
-		srcFull, err := h.safePath(serverID, srcRel)
+		srcFull, err := h.destructivePath(serverID, srcRel)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

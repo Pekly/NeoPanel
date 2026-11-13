@@ -1,7 +1,9 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -120,8 +122,12 @@ func (h *SubuserHandler) UpdateSubuser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.UpdateServerSubuser(subuserIntID, req.Permissions); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to update subuser: "+err.Error())
+	if err := h.db.UpdateServerSubuser(serverID, subuserIntID, req.Permissions); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "Subuser not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Failed to update subuser: "+err.Error())
+		}
 		return
 	}
 
@@ -148,7 +154,11 @@ func (h *SubuserHandler) DeleteSubuser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.DeleteServerSubuser(serverID, subuserIntID); err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to delete subuser: "+err.Error())
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "Subuser not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Failed to delete subuser: "+err.Error())
+		}
 		return
 	}
 
@@ -224,4 +234,3 @@ func (h *SubuserHandler) GetMyPermissions(w http.ResponseWriter, r *http.Request
 		"permissions": perms,
 	})
 }
-

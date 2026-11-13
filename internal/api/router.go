@@ -4,17 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/runner"
+	"github.com/gorilla/websocket"
 )
 
 type contextKey string
@@ -149,7 +152,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// Server Icon routes
 	r.mux.HandleFunc("POST /api/servers/{id}/icon", r.requireAuth(r.servers.UploadServerIcon))
-	r.mux.HandleFunc("GET /api/servers/{id}/icon", r.servers.GetServerIcon)
+	r.mux.HandleFunc("GET /api/servers/{id}/icon", r.requireAuth(r.servers.GetServerIcon))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/icon", r.requireAuth(r.servers.DeleteServerIcon))
 
 	// Server Quick Configs & Optimization Presets
@@ -200,6 +203,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/servers/{id}/plugins", r.requireAuth(r.plugins.ListInstalled))
 	r.mux.HandleFunc("POST /api/servers/{id}/plugins/install", r.requireAuth(r.plugins.Install))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/plugins", r.requireAuth(r.plugins.Delete))
+	r.mux.HandleFunc("POST /api/servers/{id}/plugins/toggle", r.requireAuth(r.plugins.Toggle))
+	r.mux.HandleFunc("GET /api/servers/{id}/plugins/versions", r.requireAuth(r.plugins.Versions))
 
 	// Backups routes
 	r.mux.HandleFunc("GET /api/servers/{id}/backups", r.requireAuth(r.backups.List))
@@ -341,7 +346,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/admin/email/test", r.requireAdmin(r.email.HandleTestEmail))
 
 	// Multi-node cluster & proxy routes
-	r.mux.HandleFunc("GET /api/cluster/servers", r.requireAuth(r.nodes.ListClusterServers))
+	r.mux.HandleFunc("GET /api/cluster/servers", r.requireAuth(r.listClusterServers))
 	r.mux.HandleFunc("GET /api/nodes", r.requireAuth(r.nodes.ListNodes))
 	r.mux.HandleFunc("POST /api/nodes", r.requireAdmin(r.nodes.CreateNode))
 	r.mux.HandleFunc("POST /api/nodes/test", r.requireAdmin(r.nodes.TestNodePayload))
@@ -349,9 +354,9 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("PUT /api/nodes/{id}", r.requireAdmin(r.nodes.UpdateNode))
 	r.mux.HandleFunc("DELETE /api/nodes/{id}", r.requireAdmin(r.nodes.DeleteNode))
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
-		r.mux.HandleFunc(method+" /api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.nodes.Proxy))
+		r.mux.HandleFunc(method+" /api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.proxyHTTP))
 	}
-	r.mux.HandleFunc("GET /api/nodes/{id}/ws/{serverId}", r.nodes.ProxyWS)
+	r.mux.HandleFunc("GET /api/nodes/{id}/ws/{serverId}", r.requireAuth(r.proxyWebSocket))
 
 	// Embedded Static & Multi-Page Panel routes (active in panel mode; omitted in node daemons)
 	if r.embeddedStatic != nil && !(r.cfg != nil && r.cfg.IsNode()) {
@@ -440,6 +445,21 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized: invalid or expired token"})
 			return
 		}
+		claims, err = forwardedClaims(r.auth.db, req, claims)
+		if err != nil {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		w.Header().Set("X-NeoPanel-User-ID", strconv.Itoa(claims.UserID))
+		if strings.HasPrefix(req.URL.Path, "/api/servers/") {
+			serverID := getURLParam(req, "id")
+			suffix := strings.TrimPrefix(strings.TrimPrefix(req.URL.Path, "/api/servers/"+serverID), "/")
+			permission := serverActionPermission(req.Method, suffix)
+			if status := authorizeServer(r.auth.db, claims, serverID, permission); status != 0 {
+				writeError(w, status, "Access denied: server membership and "+permission+" permission required")
+				return
+			}
+		}
 
 		ctx := context.WithValue(req.Context(), contextUserKey, claims)
 		next(w, req.WithContext(ctx))
@@ -506,4 +526,340 @@ func getUserFromContext(r *http.Request) *database.User {
 
 func getURLParam(r *http.Request, key string) string {
 	return r.PathValue(key)
+}
+
+// serverActionPermission is shared by all operational routes. Unknown operations
+// fail closed to owners/admins rather than silently granting any authenticated user.
+func serverActionPermission(method, suffix string) string {
+	read := method == http.MethodGet || method == http.MethodHead
+	parts := strings.Split(suffix, "/")
+	switch parts[0] {
+	case "":
+		if read {
+			return ""
+		}
+		if method == http.MethodPut {
+			return "settings.edit"
+		}
+		return "owner"
+	case "permissions", "icon":
+		if read {
+			return ""
+		}
+		return "settings.edit"
+	case "ws":
+		return "console.view"
+	case "command":
+		return "console.command"
+	case "power":
+		return "server.power"
+	case "files":
+		if read {
+			return "files.view"
+		}
+		if method == http.MethodDelete {
+			return "files.delete"
+		}
+		if len(parts) > 1 {
+			switch parts[1] {
+			case "rename", "move", "unzip", "extract":
+				return "files.delete"
+			}
+		}
+		return "files.edit"
+	case "plugins":
+		if read {
+			return "files.view"
+		}
+		if method == http.MethodDelete {
+			return "files.delete"
+		}
+		return "files.edit"
+	case "backups":
+		return "backup.manage"
+	case "databases":
+		return "database.manage"
+	case "subusers":
+		return "subusers.manage"
+	case "schedules":
+		return "schedules.manage"
+	case "players":
+		if read {
+			return "console.view"
+		}
+		return "console.command"
+	case "sftp":
+		return "files.view"
+	case "configs", "properties", "ports", "subdomain", "software", "reinstall":
+		if read {
+			return "settings.view"
+		}
+		return "settings.edit"
+	default:
+		return "owner"
+	}
+}
+
+func authorizeServer(db *database.DB, claims *JWTClaims, serverID, permission string) int {
+	if claims == nil {
+		return http.StatusUnauthorized
+	}
+	srv, err := db.GetServer(serverID)
+	if err != nil || srv == nil {
+		return http.StatusNotFound
+	}
+	if claims.Role == "admin" || srv.OwnerID == claims.UserID {
+		return 0
+	}
+	perms, err := db.GetUserServerPermissions(serverID, claims.UserID)
+	if err != nil {
+		return http.StatusForbidden
+	}
+	if permission == "" {
+		return 0
+	}
+	for _, p := range perms {
+		if p == permission && permission != "owner" {
+			return 0
+		}
+	}
+	return http.StatusForbidden
+}
+
+// Nodes already trust their configured node/admin API token and synchronize user
+// IDs from the master. Carry the original caller over that authenticated hop, so
+// the node evaluates its own server ownership/subusers instead of acting as admin.
+// Ordinary tokens can never assert a forwarded identity.
+func forwardedClaims(db *database.DB, req *http.Request, claims *JWTClaims) (*JWTClaims, error) {
+	id := req.Header.Get("X-NeoPanel-User-ID")
+	if id == "" {
+		return claims, nil
+	}
+	if claims == nil || claims.Role != "admin" {
+		return nil, fmt.Errorf("untrusted forwarded identity")
+	}
+	userID, err := strconv.Atoi(id)
+	if err != nil || userID <= 0 {
+		return nil, fmt.Errorf("invalid forwarded user")
+	}
+	user, err := db.GetUserByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("forwarded user is not synchronized to this node")
+	}
+	role := req.Header.Get("X-NeoPanel-User-Role")
+	if role != "admin" && role != "user" {
+		return nil, fmt.Errorf("invalid forwarded role")
+	}
+	return &JWTClaims{UserID: user.ID, Username: user.Username, Role: role}, nil
+}
+
+func setProxyIdentity(header http.Header, claims *JWTClaims, nodeToken string) {
+	header.Set("Authorization", "Bearer "+nodeToken)
+	// Native node tokens have user ID zero and are already privileged machine identities.
+	if claims.UserID > 0 && claims.Role != "admin" {
+		header.Set("X-NeoPanel-User-ID", strconv.Itoa(claims.UserID))
+		header.Set("X-NeoPanel-User-Role", claims.Role)
+	}
+}
+
+func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
+	node, err := r.auth.db.GetNode(getURLParam(req, "id"))
+	if err != nil {
+		writeError(w, 404, "Node not found")
+		return
+	}
+	rest := strings.TrimPrefix(path.Clean("/"+getURLParam(req, "rest")), "/")
+	if !strings.HasPrefix(rest, "api/") || rest == "api/nodes" || strings.HasPrefix(rest, "api/nodes/") || strings.HasPrefix(rest, "api/cluster/") {
+		writeError(w, 403, "Invalid proxy path")
+		return
+	}
+	claims, _ := req.Context().Value(contextUserKey).(*JWTClaims)
+	// Only server operations and public catalogs are available through a user proxy.
+	if claims.Role != "admin" && !strings.HasPrefix(rest, "api/servers/") && rest != "api/servers" && rest != "api/plugins/search" && rest != "api/versions" && rest != "api/system/java" {
+		writeError(w, 403, "Proxy operation requires administrator privileges")
+		return
+	}
+	if err := r.checkProxyIdentity(req, node, claims); err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	q := req.URL.Query()
+	q.Del("token")
+	remote, err := http.NewRequestWithContext(req.Context(), req.Method, strings.TrimRight(node.BaseURL, "/")+"/"+rest+"?"+q.Encode(), req.Body)
+	if err != nil {
+		writeError(w, 400, "Invalid proxy request")
+		return
+	}
+	remote.Header.Set("Content-Type", req.Header.Get("Content-Type"))
+	remote.Header.Set("Accept", req.Header.Get("Accept"))
+	remote.ContentLength = req.ContentLength
+	setProxyIdentity(remote.Header, claims, node.APIToken)
+	resp, err := r.nodes.httpClient.Do(remote)
+	if err != nil {
+		writeError(w, 502, "Failed to reach node: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Cache-Control"} {
+		if v := resp.Header.Get(key); v != "" {
+			w.Header().Set(key, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+func (r *Router) proxyWebSocket(w http.ResponseWriter, req *http.Request) {
+	node, err := r.auth.db.GetNode(getURLParam(req, "id"))
+	if err != nil {
+		writeError(w, 404, "Node not found")
+		return
+	}
+	u, err := url.Parse(node.BaseURL)
+	if err != nil {
+		writeError(w, 502, "Invalid node URL")
+		return
+	}
+	if u.Scheme == "https" {
+		u.Scheme = "wss"
+	} else {
+		u.Scheme = "ws"
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/servers/" + getURLParam(req, "serverId") + "/ws"
+	u.RawQuery = ""
+	header := http.Header{}
+	claims, _ := req.Context().Value(contextUserKey).(*JWTClaims)
+	if err := r.checkProxyIdentity(req, node, claims); err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	setProxyIdentity(header, claims, node.APIToken)
+	dialer := *websocket.DefaultDialer
+	dialer.HandshakeTimeout = 10 * time.Second
+	remote, resp, err := dialer.DialContext(req.Context(), u.String(), header)
+	if err != nil {
+		status := http.StatusBadGateway
+		if resp != nil {
+			if resp.Body != nil {
+				resp.Body.Close()
+			}
+			if resp.StatusCode == 403 || resp.StatusCode == 404 {
+				status = resp.StatusCode
+			}
+		}
+		writeError(w, status, "Remote console access failed")
+		return
+	}
+	defer remote.Close()
+	client, err := upgrader.Upgrade(w, req, nil)
+	if err != nil {
+		return
+	}
+	defer client.Close()
+	client.SetReadLimit(65536)
+	done := make(chan struct{}, 2)
+	relay := func(dst, src *websocket.Conn) {
+		defer func() { done <- struct{}{} }()
+		for {
+			kind, payload, err := src.ReadMessage()
+			if err != nil {
+				return
+			}
+			if err := dst.WriteMessage(kind, payload); err != nil {
+				return
+			}
+		}
+	}
+	go relay(remote, client)
+	go relay(client, remote)
+	<-done
+}
+
+// Refuse user proxying to older nodes that would ignore the identity headers and
+// execute the request with the privileged node token. No mutation is sent first.
+func (r *Router) checkProxyIdentity(req *http.Request, node *database.ClusterNode, claims *JWTClaims) error {
+	if claims.Role == "admin" {
+		return nil
+	}
+	probe, err := http.NewRequestWithContext(req.Context(), http.MethodGet, strings.TrimRight(node.BaseURL, "/")+"/api/auth/me", nil)
+	if err != nil {
+		return err
+	}
+	setProxyIdentity(probe.Header, claims, node.APIToken)
+	resp, err := r.nodes.httpClient.Do(probe)
+	if err != nil {
+		return fmt.Errorf("node identity check failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-NeoPanel-User-ID") != strconv.Itoa(claims.UserID) {
+		return fmt.Errorf("node must be updated and user identities synchronized before user proxy access")
+	}
+	return nil
+}
+
+func (r *Router) listClusterServers(w http.ResponseWriter, req *http.Request) {
+	claims, _ := req.Context().Value(contextUserKey).(*JWTClaims)
+	if claims.Role == "admin" {
+		r.nodes.ListClusterServers(w, req)
+		return
+	}
+	local, err := r.auth.db.ListServersForUser(claims.UserID, claims.Role)
+	if err != nil {
+		writeError(w, 500, "Failed to list servers")
+		return
+	}
+	items := []interface{}{}
+	for _, srv := range local {
+		items = append(items, struct {
+			*database.Server
+			Stats    database.ServerStats `json:"stats"`
+			MOTD     string               `json:"motd"`
+			NodeID   string               `json:"node_id"`
+			NodeName string               `json:"node_name"`
+			NodeFQDN string               `json:"node_fqdn"`
+		}{srv, r.servers.manager.GetStats(srv), readServerMOTD(r.servers.manager.GetWorkingDir(srv.ID)), "local", "Local Master Node", r.nodes.resolveLocalFQDN(req.Host)})
+	}
+	nodes, err := r.auth.db.ListNodes()
+	if err != nil {
+		writeError(w, 500, "Failed to list nodes")
+		return
+	}
+	nodeErrors := map[string]string{}
+	for _, node := range nodes {
+		list, err := r.listRemoteServers(req, node, claims)
+		if err != nil {
+			nodeErrors[node.ID] = err.Error()
+			continue
+		}
+		for _, item := range list {
+			item["node_id"], item["node_name"], item["node_fqdn"] = node.ID, node.Name, node.FQDN
+			items = append(items, item)
+		}
+	}
+	writeJSON(w, 200, map[string]interface{}{"servers": items, "node_errors": nodeErrors})
+}
+
+func (r *Router) listRemoteServers(req *http.Request, node *database.ClusterNode, claims *JWTClaims) ([]map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(req.Context(), 5*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+	if err := r.checkProxyIdentity(req, node, claims); err != nil {
+		return nil, err
+	}
+	remote, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(node.BaseURL, "/")+"/api/servers", nil)
+	if err != nil {
+		return nil, err
+	}
+	setProxyIdentity(remote.Header, claims, node.APIToken)
+	resp, err := r.nodes.httpClient.Do(remote)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("node returned HTTP %d", resp.StatusCode)
+	}
+	var items []map[string]interface{}
+	err = json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&items)
+	return items, err
 }

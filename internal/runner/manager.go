@@ -1,13 +1,10 @@
 package runner
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"fmt"
-	"io"
+	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +15,7 @@ import (
 type ServerManager struct {
 	mu              sync.RWMutex
 	baseDir         string
+	backupDir       string
 	db              *database.DB
 	instances       map[string]*ProcessInstance
 	startupFailures map[string]int
@@ -32,6 +30,7 @@ func NewServerManager(baseDir string, db *database.DB) *ServerManager {
 	_ = os.MkdirAll(baseDir, 0755)
 	mgr := &ServerManager{
 		baseDir:         baseDir,
+		backupDir:       filepath.Join(filepath.Dir(baseDir), "backups"),
 		db:              db,
 		instances:       make(map[string]*ProcessInstance),
 		startupFailures: make(map[string]int),
@@ -586,160 +585,130 @@ func (m *ServerManager) runScheduledTasks(now time.Time) {
 	}
 
 	for _, sched := range schedules {
-		if !MatchesCron(sched.CronExpr, now) {
-			continue
+		if MatchesCron(sched.CronExpr, now) {
+			if err := m.startSchedule(sched, now, true); err != nil {
+				log.Printf("schedule %s: %v", sched.ID, err)
+			}
 		}
-
-		// Prevent re-triggering within the same minute
-		if sched.LastRunAt != nil && !sched.LastRunAt.IsZero() && now.Sub(*sched.LastRunAt) < 55*time.Second {
-			continue
-		}
-
-		_ = m.db.RecordScheduleRun(sched.ID, now, nil)
-		go m.ExecuteSchedule(sched)
 	}
 }
 
-func (m *ServerManager) ExecuteSchedule(sched *database.ServerSchedule) {
-	inst, ok := m.GetInstance(sched.ServerID)
-	srv, srvErr := m.db.GetServer(sched.ServerID)
-	srvName := sched.ServerID
-	if srvErr == nil && srv != nil {
-		srvName = srv.Name
-	}
+func (m *ServerManager) SetBackupDirectory(dir string) {
+	m.mu.Lock()
+	m.backupDir = dir
+	m.mu.Unlock()
+}
 
-	switch strings.ToLower(sched.Action) {
-	case "command":
-		if ok && inst.GetStatus() == "online" && strings.TrimSpace(sched.Payload) != "" {
-			_ = inst.WriteInput(strings.TrimSpace(sched.Payload) + "\n")
-			_ = m.db.CreateAuditLog("system", "schedule.command", fmt.Sprintf("Executed schedule '%s' command: %s on %s", sched.Name, sched.Payload, srvName), "")
+// StartSchedule records acceptance before returning; completion is recorded by the worker.
+func (m *ServerManager) StartSchedule(sched *database.ServerSchedule) error {
+	return m.startSchedule(sched, time.Now().UTC(), false)
+}
+
+var ErrScheduleRunning = fmt.Errorf("schedule is already running or was already triggered this minute")
+
+func (m *ServerManager) startSchedule(sched *database.ServerSchedule, now time.Time, scheduled bool) error {
+	if _, err := database.ParseCron(sched.CronExpr); err != nil {
+		return err
+	}
+	claimed, err := m.db.ClaimScheduleRun(sched.ID, now, scheduled)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return ErrScheduleRunning
+	}
+	copy := *sched
+	go m.executeClaimedSchedule(&copy)
+	return nil
+}
+
+// ExecuteSchedule is retained for internal callers and also enforces non-overlap.
+func (m *ServerManager) ExecuteSchedule(sched *database.ServerSchedule) {
+	if err := m.StartSchedule(sched); err != nil {
+		log.Printf("schedule %s: %v", sched.ID, err)
+	}
+}
+
+func (m *ServerManager) executeClaimedSchedule(sched *database.ServerSchedule) {
+	var runErr error
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			runErr = fmt.Errorf("schedule panic: %v", recovered)
 		}
-	case "restart":
-		_ = m.db.CreateAuditLog("system", "schedule.restart", fmt.Sprintf("Executed schedule '%s' restart on %s", sched.Name, srvName), "")
-		_ = m.RestartServer(sched.ServerID)
-	case "start":
-		_ = m.db.CreateAuditLog("system", "schedule.start", fmt.Sprintf("Executed schedule '%s' start on %s", sched.Name, srvName), "")
-		_ = m.StartServer(sched.ServerID)
-	case "stop":
-		_ = m.db.CreateAuditLog("system", "schedule.stop", fmt.Sprintf("Executed schedule '%s' stop on %s", sched.Name, srvName), "")
-		_ = m.StopServer(sched.ServerID, false)
+		status, message := "succeeded", ""
+		if runErr != nil {
+			status, message = "failed", runErr.Error()
+		}
+		if err := m.db.SetScheduleRunStatus(sched.ID, status, message); err != nil {
+			log.Printf("record schedule %s completion: %v", sched.ID, err)
+		}
+		_ = m.db.CreateAuditLog("system", "schedule."+status, fmt.Sprintf("Schedule %s (%s): %s", sched.Name, sched.ID, message), "")
+	}()
+	if runErr = m.db.SetScheduleRunStatus(sched.ID, "running", ""); runErr != nil {
+		return
+	}
+	if _, runErr = m.db.GetServer(sched.ServerID); runErr != nil {
+		return
+	}
+	switch sched.Action {
+	case "command":
+		if strings.TrimSpace(sched.Payload) == "" {
+			runErr = fmt.Errorf("scheduled command is empty")
+			return
+		}
+		runErr = m.SendCommand(sched.ServerID, sched.Payload)
 	case "backup":
-		_ = m.db.CreateAuditLog("system", "schedule.backup", fmt.Sprintf("Executed schedule '%s' backup on %s", sched.Name, srvName), "")
-		backupsDir := filepath.Join(filepath.Dir(m.baseDir), "backups", sched.ServerID)
-		_ = os.MkdirAll(backupsDir, 0755)
-		baseName := fmt.Sprintf("backup-scheduled-%s-%s.tar.gz", sched.ServerID, time.Now().Format("2006-01-02-150405"))
-		destPath := filepath.Join(backupsDir, baseName)
-		workDir := m.GetWorkingDir(sched.ServerID)
-		go func() {
-			tarFile, err := os.Create(destPath)
-			if err != nil {
+		m.mu.RLock()
+		dir := m.backupDir
+		m.mu.RUnlock()
+		name := fmt.Sprintf("backup-scheduled-%s-%d.tar.gz", sched.ID, time.Now().UTC().UnixNano())
+		_, runErr = CreateBackup(m.GetWorkingDir(sched.ServerID), filepath.Join(dir, sched.ServerID), name)
+	case "restart", "start", "stop":
+		target := "online"
+		if sched.Action == "restart" {
+			runErr = m.RestartServer(sched.ServerID)
+		}
+		if sched.Action == "start" {
+			runErr = m.StartServer(sched.ServerID)
+		}
+		if sched.Action == "stop" {
+			target = "offline"
+			runErr = m.StopServer(sched.ServerID, true)
+		}
+		if runErr != nil {
+			return
+		}
+		m.mu.RLock()
+		timeout := m.startupTimeout
+		m.mu.RUnlock()
+		if timeout <= 0 {
+			timeout = DefaultStartupTimeout
+		}
+		deadline := time.NewTimer(timeout + 60*time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for m.GetStatus(sched.ServerID) != target {
+			if target == "online" && m.GetStatus(sched.ServerID) == "offline" {
+				runErr = fmt.Errorf("server stopped before becoming online")
 				return
 			}
-			defer tarFile.Close()
-			gw := gzip.NewWriter(tarFile)
-			defer gw.Close()
-			tw := tar.NewWriter(gw)
-			defer tw.Close()
-			_ = filepath.Walk(workDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil || path == workDir {
-					return nil
-				}
-				rel, err := filepath.Rel(workDir, path)
-				if err != nil {
-					return nil
-				}
-				header, err := tar.FileInfoHeader(info, info.Name())
-				if err != nil {
-					return nil
-				}
-				header.Name = filepath.ToSlash(rel)
-				if err := tw.WriteHeader(header); err != nil {
-					return nil
-				}
-				if !info.IsDir() {
-					f, err := os.Open(path)
-					if err == nil {
-						_, _ = io.Copy(tw, f)
-						f.Close()
-					}
-				}
-				return nil
-			})
-		}()
+			select {
+			case <-m.shutdownCh:
+				runErr = fmt.Errorf("daemon shutting down")
+				return
+			case <-deadline.C:
+				runErr = fmt.Errorf("timed out waiting for server to become %s", target)
+				return
+			case <-ticker.C:
+			}
+		}
+	default:
+		runErr = fmt.Errorf("unsupported scheduled action %q", sched.Action)
 	}
 }
 
 func MatchesCron(expr string, t time.Time) bool {
-	expr = strings.TrimSpace(expr)
-	switch strings.ToLower(expr) {
-	case "@hourly":
-		return t.Minute() == 0
-	case "@daily", "@midnight":
-		return t.Hour() == 0 && t.Minute() == 0
-	case "@weekly":
-		return t.Weekday() == time.Sunday && t.Hour() == 0 && t.Minute() == 0
-	}
-	fields := strings.Fields(expr)
-	if len(fields) != 5 {
-		return false
-	}
-	if !matchCronField(fields[0], t.Minute(), 0, 59) {
-		return false
-	}
-	if !matchCronField(fields[1], t.Hour(), 0, 23) {
-		return false
-	}
-	if !matchCronField(fields[2], t.Day(), 1, 31) {
-		return false
-	}
-	if !matchCronField(fields[3], int(t.Month()), 1, 12) {
-		return false
-	}
-	if !matchCronField(fields[4], int(t.Weekday()), 0, 6) {
-		return false
-	}
-	return true
-}
-
-func matchCronField(field string, value int, min, max int) bool {
-	if field == "*" || field == "?" {
-		return true
-	}
-	if strings.Contains(field, "/") {
-		parts := strings.Split(field, "/")
-		if len(parts) == 2 {
-			step, err := strconv.Atoi(parts[1])
-			if err != nil || step <= 0 {
-				return false
-			}
-			base := parts[0]
-			if base == "*" {
-				return (value-min)%step == 0
-			}
-			baseVal, err := strconv.Atoi(base)
-			if err == nil {
-				return value >= baseVal && (value-baseVal)%step == 0
-			}
-		}
-	}
-	if strings.Contains(field, ",") {
-		for _, part := range strings.Split(field, ",") {
-			if matchCronField(part, value, min, max) {
-				return true
-			}
-		}
-		return false
-	}
-	if strings.Contains(field, "-") {
-		parts := strings.Split(field, "-")
-		if len(parts) == 2 {
-			low, err1 := strconv.Atoi(parts[0])
-			high, err2 := strconv.Atoi(parts[1])
-			if err1 == nil && err2 == nil {
-				return value >= low && value <= high
-			}
-		}
-	}
-	val, err := strconv.Atoi(field)
-	return err == nil && val == value
+	c, err := database.ParseCron(expr)
+	return err == nil && c.Matches(t)
 }

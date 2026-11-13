@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,7 +17,12 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 16384,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for dev/reverse proxy flexibility (Cloudflare, Nginx, Caddy)
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		u, err := url.Parse(origin)
+		return err == nil && strings.EqualFold(u.Host, r.Host)
 	},
 }
 
@@ -57,6 +63,9 @@ type WSStatsPayload struct {
 func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// 1. Authenticate via token query param or cookie
 	token := r.URL.Query().Get("token")
+	if bearer := r.Header.Get("Authorization"); strings.HasPrefix(bearer, "Bearer ") {
+		token = strings.TrimPrefix(bearer, "Bearer ")
+	}
 	if token == "" {
 		if cookie, err := r.Cookie("neopanel_token"); err == nil {
 			token = cookie.Value
@@ -73,8 +82,17 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Unauthorized: invalid token", http.StatusUnauthorized)
 		return
 	}
+	claims, err = forwardedClaims(h.db, r, claims)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
 
 	serverID := getURLParam(r, "id")
+	if status := authorizeServer(h.db, claims, serverID, "console.view"); status != 0 {
+		http.Error(w, "Console access denied", status)
+		return
+	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -164,6 +182,10 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 				}
 
 			case <-statsTicker.C:
+				if authorizeServer(h.db, claims, serverID, "console.view") != 0 {
+					_ = conn.Close()
+					return
+				}
 				st, ok := h.manager.GetStatsByID(serverID)
 				if !ok {
 					continue
@@ -220,6 +242,10 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		if err := json.Unmarshal(msgBytes, &incoming); err == nil {
 			switch incoming.Event {
 			case "command":
+				// Re-check each command so permission revocation takes effect on open sockets.
+				if authorizeServer(h.db, claims, serverID, "console.command") != 0 {
+					return
+				}
 				cmd := strings.TrimSpace(incoming.Data)
 				if cmd != "" {
 					if err := h.manager.SendCommand(serverID, incoming.Data); err == nil {

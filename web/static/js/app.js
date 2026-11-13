@@ -722,7 +722,7 @@ function syncHeroFromSavedServer(targetSrv) {
     const maxRamMB = S.memMaxMB || getServerMaxRamMB(targetSrv);
     const m = activeStat ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
     const hostAddr = `${srvHost(targetSrv)}:${targetSrv.port || 25565}`;
-    hst.innerHTML = `<span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
+    hst.innerHTML = `<button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy server address" aria-label="Copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
   }
 
   updateSettingsCmdPreview();
@@ -1614,6 +1614,7 @@ function getViewDisplayLabel(view) {
 
 function syncActiveServerState(srv) {
   if (!srv || !srv.id) return;
+  captureEditor();
   const idx = S.servers.findIndex(x => x.id === srv.id && (x.node_id || 'local') === (srv.node_id || 'local'));
   if (idx >= 0) S.cs = idx;
   const nodeId = srv.node_id || 'local';
@@ -1626,6 +1627,8 @@ function syncActiveServerState(srv) {
   S.core = engineMeta(srv.type || 'paper').label;
 
   if (changed) {
+    ++QOL.openSequence;
+    QOL.editor = null;
     clearSettingsAutoSaveTimer();
     _settingsUiState = { status: 'saved', text: 'Real-time auto-save active' };
     S.log = [];
@@ -1675,7 +1678,16 @@ function syncActiveServerState(srv) {
 }
 
 function applyRoute(urlStr, opts = {}) {
+  captureEditor();
+  if (!opts.editorChecked && (editorIsDirty() || QOL.editor?.saving || QOL.leaving)) {
+    return guardEditorLeave().then(allowed => {
+      if (allowed) applyRoute(urlStr, { ...opts, editorChecked: true });
+      else if (opts.fromPopState) restoreEditorHistory(opts.historyIndex);
+    });
+  }
+  ++QOL.openSequence;
   const { replace = false, fromPopState = false } = opts;
+  if (fromPopState && Number.isInteger(opts.historyIndex)) QOL.historyIndex = opts.historyIndex;
   flushPendingSettingsBeforeLeave();
   const prevPath = window.location.pathname;
   const prevView = S.view;
@@ -1787,8 +1799,7 @@ function handleNavClick(e, view, opts = {}) {
   }
   if (e) e.preventDefault();
   const target = normalizeRoute(view);
-  if (opts.srv) syncActiveServerState(opts.srv);
-  else if (curServer()) saveActiveServerRef(curServer());
+  if (curServer()) saveActiveServerRef(curServer());
   if (target === 'plug' && view === 'store') opts.plugTab = 'browse';
   applyRoute(routeUrl(target, opts));
   return false;
@@ -1801,15 +1812,20 @@ function handleServerCardClick(e, index, targetView = 'con') {
   if (e) e.preventDefault();
   const srv = S.servers[index];
   if (!srv) return false;
-  syncActiveServerState(srv);
   applyRoute(serverRouteUrl(srv.node_id || 'local', srv.id, targetView));
   return false;
 }
 
-window.addEventListener('popstate', () => {
+window.addEventListener('popstate', event => {
+  const historyIndex = event.state?.npQolIndex;
+  if (Number.isInteger(historyIndex) && QOL.restoringHistory === historyIndex) {
+    QOL.restoringHistory = null;
+    return;
+  }
   if (!S.token || $('#login')) return;
   applyRoute(window.location.pathname + window.location.search + window.location.hash, {
     fromPopState: true,
+    historyIndex,
     replace: true
   });
 });
@@ -4879,8 +4895,8 @@ function srvh() {
     ? S.props.motd
     : (srv?.motd || '');
 
-  return `<div class="card srvh">
-    <div class="srvh-bg" style="background-image: url('${esc(heroUrl)}'), url('/img/banner.jpg');" aria-hidden="true"></div>
+  return `<div class="card srvh ${heroUrl && heroUrl !== SERVER_HERO_URL ? 'has-brand-art' : ''}">
+    <div class="srvh-bg" ${heroUrl && heroUrl !== SERVER_HERO_URL ? `style="background-image: url('${esc(heroUrl)}');"` : ''} aria-hidden="true"></div>
     <div class="srvh-main">
       <div class="srv-hero-meta">
         <h1 id="srv-hero-name">${renderMinecraftTextHtml(panelName, { allowNewlines: false })}</h1>
@@ -4890,16 +4906,16 @@ function srvh() {
       </div>
       <div id="srv-hero-title" class="srv-hero-sub" style="display:${rawMotd ? 'block' : 'none'};">${rawMotd ? renderMinecraftTextHtml(rawMotd, { allowNewlines: true }) : ''}</div>
       <div id="srv-hero-desc" class="srv-hero-sub" style="display:${panelDesc ? 'block' : 'none'};">${esc(panelDesc)}</div>
-      <div class="row" style="gap: 10px 14px; flex-wrap: wrap; align-items: center; margin-top: 8px;">
+      <div class="srv-connection">
         <span id="srv-hero-engine" class="eng-pill" title="Server Software Engine">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
         <div id="hst" class="row hst" style="margin-top: 0;">
-          <span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span>
+          <button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy server address" aria-label="Copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button>
           <span class="mono mu">CPU ${c.toFixed(1)}%</span>
           <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
         </div>
       </div>
     </div>
-    <div class="row" style="position:relative; gap:8px; align-items:center;">
+    <div class="row srv-power-actions" role="group" aria-label="Server power controls">
       ${S.view !== 'con' ? `<button class="btn" onclick="toggleFlyConsole()" title="Open Live Console Drawer (Ctrl+\`)">${ic('terminal', 14)} Console</button>` : ''}
       <button class="btn pr" data-power-btn="start" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
@@ -5010,7 +5026,7 @@ function liveCon() {
   }
 
   if (hst) {
-    hst.innerHTML = `<span class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</span><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${maxRamGB} GiB</span>`;
+    hst.innerHTML = `<button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy server address" aria-label="Copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${maxRamGB} GiB</span>`;
   }
 }
 
@@ -5567,17 +5583,18 @@ const V = {
     const coverUrl = getBrand('card_cover_url');
     const dashVm = getViewMode('dash', 'tiles');
     const gridCls = dashVm === 'list' ? 'vm-dash-list' : (dashVm === 'icons' ? 'vm-dash-icons' : '');
-    const gridStyle = dashVm === 'tiles' ? 'display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;' : '';
+    const gridStyle = '';
 
     return `
-    <div class="row sb" style="margin-bottom: 20px; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
+    <div class="row sb np-page-heading">
       <div>
-        <h1 style="font-size: 26px; font-weight: 800; color: var(--tx); margin-bottom: 4px; letter-spacing: -0.02em;">Servers</h1>
-        <span id="dash-running-summary" class="mu" style="font-size: 13px; font-weight: 500;">${runningCount} of ${totalCount} servers running</span>
+        <div class="np-eyebrow">Workspace overview</div>
+        <h1>Your servers</h1>
+        <span id="dash-running-summary" class="mu">${runningCount} of ${totalCount} servers running</span>
       </div>
       <div class="row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
         <div style="position: relative;">
-          <input type="text" id="srv-filter" placeholder="Filter by name or address" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
+          <input type="text" id="srv-filter" aria-label="Filter servers" placeholder="Find a server…" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
         </div>
         ${nodesList.length > 1 ? `
@@ -5607,7 +5624,7 @@ const V = {
 
     <div class="dash-grid">
       <!-- Left Column: Server Cards Grid -->
-      <div id="srv-card-grid" class="${gridCls}" style="${gridStyle}">
+      <div id="srv-card-grid" class="np-server-grid ${gridCls}" style="${gridStyle}">
         ${S.loading?.dash && S.servers.length === 0 ? [1, 2, 3].map(() => `
           <div class="np-skeleton-card">
             <div class="np-skeleton" style="height: 120px; border-radius: 0;"></div>
@@ -5639,7 +5656,7 @@ const V = {
             const srvLogoUrl = (s.icon_url && String(s.icon_url).trim()) ? s.icon_url : defaultSrvIcon;
             return `
             <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
-              <div class="vm-dash-row-bg" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');" aria-hidden="true"></div>
+              <div class="vm-dash-row-bg" ${coverUrl && coverUrl !== MINECRAFT_COVER_URL ? `style="background-image: url('${esc(coverUrl)}');"` : ''} aria-hidden="true"></div>
               <div class="vm-dash-row-main">
                 <div class="srv-row-thumb" style="background-image: url('${esc(srvLogoUrl)}'), url('/static/img/default-server-icon.png'), url('/img/default-server-icon.png');"></div>
                 <div style="min-width: 0; flex: 1;">
@@ -5680,7 +5697,7 @@ const V = {
 
           return `
           <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card ${dashVm === 'icons' ? 'vm-dash-icon' : ''}" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
-            <div class="srv-card-banner" style="background-image: url('${esc(coverUrl)}'), url('/img/banner.jpg');">
+            <div class="srv-card-banner ${coverUrl && coverUrl !== MINECRAFT_COVER_URL ? 'has-brand-art' : ''}" ${coverUrl && coverUrl !== MINECRAFT_COVER_URL ? `style="background-image: url('${esc(coverUrl)}');"` : ''}>
               <div class="srv-card-badges-left">
                 <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:6px;">${engBadgeIcon} <span>${esc(coreLabel)}</span></span>
               </div>
@@ -5733,18 +5750,17 @@ const V = {
         }).join('')}
 
         <!-- Dashed Create Server Card -->
-        <div class="create-server-dashed-card ${dashVm === 'list' ? 'compact' : ''}" onclick="openCreateServerModal()">
-          <div class="create-icon-bubble">
-            ${ic('plus', 18)}
-          </div>
+        <button type="button" class="create-server-dashed-card ${dashVm === 'list' ? 'compact' : ''}" onclick="openCreateServerModal()">
+          <span class="create-icon-bubble">${ic('plus', 18)}</span>
           <span>Create a server</span>
-        </div>
+          <span class="np-create-hint">Make room for your next world</span>
+        </button>
       </div>
 
       <!-- Right Column: Recent Activity & Allocation -->
-      <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div class="np-dash-aside">
         <!-- Recent Activity Card -->
-        <div class="card" style="padding: 18px;">
+        <div class="card np-recent-activity">
           <div class="row sb" style="margin-bottom: 14px;">
             <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin: 0;">Recent activity</h2>
             <a href="/activity" onclick="return handleNavClick(event, 'act', { global: true })" class="mu" style="font-size: 12px; text-decoration: none;">View all</a>
@@ -5755,9 +5771,9 @@ const V = {
         </div>
 
         <!-- Your Allocation Card -->
-        <div class="card" style="padding: 18px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 14px;">Your allocation</h2>
-          <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div class="card np-allocation">
+          <h2>Resource overview</h2>
+          <div class="np-allocation-metrics">
             <div>
               <div class="row sb" style="font-size: 12px; margin-bottom: 5px;">
                 <span class="mu">Memory</span>
@@ -5788,12 +5804,13 @@ const V = {
 
   con() {
     return `${srvh()}
+    <div class="np-section-heading"><div><h2>Console</h2><p>Live output and server performance.</p></div><span class="np-shortcut-hint">Command history <kbd>↑</kbd> <kbd>↓</kbd></span></div>
     <div class="cgrid">
       <div class="cwrap">
         <div class="con-top-bar">
           <div class="row" style="gap:8px; align-items:center;">
             ${ic('terminal', 14)}
-            <span>Console Stream</span>
+            <span class="np-console-label">Live console</span>
             <span id="ws-live-pill" class="con-live-pill"><i></i>Connecting...</span>
             <span class="mu">&bull;</span>
             <span id="con-buf-count">${S.log.length} lines</span>
@@ -5990,15 +6007,16 @@ const V = {
     const f = S.editingFile || S.ftab;
     if (S.editingFile) {
       return `${srvh()}
-      <div style="margin-top: 16px;">
-        <div class="row sb" style="margin-bottom: 12px; gap: 12px;">
-          <div class="row" style="gap: 8px;">
+      <div class="np-editor-workspace">
+        <div class="row sb np-editor-toolbar">
+          <div class="row np-editor-file">
             <button class="btn sm" onclick="closeEditor()">&larr; Back to files</button>
-            <span class="mono" style="font-weight: 600; font-size: 14px; color: #fff;">${esc(S.editingFile)}</span>
+            <span class="mono np-editor-name">${esc(S.editingFile)}</span>
+            <span id="editor-save-status" class="mu" role="status" style="font-size:12px;"></span>
           </div>
           <div class="row" style="gap: 8px;">
             <button class="btn sm" onclick="downloadFileItem('${esc(S.editingFile)}')">${ic('download', 14)} Download</button>
-            <button class="btn sm pr" onclick="saveActiveFile()">${ic('download', 14)} Save File</button>
+            <button id="editor-save-btn" class="btn sm pr" onclick="saveActiveFile()" title="Ctrl/Cmd + S">${ic('download', 14)} Save File</button>
           </div>
         </div>
         <textarea id="ed" spellcheck="false" aria-label="File editor">${esc(S.files[S.editingFile] || '')}</textarea>
@@ -6080,12 +6098,12 @@ const V = {
                          aria-label="Select ${esc(item.name)}">
                 </td>
                 <td style="width: 40px; padding: 8px 4px;">${icon}</td>
-                <td style="font-weight: 500; color: var(--tx);">${esc(item.name)}</td>
+                <td style="font-weight: 500; color: var(--tx);"><button type="button" class="np-file-open" onclick="event.stopPropagation(); ${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">${esc(item.name)}</button></td>
                 <td class="mu mono" style="font-size: 12px; width: 90px;">${esc(extLabel)}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 130px;">${sizeStr}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 170px;">${dateStr}</td>
                 <td style="width: 50px; text-align: right; padding-right: 18px; position: relative;" onclick="event.stopPropagation();">
-                  <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
+                  <button class="btn sm" aria-label="File actions for ${esc(item.name)}" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
                   ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
                 </td>
               </tr>`;
@@ -6201,9 +6219,10 @@ const V = {
     }
 
     return `${srvh()}
-    <div style="margin-top: 16px;">
+    <div class="np-files-workspace">
       <div class="np-slot-container" data-np-slot="files:top" style="margin-bottom: 12px;"></div>
-      <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+      <div class="np-section-heading"><div><h2>Files</h2><p>Manage your server’s files and configuration.</p></div></div>
+      <div class="row sb np-files-toolbar">
         <!-- Breadcrumb Navigation -->
         <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
           <span onclick="browseFolder('')" style="color: var(--tx-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">${ic('folder', 15)} / home / container /</span>
@@ -6217,7 +6236,7 @@ const V = {
         <!-- Search, Sort, View Mode & Action Buttons -->
         <div class="row" style="gap: 10px; flex-wrap: wrap;">
           <div style="position: relative;">
-            <input type="text" id="fi-filter" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 190px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
+            <input type="text" id="fi-filter" aria-label="Filter this folder" placeholder="Filter this folder" oninput="filterFileList(this.value)" style="width: 190px; height: 36px; padding: 0 28px 0 12px; font-size: 13px; border-radius: 8px;">
             <kbd style="position: absolute; right: 10px; top: 9px; font-size: 11px; color: var(--tx-muted); background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;">/</kbd>
           </div>
           <div class="file-sort-bar">
@@ -6287,7 +6306,7 @@ const V = {
             </div>
             <div class="vm-item-foot">
               <label class="sw" title="Toggle ${nounLow} state">
-                <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
+                <input type="checkbox" ${p[2] ? 'checked' : ''} ${p[4] ? 'disabled' : ''} onchange="togglePlugin(${i}, this.checked)">
                 <i></i>
               </label>
               <button class="btn sm dg" data-plugin="${esc(p[0])}" onclick="deletePlugin(this.dataset.plugin)">${ic('trash', 13)} Remove</button>
@@ -6308,7 +6327,7 @@ const V = {
                 </div>
               </div>
               <label class="sw" title="Toggle ${nounLow} state">
-                <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
+                <input type="checkbox" ${p[2] ? 'checked' : ''} ${p[4] ? 'disabled' : ''} onchange="togglePlugin(${i}, this.checked)">
                 <i></i>
               </label>
             </div>
@@ -6324,9 +6343,7 @@ const V = {
         ${filteredInstalled.map(({ p, i }) => `
           <div class="plugin-card">
             <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
-              <div style="width: 44px; height: 44px; border-radius: 8px; background: rgba(56, 122, 255, 0.12); display: grid; place-items: center; color: var(--ac); font-size: 20px; flex-shrink: 0;">
-                🧩
-              </div>
+              <div class="np-plugin-icon" aria-hidden="true">${ic('puzzle', 22)}</div>
               <div style="min-width: 0;">
                 <b class="plugin-title">${esc(p[0])}</b>
                 <div class="mu mono" style="font-size: 12px; margin-top: 3px;">
@@ -6336,7 +6353,7 @@ const V = {
             </div>
             <div class="row" style="gap: 12px; flex-shrink: 0;">
               <label class="sw" title="Toggle ${nounLow} state">
-                <input type="checkbox" ${p[2] ? 'checked' : ''} onchange="togglePlugin(${i}, this.checked)">
+                <input type="checkbox" ${p[2] ? 'checked' : ''} ${p[4] ? 'disabled' : ''} onchange="togglePlugin(${i}, this.checked)">
                 <i></i>
               </label>
               <button class="btn sm dg" data-plugin="${esc(p[0])}" onclick="deletePlugin(this.dataset.plugin)">${ic('trash', 13)} Uninstall</button>
@@ -6347,14 +6364,15 @@ const V = {
     }
 
     return `${srvh()}
-    <div style="margin-top: 18px;">
+    <div class="np-plugins-workspace">
       <div class="np-slot-container" data-np-slot="plugins:top" style="margin-bottom: 12px;"></div>
       <!-- Top Title and Tabs Bar -->
-      <div class="row sb" style="margin-bottom: 16px; flex-wrap: wrap; gap: 14px;">
+      <div class="row sb np-section-heading">
         <div>
-          <h1 style="font-size: 24px; font-weight: 800; color: var(--tx); margin: 0;">${nounPlur} &amp; Store</h1>
+          <h2>${nounPlur}</h2>
           <div class="mu" style="font-size: 12.5px; margin-top: 3px;">
             Browse and install Modrinth ${nounsLow} directly into <span class="mono">${targetFolder}</span>
+            <div style="margin-top:6px;">Enabled/disabled reflects the next startup. Restart after installing, removing, or toggling ${nounsLow}.</div>
           </div>
         </div>
         <div class="row" style="gap: 8px; flex-wrap: wrap;">
@@ -6583,13 +6601,13 @@ const V = {
     const isLoading = S.loading?.schedules;
 
     return `${srvh()}
-    <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 14px;">
-      <div class="card" style="padding: 22px;">
-        <div class="row sb" style="align-items: flex-start; flex-wrap: wrap; gap: 14px;">
+    <div class="np-schedules-workspace">
+      <div class="np-section-heading">
+        <div class="row sb np-schedules-heading">
           <div>
-            <h2 style="margin: 0; font-size: 18px; color: var(--tx);">Automated Schedules &amp; Tasks</h2>
-            <p class="mu" style="font-size: 13px; margin: 4px 0 0; max-width: 650px;">
-              Schedule recurring server console commands (e.g. broadcasts, world saves), automatic restarts, and world backups using standard cron expressions.
+            <h2>Schedules</h2>
+            <p class="mu">
+              Keep your server on schedule. Automate commands, restarts and backups.
             </p>
           </div>
           <div class="row" style="gap: 8px;">
@@ -6603,24 +6621,24 @@ const V = {
 
       ${isLoading ? `<div class="card">${loaderHtml('Loading automated schedules...')}</div>` : (
         schedules.length === 0 ? `
-          <div class="card mu" style="text-align: center; padding: 36px 20px;">
-            <div style="font-size: 32px; margin-bottom: 8px;">⏰</div>
-            <h3 style="color: var(--tx); margin: 0 0 6px; font-size: 16px;">No Automated Schedules Configured</h3>
+          <div class="card mu np-empty-state">
+            <div class="np-empty-icon" aria-hidden="true">${ic('clock', 24)}</div>
+            <h3>No schedules yet</h3>
             <p style="margin: 0 auto 16px; max-width: 480px; font-size: 13px; line-height: 1.5;">
               Create automated schedules to restart your server during quiet hours, broadcast automated warnings to online players, or archive world backups.
             </p>
             <button class="btn pr" onclick="openScheduleModal()">${ic('plus', 14)} Create Your First Schedule</button>
           </div>
         ` : `
-          <div class="card tw">
+          <div class="card tw np-schedule-table">
             <table>
               <thead>
                 <tr>
                   <th>Schedule Name</th>
                   <th>Action</th>
                   <th>Cron Expression</th>
-                  <th>Schedule Frequency</th>
-                  <th>Last Executed</th>
+                  <th>Next Run (UTC)</th>
+                  <th>Last Execution</th>
                   <th>Status</th>
                   <th style="text-align: right;">Actions</th>
                 </tr>
@@ -6629,9 +6647,6 @@ const V = {
                 ${schedules.map(sch => {
                   const actBadge = getScheduleActionBadge(sch.action);
                   const cronHuman = describeCron(sch.cron_expr);
-                  const lastRunStr = sch.last_run_at && !sch.last_run_at.startsWith('0001')
-                    ? formatFileDate(sch.last_run_at)
-                    : 'Never run';
                   return `<tr>
                     <td>
                       <b style="color: var(--tx); display: block;">${esc(sch.name)}</b>
@@ -6639,8 +6654,8 @@ const V = {
                     </td>
                     <td>${actBadge}</td>
                     <td class="mono" style="font-weight: 600;">${esc(sch.cron_expr)}</td>
-                    <td style="font-size: 12.5px; color: var(--tx-muted);">${esc(cronHuman)}</td>
-                    <td style="font-size: 12px;" class="mu">${esc(lastRunStr)}</td>
+                    <td style="font-size:12px;" title="${esc(cronHuman)}">${sch.is_active ? esc(formatScheduleUTC(sch.next_run_at)) : 'Paused'}</td>
+                    <td style="font-size:12px;" class="mu">${esc(formatScheduleUTC(sch.last_run_at || sch.last_run))}<br><b>${esc(sch.last_status || 'Never run')}</b>${sch.last_error ? `<div class="upload-error">${esc(sch.last_error)}</div>` : ''}</td>
                     <td>
                       <label class="sw" title="Toggle active status">
                         <input type="checkbox" ${sch.is_active ? 'checked' : ''} onchange="toggleServerSchedule('${esc(sch.id)}', this.checked)">
@@ -6649,9 +6664,9 @@ const V = {
                     </td>
                     <td style="text-align: right;">
                       <div class="row" style="justify-content: flex-end; gap: 6px;">
-                        <button class="btn sm" onclick="runScheduleNow('${esc(sch.id)}')" title="Run immediately once">${ic('play', 12)} Run Now</button>
+                        <button class="btn sm" ${sch.last_status === 'running' || sch.last_status === 'started' ? 'disabled' : ''} onclick="runScheduleNow('${esc(sch.id)}')" title="Run immediately once">${ic('play', 12)} Run Now</button>
                         <button class="btn sm" onclick="openScheduleModal('${esc(sch.id)}')" title="Edit schedule settings">${ic('edit', 12)} Edit</button>
-                        <button class="btn sm dg" onclick="deleteServerSchedule('${esc(sch.id)}')" title="Delete schedule">${ic('trash', 12)}</button>
+                        <button class="btn sm dg" onclick="deleteServerSchedule('${esc(sch.id)}')" title="Delete schedule" aria-label="Delete schedule">${ic('trash', 12)}</button>
                       </div>
                     </td>
                   </tr>`;
@@ -9025,6 +9040,7 @@ window.addEventListener('hashchange', () => {
 
 // --- Main Render Function (R) ---
 window.R = function() {
+  captureEditor();
   closeAllCustomSelects();
   const nav = $('#nav');
   const main = $('#main');
@@ -9103,19 +9119,7 @@ function bindConsoleInput() {
   });
 }
 
-function bindEditorTabKey() {
-  const ed = $('#ed');
-  if (!ed) return;
-  ed.addEventListener('keydown', e => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const start = ed.selectionStart;
-      const end = ed.selectionEnd;
-      ed.value = ed.value.substring(0, start) + '  ' + ed.value.substring(end);
-      ed.selectionStart = ed.selectionEnd = start + 2;
-    }
-  });
-}
+function bindEditorTabKey() { bindQolEditor(); }
 
 // --- View Transition Lifecycle Hook & Initial Route Preloader ---
 async function loadInitialRouteData(view) {
@@ -9754,6 +9758,7 @@ async function loadFileList(path = '', skipRender = false) {
   }
   try {
     const data = await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`));
+    if (!sameQolServer(srv, curServer())) return;
     S.fileList = data || [];
     S.currentDir = path;
   } catch (e) {} finally {
@@ -9842,7 +9847,10 @@ function closeAllCtx() {
 }
 window.addEventListener('click', closeAllCtx);
 
-function closeEditor() {
+async function closeEditor() {
+  if (!await guardEditorLeave()) return;
+  ++QOL.openSequence;
+  QOL.editor = null;
   S.editingFile = null;
   R();
 }
@@ -9916,50 +9924,8 @@ async function saveStartupSettings() {
   }
 }
 
-async function openFile(name) {
-  const srv = curServer();
-  if (!srv) return;
-  const filePath = S.currentDir ? `${S.currentDir}/${name}` : name;
-  S.editingFile = filePath;
-  S.ftab = filePath;
-  try {
-    const data = await api(srvApiPath(srv, `/files/content?path=${encodeURIComponent(filePath)}`));
-    S.files[filePath] = data.content != null ? data.content : data;
-    R();
-  } catch (e) {
-    S.editingFile = null;
-    toast(`Failed to open file: ${e.message}`, 'bad');
-    uiAlert({
-      title: 'File Open Error',
-      message: `Could not open file <b>${esc(filePath)}</b>: ${esc(e.message || 'File not found or exceeds 5MB limit.')}`,
-      type: 'error'
-    });
-  }
-}
-
-async function saveActiveFile() {
-  const srv = curServer();
-  const filePath = S.editingFile || S.ftab;
-  if (!srv || !filePath) return;
-  const ed = $('#ed');
-  if (!ed) return;
-  const content = ed.value;
-  try {
-    await api(srvApiPath(srv, '/files/content'), {
-      method: 'POST',
-      body: JSON.stringify({ path: filePath, content })
-    });
-    S.files[filePath] = content;
-    toast(`Saved ${filePath.split('/').pop()} successfully`, 'ok');
-  } catch (e) {
-    toast(`Failed to save file: ${e.message}`, 'bad');
-    uiAlert({
-      title: 'Failed to Save File',
-      message: `Could not save file <b>${esc(filePath)}</b>: ${esc(e.message || 'Permission denied or disk is full')}`,
-      type: 'error'
-    });
-  }
-}
+async function openFile(name) { return openQolFile(name); }
+async function saveActiveFile() { return saveQolFile(); }
 
 function downloadFileItem(path) {
   const srv = curServer();
@@ -10659,71 +10625,7 @@ function uploadFileDialog() {
   input.click();
 }
 
-async function uploadFilesWithProgress(files) {
-  const srv = curServer();
-  if (!srv || !files || files.length === 0) return;
-
-  const widget = $('#upload-progress-widget');
-  const targetDir = S.currentDir || '';
-
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    await new Promise((resolve) => {
-      const xhr = new XMLHttpRequest();
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('path', targetDir);
-
-      if (widget) {
-        widget.style.display = 'block';
-        widget.innerHTML = `
-          <div class="row sb" style="font-size: 13px; font-weight: 600; color: #fff;">
-            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;">
-              Uploading (${i + 1}/${files.length}): ${esc(file.name)}
-            </span>
-            <span id="upl-pct" style="color: var(--ac); font-family: monospace;">0%</span>
-          </div>
-          <div class="upload-prog-bar"><i id="upl-bar" style="width: 0%;"></i></div>
-        `;
-      }
-
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 100);
-          const bar = $('#upl-bar');
-          const txt = $('#upl-pct');
-          if (bar) bar.style.width = `${pct}%`;
-          if (txt) txt.textContent = `${pct}%`;
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          toast(`Uploaded ${file.name}`, 'ok');
-        } else {
-          toast(`Failed to upload ${file.name}`, 'bad');
-        }
-        resolve();
-      };
-
-      xhr.onerror = () => {
-        toast(`Network error uploading ${file.name}`, 'bad');
-        resolve();
-      };
-
-      xhr.open('POST', srvApiPath(srv, '/files/upload'));
-      if (S.token) {
-        xhr.setRequestHeader('Authorization', `Bearer ${S.token}`);
-      }
-      xhr.send(formData);
-    });
-  }
-
-  if (widget) {
-    widget.style.display = 'none';
-  }
-  loadFileList(S.currentDir);
-}
+async function uploadFilesWithProgress(files) { return enqueueUploads(files); }
 
 function initDragAndDrop() {
   let dragCounter = 0;
@@ -10772,12 +10674,13 @@ async function loadPluginsList(skipRender = false) {
   if (!skipRender && S.view === 'plug' && (S.plugTab || 'browse') === 'installed') R();
   try {
     const data = await api(srvApiPath(srv, '/plugins'));
+    if (!sameQolServer(srv, curServer())) return;
     const list = Array.isArray(data) ? data : (data?.plugins || []);
     S.plugins = list.map(p => {
       if (typeof p === 'string') return [p, 'installed', true, ''];
       const fname = p.filename || p.name || 'plugin.jar';
       const meta = p.size ? formatFileSize(p.size) : (p.version || 'installed');
-      return [fname, meta, true, p.modified || ''];
+      return [fname, meta, p.enabled !== false, p.modified || '', false];
     });
   } catch (e) {} finally {
     S.loading.plugins = false;
@@ -10815,9 +10718,22 @@ async function deletePlugin(name) {
   } catch (e) {}
 }
 
-function togglePlugin(idx, enabled) {
-  S.plugins[idx][2] = enabled;
-  toast(`${S.plugins[idx][0]} ${enabled ? 'enabled' : 'disabled'}. Restart server to apply.`);
+async function togglePlugin(idx, enabled) {
+  const srv = curServer();
+  const plugin = S.plugins[idx];
+  if (!srv || !plugin || plugin[4]) return;
+  plugin[4] = true;
+  R();
+  try {
+    const result = await api(srvApiPath(srv, '/plugins/toggle'), { method: 'POST', body: JSON.stringify({ filename: plugin[0], enabled }) });
+    plugin[0] = result.filename;
+    plugin[2] = result.enabled;
+    toast(`${result.filename} ${result.enabled ? 'enabled' : 'disabled'}. Restart server to apply.`, 'ok');
+  } catch (_) { /* api reports the failure; retain the previous server state. */ }
+  finally {
+    plugin[4] = false;
+    if (sameQolServer(srv, curServer())) R();
+  }
 }
 
 let searchTimeout = null;
@@ -10844,7 +10760,8 @@ function renderModrinthHitsHtml(hits) {
       ? `<img src="${esc(hit.icon_url)}" class="plugin-icon" onerror="this.src='/favicon.svg'">`
       : `<div class="plugin-icon" style="display:grid; place-items:center; color:var(--ac); font-size:20px;">🧩</div>`;
     const slugVal = hit.slug || hit.project_id || hit.id || '';
-    const isInstalling = Boolean(S.installingPlugins && S.installingPlugins.has(slugVal));
+    const srv = curServer();
+    const isInstalling = Boolean(S.installingPlugins && S.installingPlugins.has(`${srv?.node_id || 'local'}:${srv?.id}:${slugVal}`));
     const btnPad = storeVm === 'icons' ? 'min-width: 88px; font-size: 12px; padding: 5px 10px;' : 'min-width: 112px;';
     const actionHtml = isInstalled
       ? '<span class="badge online"><i class="dot"></i>Installed</span>'
@@ -10961,80 +10878,40 @@ function setPlugSkipConfirm(val) {
 async function installPlugin(projectSlug, title, btnEl) {
   const srv = curServer();
   if (!srv || !projectSlug) return;
-  if (S.installingPlugins && S.installingPlugins.has(projectSlug)) return;
-
-  const isMod = isModdedEngine(srv.type || S.core);
-  const noun = isMod ? 'Mod' : 'Plugin';
-  const nounLow = isMod ? 'mod' : 'plugin';
-  const targetFolder = isMod ? 'mods/' : 'plugins/';
-  let skipConfirm = false;
-  try {
-    skipConfirm = Boolean(S.skipPlugConfirm || localStorage.getItem('neopanel_skip_plug_confirm') === 'true');
-  } catch (e) {
-    skipConfirm = Boolean(S.skipPlugConfirm);
-  }
-
-  if (!skipConfirm) {
-    window.__plugSkipPending = false;
-    const ok = await uiConfirm({
-      title: `Install ${noun} from Modrinth`,
-      message: `
-        <div>Download and install <b>${esc(title || projectSlug)}</b> into <code>${targetFolder}</code> on <b>${esc(srv.name)}</b>?</div>
-        <label class="row" style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); gap: 9px; cursor: pointer; font-size: 13px; color: var(--tx-muted);">
-          <input type="checkbox" id="plug-skip-confirm-chk" onchange="window.__plugSkipPending=this.checked">
-          <span>Don't ask again &mdash; install future ${nounLow}s immediately without confirmation</span>
-        </label>
-      `,
-      confirmText: 'Download & Install',
-      cancelText: 'Cancel',
-      isDanger: false,
-      icon: 'download'
-    });
-    const wantSkip = Boolean(window.__plugSkipPending);
-    window.__plugSkipPending = false;
-    if (!ok) return;
-    if (wantSkip) {
-      setPlugSkipConfirm(true);
-      toast(`${noun} install confirmation disabled — installs are now instant`);
-    }
-  }
-
   if (!S.installingPlugins) S.installingPlugins = new Set();
-  S.installingPlugins.add(projectSlug);
-
-  const findBtn = () => {
-    if (btnEl && document.body.contains(btnEl)) return btnEl;
-    if (typeof CSS !== 'undefined' && CSS.escape) {
-      return document.querySelector(`#store-grid button[data-slug="${CSS.escape(projectSlug)}"]`);
-    }
-    return null;
-  };
-
-  const activeBtn = findBtn();
-  if (activeBtn) {
-    setBtnLoading(activeBtn, true, 'Installing...');
-  }
-  toast(`Downloading & installing ${title || projectSlug}...`);
+  const installKey = `${srv.node_id || 'local'}:${srv.id}:${projectSlug}`;
+  if (S.installingPlugins.has(installKey)) return;
+  S.installingPlugins.add(installKey);
+  if (btnEl) setBtnLoading(btnEl, true, 'Checking…');
   try {
-    await api(srvApiPath(srv, '/plugins/install'), {
-      method: 'POST',
-      body: JSON.stringify({ slug: projectSlug, project_id: projectSlug })
-    });
-    S.installingPlugins.delete(projectSlug);
-    toast(`Successfully installed ${title || projectSlug}!`);
-    const curBtn = findBtn();
-    if (curBtn && curBtn.parentElement) {
-      curBtn.parentElement.innerHTML = '<span class="badge online"><i class="dot"></i>Installed</span>';
+    const result = await api(srvApiPath(srv, `/plugins/versions?slug=${encodeURIComponent(projectSlug)}`));
+    const versions = result.versions || [];
+    if (!sameQolServer(srv, curServer())) return;
+    if (!versions.length) {
+      await uiAlert({ title: 'No compatible release', message: `No release of <b>${esc(title || projectSlug)}</b> explicitly supports Minecraft <b>${esc(result.minecraft_version)}</b> and <b>${esc(result.loader)}</b>. Nothing was installed.` });
+      return;
     }
-    loadPluginsList();
-  } catch (e) {
-    S.installingPlugins.delete(projectSlug);
-    const curBtn = findBtn();
-    if (curBtn) {
-      setBtnLoading(curBtn, false);
-      if (curBtn.innerHTML.includes('Installing')) {
-        curBtn.innerHTML = `${ic('download', 14)} Install`;
-      }
+    let selected = versions[0];
+    if (!S.skipPlugConfirm) {
+      const confirmation = uiConfirm({
+        title: 'Install compatible release',
+        message: `<p>Install <b>${esc(title || projectSlug)}</b> on <b>${esc(srv.name)}</b>?</p><p class="mu">Minecraft ${esc(result.minecraft_version)} · ${esc(result.loader)}. Restart required after installation.</p><label class="f"><span>Compatible release</span><select id="plugin-release">${versions.map(v => `<option value="${esc(v.id)}">${esc(v.version_number)} — ${esc(v.name)}</option>`).join('')}</select></label>`,
+        confirmText: 'Download & Install', cancelText: 'Cancel'
+      });
+      $('#plugin-release').onchange = event => { selected = versions.find(v => v.id === event.target.value) || versions[0]; };
+      if (!await confirmation) return;
+    }
+    if (!sameQolServer(srv, curServer())) return;
+    if (btnEl) setBtnLoading(btnEl, true, 'Installing…');
+    await api(srvApiPath(srv, '/plugins/install'), { method: 'POST', body: JSON.stringify({ slug: projectSlug, version_id: selected.id }) });
+    toast(`Installed ${title || projectSlug} ${selected.version_number}. Restart server to apply.`, 'ok');
+    if (sameQolServer(srv, curServer())) await loadPluginsList();
+  } catch (_) { /* api displays actionable errors. */ }
+  finally {
+    S.installingPlugins.delete(installKey);
+    if (btnEl && document.body.contains(btnEl)) setBtnLoading(btnEl, false);
+    if (sameQolServer(srv, curServer()) && S.view === 'plug' && $('#store-grid') && Array.isArray(S.lastModrinthHits)) {
+      $('#store-grid').innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
     }
   }
 }
@@ -11824,7 +11701,8 @@ function toggleTheme() {
   setAppearanceMode(cur === 'light' ? 'Dark' : 'Light');
 }
 
-function switchServer(index) {
+async function switchServer(index) {
+  if (!await guardEditorLeave()) return;
   const srv = S.servers[index];
   if (!srv) return;
   flushPendingSettingsBeforeLeave();
@@ -11865,7 +11743,6 @@ function paletteItems() {
     ...(S.user?.role === 'admin' ? [['Pages', 'Admin Area', 'Global cluster & daemon health', () => go('admin')]] : []),
     ['Pages', 'Account Settings', 'Profile, appearance, security', () => go('acc')],
     ...S.servers.map(s => ['Servers', s.name, `${(s.stats?.status || s.status) === 'running' ? 'Online' : 'Offline'} (Port ${s.port})`, () => {
-      syncActiveServerState(s);
       applyRoute(serverRouteUrl(s.node_id || 'local', s.id, 'con'));
     }]),
     ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.ptab = 'online'; go('pl'); }]),
@@ -12554,20 +12431,31 @@ async function setPrimaryPort(portId) {
 
 // --- Server Schedules Management ---
 async function loadServerSchedules(srvId = null, skipRender = false) {
-  const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
+  const srv = srvId ? S.servers.find(s => s.id === srvId && (s.node_id || 'local') === (curServer()?.node_id || 'local')) : curServer();
   if (!srv) return;
+  clearTimeout(QOL.scheduleTimer);
   if (!S.loading) S.loading = {};
   S.loading.schedules = true;
   if (!skipRender && S.view === 'sc') R();
   try {
     const list = await api(srvApiPath(srv, '/schedules'));
-    S.serverSchedules = Array.isArray(list) ? list : [];
+    if (!sameQolServer(srv, curServer())) return;
+    S.serverSchedules = Array.isArray(list) ? list : (Array.isArray(list?.schedules) ? list.schedules : []);
   } catch (err) {
+    if (!sameQolServer(srv, curServer())) return;
     console.error('Failed to load server schedules:', err);
     S.serverSchedules = [];
   } finally {
-    S.loading.schedules = false;
-    if (!skipRender && S.view === 'sc') R();
+    if (sameQolServer(srv, curServer())) {
+      S.loading.schedules = false;
+      if (!skipRender && S.view === 'sc') R();
+    }
+    if (S.view === 'sc' && sameQolServer(srv, curServer())) {
+      const running = S.serverSchedules?.some(s => ['started', 'running'].includes(s.last_status));
+      QOL.scheduleTimer = setTimeout(() => {
+        if (S.view === 'sc' && sameQolServer(srv, curServer())) loadServerSchedules();
+      }, running ? 2000 : 30000);
+    }
   }
 }
 
@@ -12585,10 +12473,10 @@ function describeCron(expr) {
 }
 
 function getScheduleActionBadge(action) {
-  if (action === 'command') return `<span class="chip" style="color: #38bdf8; border-color: rgba(56,189,248,0.3);">${ic('terminal', 11)} Command</span>`;
-  if (action === 'restart') return `<span class="chip" style="color: #f59e0b; border-color: rgba(245,158,11,0.3);">${ic('refresh', 11)} Restart</span>`;
-  if (action === 'backup') return `<span class="chip" style="color: #10b981; border-color: rgba(16,185,129,0.3);">${ic('archive', 11)} Backup</span>`;
-  if (action === 'stop') return `<span class="chip" style="color: #ef4444; border-color: rgba(239,68,68,0.3);">${ic('stop', 11)} Stop</span>`;
+  if (action === 'command') return `<span class="chip" style="color: var(--ac); border-color: var(--border-accent);">${ic('terminal', 11)} Command</span>`;
+  if (action === 'restart') return `<span class="chip" style="color: var(--wn); border-color: var(--wn-glow);">${ic('refresh', 11)} Restart</span>`;
+  if (action === 'backup') return `<span class="chip" style="color: var(--ok); border-color: var(--ok-glow);">${ic('archive', 11)} Backup</span>`;
+  if (action === 'stop') return `<span class="chip" style="color: var(--er); border-color: var(--er-glow);">${ic('stop', 11)} Stop</span>`;
   return `<span class="chip">${esc(action)}</span>`;
 }
 
@@ -12611,7 +12499,7 @@ function openScheduleModal(schedId = null) {
       </div>
 
       <p class="mu" style="font-size: 13px; line-height: 1.5; margin-bottom: 16px;">
-        Define recurring automation rules for <b>${esc(srv?.name || 'this server')}</b> using standard 5-field cron syntax (Minute Hour Day-of-Month Month Day-of-Week).
+        Run recurring actions in <b>UTC</b>. Choose a time below or use a standard five-field numeric cron expression. Execution is checked every 30 seconds.
       </p>
 
       <form onsubmit="submitScheduleModal(event, '${isEdit ? esc(existing.id) : ''}')">
@@ -12633,7 +12521,7 @@ function openScheduleModal(schedId = null) {
 
           <label class="f">
             <span>Cron Preset</span>
-            <select onchange="if(this.value)$('#sch-cron').value=this.value;">
+            <select onchange="if(this.value){$('#sch-cron').value=this.value;$('#sch-frequency').value='custom';updateSchedulePreview();}">
               <option value="">Select a preset...</option>
               <option value="0 4 * * *">Daily at 04:00 AM</option>
               <option value="0 0 * * *">Daily at Midnight (00:00)</option>
@@ -12644,11 +12532,17 @@ function openScheduleModal(schedId = null) {
             </select>
           </label>
         </div>
+        <div class="grid g2">
+          <label class="f"><span>Simple schedule</span><select id="sch-frequency" onchange="applyScheduleTimePicker()"><option value="custom">Custom cron / preset</option><option value="daily">Daily</option><option value="hourly">Hourly (minute from time)</option><option value="weekly">Weekly</option></select></label>
+          <label class="f"><span>Time (UTC)</span><input id="sch-time" type="time" value="04:00" onchange="applyScheduleTimePicker()"></label>
+          <label class="f"><span>Weekly day</span><select id="sch-weekday" onchange="applyScheduleTimePicker()">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, i) => `<option value="${i}">${day}</option>`).join('')}</select></label>
+        </div>
 
         <label class="f">
           <span>Cron Expression (5 fields: min hour dom mon dow)</span>
-          <input type="text" id="sch-cron" required class="mono" value="${esc(existing?.cron_expr || '0 4 * * *')}" placeholder="0 4 * * *">
+          <input type="text" id="sch-cron" required class="mono" value="${esc(existing?.cron_expr || '0 4 * * *')}" placeholder="0 4 * * *" oninput="$('#sch-frequency').value='custom';updateSchedulePreview()">
         </label>
+        <p id="sch-preview" class="mu" role="status"></p>
 
         <div id="sch-payload-wrap" style="display: ${(existing?.action || 'command') === 'command' ? 'block' : 'none'};">
           <label class="f">
@@ -12679,6 +12573,7 @@ function openScheduleModal(schedId = null) {
       </form>
     </div>
   </div>`;
+  updateSchedulePreview();
   setTimeout(() => $('#sch-name')?.focus(), 40);
 }
 
@@ -12739,7 +12634,7 @@ async function runScheduleNow(schedId) {
   try {
     toast('Executing schedule now...');
     const res = await api(srvApiPath(srv, `/schedules/${encodeURIComponent(schedId)}/run`), { method: 'POST' });
-    toast(res.message || 'Schedule executed successfully', 'ok');
+    toast(res.message || 'Schedule accepted; waiting for completion.', 'info');
     await loadServerSchedules(srv.id);
   } catch (err) {
     toast(err.message || 'Failed to execute schedule', 'bad');
@@ -16660,6 +16555,7 @@ async function submit2FALogin(tempToken) {
 }
 
 async function logout() {
+  if (!await guardEditorLeave()) return;
   const brandName = (getBrand('brand_name') || 'NeoPanel').trim() || 'NeoPanel';
   const ok = await uiConfirm({
     title: `Sign Out of ${brandName}`,
@@ -16670,6 +16566,11 @@ async function logout() {
     icon: 'lock'
   });
   if (!ok) return;
+  cancelAllUploads();
+  QOL.uploads = [];
+  renderUploadQueue();
+  QOL.editor = null;
+  ++QOL.openSequence;
 
   S.token = '';
   S.user = null;

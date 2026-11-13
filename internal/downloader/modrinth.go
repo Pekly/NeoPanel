@@ -3,6 +3,7 @@ package downloader
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -134,79 +135,137 @@ func SearchModrinthPlugins(query string, limit int, loader string, mcVersion str
 	return &result, nil
 }
 
-// DownloadModrinthPlugin downloads the best matching plugin jar into destPluginsDir
-func DownloadModrinthPlugin(projectIDOrSlug string, destPluginsDir string, preferredLoader string) (string, error) {
-	if err := os.MkdirAll(destPluginsDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create plugins directory: %w", err)
+// CompatibleModrinthVersions returns only releases explicitly supporting this server.
+func CompatibleModrinthVersions(project, loader, mcVersion string) ([]ModrinthVersion, error) {
+	if strings.TrimSpace(project) == "" || strings.TrimSpace(mcVersion) == "" {
+		return nil, fmt.Errorf("project and server Minecraft version are required")
 	}
-
-	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version", url.PathEscape(projectIDOrSlug))
+	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version", url.PathEscape(project))
 	resp, err := httpGet(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Modrinth returned status %s", resp.Status)
+	}
+	var versions []ModrinthVersion
+	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
+		return nil, err
+	}
+	return filterCompatibleVersions(versions, loader, mcVersion), nil
+}
+
+func filterCompatibleVersions(versions []ModrinthVersion, loader, mcVersion string) []ModrinthVersion {
+	loader = strings.ToLower(strings.TrimSpace(loader))
+	switch loader {
+	case "purpur", "leaf", "leafmc":
+		loader = "paper"
+	case "waterfall":
+		loader = "bungeecord"
+	}
+	result := make([]ModrinthVersion, 0)
+	for _, v := range versions {
+		versionOK, loaderOK, jarOK := false, false, false
+		for _, ver := range v.GameVersions {
+			if ver == strings.TrimSpace(mcVersion) {
+				versionOK = true
+			}
+		}
+		for _, l := range v.Loaders {
+			l = strings.ToLower(l)
+			if l == loader || (loader == "paper" && (l == "spigot" || l == "bukkit")) || (loader == "spigot" && l == "bukkit") {
+				loaderOK = true
+			}
+		}
+		for _, f := range v.Files {
+			if validPluginJarName(f.Filename) {
+				jarOK = true
+			}
+		}
+		// Folia must be explicitly tagged; Paper compatibility alone is not sufficient.
+		if versionOK && loaderOK && jarOK {
+			result = append(result, v)
+		}
+	}
+	return result
+}
+
+func validPluginJarName(name string) bool {
+	return name != "" && !strings.ContainsAny(name, "/\\:") && !strings.Contains(name, "..") && strings.HasSuffix(strings.ToLower(name), ".jar")
+}
+
+// DownloadModrinthPlugin revalidates the selected release against the server, then
+// publishes a completed JAR without replacing an existing enabled or disabled file.
+func DownloadModrinthPlugin(project, destDir, loader, mcVersion, versionID string) (string, error) {
+	versions, err := CompatibleModrinthVersions(project, loader, mcVersion)
+	if err != nil {
+		return "", err
+	}
+	var chosen *ModrinthVersion
+	for i := range versions {
+		if versionID == "" || versions[i].ID == versionID {
+			chosen = &versions[i]
+			break
+		}
+	}
+	if chosen == nil {
+		return "", fmt.Errorf("no compatible release for %s on Minecraft %s (%s)", project, mcVersion, loader)
+	}
+	fileIndex := -1
+	for i, f := range chosen.Files {
+		if validPluginJarName(f.Filename) && (fileIndex < 0 || f.Primary) {
+			fileIndex = i
+			if f.Primary {
+				break
+			}
+		}
+	}
+	if fileIndex < 0 {
+		return "", fmt.Errorf("compatible release has no safe JAR file")
+	}
+	f := chosen.Files[fileIndex]
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return "", err
+	}
+	dest := filepath.Join(destDir, f.Filename)
+	for _, path := range []string{dest, dest + ".disabled"} {
+		if _, err := os.Lstat(path); err == nil {
+			return "", fmt.Errorf("%s already exists; remove it explicitly before reinstalling", filepath.Base(path))
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+	}
+	resp, err := httpGet(f.URL)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("modrinth versions returned status %s", resp.Status)
+		return "", fmt.Errorf("download returned status %s", resp.Status)
 	}
-
-	var versions []ModrinthVersion
-	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
+	tmp, err := os.CreateTemp(destDir, ".neopanel-plugin-*")
+	if err != nil {
 		return "", err
 	}
-
-	if len(versions) == 0 {
-		return "", fmt.Errorf("no versions found for plugin %s", projectIDOrSlug)
+	defer os.Remove(tmp.Name())
+	n, copyErr := io.Copy(tmp, resp.Body)
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return "", copyErr
 	}
-
-	// Find the best version matching loader (paper, spigot, purpur, leaf, folia, fabric, forge, neoforge, velocity, etc.)
-	var chosenVersion *ModrinthVersion
-	loaderTarget := strings.ToLower(strings.TrimSpace(preferredLoader))
-	if loaderTarget == "purpur" || loaderTarget == "leaf" || loaderTarget == "leafmc" || loaderTarget == "folia" {
-		loaderTarget = "paper"
+	if closeErr != nil {
+		return "", closeErr
 	}
-
-	for i := range versions {
-		v := &versions[i]
-		if len(v.Files) == 0 {
-			continue
-		}
-		for _, l := range v.Loaders {
-			lLow := strings.ToLower(l)
-			if lLow == loaderTarget ||
-				(loaderTarget == "paper" && (lLow == "spigot" || lLow == "bukkit" || lLow == "purpur")) {
-				chosenVersion = v
-				break
-			}
-		}
-		if chosenVersion != nil {
-			break
-		}
+	if f.Size > 0 && n != f.Size {
+		return "", fmt.Errorf("incomplete plugin download: expected %d bytes, received %d", f.Size, n)
 	}
-
-	// Fallback to latest available version if specific loader wasn't explicitly tagged
-	if chosenVersion == nil {
-		chosenVersion = &versions[0]
+	if err := os.Chmod(tmp.Name(), 0644); err != nil {
+		return "", err
 	}
-
-	if len(chosenVersion.Files) == 0 {
-		return "", fmt.Errorf("no files in chosen version for %s", projectIDOrSlug)
+	// Link is atomic and, unlike Rename on Unix, never overwrites the destination.
+	if err := os.Link(tmp.Name(), dest); err != nil {
+		return "", fmt.Errorf("cannot publish plugin (file may already exist): %w", err)
 	}
-
-	// Pick primary file or first file
-	chosenFile := chosenVersion.Files[0]
-	for _, f := range chosenVersion.Files {
-		if f.Primary {
-			chosenFile = f
-			break
-		}
-	}
-
-	destPath := filepath.Join(destPluginsDir, chosenFile.Filename)
-	if err := downloadFile(destPath, chosenFile.URL); err != nil {
-		return "", fmt.Errorf("failed to download plugin file: %w", err)
-	}
-
-	return chosenFile.Filename, nil
+	return f.Filename, nil
 }

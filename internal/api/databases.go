@@ -219,18 +219,6 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		dbFile = absPath
 	}
 
-	conn, err := h.openServerSQLite(dbFile)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to initialize SQLite database: " + err.Error()})
-		return
-	}
-	_, initErr := conn.Exec(`PRAGMA journal_mode=WAL; PRAGMA user_version=1;`)
-	_ = conn.Close()
-	if initErr != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to initialize SQLite schema header: " + initErr.Error()})
-		return
-	}
-
 	idBytes := make([]byte, 4)
 	_, _ = rand.Read(idBytes)
 	dbID := "db-" + hex.EncodeToString(idBytes)
@@ -253,11 +241,38 @@ func (h *DatabaseHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MaxConnections: req.MaxConnections,
 	}
 
-	if err := h.db.CreateServerDatabase(record); err != nil {
-		_ = os.Remove(dbFile)
-		_ = os.Remove(dbFile + "-wal")
-		_ = os.Remove(dbFile + "-shm")
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "A database with this name already exists on this server"})
+	owned := false
+	err := h.db.InitializeServerDatabase(record, func() error {
+		f, err := os.OpenFile(dbFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			return err
+		}
+		owned = true
+		if err := f.Close(); err != nil {
+			return err
+		}
+		conn, err := h.openServerSQLite(dbFile)
+		if err != nil {
+			return err
+		}
+		_, initErr := conn.Exec(`PRAGMA journal_mode=WAL; PRAGMA user_version=1;`)
+		closeErr := conn.Close()
+		if initErr != nil {
+			return initErr
+		}
+		return closeErr
+	})
+	if err != nil {
+		if owned {
+			_ = os.Remove(dbFile)
+			_ = os.Remove(dbFile + "-wal")
+			_ = os.Remove(dbFile + "-shm")
+		}
+		if os.IsExist(err) || strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			writeError(w, http.StatusConflict, "A database with this name already exists on this server")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Failed to initialize database: "+err.Error())
+		}
 		return
 	}
 
