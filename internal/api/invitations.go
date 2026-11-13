@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"net/mail"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -246,27 +245,7 @@ func (h *InvitationHandler) authorize(r *http.Request, server string, node *data
 	return result.Name, nil
 }
 func (h *InvitationHandler) origin(r *http.Request) (string, error) {
-	host := r.Host
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	if raw, e := h.db.GetPanelSetting(panelSettingDaemonKey); e == nil {
-		var d DaemonSettingsConfig
-		if json.Unmarshal([]byte(raw), &d) == nil && strings.TrimSpace(d.FQDN) != "" {
-			host = strings.TrimSpace(d.FQDN)
-			scheme = "https"
-		}
-	}
-	raw := scheme + "://" + host
-	if strings.Contains(host, "://") {
-		raw = host
-	}
-	u, e := url.Parse(raw)
-	if e != nil || u.Hostname() == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") || strings.ContainsAny(u.Host, "\r\n\t \\") {
-		return "", fmt.Errorf("invalid panel origin")
-	}
-	return u.Scheme + "://" + u.Host, nil
+	return h.auth.panelLinkOrigin(r)
 }
 func (h *InvitationHandler) smtp() (*database.SMTPSettings, error) {
 	s, e := h.email.GetSMTPSettings()

@@ -321,14 +321,13 @@ func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
 	smtpReady := smtpCfg != nil && smtpCfg.Enabled && smtpCfg.Host != "" && user.Email != ""
 
 	if smtpReady {
-		host := r.Host
-		scheme := "https"
-		if r.TLS == nil {
-			if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
-				scheme = proto
-			}
+		origin, err := h.auth.panelLinkOrigin(r)
+		if err != nil {
+			// Keep the response identical for existing and unknown accounts.
+			writeJSON(w, http.StatusOK, map[string]string{"message": "If an account matches that username or email address, password reset instructions have been sent."})
+			return
 		}
-		resetLink := fmt.Sprintf("%s://%s/#reset-token=%s", scheme, host, resetToken)
+		resetLink := origin + "/#reset-token=" + resetToken
 
 		subject := fmt.Sprintf("[NeoPanel] Reset Password for %s", user.Username)
 		bodyPlain := fmt.Sprintf("Hello %s,\n\nA request was received to reset your NeoPanel password.\n\nTo choose a new password, click the link below (valid for 1 hour):\n%s\n\nReset Code: %s\n\nIf you did not request this, you can safely ignore this email.\n", user.Username, resetLink, resetToken)

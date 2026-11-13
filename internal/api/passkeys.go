@@ -129,10 +129,10 @@ func (h *PasskeyHandler) loadUser(id int, rpID string) (*passkeyUser, []database
 func canonicalPasskeyOrigin(raw string) (string, string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.User != nil || u.Opaque != "" || u.Host == "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") || u.RawPath != "" {
-		return "", "", errors.New("Configure server.public_url as the exact panel origin without a path")
+		return "", "", errors.New("Enter the exact public panel URL without a path, query, or fragment")
 	}
 	host := strings.ToLower(u.Hostname())
-	if host == "" || strings.HasSuffix(host, ".") {
+	if host == "" || len(host) > 253 || strings.HasSuffix(host, ".") || strings.HasSuffix(u.Host, ":") || strings.Contains(raw, "#") {
 		return "", "", errors.New("Invalid passkey hostname")
 	}
 	local := host == "localhost" || host == "127.0.0.1" || host == "::1"
@@ -177,7 +177,7 @@ func canonicalPasskeyOrigin(raw string) (string, string, error) {
 func (h *PasskeyHandler) relyingParty(r *http.Request) (*webauthn.WebAuthn, string, error) {
 	h.auth.mu.RLock()
 	cfg := h.auth.cfg
-	publicURL, mode := "", ""
+	mode := ""
 	if cfg != nil {
 		if cfg.IsNode() {
 			h.auth.mu.RUnlock()
@@ -187,13 +187,18 @@ func (h *PasskeyHandler) relyingParty(r *http.Request) (*webauthn.WebAuthn, stri
 			h.auth.mu.RUnlock()
 			return nil, "", errors.New("Passkeys are disabled by the administrator")
 		}
-		publicURL, mode = cfg.Server.PublicURL, cfg.Server.Mode
+		mode = cfg.Server.Mode
 	}
 	h.auth.mu.RUnlock()
+	settings, err := h.auth.panelURL()
+	if err != nil {
+		return nil, "", errors.New("Public panel URL is invalid or unavailable; check Admin → Appearance")
+	}
+	publicURL := settings.PublicURL
 	// Request headers are not trusted configuration: an ordinary user must not
 	// choose the panel-wide RP hostname by making the first registration.
 	if strings.TrimSpace(publicURL) == "" {
-		return nil, "", errors.New("Ask an administrator to configure server.public_url before using passkeys")
+		return nil, "", errors.New("Ask an administrator to set the Public panel URL in Admin → Appearance before using passkeys")
 	}
 	requestHost, err := url.Parse("http://" + r.Host)
 	if err != nil || requestHost.Host != r.Host || requestHost.User != nil {

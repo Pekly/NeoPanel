@@ -255,7 +255,7 @@ func TestInvitationStyledEmailMIME(t *testing.T) {
 	if err := h.db.CreateServer(&database.Server{ID: "html", Name: server, OwnerID: h.owner.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.db.SetPanelSetting(panelSettingDaemonKey, `{"fqdn":"https://configured.example:8443"}`); err != nil {
+	if err := h.db.SetPanelPublicURL("https://configured.example:8443", "configured.example"); err != nil {
 		t.Fatal(err)
 	}
 	w := h.request("POST", "/api/team/invitations", map[string]any{"server_id": "html", "username": "htmluser", "email": "htmluser@example.test", "permissions": []string{"console.view", "files.view"}}, h.session)

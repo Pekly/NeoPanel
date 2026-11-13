@@ -344,6 +344,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	}))
 	r.mux.HandleFunc("GET /api/admin/turnstile", r.requireAdmin(r.auth.GetTurnstileConfig))
 	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAdmin(r.auth.UpdateTurnstileConfig))
+	r.mux.HandleFunc("GET /api/admin/panel-url", r.requireAdmin(r.auth.GetPanelURL))
+	r.mux.HandleFunc("PUT /api/admin/panel-url", r.requireAdmin(r.auth.UpdatePanelURL))
 	r.mux.HandleFunc("GET /api/admin/branding", r.requireAdmin(r.branding.GetAdminBranding))
 	r.mux.HandleFunc("PUT /api/admin/branding", r.requireAdmin(r.branding.UpdateAdminBranding))
 	r.mux.HandleFunc("POST /api/admin/branding", r.requireAdmin(r.branding.UpdateAdminBranding))

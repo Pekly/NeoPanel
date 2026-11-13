@@ -625,7 +625,7 @@ func TestPasskeysRequireConfiguredOriginBeforeFirstRegistration(t *testing.T) {
 		req = req.WithContext(context.WithValue(req.Context(), contextUserKey, &JWTClaims{UserID: user.ID, Username: user.Username, Role: user.Role}))
 		response := httptest.NewRecorder()
 		h.RegisterBegin(response, req)
-		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "server.public_url") {
+		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "Public panel URL") {
 			t.Fatalf("unconfigured origin %s accepted: %d %s", origin, response.Code, response.Body.String())
 		}
 	}

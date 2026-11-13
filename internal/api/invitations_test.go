@@ -448,14 +448,14 @@ func TestInvitationSMTPHeadersAndOrigin(t *testing.T) {
 	if e := h.router.email.SendEmail(&s.settings, "to@example.test", "name\r\nBcc: evil@example.test", "subject", "", "body"); e == nil {
 		t.Fatal("header injection accepted")
 	}
-	h.db.SetPanelSetting(panelSettingDaemonKey, `{"fqdn":"https://configured.example:8443"}`)
+	h.db.SetPanelSetting(database.PanelPublicURLKey, "https://configured.example:8443")
 	r := httptest.NewRequest("POST", "http://panel.example/", nil)
 	r.Header.Set("X-Forwarded-Host", "evil.example")
 	origin, e := h.handler.origin(r)
 	if e != nil || origin != "https://configured.example:8443" {
 		t.Fatalf("origin %q %v", origin, e)
 	}
-	h.db.SetPanelSetting(panelSettingDaemonKey, `{"fqdn":"https://evil@example.test"}`)
+	h.db.SetPanelSetting(database.PanelPublicURLKey, "https://evil@example.test")
 	if _, e = h.handler.origin(r); e == nil {
 		t.Fatal("userinfo origin accepted")
 	}

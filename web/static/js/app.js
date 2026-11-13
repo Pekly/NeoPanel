@@ -1133,6 +1133,12 @@ window.S = {
     auto_restart_policy: true
   },
   daemonDraft: null,
+  adminPanelUrl: null,
+  panelUrlDraft: null,
+  panelUrlLoading: false,
+  panelUrlSaving: false,
+  panelUrlError: '',
+  panelUrlRequest: 0,
   adminTurnstile: {
     enabled: false,
     site_key: '',
@@ -8255,6 +8261,8 @@ const V = {
           </div>
         </div>
 
+        ${renderAdminPanelUrlCard()}
+
         <div class="card" style="margin-bottom:18px;">
           <h2 style="margin:0 0 6px; color:var(--tx);">Network and server defaults</h2>
           <span class="mu" style="font-size:13px; display:block; margin-bottom:18px;">
@@ -9308,7 +9316,8 @@ async function loadAdminData(skipRender = false) {
     api(`/api/account/activity?limit=${S.actFilter?.limit || 200}`).catch(() => null),
     api('/api/admin/mods').catch(() => null),
     api('/api/admin/updates').catch(() => null),
-    api('/api/admin/email').catch(() => null)
+    api('/api/admin/email').catch(() => null),
+    loadAdminPanelUrl(true)
   ]);
 
   if (sysRes) S.system = sysRes;
@@ -14787,6 +14796,107 @@ function onBrandInputChange(field, val, srcEl = null) {
   if (['brand_name', 'logo_url', 'client_area_label', 'client_area_enabled', 'client_area_available', 'maintenance_enabled'].includes(field)) {
     const nav = $('#nav');
     if (nav) nav.innerHTML = navHtml();
+  }
+}
+
+// Panel address is independent of the game/SFTP daemon FQDN.
+function renderAdminPanelUrlCard() {
+  const current = S.adminPanelUrl;
+  const draft = S.panelUrlDraft ?? current?.public_url ?? '';
+  const busy = S.panelUrlLoading || S.panelUrlSaving;
+  const source = { settings: 'Database override', config: 'Configuration fallback', unset: 'Not configured' };
+  return `<div class="card" style="margin-bottom:18px;">
+    <div class="row sb" style="gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+      <h2 style="margin:0; color:var(--tx);">${ic('link', 18)} Panel address</h2>
+      <span class="chip">${S.panelUrlLoading ? 'Loading…' : esc(source[current?.source] || 'Unavailable')}</span>
+    </div>
+    <p class="mu" style="font-size:13px; line-height:1.6; margin:0 0 16px;">
+      The browser-facing address used for passkeys, invitation links, and password-reset links. This is separate from game and SFTP connection addresses.
+    </p>
+    <form onsubmit="saveAdminPanelUrl(event)">
+      <label class="f" for="adm-panel-url">
+        <span>Public panel URL</span>
+        <input type="url" id="adm-panel-url" value="${esc(draft)}" placeholder="https://panel.example.com" required spellcheck="false" autocomplete="url" aria-describedby="adm-panel-url-help adm-panel-url-error" oninput="onPanelUrlInputChange(this.value)" ${busy ? 'disabled' : ''}>
+      </label>
+      <p id="adm-panel-url-help" class="mu" style="font-size:12.5px; line-height:1.6;">
+        Enter an exact HTTPS origin: scheme, hostname, and optional port, with no path, credentials, query, or fragment. HTTP is allowed only for localhost development. The saved address cannot be cleared.
+        Saving applies immediately in SQLite and overrides <code>server.public_url</code>; no restart is needed.
+      </p>
+      <div style="padding:12px 14px; border:1px solid var(--border); border-radius:8px; font-size:12.5px; line-height:1.6;">
+        <b>Prepare the address first.</b> Saving does not configure DNS, HTTPS certificates, or your reverse proxy. Make sure the panel is reachable at this address before saving.
+        <br><b>Moving to a new hostname?</b> Remove all passkeys from every account before changing it, then register new passkeys at the new address. Hostname changes are blocked while any passkeys exist; disabling passkeys does not remove them.
+      </div>
+      <p id="adm-panel-url-error" role="alert" style="color:var(--red); font-size:13px;" ${S.panelUrlError ? '' : 'hidden'}>${esc(S.panelUrlError)}</p>
+      <div class="row sb" style="gap:10px; flex-wrap:wrap; margin-top:18px;">
+        <span class="mu" style="font-size:12px; overflow-wrap:anywhere;">Current address: ${esc(current?.public_url || (current ? 'Not configured' : 'Unavailable'))}</span>
+        <div class="row" style="gap:8px;">
+          ${!current ? `<button type="button" class="btn" onclick="loadAdminPanelUrl()" ${busy ? 'disabled' : ''}>${ic('refresh', 14)} Retry</button>` : ''}
+          <button type="submit" id="panel-url-save-btn" class="btn pr" ${busy || !current || !draft.trim() ? 'disabled' : ''}>${ic('check', 14)} ${S.panelUrlSaving ? 'Saving…' : 'Save panel address'}</button>
+        </div>
+      </div>
+    </form>
+  </div>`;
+}
+
+function onPanelUrlInputChange(value) {
+  if (S.panelUrlSaving) return;
+  S.panelUrlDraft = value;
+  S.panelUrlError = '';
+  const error = $('#adm-panel-url-error');
+  if (error) { error.textContent = ''; error.hidden = true; }
+  const button = $('#panel-url-save-btn');
+  if (button) button.disabled = S.panelUrlLoading || !S.adminPanelUrl || !value.trim();
+}
+
+async function loadAdminPanelUrl(skipRender = false) {
+  if (S.panelUrlSaving) return;
+  const request = ++S.panelUrlRequest;
+  S.panelUrlLoading = true;
+  if (!skipRender) R();
+  try {
+    const result = await api('/api/admin/panel-url');
+    if (request !== S.panelUrlRequest) return;
+    S.adminPanelUrl = result;
+    S.panelUrlError = '';
+    // A null draft follows the saved value; never overwrite an unsaved edit.
+  } catch (err) {
+    if (request === S.panelUrlRequest) S.panelUrlError = err.message || 'Failed to load panel address.';
+  } finally {
+    if (request === S.panelUrlRequest) {
+      S.panelUrlLoading = false;
+      if (!skipRender) R();
+    }
+  }
+}
+
+async function saveAdminPanelUrl(event) {
+  if (event) event.preventDefault();
+  if (S.panelUrlSaving || S.panelUrlLoading || !S.adminPanelUrl) return;
+  const draft = S.panelUrlDraft ?? S.adminPanelUrl.public_url;
+  if (!draft.trim()) {
+    S.panelUrlError = 'Enter a public panel URL. The saved address cannot be cleared.';
+    R();
+    return;
+  }
+  S.panelUrlDraft = draft;
+  S.panelUrlSaving = true;
+  S.panelUrlError = '';
+  ++S.panelUrlRequest;
+  R();
+  try {
+    const result = await api('/api/admin/panel-url', {
+      method: 'PUT',
+      body: JSON.stringify({ public_url: draft.trim() })
+    });
+    S.adminPanelUrl = result;
+    S.panelUrlDraft = null;
+    toast('Panel address saved. The new address is active immediately.', 'ok');
+  } catch (err) {
+    S.panelUrlError = err.message || 'Failed to save panel address.';
+    toast(S.panelUrlError, 'bad');
+  } finally {
+    S.panelUrlSaving = false;
+    R();
   }
 }
 
