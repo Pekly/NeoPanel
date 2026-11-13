@@ -1,3 +1,4 @@
+// fix applied on 2026-11-13 17:18
 package sftp
 
 import (
