@@ -199,6 +199,7 @@ function getSftpDetails(srv) {
 }
 
 function launchSftpClient() {
+  if (!hasServerPermission('sftp.access')) return;
   const d = getSftpDetails(curServer());
   try {
     const a = document.createElement('a');
@@ -729,6 +730,7 @@ function syncHeroFromSavedServer(targetSrv) {
 }
 
 function scheduleSettingsAutoSave(delay = 550) {
+  if (!hasServerPermission('settings.edit')) return;
   if (S.view !== 'set') return;
   clearSettingsAutoSaveTimer();
   const srv = curServer();
@@ -746,12 +748,14 @@ function scheduleSettingsAutoSave(delay = 550) {
 }
 
 function saveSettingsAutoNow() {
+  if (!hasServerPermission('settings.edit')) return;
   clearSettingsAutoSaveTimer();
   if (S.view !== 'set') return;
   void saveProperties({ autoSave: true, skipRender: true });
 }
 
 function flushSettingsAutoSave() {
+  if (!hasServerPermission('settings.edit')) { clearSettingsAutoSaveTimer(); return; }
   const hadPending = Boolean(_settingsAutoTimer);
   clearSettingsAutoSaveTimer();
   const srv = curServer();
@@ -1311,6 +1315,7 @@ function setViewMode(scope, mode) {
     if (grid) {
       if (Array.isArray(S.lastModrinthHits)) {
         grid.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
+        applyPermissionControls(grid);
       } else {
         searchModrinth();
       }
@@ -1347,6 +1352,7 @@ const VIEW_TO_SLUG = {
   sc: 'schedules',
   team: 'team',
   net: 'network',
+  sftp: 'sftp',
   sub: 'subdomain',
   stp: 'settings',
   pl: 'players',
@@ -1370,7 +1376,7 @@ SLUG_TO_VIEW.stp = 'set';
 SLUG_TO_VIEW.servers = 'dash';
 SLUG_TO_VIEW.subusers = 'team';
 
-const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email'];
+const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email', 'roles'];
 const ADMIN_SECTIONS = [
   { label: 'Overview', icon: 'activity', description: 'Panel health, resource usage, and updates.' },
   { label: 'Nodes', icon: 'network', description: 'Connect and manage the machines that run your servers.' },
@@ -1379,7 +1385,8 @@ const ADMIN_SECTIONS = [
   { label: 'Appearance', icon: 'layers', description: 'Customize your branding, theme, and panel defaults.' },
   { label: 'Audit logs', icon: 'clock', description: 'Review activity and changes across your panel.' },
   { label: 'Extensions', icon: 'package', description: 'Add and manage panel extensions.' },
-  { label: 'Email & SMTP', icon: 'mail', description: 'Set up email for invitations and password resets.' }
+  { label: 'Email & SMTP', icon: 'mail', description: 'Set up email for invitations and password resets.' },
+  { label: 'Roles', icon: 'shield', description: 'Named panel permissions, separate from Administrator access.' }
 ];
 let adminStatusRefreshing = false;
 async function refreshAdminStatus(button) {
@@ -1398,8 +1405,10 @@ async function refreshAdminStatus(button) {
 
 function displayNodeName(nodeId, name = '') {
   const label = String(name || '').trim();
-  if ((nodeId || 'local') === 'local' && (!label || ['Local Master Node', 'Local Master'].includes(label))) return 'Local node';
-  return label || nodeId || 'Node';
+  if ((nodeId || 'local') === 'local' && (!label || ['local', 'Local Master Node', 'Local Master'].includes(label))) return 'Local node';
+  if (label && label !== nodeId) return label;
+  const node = (S.nodes || []).find(n => n.id === nodeId);
+  return (node?.name && node.name !== nodeId ? node.name : node?.location && node.location !== nodeId ? node.location : 'Remote node');
 }
 const ACC_TAB_SLUGS = ['general', 'security', 'ssh', 'api', 'activity'];
 
@@ -1521,6 +1530,7 @@ function serverRouteUrl(nodeId, srvId, view = 'con', opts = {}) {
 
 function routeUrl(view, opts = {}) {
   const target = normalizeRoute(view);
+  if (target === 'create') return withSafeModeQuery('/servers/create');
   if (target === 'dash') return withSafeModeQuery('/');
   if (target === 'client') return withSafeModeQuery('/client-area');
   if (target === 'mod') {
@@ -1573,6 +1583,7 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
     return { view: 'dash', safeMode };
   }
   if (cleanPath === '/servers') return { view: 'dash', safeMode };
+  if (['/create', '/servers/create', '/server/create'].includes(cleanPath)) return { view: 'create', safeMode };
   if (cleanPath === '/activity') return { view: 'act', global: true, safeMode };
   if (cleanPath === '/client-area') return { view: 'client', safeMode };
   if (cleanPath === '/billing') return { view: 'notfound', notFoundPath: cleanPath, safeMode };
@@ -1768,8 +1779,7 @@ function syncActiveServerState(srv) {
     S.startupFailures = Number(srv.stats?.startup_failures) || 0;
     S.startupHalted = Boolean(srv.stats?.startup_halted);
     applyServerStatsSnapshot(srv, srv.stats, false);
-    connectWs(srv.id, false, nodeId);
-    loadServerPorts(true);
+    resetServerAccess();
     if (window.NP && typeof window.NP._emit === 'function') {
       window.NP._emit('server:switch', { server: srv });
     }
@@ -1895,6 +1905,7 @@ function navigateToUrl(url, label = 'Page', opts = {}) {
 }
 
 function handleNavClick(e, view, opts = {}) {
+  if (serverPagePermission(view) && !canServerPage(view)) { if (e) e.preventDefault(); return false; }
   if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0)) {
     return true;
   }
@@ -3228,6 +3239,7 @@ async function computeGravatarHash(email) {
 
 // --- API Client ---
 async function api(endpoint, options = {}) {
+  assertClientRequestAccess(endpoint, options);
   const { suppressToast, ...fetchOpts } = options || {};
   const headers = { ...(fetchOpts.headers || {}) };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
@@ -4007,7 +4019,7 @@ function formatLogLine(raw) {
 }
 
 function updateInputState() {
-  const isOnline = S.status === 'online';
+  const isOnline = S.status === 'online' && hasServerPermission('console.command');
   const placeholder = isOnline ? 'Type a command, try help...' : 'Server is offline';
   for (const id of ['#cmd', '#fly-cmd']) {
     const inp = $(id);
@@ -4035,11 +4047,11 @@ function updateHeaderBadge() {
     haltBadge.style.display = (S.status === 'offline' && S.startupHalted) ? 'inline-flex' : 'none';
   }
   const startBtn = document.querySelector('[data-power-btn="start"]');
-  if (startBtn) startBtn.disabled = S.status !== 'offline';
+  if (startBtn) startBtn.disabled = S.status !== 'offline' || !hasServerPermission('server.power');
   const restartBtn = document.querySelector('[data-power-btn="restart"]');
-  if (restartBtn) restartBtn.disabled = S.status !== 'online';
+  if (restartBtn) restartBtn.disabled = S.status !== 'online' || !hasServerPermission('server.power');
   const stopBtn = document.querySelector('[data-power-btn="stop"]');
-  if (stopBtn) stopBtn.disabled = !(S.status === 'online' || S.status === 'starting');
+  if (stopBtn) stopBtn.disabled = !(S.status === 'online' || S.status === 'starting') || !hasServerPermission('server.power');
   const fabDot = $('#fly-con-fab .fly-con-dot');
   if (fabDot) fabDot.className = `fly-con-dot ${S.status}`;
 }
@@ -4166,6 +4178,7 @@ function runFlyCmd() {
 }
 
 function toggleFlyConsole(forceOpen) {
+  if (!hasServerPermission('console.view')) return;
   const srv = curServer();
   if (!srv) {
     toast('Select or create a server first');
@@ -4270,6 +4283,7 @@ function renderFlyConsole() {
 // --- WebSocket Connection (Auto-Reconnect + Cloudflare Keepalive Heartbeat) ---
 function connectWs(serverId, isReconnect = false, nodeId = null) {
   if (!serverId || !S.token) return;
+  if (!hasServerPermission('console.view', { id: serverId, node_id: nodeId || curServer()?.node_id || 'local' })) return;
 
   const targetNodeId = nodeId || curServer()?.node_id || 'local';
 
@@ -4435,6 +4449,7 @@ setInterval(() => {
 
 // --- Power Actions ---
 async function power(action, skipConfirm = false) {
+  if (!hasServerPermission('server.power')) { toast('Access restricted: server.power required', 'bad'); return; }
   const srv = curServer();
   if (!srv) return;
 
@@ -4579,6 +4594,7 @@ async function refreshServerStatus() {
 }
 
 async function runCmd(cmd) {
+  if (!hasServerPermission('console.command')) { toast('Access restricted: console.command required', 'bad'); return; }
   if (!cmd) return;
   addLog(formatCommandLine(cmd));
   const srv = curServer();
@@ -4607,6 +4623,7 @@ const PG = [
   ['sc', 'Schedules', 'clock', 'Management'],
   ['team', 'Team', 'users', 'Management'],
   ['net', 'Network', 'network', 'Management'],
+  ['sftp', 'SFTP', 'files', 'Management'],
   ['sub', 'Subdomain', 'link', 'Management'],
   ['pl', 'Players', 'users', 'Management'],
   ['plug', 'Plugins', 'puzzle', 'Minecraft'],
@@ -5715,9 +5732,9 @@ const V = {
           </select>
         ` : ''}
         ${renderViewModeToggle('dash', 'tiles')}
-        <button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
+        ${canCreateServers() ? `<button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
           ${ic('plus', 14)} Create server
-        </button>
+        </button>` : ''}
       </div>
     </div>
 
@@ -5858,11 +5875,11 @@ const V = {
         }).join('')}
 
         <!-- Dashed Create Server Card -->
-        <button type="button" class="create-server-dashed-card ${dashVm === 'list' ? 'compact' : ''}" onclick="openCreateServerModal()">
+        ${canCreateServers() ? `<button type="button" class="create-server-dashed-card ${dashVm === 'list' ? 'compact' : ''}" onclick="openCreateServerModal()">
           <span class="create-icon-bubble">${ic('plus', 18)}</span>
           <span>Create a server</span>
           <span class="np-create-hint">Make room for your next world</span>
-        </button>
+        </button>` : ''}
       </div>
 
       <!-- Right Column: Recent Activity & Allocation -->
@@ -6863,7 +6880,7 @@ const V = {
 
       <!-- Secondary Row: SFTP Access & Common Ports -->
       <div class="grid g2" style="gap: 20px;">
-        ${renderSftpCardHtml(srv)}
+        <p class="mu">File transfer connections are managed in the dedicated SFTP section.</p>
 
         <div class="card" style="padding: 22px;">
           <h2 style="font-size: 16px; margin-bottom: 8px; color: #fff;">Common Plugin Ports</h2>
@@ -7396,7 +7413,7 @@ const V = {
       <div class="banner info" style="margin-bottom:0; display:flex; align-items:center; gap:10px; padding:12px 16px; border-radius:8px; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25);">
         ${ic('users', 18)}
         <div style="font-size:13px; line-height:1.45;">
-          <b>Player / Collaborator Access:</b> You are managing this server with operator permissions. Administrative actions such as server deletion, reinstall, and team subuser management are restricted to the server owner.
+          <b>Team access:</b> Your assigned permissions determine which pages and controls are available. Viewing settings does not grant permission to change them.
         </div>
       </div>` : ''}
       <!-- Top Row: Panel Identity & Active Startup Command / Java Runtime -->
@@ -7604,8 +7621,7 @@ const V = {
       </div>` : ''}
 
 
-      <!-- Quick SFTP Access -->
-      ${renderSftpCardHtml(srv, true)}
+      <p class="mu">Networking and file transfer have dedicated Network and SFTP sections in the sidebar.</p>
 
       ${(isAdmin || isOwner) ? `
       <!-- Reinstall Server Section -->
@@ -7910,7 +7926,7 @@ const V = {
                       ${n.is_local ? '<span class="chip" style="font-size:10px;">Local</span>' : ''}
                     </div>
                   </td>
-                  <td class="mu">${esc(n.location || 'Unspecified')}</td>
+                  <td class="mu">${esc(displayNodeLocation(n))}</td>
                   <td class="mono">${esc(n.is_local ? 'Internal Direct' : (n.base_url || n.fqdn))}</td>
                   <td class="mono">${sysInfo.cpus ? `${sysInfo.cpus} vCPU &bull; ${totalGb}` : '—'}</td>
                   <td>${Number(n.server_count) || 0}</td>
@@ -7945,7 +7961,7 @@ const V = {
                     ${n.is_local ? '<span class="chip" style="font-size:10.5px;">This machine</span>' : ''}
                   </div>
                   <div class="mu mono" style="font-size: 11.5px; margin-top: 3px;">
-                    ${esc(n.location || 'Unspecified Region')} &bull; ${esc(n.fqdn || window.location.hostname)}
+                    ${esc(displayNodeLocation(n))} &bull; ${esc(n.fqdn || window.location.hostname)}
                   </div>
                 </div>
                 <span class="badge ${n.online ? 'online' : 'offline'}">
@@ -8108,7 +8124,7 @@ const V = {
                       ${esc(u.email || '—')}
                     </span>
                   </td>
-                  <td><span class="badge ${u.role === 'admin' ? 'online' : ''}">${esc(u.role)}</span></td>
+                  <td><span class="badge ${u.role === 'admin' ? 'online' : ''}">${esc(u.role)}</span>${renderUserPanelRole(u)}</td>
                   <td>
                     ${u.two_factor_enabled
                       ? '<span class="badge online"><i class="dot"></i>2FA Enabled</span>'
@@ -8551,7 +8567,10 @@ const V = {
       content = renderAdminModsTabHtml();
     } else if (t === 7) {
       content = renderAdminEmailTabHtml();
+    } else if (t === 8) {
+      content = renderPanelRoles();
     }
+    if (t === 4) content = organizeAppearance(content);
 
     return `<header class="np-admin-heading">
       ${ic(section.icon, 26)}
@@ -8928,7 +8947,7 @@ function navHtml() {
       : '');
 
   // 1. Independent Dedicated Admin Navigation
-  if (S.view === 'admin') {
+  if (S.view === 'admin' && S.user?.role === 'admin') {
     const t = S.adminTab || 0;
     return `
     <a class="brand" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
@@ -8965,7 +8984,7 @@ function navHtml() {
   }
 
   // 2. Global Navigation (Servers, Activity, Client Area, Account)
-  const showGlobalNav = ['dash', 'client', 'notfound', 'mod', 'maintenance', 'acc'].includes(S.view) ||
+  const showGlobalNav = ['dash', 'client', 'notfound', 'mod', 'maintenance', 'acc', 'create', 'admin'].includes(S.view) ||
     (S.view === 'act' && !window.location.pathname.startsWith('/server/')) ||
     !curServer();
 
@@ -9045,7 +9064,7 @@ function navHtml() {
       const href = routeUrl(key);
       const displayLabel = (key === 'plug' && isModSrv) ? 'Mods' : label;
       return `${header}
-    <a class="nav-item ${active}" href="${esc(href)}" onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
+    <a class="nav-item ${active}" ${canServerPage(key) ? `href="${esc(href)}"` : 'aria-disabled="true" tabindex="0" title="Access restricted — permission required"'} onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
       ${ic(iconName, 16)}
       <span>${displayLabel}</span>
     </a>`;
@@ -9088,6 +9107,7 @@ function normalizeRoute(view) {
 
 window.go = function(view, opts = {}) {
   const target = normalizeRoute(view);
+  if (serverPagePermission(target) && !canServerPage(target)) return;
   if (S.view === 'admin' && target !== 'admin' && (S.adminTab || 0) === 4) {
     applyBranding(S.branding);
   }
@@ -9147,7 +9167,10 @@ window.R = function() {
         </div>`
       : '';
     const viewFn = V[S.view] || V.notfound;
-    main.innerHTML = maintBannerHtml + viewFn();
+    const blocked = serverPagePermission(S.view) && !canServerPage(S.view);
+    main.innerHTML = renderAnnouncement() + maintBannerHtml + (blocked ? renderAccessRestricted() : (S.view === 'admin' && !isAdmin ? renderAccessRestricted(false) : viewFn())) + (S.view === 'dash' ? renderDiscordCard() : '');
+    if (S.view === 'set' && !blocked) organizeServerSettings(main);
+    applyPermissionControls(main);
     main.scrollTop = prevMainScroll;
     if (S.view === 'con') {
       paintLog();
@@ -9190,6 +9213,13 @@ function bindEditorTabKey() { bindQolEditor(); }
 
 // --- View Transition Lifecycle Hook & Initial Route Preloader ---
 async function loadInitialRouteData(view) {
+  if (serverPagePermission(view)) {
+    await ensureServerAccess();
+    if (!canServerPage(view) || S.view !== view) return;
+    if (hasServerPermission('console.view')) connectWs(curServer()?.id, false, curServer()?.node_id || 'local');
+  }
+  if (view === 'create') { if (canCreateServers()) openCreateServerModal(); return; }
+  if (view === 'sftp') { await loadSFTPDetails(true); return; }
   const jobs = [];
   if (view === 'pl') jobs.push(loadPlayersData(true));
   else if (view === 'fi') jobs.push(loadFileList(S.currentDir, true));
@@ -9205,7 +9235,7 @@ async function loadInitialRouteData(view) {
   else if (view === 'set' || view === 'stp') {
     jobs.push(loadProperties(true));
     jobs.push(loadVersionsCatalog());
-    jobs.push(loadSFTPDetails(true));
+    // SFTP loads only on its dedicated, separately authorized page.
     jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
   }
   else if (view === 'ver') {
@@ -9214,17 +9244,24 @@ async function loadInitialRouteData(view) {
   }
   else if (view === 'sub') jobs.push(loadSubdomainData(true));
   else if (view === 'net') {
-    jobs.push(loadSFTPDetails(true));
+    // Network allocations do not require SFTP credentials.
     jobs.push(loadServerPorts(true));
   }
   else if (view === 'act') jobs.push(loadActivityLog(S.actFilter?.limit || 200, true));
   else if (view === 'admin') jobs.push(loadAdminData(true));
   else if (view === 'acc') jobs.push(loadAccountData(true));
-  else if (view === 'con') jobs.push(loadServerPorts(true));
+  else if (view === 'con' && hasServerPermission('settings.view')) jobs.push(loadServerPorts(true));
   await Promise.all(jobs).catch(() => {});
 }
 
 window.onEnterView = function(view) {
+  if (serverPagePermission(view) && !canServerPage(view)) {
+    ensureServerAccess().then(() => { if (S.view === view) { R(); if (canServerPage(view)) onEnterView(view); } });
+    return;
+  }
+  if (view === 'create') { if (canCreateServers()) openCreateServerModal(); return; }
+  if (serverPagePermission(view) && hasServerPermission('console.view')) connectWs(curServer()?.id, false, curServer()?.node_id || 'local');
+  if (view === 'sftp') { loadSFTPDetails(); return; }
   if (view === 'pl') loadPlayersData();
   else if (view === 'fi') loadFileList(S.currentDir);
   else if (view === 'db') loadDatabases(Array.isArray(S.databases) && S.databases.length > 0);
@@ -9239,12 +9276,12 @@ window.onEnterView = function(view) {
   else if (view === 'set' || view === 'stp') {
     loadProperties();
     loadVersionsCatalog();
-    loadSFTPDetails();
+    // SFTP is intentionally not prefetched.
     loadJavaRuntimes(false, curServer()?.node_id || 'local');
   }
   else if (view === 'ver') { loadVersionsCatalog(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
   else if (view === 'sub') loadSubdomainData();
-  else if (view === 'net') { loadSFTPDetails(); loadServerPorts(); }
+  else if (view === 'net') { loadServerPorts(); }
   else if (view === 'act') loadActivityLog();
   else if (view === 'admin') loadAdminData();
   else if (view === 'acc') loadAccountData();
@@ -9396,6 +9433,8 @@ function selectAccountTab(idx) {
 }
 
 async function loadAdminData(skipRender = false) {
+  if (S.user?.role !== 'admin') return;
+  await Promise.all([loadPanelRoles(true), loadCommunitySettings(true)]);
   const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes, modsRes, upRes, smtpRes] = await Promise.all([
     api('/api/system').catch(() => null),
     api('/api/admin/users').catch(() => null),
@@ -10010,6 +10049,7 @@ async function openFile(name) { return openQolFile(name); }
 async function saveActiveFile() { return saveQolFile(); }
 
 function downloadFileItem(path) {
+  if (!hasServerPermission('files.view')) return;
   const srv = curServer();
   if (!srv) return;
   const baseUrl = srvApiPath(srv, `/files/download?path=${encodeURIComponent(path)}`);
@@ -10184,6 +10224,7 @@ async function submitMoveFilesModal(e) {
   const overwrite = Boolean($('#move-overwrite')?.checked);
 
   try {
+    assertClientRequestAccess(srvApiPath(srv, '/files/move'), { method: 'POST' });
     const res = await fetch(srvApiPath(srv, '/files/move'), {
       method: 'POST',
       headers: {
@@ -10326,6 +10367,7 @@ async function submitCompressFilesModal(e) {
   const format = $('#comp-format')?.value || 'zip';
 
   try {
+    assertClientRequestAccess(srvApiPath(srv, '/files/compress'), { method: 'POST' });
     const res = await fetch(srvApiPath(srv, '/files/compress'), {
       method: 'POST',
       headers: {
@@ -10527,6 +10569,7 @@ function syncFileSelectionUI() {
   const root = $('#file-bulk-bar-root');
   if (root) {
     root.innerHTML = renderFileBulkBarHtml();
+    applyPermissionControls(root);
   }
 }
 
@@ -10611,6 +10654,7 @@ async function deleteSelectedFiles() {
 }
 
 function copyFilePath(path) {
+  if (!hasServerPermission('files.view')) return;
   if (navigator.clipboard) {
     navigator.clipboard.writeText(path).then(() => {
       toast(`Copied "${path}" to clipboard!`, 'ok');
@@ -10685,6 +10729,7 @@ function handleFileContextMenu(e, idx) {
       ${ic('trash', 14)} Delete
     </button>
   `;
+  applyPermissionControls(menu);
 
   const clientX = e?.clientX ?? (e?.touches?.[0]?.clientX ?? 100);
   const clientY = e?.clientY ?? (e?.touches?.[0]?.clientY ?? 150);
@@ -10949,6 +10994,7 @@ async function searchModrinth(skipDomWrite = false) {
     S.lastModrinthHits = res.hits || [];
     if (!skipDomWrite && grid) {
       grid.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
+      applyPermissionControls(grid);
     }
   } catch (e) {
     S.lastModrinthHits = [];
@@ -11005,6 +11051,7 @@ async function installPlugin(projectSlug, title, btnEl) {
     if (btnEl && document.body.contains(btnEl)) setBtnLoading(btnEl, false);
     if (sameQolServer(srv, curServer()) && S.view === 'plug' && $('#store-grid') && Array.isArray(S.lastModrinthHits)) {
       $('#store-grid').innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
+      applyPermissionControls($('#store-grid'));
     }
   }
 }
@@ -11287,6 +11334,7 @@ async function loadProperties(skipRender = false) {
 }
 
 async function persistSettingsPayload(targetSrv, collected, opts = {}) {
+  if (!hasServerPermission('settings.edit', targetSrv)) return false;
   const { autoSave = false, skipRender = false, force = false } = opts || {};
   if (!targetSrv || !collected || !collected.ok) return;
 
@@ -11408,12 +11456,15 @@ async function saveProperties(opts = {}) {
 
 async function loadSFTPDetails(skipRender = false) {
   const srv = curServer();
-  if (!srv) return;
+  if (!srv || !hasServerPermission('sftp.access')) return;
+  const key = accessIdentity();
+  S.sftpLoading = true; S.sftpError = '';
+  if (!skipRender) R();
   try {
-    const data = await api(srvApiPath(srv, '/sftp'));
-    S.sftp = data;
-    if (!skipRender && !shouldSkipSettingsBgRender()) R();
-  } catch (e) {}
+    const data = await api(srvApiPath(srv, '/sftp'), { suppressToast: true });
+    if (key === accessIdentity()) S.sftp = data;
+  } catch (error) { if (key === accessIdentity()) S.sftpError = error.message; }
+  finally { if (key === accessIdentity()) { S.sftpLoading = false; if (!skipRender && S.view === 'sftp') R(); } }
 }
 
 // --- Account Management ---
@@ -11807,7 +11858,7 @@ async function switchServer(index) {
   flushPendingSettingsBeforeLeave();
   syncActiveServerState(srv);
 
-  const serverViews = ['con', 'set', 'act', 'fi', 'db', 'bk', 'sc', 'team', 'net', 'sub', 'stp', 'pl', 'plug', 'ver'];
+  const serverViews = ['con', 'set', 'act', 'fi', 'db', 'bk', 'sc', 'team', 'net', 'sftp', 'sub', 'stp', 'pl', 'plug', 'ver'];
   if (serverViews.includes(S.view) && !(S.view === 'act' && !window.location.pathname.startsWith('/server/'))) {
     try {
       const nextUrl = serverRouteUrl(srv.node_id || 'local', srv.id, S.view, { plugTab: S.plugTab });
@@ -11818,12 +11869,7 @@ async function switchServer(index) {
   }
 
   R();
-  if (S.view === 'net') {
-    loadSFTPDetails();
-    loadServerPorts();
-  } else if (S.view && !['dash', 'con', 'admin', 'acc', 'client', 'notfound', 'maintenance'].includes(S.view)) {
-    onEnterView(S.view);
-  }
+  if (serverPagePermission(S.view)) onEnterView(S.view);
   toast(`Switched to ${srv.name}`);
 }
 
@@ -11837,7 +11883,7 @@ function paletteItems() {
     ? window.NP._paletteCommands.map(c => [c.group || 'Extensions', c.label || 'Extension Action', c.subtitle || 'Mod command', () => c.action && c.action()])
     : [];
   const items = [
-    ...PG.map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods' : p[1], 'Go to page', () => go(p[0])]),
+    ...PG.filter(p => canServerPage(p[0])).map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods' : p[1], 'Go to page', () => go(p[0])]),
     ...(showClientArea ? [['Pages', clientLabel, 'External storefront and billing', () => go('client')]] : []),
     ...(S.user?.role === 'admin' ? [['Pages', 'Admin', 'Panel settings, nodes, and users', () => go('admin')]] : []),
     ['Pages', 'Account', 'Profile, appearance, and security', () => go('acc')],
@@ -11845,9 +11891,10 @@ function paletteItems() {
       applyRoute(serverRouteUrl(s.node_id || 'local', s.id, 'con'));
     }]),
     ...S.players.map(p => ['Players', p.n, p.op ? 'Operator' : 'Online', () => { S.ptab = 'online'; go('pl'); }]),
-    ['Actions', 'Toggle Live Console', 'Ctrl + `', () => toggleFlyConsole()],
-    ['Actions', 'Create Backup', 'Backups', () => createBackup()],
-    ['Actions', 'Restart Server', 'Power', () => power('restart')],
+    ...(hasServerPermission('console.view') ? [['Actions', 'Toggle Live Console', 'Ctrl + `', () => toggleFlyConsole()]] : []),
+    ...(hasServerPermission('backup.manage') ? [['Actions', 'Create Backup', 'Backups', () => createBackup()]] : []),
+    ...(hasServerPermission('server.power') ? [['Actions', 'Restart Server', 'Power', () => power('restart')]] : []),
+    ...(canCreateServers() ? [['Actions', 'Create server', 'New Minecraft server', () => openCreateServerModal()]] : []),
     ['Actions', 'Toggle Dark / Light Theme', 'Appearance', () => toggleTheme()],
     ['Actions', 'Toggle Privacy Mode', 'Privacy', () => togglePrivacy(!S.acct.priv)],
     ...modCmds
@@ -11886,15 +11933,17 @@ function openPalette(open) {
   let p = $('#pal');
   if (!open) {
     if (p) p.remove();
+    if (p && S.paletteReturnFocus?.isConnected) S.paletteReturnFocus.focus();
     return;
   }
   if (p || $('#login')) return;
+  S.paletteReturnFocus = document.activeElement;
 
   p = document.createElement('div');
   p.id = 'pal';
   p.className = 'pal';
-  p.innerHTML = `<div class="pbox" role="dialog" aria-label="Command Palette">
-    <input id="pq" class="pin" placeholder="Search servers, pages, players, actions..." autocomplete="off">
+  p.innerHTML = `<div class="pbox" role="dialog" aria-modal="true" aria-label="Command Palette">
+    <div class="np-palette-input"><input id="pq" class="pin" aria-label="Search servers, pages, players, actions" placeholder="Search servers, pages, players, actions..." autocomplete="off"></div>
     <div id="pl2" class="plist"></div>
   </div>`;
   document.body.appendChild(p);
@@ -11903,6 +11952,13 @@ function openPalette(open) {
   S.pi = 0;
   renderPaletteList();
 
+  p.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const controls = [...p.querySelectorAll('input, button')];
+    const first = controls[0], last = controls.at(-1);
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
   const inp = $('#pq');
   inp.focus();
   inp.oninput = () => {
@@ -12066,6 +12122,7 @@ function onCreateNodeChange(nodeId) {
 }
 
 function openCreateServerModal() {
+  if (!canCreateServers()) { toast('Access restricted: server creation permission required', 'bad'); return; }
   const container = $('#modal-container');
   if (!container) return;
 
@@ -12100,7 +12157,7 @@ function openCreateServerModal() {
           <label class="f" style="margin-bottom:0;">
             <span>Node</span>
             <select id="cs-node" onchange="onCreateNodeChange(this.value)">
-              ${nodesList.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNodeId ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))}${n.location ? ` (${esc(n.location)})` : ''}${n.online ? '' : ' [Offline]'}</option>`).join('')}
+              ${nodesList.map(n => `<option value="${esc(n.id)}" ${n.id === defaultNodeId ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))} (${esc(displayNodeLocation(n))})${n.online ? '' : ' [Offline]'}</option>`).join('')}
             </select>
           </label>` : `<input type="hidden" id="cs-node" value="${esc(defaultNodeId)}">`}
         </div>
@@ -12262,6 +12319,7 @@ function closeModal() {
 }
 
 async function handleCreateServer(e) {
+  if (!canCreateServers()) { e?.preventDefault(); toast('Access restricted: server creation permission required', 'bad'); return; }
   e.preventDefault();
   const btn = $('#cs-submit-btn');
   if (btn) {
@@ -12647,6 +12705,7 @@ const SUBUSER_PERMS = [
   ['files.view', 'Browse Files', 'Browse directories and view file contents'],
   ['files.edit', 'Create & Edit Files', 'Upload, save edits, create files/folders'],
   ['files.delete', 'Delete Files', 'Delete, rename, move, and extract archives'],
+  ['sftp.access', 'SFTP Access', 'Connect with an SFTP client using your account credentials'],
   ['settings.view', 'View Settings', 'Inspect server settings and properties'],
   ['settings.edit', 'Edit Settings', 'Modify MOTD, difficulty, rules & configs'],
   ['database.manage', 'Databases', 'Create, delete, and view database credentials'],
@@ -16248,11 +16307,13 @@ async function checkAuth() {
 
   try {
     setPageProgress(42);
-    const [, status] = await Promise.all([
+    const results = await Promise.all([
       loadPublicBranding().catch(() => {}),
+      loadPublicCommunity(true),
       fetch('/api/auth/status').then(r => r.json()),
       loadRuntimeMods().catch(() => [])
     ]);
+    const status = results[2];
     S.turnstileEnabled = Boolean(status.turnstile_enabled && status.turnstile_site_key);
     S.turnstileSiteKey = S.turnstileEnabled ? status.turnstile_site_key : '';
     S.maintPublicInfo = {
@@ -16309,7 +16370,7 @@ async function checkAuth() {
     if (route.acctTab !== undefined) S.acct.tab = route.acctTab;
     if (route.plugTab !== undefined) S.plugTab = route.plugTab;
 
-    const globalOnlyViews = ['dash', 'client', 'admin', 'acc', 'notfound', 'maintenance', 'mod'];
+    const globalOnlyViews = ['dash', 'client', 'admin', 'acc', 'create', 'notfound', 'maintenance', 'mod'];
     if (route.notFoundPath) {
       S.view = 'notfound';
       S.notFoundPath = route.notFoundPath;
@@ -16346,7 +16407,7 @@ async function checkAuth() {
     if (!['notfound', 'serverpending', 'maintenance'].includes(S.view)) {
       await loadInitialRouteData(S.view);
     }
-    if (!['plug', 'set', 'ver', 'notfound', 'serverpending', 'maintenance'].includes(S.view)) {
+    if (!serverPagePermission(S.view) && !['plug', 'set', 'ver', 'notfound', 'serverpending', 'maintenance'].includes(S.view)) {
       loadVersionsCatalog();
     }
 
@@ -16632,6 +16693,7 @@ async function submit2FALogin(tempToken) {
 }
 
 async function logout() {
+  resetServerAccess();
   if (!await guardEditorLeave()) return;
   const brandName = (getBrand('brand_name') || 'NeoPanel').trim() || 'NeoPanel';
   const ok = await uiConfirm({
@@ -17316,3 +17378,340 @@ document.addEventListener('DOMContentLoaded', () => {
     globalSelectObserver.observe(document.body, { childList: true, subtree: true });
   }
 });
+
+// --- Permission-aware workspace and panel governance ---
+// UI guards are fail-closed conveniences; the API remains the authority.
+function accessIdentity(srv = curServer()) {
+  return JSON.stringify([S.token, S.user?.id, S.user?.role, srv?.node_id || 'local', srv?.id]);
+}
+function resetServerAccess() {
+  S.serverAccess?.controller?.abort();
+  S.serverAccess = null;
+  clearTimeout(S.wsReconnectTimer);
+  clearInterval(S.wsPingTimer);
+  if (S.activeWs) {
+    S.activeWs.onopen = S.activeWs.onmessage = S.activeWs.onclose = S.activeWs.onerror = null;
+    try { S.activeWs.close(); } catch (_) {}
+    S.activeWs = null;
+  }
+  S.sftp = null;
+  S.flyConOpen = false;
+}
+function serverPagePermission(view) {
+  if (view === 'act' && !window.location.pathname.startsWith('/server/')) return '';
+  return ({ con: 'console.view', pl: 'console.view', act: 'console.view', fi: 'files.view', plug: 'files.view', bk: 'backup.manage', db: 'database.manage', sc: 'schedules.manage', team: 'subusers.manage', set: 'settings.view', stp: 'settings.view', net: 'settings.view', ver: 'settings.view', sub: 'settings.view', sftp: 'sftp.access' })[view] || '';
+}
+function hasServerPermission(permission, srv = curServer()) {
+  if (!srv?.id || !S.token || !S.user) return false;
+  const state = S.serverAccess;
+  if (!state || state.key !== accessIdentity(srv) || state.status !== 'ready') return false;
+  return state.data.is_admin === true || state.data.is_owner === true || state.data.permissions.includes(permission);
+}
+function canServerPage(view) {
+  const permission = serverPagePermission(view);
+  return !permission || hasServerPermission(permission);
+}
+function canCreateServers() {
+  return Boolean(S.user && (S.user.role === 'admin' || S.user.panel_permissions?.includes('servers.create')));
+}
+async function ensureServerAccess(force = false) {
+  const srv = curServer();
+  if (!srv?.id || !S.user || !S.token) return false;
+  const key = accessIdentity(srv);
+  const old = S.serverAccess;
+  if (!force && old?.key === key) return old.promise || old.status === 'ready';
+  resetServerAccess();
+  const state = { key, status: 'loading', data: null, error: '' };
+  S.serverAccess = state;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  state.controller = controller;
+  state.promise = (async () => {
+    try {
+      const data = await api(srvApiPath(srv, '/permissions'), { suppressToast: true, signal: controller.signal });
+      if (S.serverAccess !== state || accessIdentity() !== key) return false;
+      if (!Array.isArray(data?.permissions) || typeof data.is_admin !== 'boolean' || typeof data.is_owner !== 'boolean') throw new Error('Invalid permission response');
+      state.data = data;
+      state.status = 'ready';
+      return true;
+    } catch (error) {
+      if (S.serverAccess === state && accessIdentity() === key) { state.status = 'error'; state.error = error.name === 'AbortError' ? 'Permission check timed out. Please retry.' : error.message; }
+      return false;
+    } finally { clearTimeout(timer); state.promise = null; }
+  })();
+  return state.promise;
+}
+async function retryWorkspaceAccess() {
+  const view = S.view;
+  const pending = ensureServerAccess(true);
+  R();
+  await pending;
+  if (S.view === view) { R(); if (canServerPage(view)) onEnterView(view); }
+}
+function renderAccessRestricted(server = true) {
+  const state = S.serverAccess;
+  const loading = server && (!state || state.key !== accessIdentity() || state.status === 'loading');
+  return `<section class="card np-access-state" role="status"><div class="np-eyebrow">Workspace access</div><h1>${loading ? 'Checking permissions…' : 'Access restricted'}</h1><p class="mu">${loading ? 'Server pages stay locked until your access is confirmed.' : server && state?.error ? `Could not confirm access: ${esc(state.error)}` : 'Your account does not have permission to open this page. Contact the server owner or a panel administrator.'}</p><div class="row">${server && !loading ? '<button class="btn" onclick="retryWorkspaceAccess()">Check access again</button>' : ''}<a class="btn" href="/" onclick="return handleNavClick(event, \'dash\')">All servers</a></div></section>`;
+}
+function clientRequestPermission(suffix, method = 'GET') {
+  const read = ['GET', 'HEAD'].includes(method.toUpperCase());
+  const path = suffix.split('?')[0];
+  if (path === '/permissions') return '';
+  if (path.startsWith('/files')) {
+    if (read) return 'files.view';
+    if (/delete|rename|move|unzip/.test(path) || method === 'DELETE') return 'files.delete';
+    return 'files.edit';
+  }
+  if (path.startsWith('/plugins')) return read ? 'files.view' : method === 'DELETE' ? 'files.delete' : 'files.edit';
+  if (path.startsWith('/sftp')) return 'sftp.access';
+  if (path.startsWith('/backups')) return 'backup.manage';
+  if (path.startsWith('/databases')) return 'database.manage';
+  if (path.startsWith('/schedules')) return 'schedules.manage';
+  if (path.startsWith('/subusers')) return 'subusers.manage';
+  if (path.startsWith('/power')) return 'server.power';
+  if (path.startsWith('/command')) return 'console.command';
+  if (path.startsWith('/players')) return read ? 'console.view' : 'console.command';
+  if (!path && read) return ''; // Inventory/status is not a page prefetch.
+  return read ? 'settings.view' : 'settings.edit';
+}
+function assertClientRequestAccess(endpoint, options = {}) {
+  const path = String(endpoint).split('?')[0];
+  const method = (options.method || 'GET').toUpperCase();
+  if (/^(?:\/api\/nodes\/[^/]+\/proxy)?\/api\/servers$/.test(path) && method === 'POST' && !canCreateServers()) throw Object.assign(new Error('Access restricted: server creation permission required'), { status: 403 });
+  const match = path.match(/^(?:\/api\/nodes\/([^/]+)\/proxy)?\/api\/servers\/([^/]+)(.*)$/);
+  if (!match || match[3] === '/permissions' || S.user?.role === 'admin') return;
+  const srv = { id: decodeURIComponent(match[2]), node_id: decodeURIComponent(match[1] || 'local') };
+  const permission = clientRequestPermission(match[3], method);
+  if ((permission && !hasServerPermission(permission, srv)) || (match[3].startsWith('/files') && !hasServerPermission('files.view', srv))) throw Object.assign(new Error('Access restricted: ' + (permission || 'files.view') + ' required'), { status: 403 });
+}
+function applyPermissionControls(root) {
+  if (!serverPagePermission(S.view)) return;
+  const disable = (selector, permission) => {
+    if (hasServerPermission(permission)) return;
+    root.querySelectorAll(selector).forEach(el => { el.disabled = true; el.setAttribute('aria-disabled', 'true'); el.title = `Access restricted — ${permission} required`; });
+  };
+  disable('.srv-power-actions [onclick*="power("]', 'server.power');
+  disable('[onclick*="toggleFlyConsole("]', 'console.view');
+  disable('#cmd, [onclick*="runCmd("], [onclick*="playerAction("], [onclick*="addWhitelistPlayer("]', 'console.command');
+  if (['set', 'net', 'sub', 'ver'].includes(S.view)) disable('input, select, textarea, button:not(.nb):not([data-settings-section]):not(.srv-power-actions button):not([onclick*="handleNavClick"]):not([onclick*="copy"])', 'settings.edit');
+  if (['fi', 'plug'].includes(S.view)) {
+    disable('#ed, #editor-save-btn, [onclick*="promptNew"], [onclick*="upload"], input[type="file"], [onclick*="Compress"], [onclick*="installPlugin"], [onchange*="togglePlugin"]', 'files.edit');
+    disable('[onclick*="deleteFile"], [onclick*="deleteSelected"], [onclick*="RenameFile"], [onclick*="MoveFiles"], [onclick*="unzipFile"], [onclick*="unzipSelected"], [onclick*="deletePlugin"]', 'files.delete');
+  }
+}
+V.sftp = () => `${srvh()}<div class="np-section-heading"><div><h2>SFTP</h2><p>One place for external file transfer connections.</p></div></div>${S.sftpLoading ? '<div class="card" role="status">Loading connection details…</div>' : S.sftp ? renderSftpCardHtml(curServer()) : `<div class="card" role="status">${esc(S.sftpError || 'Connection details are not loaded.')} <button class="btn sm" onclick="loadSFTPDetails()">Retry</button></div>`}`;
+V.create = () => canCreateServers() ? '<section class="card"><h1>Create server</h1><p class="mu">Choose a node and configure your Minecraft server.</p><button class="btn pr" onclick="openCreateServerModal()">Configure server</button></section>' : renderAccessRestricted(false);
+
+// Custom panel roles never imply built-in admin or server team privileges.
+async function loadPanelRoles(skipRender = false) {
+  if (S.user?.role !== 'admin') return;
+  const key = accessIdentity();
+  S.rolesLoading = true;
+  try {
+    const result = await api('/api/admin/roles', { suppressToast: true });
+    if (key !== accessIdentity()) return;
+    if (!Array.isArray(result.roles) || !Array.isArray(result.permissions)) throw new Error('Invalid roles response');
+    S.panelRoles = result.roles.filter(role => !role.builtin); S.panelRoleCatalog = result.permissions; S.rolesError = '';
+  } catch (error) { if (key === accessIdentity()) S.rolesError = error.message; }
+  finally { if (key === accessIdentity()) { S.rolesLoading = false; if (!skipRender && S.view === 'admin') R(); } }
+}
+function renderPanelRoles() {
+  if (S.user?.role !== 'admin') return renderAccessRestricted(false);
+  if (S.rolesLoading) return '<div class="card" role="status">Loading panel roles…</div>';
+  if (S.rolesError || !S.panelRoles) return `<div class="card" role="alert"><h2>Could not load roles</h2><p>${esc(S.rolesError || 'Roles have not loaded.')}</p><button class="btn" onclick="loadPanelRoles()">Retry</button></div>`;
+  return `<div class="np-section-heading"><div><h2>Custom panel roles</h2><p>Grant specific panel actions without making someone an Administrator. Server Team access is managed separately.</p></div><button class="btn pr" onclick="openPanelRoleEditor()">${ic('plus', 14)} Create role</button></div><div class="np-role-list">${S.panelRoles.length ? S.panelRoles.map(role => `<section class="card np-role-row"><div><h3>${esc(role.name)}</h3><p class="mu">${esc(role.description || 'No description')}</p><div class="row">${role.permissions.map(p => `<span class="chip">${esc(S.panelRoleCatalog.find(x => x.id === p)?.label || p)}</span>`).join('') || '<span class="mu">No extra panel permissions</span>'}</div></div><div class="row"><button class="btn sm" data-role="${esc(role.id)}" onclick="openPanelRoleEditor(this.dataset.role)">Edit</button><button class="btn sm dg" data-role="${esc(role.id)}" onclick="deletePanelRole(this.dataset.role, this)">Delete</button></div></section>`).join('') : '<div class="card np-empty-state"><h3>No custom roles yet</h3><p class="mu">Create a role to allow trusted members to create servers.</p></div>'}</div>`;
+}
+function openPanelRoleEditor(id = '') {
+  if (S.user?.role !== 'admin' || !S.panelRoleCatalog) return;
+  const role = S.panelRoles.find(x => String(x.id) === String(id));
+  const container = $('#modal-container');
+  container.innerHTML = `<div class="pal"><form class="pbox ui-modal-box" role="dialog" aria-modal="true" aria-labelledby="role-title" onsubmit="savePanelRole(event)" data-role="${esc(id)}"><h2 id="role-title">${role ? 'Edit' : 'Create'} panel role</h2><p class="mu">This role does not grant administrator or server team access.</p><label class="f">Name<input name="name" required maxlength="64" value="${esc(role?.name || '')}"></label><label class="f">Description<textarea name="description" rows="2" maxlength="500">${esc(role?.description || '')}</textarea></label><fieldset class="np-permission-fields"><legend>Panel permissions</legend>${S.panelRoleCatalog.map(p => `<label class="np-permission-choice"><input type="checkbox" name="permissions" value="${esc(p.id)}" ${role?.permissions.includes(p.id) ? 'checked' : ''}><span><b>${esc(p.label)}</b><small>${esc(p.description)}</small></span></label>`).join('')}</fieldset><p class="np-form-error" role="alert"></p><div class="row"><button type="button" class="btn" onclick="closeModal()">Cancel</button><button class="btn pr" type="submit">Save role</button></div></form></div>`;
+  container.querySelector('[name=name]')?.focus();
+}
+async function savePanelRole(event) {
+  event.preventDefault();
+  if (S.user?.role !== 'admin') return;
+  const form = event.currentTarget, button = form.querySelector('[type=submit]');
+  if (button.disabled) return;
+  const payload = { name: form.elements.name.value.trim(), description: form.elements.description.value.trim(), permissions: [...form.querySelectorAll('[name=permissions]:checked')].map(x => x.value) };
+  if (!payload.name) return;
+  setBtnLoading(button, true, 'Saving…');
+  try {
+    await api('/api/admin/roles' + (form.dataset.role ? '/' + encodeURIComponent(form.dataset.role) : ''), { method: form.dataset.role ? 'PUT' : 'POST', body: JSON.stringify(payload), suppressToast: true });
+    closeModal(); toast('Panel role saved', 'ok'); await loadPanelRoles();
+  } catch (error) { form.querySelector('[role=alert]').textContent = error.message; }
+  finally { if (button.isConnected) setBtnLoading(button, false); }
+}
+async function deletePanelRole(id, button) {
+  if (S.user?.role !== 'admin' || button.disabled) return;
+  if (!await uiConfirm({ title: 'Delete panel role?', message: 'Assigned roles cannot be deleted. Reassign their users first.', confirmText: 'Delete role', danger: true })) return;
+  setBtnLoading(button, true, 'Deleting…');
+  try { await api('/api/admin/roles/' + encodeURIComponent(id), { method: 'DELETE', suppressToast: true }); toast('Role deleted', 'ok'); await loadPanelRoles(); }
+  catch (error) { toast(error.message, 'bad'); }
+  finally { if (button.isConnected) setBtnLoading(button, false); }
+}
+function renderUserPanelRole(user) {
+  if (S.user?.role !== 'admin') return '';
+  if (user.role === 'admin') return '<small class="mu np-role-hint">All panel permissions · built-in</small>';
+  if (!S.panelRoles || S.rolesError) return `<small class="mu np-role-hint">${esc(user.panel_role_name || 'No custom role')} · roles unavailable</small>`;
+  return `<label class="np-user-role"><span class="mu">Panel role</span><select aria-label="Panel role for ${esc(user.username)}" data-user="${esc(user.id)}" data-previous="${esc(user.panel_role_id || '')}" onchange="assignUserPanelRole(this)"><option value="">No custom role</option>${S.panelRoles.map(role => `<option value="${esc(role.id)}" ${String(user.panel_role_id) === String(role.id) ? 'selected' : ''}>${esc(role.name)}</option>`).join('')}</select></label>`;
+}
+async function assignUserPanelRole(select) {
+  if (S.user?.role !== 'admin') return;
+  select.disabled = true;
+  try {
+    await api('/api/admin/users/' + encodeURIComponent(select.dataset.user) + '/panel-role', { method: 'PUT', body: JSON.stringify({ role_id: select.value }), suppressToast: true });
+    const user = S.adminUsers.find(x => String(x.id) === select.dataset.user);
+    if (user) { user.panel_role_id = select.value; user.panel_role_name = S.panelRoles.find(x => String(x.id) === select.value)?.name || ''; }
+    select.dataset.previous = select.value; toast('Panel role assigned', 'ok');
+  } catch (error) { select.value = select.dataset.previous; toast(error.message, 'bad'); }
+  finally { select.disabled = false; R(); }
+}
+
+// Public community content is plain text. Only a validated Discord invite becomes a link.
+function safeDiscordInvite(value) {
+  try { const u = new URL(value); return u.protocol === 'https:' && !u.username && !u.password && !u.port && ((u.hostname === 'discord.gg' && /^\/[\w-]+\/?$/.test(u.pathname)) || (['discord.com', 'www.discord.com'].includes(u.hostname) && /^\/invite\/[\w-]+\/?$/.test(u.pathname))) ? u.href : ''; } catch (_) { return ''; }
+}
+async function loadPublicCommunity(skipRender = false) {
+  try { const response = await fetch('/api/community'); if (!response.ok) throw new Error('Community unavailable'); S.community = await response.json(); }
+  catch (_) { S.community = null; }
+  if (!skipRender && !$('#login')) R();
+}
+function announcementDismissed(id) {
+  if (S.dismissedAnnouncement === id) return true;
+  try { return localStorage.getItem('neopanel:announcement:' + id) === 'dismissed'; } catch (_) { return false; }
+}
+function dismissAnnouncement() {
+  const a = S.community?.announcement;
+  if (!a?.dismissible || !a.id) return;
+  S.dismissedAnnouncement = a.id;
+  try { localStorage.setItem('neopanel:announcement:' + a.id, 'dismissed'); } catch (_) {}
+  R();
+}
+function renderAnnouncement() {
+  const a = S.community?.announcement;
+  if (!a?.enabled || !a.text || (a.dismissible && announcementDismissed(a.id))) return '';
+  const tone = ['info', 'success', 'warning'].includes(a.tone) ? a.tone : 'info';
+  return `<aside class="np-announcement is-${tone}" aria-label="Panel announcement"><span>${esc(a.text)}</span>${a.dismissible && a.id ? '<button class="btn-ico" aria-label="Dismiss announcement" onclick="dismissAnnouncement()">&times;</button>' : ''}</aside>`;
+}
+function discordLogo() {
+  return '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="currentColor"><path d="M19.7 4.5a18 18 0 0 0-4.5-1.4l-.6 1.2a16 16 0 0 0-5.2 0l-.6-1.2a18 18 0 0 0-4.5 1.4C1.5 8.7.7 12.8 1.1 16.8a18 18 0 0 0 5.5 2.8l1.1-1.8-1.7-.8.4-.3a13 13 0 0 0 11.2 0l.4.3-1.7.8 1.1 1.8a18 18 0 0 0 5.5-2.8c.5-4.7-.8-8.8-3.2-12.3ZM8.4 14.3c-1.1 0-1.9-1-1.9-2.2s.8-2.2 1.9-2.2 1.9 1 1.9 2.2-.8 2.2-1.9 2.2Zm7.2 0c-1.1 0-1.9-1-1.9-2.2s.8-2.2 1.9-2.2 1.9 1 1.9 2.2-.8 2.2-1.9 2.2Z"/></svg>';
+}
+function renderDiscordCard() {
+  const d = S.community?.discord;
+  if (!d?.enabled || d.status === 'disabled') return '';
+  const invite = d.status === 'ready' ? safeDiscordInvite(d.invite_url) : '';
+  return `<aside class="card np-discord-card">${discordLogo()}<div><h2>${esc(d.title || 'Join our Discord')}</h2><p class="mu">${invite ? esc(d.name || 'Our community') + (Number.isFinite(d.member_count) ? ` · ${d.member_count.toLocaleString()} online` : '') : 'Community invite is temporarily unavailable.'}</p></div>${invite ? `<a class="btn pr" href="${esc(invite)}" target="_blank" rel="noopener noreferrer">Join Discord ${ic('external', 13)}</a>` : '<button class="btn" disabled title="No verified Discord invite is available">Invite unavailable</button>'}</aside>`;
+}
+async function loadCommunitySettings(skipRender = false) {
+  if (S.user?.role !== 'admin') return;
+  const key = accessIdentity();
+  try {
+    const data = await api('/api/admin/community', { suppressToast: true });
+    if (key !== accessIdentity()) return;
+    if (!data.discord || !data.announcement) throw new Error('Invalid community settings response');
+    S.communitySettings = data; S.communityError = '';
+  } catch (error) { if (key === accessIdentity()) S.communityError = error.message; }
+  if (!skipRender && S.view === 'admin') R();
+}
+function communityPayload(form) {
+  const f = form.elements;
+  return { discord: { enabled: f.discord_enabled.checked, guild_id: f.guild_id.value.trim(), title: f.discord_title.value.trim() }, announcement: { enabled: f.announcement_enabled.checked, text: f.announcement_text.value.trim(), tone: f.tone.value, dismissible: f.dismissible.checked } };
+}
+function rememberCommunityDraft(form) {
+  S.communityDraftKey = accessIdentity();
+  S.communityDraft = communityPayload(form);
+}
+function renderCommunitySettings() {
+  if (S.user?.role !== 'admin') return '';
+  if (S.communityError || !S.communitySettings) return `<div class="card" role="alert"><h2>Community settings unavailable</h2><p class="mu">${esc(S.communityError || 'Settings have not loaded.')}</p><button class="btn" onclick="loadCommunitySettings()">Retry</button></div>`;
+  const draft = S.communityDraftKey === accessIdentity() ? S.communityDraft : null;
+  const { discord: d, announcement: a } = draft || S.communitySettings;
+  return `<form class="np-community-form" oninput="rememberCommunityDraft(this)" onchange="rememberCommunityDraft(this)" onsubmit="saveCommunitySettings(event)">
+    <fieldset class="np-community-fields" ${S.communitySaving ? 'disabled' : ''}>
+      <section class="card">
+        <div class="np-section-heading"><div><h2>Discord community</h2><p>A compact custom join card, not an embedded Discord widget.</p></div>${discordLogo()}</div>
+        <label class="np-permission-choice"><input name="discord_enabled" type="checkbox" ${d.enabled ? 'checked' : ''}> Show Discord join card</label>
+        <div class="grid g2">
+          <label class="f">Discord server ID<input name="guild_id" inputmode="numeric" pattern="[0-9]*" value="${esc(d.guild_id)}" aria-describedby="discord-help"></label>
+          <label class="f">Card title<input name="discord_title" maxlength="80" value="${esc(d.title)}" placeholder="Join our Discord"></label>
+        </div>
+        <p id="discord-help" class="mu">In Discord, enable <b>Server Settings → Widget → Enable Server Widget</b>, choose an invite channel, then copy the server ID. An ID is not a join URL. NeoPanel resolves the public widget invite safely; no link is shown when it is unavailable.</p>
+        <p class="np-community-diagnostic" role="status">Public status: ${esc(S.community?.discord?.status || 'not loaded')}${S.community?.discord?.status === 'unavailable' ? ' — check the server ID, public widget setting, and invite channel.' : ''}</p>
+      </section>
+      <section class="card">
+        <h2>Panel announcement</h2><p class="mu">Plain text displayed at the top of every workspace page.</p>
+        <label class="np-permission-choice"><input name="announcement_enabled" type="checkbox" ${a.enabled ? 'checked' : ''}> Show announcement</label>
+        <label class="f">Announcement text<textarea name="announcement_text" rows="3" maxlength="500">${esc(a.text)}</textarea></label>
+        <div class="grid g2">
+          <label class="f">Tone<select name="tone">${['info', 'success', 'warning'].map(t => `<option value="${t}" ${a.tone === t ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
+          <label class="np-permission-choice"><input type="checkbox" name="dismissible" ${a.dismissible ? 'checked' : ''}> Allow dismissal</label>
+        </div>
+        <p class="mu">An updated announcement ID lets members see a new announcement after dismissing an old one.</p>
+      </section>
+      <p class="np-form-error" role="alert">${esc(S.communitySaveError || '')}</p>
+      <div class="row"><button type="submit" class="btn pr">${S.communitySaving ? 'Saving…' : 'Save community settings'}</button><button type="button" class="btn" onclick="loadPublicCommunity()">Refresh public status</button></div>
+    </fieldset>
+  </form>`;
+}
+async function saveCommunitySettings(event) {
+  event.preventDefault();
+  if (S.user?.role !== 'admin' || S.communitySaving) return;
+  const form = event.currentTarget;
+  const payload = communityPayload(form), key = accessIdentity();
+  const errorBox = form.querySelector('[role=alert]');
+  if ((payload.discord.enabled || payload.discord.guild_id) && !/^\d{17,20}$/.test(payload.discord.guild_id)) { errorBox.textContent = 'Enter a Discord server ID containing 17–20 digits.'; return; }
+  if (payload.announcement.enabled && !payload.announcement.text) { errorBox.textContent = 'Enter announcement text or turn the announcement off.'; return; }
+  S.communitySaving = true; S.communitySaveError = ''; rememberCommunityDraft(form); R();
+  try {
+    const saved = await api('/api/admin/community', { method: 'PUT', body: JSON.stringify(payload), suppressToast: true });
+    if (key !== accessIdentity()) return;
+    S.communitySettings = saved; S.communityDraft = null;
+    await loadPublicCommunity(true); toast('Community settings saved', 'ok');
+  } catch (error) { if (key === accessIdentity()) S.communitySaveError = error.message; }
+  finally { S.communitySaving = false; if (key === accessIdentity()) R(); }
+}
+function organizeAppearance(html) {
+  const sections = ['Brand & theme', 'Public URL', 'Community', 'Server defaults', 'Security & maintenance'];
+  const selected = S.appearanceSection || 0;
+  const tabs = `<div class="tabs np-settings-tabs" aria-label="Appearance sections">${sections.map((label, index) => `<button class="${selected === index ? 'on' : ''}" aria-pressed="${selected === index}" onclick="S.appearanceSection=${index};R()">${label}</button>`).join('')}</div>`;
+  if (selected === 2) return tabs + renderCommunitySettings();
+  const template = document.createElement('template'); template.innerHTML = html;
+  const visible = [...template.content.children].filter(el => {
+    const text = el.textContent;
+    const group = el.classList.contains('brand-layout-grid') ? 0 : el.querySelector('#adm-fqdn') ? 3 : /Turnstile|Maintenance|Client Area/.test(text) ? 4 : 1;
+    return group === selected;
+  }).map(el => el.outerHTML).join('');
+  return tabs + visible;
+}
+
+// Move existing controls, never clone them: autosave keeps a complete form snapshot.
+function organizeServerSettings(root) {
+  const identity = root.querySelector('#set-srv-name')?.closest('.card');
+  if (!identity) return;
+  const wrapper = identity.parentElement.parentElement;
+  const groups = [
+    ['General', [identity, root.querySelector('#prop-motd')?.closest('.card')]],
+    ['Startup & resources', [root.querySelector('#prop-java')?.closest('.card'), root.querySelector('#prop-jar')?.closest('.card')]],
+    ['Administration', [...wrapper.children].filter(el => el.classList.contains('card'))]
+  ];
+  const selected = Math.min(S.serverSettingsSection || 0, 2);
+  const nav = document.createElement('div'); nav.className = 'tabs np-settings-tabs'; nav.setAttribute('aria-label', 'Server settings sections');
+  groups.forEach(([label], i) => {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.settingsSection = String(i); button.className = i === selected ? 'on' : ''; button.setAttribute('aria-pressed', String(i === selected));
+    button.onclick = () => { S.serverSettingsSection = i; root.querySelectorAll('[data-settings-panel]').forEach(panel => { panel.hidden = Number(panel.dataset.settingsPanel) !== i; }); nav.querySelectorAll('button').forEach((b, j) => { b.classList.toggle('on', i === j); b.setAttribute('aria-pressed', String(i === j)); }); };
+    nav.append(button);
+  });
+  wrapper.prepend(nav);
+  groups.forEach(([, cards], i) => {
+    const panel = document.createElement('section'); panel.className = 'np-server-settings-group'; panel.dataset.settingsPanel = String(i); panel.hidden = i !== selected;
+    cards.filter(Boolean).forEach(card => panel.append(card)); wrapper.append(panel);
+  });
+  wrapper.querySelectorAll(':scope > .grid, :scope > .stp-top-grid').forEach(el => { if (!el.children.length) el.remove(); });
+}
+
+function displayNodeLocation(node) {
+  const location = String(node?.location || '').trim();
+  if (location && location !== node.id) return location;
+  return node?.id === 'local' ? 'This machine' : location ? displayNodeName(node.id, node.name) : 'Location not specified';
+}

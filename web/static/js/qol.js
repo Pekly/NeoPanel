@@ -60,7 +60,7 @@ function updateEditorStatus() {
   const status = document.querySelector('#editor-save-status');
   const button = document.querySelector('#editor-save-btn');
   if (status && e) status.textContent = e.saving ? 'Saving…' : editorIsDirty() ? (e.draftStored ? 'Unsaved · draft kept in this tab' : 'Unsaved · draft not stored') : 'Saved';
-  if (button && e) button.disabled = Boolean(e.saving);
+  if (button && e) button.disabled = Boolean(e.saving) || (typeof hasServerPermission === 'function' && !hasServerPermission('files.edit', e.server));
 }
 function bindQolEditor() {
   const ed = document.querySelector('#ed');
@@ -188,6 +188,7 @@ function renderUploadQueue() {
     <div class="row" style="gap:8px;margin-top:10px">${c.failed ? '<button class="btn sm" onclick="retryFailedUploads()">Retry failed</button>' : ''}${c.queued + c.uploading ? '<button class="btn sm dg" onclick="cancelAllUploads()">Cancel pending</button>' : ''}</div>`;
 }
 function enqueueUploads(files) {
+  if (typeof hasServerPermission === 'function' && (!hasServerPermission('files.view') || !hasServerPermission('files.edit'))) { toast('Access restricted: files.view and files.edit required', 'bad'); return; }
   const srv = curServer();
   if (!srv || !files?.length) return;
   const dir = S.currentDir || '';
@@ -244,6 +245,7 @@ function transferUpload(item) {
     xhr.ontimeout = () => finish('failed', 'Upload timed out after 15 minutes. Check the destination before retrying.');
     xhr.onabort = () => finish('cancelled');
     try {
+      if (typeof assertClientRequestAccess === 'function') assertClientRequestAccess(srvApiPath(item.server, '/files/upload'), { method: 'POST' });
       const body = new FormData(); body.append('file', item.file); body.append('path', item.dir);
       xhr.open('POST', srvApiPath(item.server, '/files/upload'));
       xhr.timeout = 15 * 60 * 1000;

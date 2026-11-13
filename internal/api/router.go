@@ -116,6 +116,15 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) registerRoutes(db *database.DB) {
+	community := NewCommunityHandler(db)
+	r.mux.HandleFunc("GET /api/community", community.GetPublic)
+	r.mux.HandleFunc("GET /api/admin/community", r.requireAdmin(community.GetAdmin))
+	r.mux.HandleFunc("PUT /api/admin/community", r.requireAdmin(community.UpdateAdmin))
+	r.mux.HandleFunc("GET /api/admin/roles", r.requireAdmin(r.auth.ListPanelRoles))
+	r.mux.HandleFunc("POST /api/admin/roles", r.requireAdmin(r.auth.CreatePanelRole))
+	r.mux.HandleFunc("PUT /api/admin/roles/{roleId}", r.requireAdmin(r.auth.UpdatePanelRole))
+	r.mux.HandleFunc("DELETE /api/admin/roles/{roleId}", r.requireAdmin(r.auth.DeletePanelRole))
+	r.mux.HandleFunc("PUT /api/admin/users/{id}/panel-role", r.requireAdmin(r.auth.AssignPanelRole))
 	// Public auth, branding & mods runtime routes
 	passkeys := NewPasskeyHandler(r.auth)
 	for route, handler := range map[string]http.HandlerFunc{
@@ -157,7 +166,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// Automated Client Area Provisioning API (WHMCS, Blesta, Billing portals)
 	r.mux.HandleFunc("POST /api/client-api/v1/provision", r.clientAPI.Provision)
-	r.mux.HandleFunc("GET /api/client-api/v1/code-samples", r.requireAuth(r.clientAPI.GetCodeSamples))
+	r.mux.HandleFunc("GET /api/client-api/v1/code-samples", r.requireAdmin(r.clientAPI.GetCodeSamples))
 
 	// Protected auth routes
 	r.mux.HandleFunc("GET /api/auth/me", r.requireAuth(r.auth.Me))
@@ -481,6 +490,7 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("X-NeoPanel-User-ID", strconv.Itoa(claims.UserID))
+		w.Header().Set("X-NeoPanel-Permission-Policy", "2")
 		if strings.HasPrefix(req.URL.Path, "/api/servers/") {
 			serverID := getURLParam(req, "id")
 			suffix := strings.TrimPrefix(strings.TrimPrefix(req.URL.Path, "/api/servers/"+serverID), "/")
@@ -622,7 +632,7 @@ func serverActionPermission(method, suffix string) string {
 		}
 		return "console.command"
 	case "sftp":
-		return "files.view"
+		return "sftp.access"
 	case "configs", "properties", "ports", "subdomain", "software", "reinstall":
 		if read {
 			return "settings.view"
@@ -683,10 +693,14 @@ func forwardedClaims(db *database.DB, req *http.Request, claims *JWTClaims) (*JW
 	if role != "admin" && role != "user" {
 		return nil, fmt.Errorf("invalid forwarded role")
 	}
-	return &JWTClaims{UserID: user.ID, Username: user.Username, Role: role}, nil
+	allowCreate := req.Method == http.MethodPost && req.URL.Path == "/api/servers" && req.Header.Get("X-NeoPanel-Can-Create-Server") == "true"
+	return &JWTClaims{UserID: user.ID, Username: user.Username, Role: role, AuthorizedServerCreate: allowCreate}, nil
 }
 
 func setProxyIdentity(header http.Header, claims *JWTClaims, nodeToken string) {
+	header.Del("X-NeoPanel-User-ID")
+	header.Del("X-NeoPanel-User-Role")
+	header.Del("X-NeoPanel-Can-Create-Server")
 	header.Set("Authorization", "Bearer "+nodeToken)
 	// Native node tokens have user ID zero and are already privileged machine identities.
 	if claims.UserID > 0 && claims.Role != "admin" {
@@ -712,6 +726,19 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, 403, "Proxy operation requires administrator privileges")
 		return
 	}
+	createAuthorized := false
+	if req.Method == http.MethodPost && rest == "api/servers" {
+		allowed, err := r.auth.CanCreateServer(req)
+		if err != nil {
+			writeError(w, 503, "Could not verify server creation permission")
+			return
+		}
+		if !allowed {
+			writeError(w, 403, "Your panel role does not allow server creation")
+			return
+		}
+		createAuthorized = true
+	}
 	if err := r.checkProxyIdentity(req, node, claims); err != nil {
 		writeError(w, 502, err.Error())
 		return
@@ -727,6 +754,9 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	remote.Header.Set("Accept", req.Header.Get("Accept"))
 	remote.ContentLength = req.ContentLength
 	setProxyIdentity(remote.Header, claims, node.APIToken)
+	if createAuthorized && claims.UserID > 0 && claims.Role != "admin" {
+		remote.Header.Set("X-NeoPanel-Can-Create-Server", "true")
+	}
 	resp, err := r.nodes.httpClient.Do(remote)
 	if err != nil {
 		writeError(w, 502, "Failed to reach node: "+err.Error())
@@ -824,8 +854,8 @@ func (r *Router) checkProxyIdentity(req *http.Request, node *database.ClusterNod
 		return fmt.Errorf("node identity check failed: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-NeoPanel-User-ID") != strconv.Itoa(claims.UserID) {
-		return fmt.Errorf("node must be updated and user identities synchronized before user proxy access")
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("X-NeoPanel-User-ID") != strconv.Itoa(claims.UserID) || resp.Header.Get("X-NeoPanel-Permission-Policy") != "2" {
+		return fmt.Errorf("node must be updated to the current permission policy and user identities synchronized before user proxy access")
 	}
 	return nil
 }

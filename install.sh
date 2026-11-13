@@ -252,29 +252,160 @@ step_prerequisites() {
   detect_os_pkg_manager
   case "$PKG_MGR" in
     apt)
-      apt-get update -y -q
+      apt-get update -y -q || return 1
       apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-        curl wget jq tar ufw ca-certificates software-properties-common git openssl bubblewrap
+        curl wget jq tar ufw ca-certificates software-properties-common git openssl
       ;;
     dnf)
-      dnf install -y curl wget jq tar firewalld ca-certificates git openssl bubblewrap
+      dnf install -y curl wget jq tar firewalld ca-certificates git openssl
       ;;
     yum)
-      yum install -y curl wget jq tar firewalld ca-certificates git openssl bubblewrap
+      yum install -y curl wget jq tar firewalld ca-certificates git openssl
       ;;
     pacman)
-      pacman -Sy --noconfirm curl wget jq tar ufw ca-certificates git openssl bubblewrap
+      pacman -Sy --noconfirm curl wget jq tar ufw ca-certificates git openssl
       ;;
     apk)
-      apk update
-      apk add curl wget jq tar ca-certificates git openssl bubblewrap
+      apk update || return 1
+      apk add curl wget jq tar ca-certificates git openssl
       ;;
     *)
-      apt-get update -y -q 2>/dev/null || true
-      apt-get install -y -q curl wget jq tar git openssl bubblewrap 2>/dev/null || true
+      log_error "No supported package manager found. Install prerequisites manually on a supported Linux host."
+      return 1
       ;;
   esac
 }
+
+# Keep isolation separate from general dependencies so updates repair older hosts
+# too. Every failure is explicit even when a caller uses this function in an if.
+install_isolation_tools() {
+  local -a packages=()
+  command -v bwrap >/dev/null 2>&1 || packages+=(bubblewrap)
+  command -v timeout >/dev/null 2>&1 || packages+=(coreutils)
+  if [ "${#packages[@]}" -eq 0 ]; then
+    return 0
+  fi
+  detect_os_pkg_manager
+  log_info "Installing isolation prerequisites: ${packages[*]}"
+  case "$PKG_MGR" in
+    apt)
+      if ! apt-get update -y -q || ! apt-get install -y -q \
+        -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" "${packages[@]}"; then
+        log_error "Could not install isolation prerequisites with apt. Check the package/repository errors above."
+        return 1
+      fi
+      ;;
+    dnf|yum)
+      if ! "$PKG_MGR" install -y "${packages[@]}"; then
+        log_error "Could not install isolation prerequisites with $PKG_MGR. Check enabled repositories and package availability."
+        return 1
+      fi
+      ;;
+    pacman)
+      if ! pacman -S --needed --noconfirm "${packages[@]}"; then
+        log_error "Could not install isolation prerequisites with pacman. Check repository configuration."
+        return 1
+      fi
+      ;;
+    apk)
+      if ! apk update || ! apk add "${packages[@]}"; then
+        log_error "Could not install isolation prerequisites with apk. Check repository configuration."
+        return 1
+      fi
+      ;;
+    *)
+      log_error "No supported package manager found. Install bubblewrap and a timeout utility manually, then retry."
+      return 1
+      ;;
+  esac
+  if ! command -v bwrap >/dev/null 2>&1 || ! command -v timeout >/dev/null 2>&1; then
+    log_error "Package installation finished, but bwrap or timeout is still unavailable on PATH."
+    return 1
+  fi
+}
+
+# Subshell keeps cleanup and temporary state local to this step. No host security
+# policy or saved node isolation setting is modified by this capability test.
+step_isolation() (
+  install_isolation_tools || return 1
+  local bwrap_path probe_user=root probe_group="" load_state dynamic_user uid
+  bwrap_path="$(command -v bwrap)" || return 1
+  if ! "$bwrap_path" --version; then
+    log_error "Bubblewrap is installed but cannot execute. Repair the package before retrying."
+    return 1
+  fi
+
+  # Fresh installs create User=root. Updates must not accidentally test root
+  # while an existing service is configured to run as an unprivileged user.
+  if [ "${1:-fresh}" = "installed" ]; then
+    if ! load_state="$(systemctl show neopanel.service --property=LoadState --value)" || [ "$load_state" != "loaded" ]; then
+      log_error "Cannot inspect the installed neopanel.service. Restore/load its unit before updating."
+      return 1
+    fi
+    if ! dynamic_user="$(systemctl show neopanel.service --property=DynamicUser --value)" || \
+       ! probe_user="$(systemctl show neopanel.service --property=User --value)" || \
+       ! probe_group="$(systemctl show neopanel.service --property=Group --value)"; then
+      log_error "Cannot read the service identity; refusing to claim isolation was verified."
+      return 1
+    fi
+    if [ "$dynamic_user" = "yes" ]; then
+      log_error "DynamicUser=yes requires a service-specific sandbox check; this installer cannot safely reproduce that transient identity. The service was not changed."
+      return 1
+    fi
+    probe_user="${probe_user:-root}"
+  fi
+  if ! uid="$(id -u "$probe_user")"; then
+    log_error "Cannot resolve the NeoPanel service user '$probe_user'."
+    return 1
+  fi
+
+  local probe_dir
+  probe_dir="$(mktemp -d "${TMPDIR:-/var/tmp}/neopanel-isolation.XXXXXX")" || return 1
+  trap 'rm -rf -- "$probe_dir"' EXIT
+  chmod 755 "$probe_dir" || return 1
+  printf '%s\n' 'Synthetic isolation probe; not a real secret.' > "$probe_dir/host-only" || return 1
+  chmod 644 "$probe_dir/host-only" || return 1
+  mkdir -m 700 "$probe_dir/work" || return 1
+  local -a launcher=() sandbox=(
+    "$bwrap_path" --unshare-all --share-net --die-with-parent --cap-drop ALL
+    --clearenv --setenv PATH /usr/bin:/bin --setenv LANG C.UTF-8 --setenv HOME /server
+    --ro-bind /usr /usr --ro-bind /bin /bin --ro-bind /lib /lib
+    --ro-bind-try /lib64 /lib64 --dev /dev --proc /proc --tmpfs /tmp
+    --bind "$probe_dir/work" /server --chdir /server
+    -- /bin/sh -eu -c '
+      test ! -e "$1"
+      test ! -e /etc/neopanel
+      test -z "${NEOPANEL_ISOLATION_PROBE_SECRET+x}"
+      printf "%s\n" sandbox-ok > /server/probe-ok
+    ' probe "$probe_dir/host-only"
+  )
+  if [ "$uid" != "0" ] || [ -n "$probe_group" ]; then
+    if ! command -v runuser >/dev/null 2>&1; then
+      log_error "Install runuser (usually util-linux) to test the configured service identity without changing it."
+      return 1
+    fi
+    chown "$probe_user${probe_group:+:$probe_group}" "$probe_dir/work" || return 1
+    launcher=(runuser -u "$probe_user")
+    if [ -n "$probe_group" ]; then launcher+=(-g "$probe_group"); fi
+    launcher+=(--)
+  fi
+  log_info "Testing Bubblewrap namespaces and filesystem boundaries as $probe_user (20-second limit)..."
+  if ! NEOPANEL_ISOLATION_PROBE_SECRET=must-not-reach-sandbox \
+    timeout -k 5 20 "${launcher[@]}" "${sandbox[@]}" > "$probe_dir/output" 2>&1; then
+    cat "$probe_dir/output"
+    log_error "Bubblewrap is installed, but the sandbox probe failed. Installation/update stopped before binary replacement or service restart."
+    log_error "Check the error above: user namespaces may be restricted by AppArmor, kernel policy, or the VPS/container provider. Older Bubblewrap versions may lack required options."
+    log_error "Review kernel/AppArmor logs and host namespace support. Do not globally disable AppArmor or silently switch to unrestricted mode."
+    return 1
+  fi
+  if [ ! -f "$probe_dir/work/probe-ok" ] || [ "$(cat "$probe_dir/work/probe-ok")" != "sandbox-ok" ]; then
+    log_error "The sandbox exited without its expected filesystem marker; isolation verification failed."
+    return 1
+  fi
+  log_success "Bubblewrap host probe passed as $probe_user. Node settings were not changed."
+  log_info "Choose Bubblewrap (bwrap) on the node to REQUIRE filesystem isolation. Systemd-only mode provides resource limits, not a filesystem sandbox."
+  log_info "This verifies host capability and service identity, not all service-unit restrictions or every Java/plugin workload."
+)
 
 has_java_version() {
   local ver="$1"
@@ -801,7 +932,9 @@ run_full_installation() {
   echo -e "${BOLD}Installing NeoPanel Master Panel...${NC} (Silent background execution, logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
   # Run steps with smooth percentage progress
-  run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
+  run_step 0 10 "Updating system & installing base utilities" "step_prerequisites"
+  run_step 10 15 "Installing & testing Bubblewrap sandbox" "step_isolation fresh"
+  log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
   run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
   run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
   run_step 55 75 "Compiling NeoPanel panel & daemon binary" "step_build_neopanel"
@@ -990,7 +1123,9 @@ run_node_installation() {
   print_banner
   echo -e "${BOLD}Installing NeoPanel Cluster Node Daemon...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
-  run_step 0 15 "Updating system & installing base utilities" "step_prerequisites"
+  run_step 0 10 "Updating system & installing base utilities" "step_prerequisites"
+  run_step 10 15 "Installing & testing Bubblewrap sandbox" "step_isolation fresh"
+  log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
   run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
   run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
   run_step 55 75 "Compiling NeoPanel Node Daemon (-tags node)" "step_build_neopanel"
@@ -1209,8 +1344,10 @@ update_neopanel() {
     echo -e "${BOLD}Updating NeoPanel to Latest Release...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
   fi
 
-  run_step 0 20 "Ensuring Java 25, 21, 17 & 8 runtimes" "step_update_ensure_java"
-  run_step 20 45 "Fetching latest updates from GitHub" "step_update_fetch"
+  run_step 0 10 "Installing & testing Bubblewrap sandbox" "step_isolation installed"
+  log_info "Bubblewrap host check passed; existing node isolation settings are unchanged."
+  run_step 10 25 "Ensuring Java 25, 21, 17 & 8 runtimes" "step_update_ensure_java"
+  run_step 25 45 "Fetching latest updates from GitHub" "step_update_fetch"
   if [ "$INSTALL_ROLE" = "node" ]; then
     run_step 45 80 "Compiling fresh Cluster Node binary (-tags node)" "step_update_compile"
   else

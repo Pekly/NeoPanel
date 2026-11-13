@@ -10,6 +10,9 @@ type User struct {
 	Email            string    `json:"email"`
 	PasswordHash     string    `json:"-"`
 	Role             string    `json:"role"` // "admin" or "user"
+	PanelRoleID      string    `json:"panel_role_id"`
+	PanelRoleName    string    `json:"panel_role_name"`
+	PanelPermissions []string  `json:"panel_permissions"`
 	AvatarURL        string    `json:"avatar_url,omitempty"`
 	TwoFactorEnabled bool      `json:"two_factor_enabled"`
 	TwoFactorSecret  string    `json:"-"`

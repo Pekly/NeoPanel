@@ -15,9 +15,9 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -119,6 +119,7 @@ func (s *SFTPServer) Stop() {
 	}
 }
 
+// Exact IDs are canonical; non-exact aliases must identify exactly one server.
 func (s *SFTPServer) findServer(targetServer string) *database.Server {
 	targetServer = strings.TrimSpace(targetServer)
 	if targetServer == "" {
@@ -127,14 +128,46 @@ func (s *SFTPServer) findServer(targetServer string) *database.Server {
 	if srv, err := s.db.GetServer(targetServer); err == nil && srv != nil {
 		return srv
 	}
-	servers, _ := s.db.ListServers()
+	servers, err := s.db.ListServers()
+	if err != nil {
+		return nil
+	}
+	var match *database.Server
 	for _, sv := range servers {
-		if strings.EqualFold(sv.ID, targetServer) ||
-			strings.EqualFold(sv.Name, targetServer) ||
-			strings.EqualFold(sv.ID, "srv-"+targetServer) ||
-			strings.HasPrefix(strings.ToLower(sv.ID), strings.ToLower(targetServer)) {
-			return sv
+		if strings.EqualFold(sv.ID, targetServer) || strings.EqualFold(sv.Name, targetServer) ||
+			strings.EqualFold(sv.ID, "srv-"+targetServer) || strings.HasPrefix(strings.ToLower(sv.ID), strings.ToLower(targetServer)) {
+			if match != nil {
+				return nil
+			}
+			match = sv
 		}
+	}
+	return match
+}
+
+func (s *SFTPServer) authorize(userID int, serverID, permission string) error {
+	u, err := s.db.GetUserByID(userID)
+	if err != nil || u == nil || serverID == "" {
+		return os.ErrPermission
+	}
+	srv, err := s.db.GetServer(serverID)
+	if err != nil || srv == nil {
+		return os.ErrPermission
+	}
+	if u.Role == "admin" || srv.OwnerID == u.ID {
+		return nil
+	}
+	perms, err := s.db.GetUserServerPermissions(serverID, u.ID)
+	if err != nil {
+		return os.ErrPermission
+	}
+	access, operation := false, permission == ""
+	for _, p := range perms {
+		access = access || p == "sftp.access"
+		operation = operation || p == permission
+	}
+	if !access || !operation {
+		return os.ErrPermission
 	}
 	return nil
 }
@@ -142,75 +175,79 @@ func (s *SFTPServer) findServer(targetServer string) *database.Server {
 func (s *SFTPServer) resolveUsernameAndServer(rawUser string) (string, *database.Server, error) {
 	rawUser = strings.TrimSpace(rawUser)
 	if rawUser == "" {
-		return "", nil, fmt.Errorf("empty username")
+		return "", nil, os.ErrPermission
 	}
-
-	var candUser, candSrv string
-
-	// 1. Support '#' or '/' delimiter (e.g. user#srv-1 or user/srv-1)
-	if idx := strings.IndexAny(rawUser, "#/"); idx > 0 && idx < len(rawUser)-1 {
-		candUser = rawUser[:idx]
-		candSrv = rawUser[idx+1:]
-	} else if idx := strings.LastIndex(rawUser, "."); idx > 0 && idx < len(rawUser)-1 {
-		// 2. Support '.' delimiter (e.g. user.srv-1)
-		part1 := rawUser[:idx]
-		part2 := rawUser[idx+1:]
-		if srv := s.findServer(part2); srv != nil {
-			candUser = part1
-			candSrv = part2
-		} else if u, _ := s.db.GetUserByEmailOrUsername(rawUser); u != nil {
-			candUser = u.Username
-			candSrv = ""
-		} else {
-			candUser = part1
-			candSrv = part2
+	candUser, candSrv := rawUser, ""
+	if idx := strings.IndexAny(rawUser, "#/"); idx >= 0 {
+		if idx == 0 || idx == len(rawUser)-1 {
+			return "", nil, os.ErrPermission
 		}
-	} else {
-		candUser = rawUser
-		candSrv = ""
+		candUser, candSrv = rawUser[:idx], rawUser[idx+1:]
+	} else if u, _ := s.db.GetUserByEmailOrUsername(rawUser); u == nil {
+		if idx := strings.LastIndex(rawUser, "."); idx > 0 && idx < len(rawUser)-1 {
+			candUser, candSrv = rawUser[:idx], rawUser[idx+1:]
+		}
 	}
-
 	u, err := s.db.GetUserByEmailOrUsername(candUser)
 	if err != nil || u == nil {
-		if u2, err2 := s.db.GetUserByEmailOrUsername(rawUser); err2 == nil && u2 != nil {
-			u = u2
-			candSrv = ""
-		} else {
-			return "", nil, fmt.Errorf("user %q not found", candUser)
-		}
+		return "", nil, os.ErrPermission
 	}
-
-	actualUsername := u.Username
-
 	if candSrv != "" {
 		srv := s.findServer(candSrv)
-		if srv == nil {
-			return actualUsername, nil, fmt.Errorf("server %q not found", candSrv)
+		if srv == nil || s.authorize(u.ID, srv.ID, "") != nil {
+			return "", nil, os.ErrPermission
 		}
-		if u.Role != "admin" && srv.OwnerID != u.ID {
-			perms, _ := s.db.GetUserServerPermissions(srv.ID, u.ID)
-			if len(perms) == 0 {
-				return actualUsername, nil, fmt.Errorf("access denied to server %q", candSrv)
-			}
+		return u.Username, srv, nil
+	}
+	servers, err := s.db.ListServersForUser(u.ID, u.Role)
+	if err != nil {
+		return "", nil, os.ErrPermission
+	}
+	var permitted *database.Server
+	for _, srv := range servers {
+		if s.authorize(u.ID, srv.ID, "") != nil {
+			continue
 		}
-		return actualUsername, srv, nil
+		if permitted != nil {
+			return "", nil, fmt.Errorf("multiple SFTP servers: specify username#server-id")
+		}
+		permitted = srv
 	}
-
-	// Auto-route single server accounts directly
-	srvs, err := s.db.ListServersForUser(u.ID, u.Role)
-	if err == nil && len(srvs) == 1 {
-		return actualUsername, srvs[0], nil
+	// Every account, including administrators, gets an explicit per-server jail.
+	if permitted == nil {
+		return "", nil, os.ErrPermission
 	}
+	return u.Username, permitted, nil
+}
 
-	if u.Role == "admin" {
-		return actualUsername, nil, nil
+// All authentication methods finish here; extensions carry identity, never grants.
+func (s *SFTPServer) sessionPermissions(username string, srv *database.Server) (*ssh.Permissions, error) {
+	u, err := s.db.GetUserByEmailOrUsername(username)
+	if err != nil || u == nil || srv == nil {
+		return nil, os.ErrPermission
 	}
-
-	if len(srvs) > 0 {
-		return actualUsername, srvs[0], nil
+	if err := s.authorize(u.ID, srv.ID, ""); err != nil {
+		return nil, err
 	}
+	if !validServerID(srv.ID) {
+		return nil, os.ErrPermission
+	}
+	root, err := filepath.Abs(s.cfg.Paths.ServersDir)
+	if err != nil {
+		return nil, err
+	}
+	jail := filepath.Join(root, srv.ID)
+	if err := prepareJail(jail); err != nil {
+		return nil, err
+	}
+	return &ssh.Permissions{Extensions: map[string]string{
+		"jail_path": jail, "user_id": strconv.Itoa(u.ID), "server_id": srv.ID,
+	}}, nil
+}
 
-	return actualUsername, nil, nil
+func validServerID(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, "/\\:\x00") &&
+		filepath.IsLocal(id) && filepath.Base(id) == id && strings.TrimRight(id, ". ") == id
 }
 
 func (s *SFTPServer) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
@@ -232,19 +269,7 @@ func (s *SFTPServer) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permiss
 		return nil, fmt.Errorf("invalid password for user %q", rawUser)
 	}
 
-	jailPath := s.cfg.Paths.ServersDir
-	if srv != nil {
-		jailPath = filepath.Join(s.cfg.Paths.ServersDir, srv.ID)
-	}
-
-	_ = os.MkdirAll(jailPath, 0755)
-
-	return &ssh.Permissions{
-		Extensions: map[string]string{
-			"jail_path": jailPath,
-			"username":  username,
-		},
-	}, nil
+	return s.sessionPermissions(username, srv)
 }
 
 func (s *SFTPServer) authenticateKeyboardInteractive(c ssh.ConnMetadata, challenge ssh.KeyboardInteractiveChallenge) (*ssh.Permissions, error) {
@@ -281,19 +306,7 @@ func (s *SFTPServer) authenticatePublicKey(c ssh.ConnMetadata, pubKey ssh.Public
 		return nil, fmt.Errorf("public key rejected for user %q", username)
 	}
 
-	jailPath := s.cfg.Paths.ServersDir
-	if srv != nil {
-		jailPath = filepath.Join(s.cfg.Paths.ServersDir, srv.ID)
-	}
-
-	_ = os.MkdirAll(jailPath, 0755)
-
-	return &ssh.Permissions{
-		Extensions: map[string]string{
-			"jail_path": jailPath,
-			"username":  username,
-		},
-	}, nil
+	return s.sessionPermissions(username, srv)
 }
 
 func (s *SFTPServer) acceptLoop() {
@@ -345,14 +358,29 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 
 	go ssh.DiscardRequests(reqs)
 
-	jailPath := ""
-	if sshConn.Permissions != nil {
-		jailPath = sshConn.Permissions.Extensions["jail_path"]
+	if sshConn.Permissions == nil {
+		return
 	}
-	if jailPath == "" {
-		jailPath = s.cfg.Paths.ServersDir
+	ext := sshConn.Permissions.Extensions
+	jailPath, serverID := ext["jail_path"], ext["server_id"]
+	userID, err := strconv.Atoi(ext["user_id"])
+	if err != nil || jailPath == "" || s.authorize(userID, serverID, "") != nil {
+		return
 	}
 
+	h := &chrootHandler{rootDir: jailPath, server: s, userID: userID, serverID: serverID}
+	rootHandle, err := h.fsRoot()
+	if err != nil {
+		return
+	}
+	defer rootHandle.Close()
+	h.rootInfo, err = rootHandle.Stat()
+	if !pinRootHandle {
+		_ = rootHandle.Close()
+	}
+	if err != nil {
+		return
+	}
 	for newChannel := range chans {
 		if newChannel.ChannelType() != "session" {
 			_ = newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
@@ -364,7 +392,7 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 			continue
 		}
 
-		go func(ch ssh.Channel, in <-chan *ssh.Request, root string) {
+		go func(ch ssh.Channel, in <-chan *ssh.Request) {
 			defer ch.Close()
 
 			subsystemAccepted := false
@@ -376,26 +404,8 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 						ok = true
 						subsystemAccepted = true
 					}
-				case "exec":
-					// Fallback for SFTP clients that issue exec sftp-server
-					cmd := string(req.Payload)
-					if len(req.Payload) >= 4 {
-						cmdLen := int(binary.BigEndian.Uint32(req.Payload[:4]))
-						if 4+cmdLen <= len(req.Payload) {
-							cmd = string(req.Payload[4 : 4+cmdLen])
-						}
-					}
-					if strings.Contains(strings.ToLower(cmd), "sftp") {
-						ok = true
-						subsystemAccepted = true
-					}
-				case "pty-req", "env", "window-change":
-					// Accept terminal/environment requests from WinSCP/Cyberduck without failing
-					ok = true
-				case "shell":
-					_ = req.Reply(true, nil)
-					fmt.Fprintf(ch, "NeoPanel SFTP Service\r\n\r\nThis port is reserved exclusively for SFTP file transfers (FileZilla, WinSCP, Cyberduck, etc.).\r\nDirect interactive shell commands are disabled.\r\n")
-					return
+					// Shell, exec (including sftp-server), forwarding, and environment
+					// requests are deliberately not supported.
 				}
 				_ = req.Reply(ok, nil)
 				if subsystemAccepted {
@@ -410,11 +420,10 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 			// Drain any remaining out-of-band requests in background
 			go func() {
 				for req := range in {
-					_ = req.Reply(req.Type == "env" || req.Type == "window-change", nil)
+					_ = req.Reply(false, nil)
 				}
 			}()
 
-			h := &chrootHandler{rootDir: root}
 			handlers := sftp.Handlers{
 				FileGet:  h,
 				FilePut:  h,
@@ -427,7 +436,7 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 				log.Printf("[SFTP] Client session finished: %v", err)
 			}
 			_ = server.Close()
-		}(channel, requests, jailPath)
+		}(channel, requests)
 	}
 }
 
@@ -495,214 +504,227 @@ func getOrGenerateEd25519HostKey(keyPath string) (ssh.Signer, error) {
 // -----------------------------------------------------------------------------
 
 type chrootHandler struct {
-	rootDir string
+	rootDir  string
+	server   *SFTPServer
+	userID   int
+	serverID string
+	rootInfo os.FileInfo // immutable identity; Linux also pins the root handle
+}
+
+func (h *chrootHandler) check(permission string) error {
+	if h.server == nil {
+		return sftp.ErrSSHFxPermissionDenied
+	}
+	if h.server.authorize(h.userID, h.serverID, permission) != nil {
+		return sftp.ErrSSHFxPermissionDenied
+	}
+	return nil
 }
 
 func (h *chrootHandler) RealPath(p string) (string, error) {
-	p = strings.TrimSpace(p)
-	if p == "" || p == "." || p == "/" {
-		return "/", nil
+	if err := h.check("files.view"); err != nil {
+		return "", err
 	}
-	clean := path.Clean("/" + strings.ReplaceAll(p, "\\", "/"))
-	return clean, nil
+	if _, err := h.fsStat(p); err != nil {
+		return "", err
+	}
+	return path.Clean("/" + strings.ReplaceAll(p, "\\", "/")), nil
 }
 
 func (h *chrootHandler) safePath(reqPath string) (string, error) {
-	p := path.Clean("/" + strings.ReplaceAll(reqPath, "\\", "/"))
-	p = strings.TrimPrefix(p, "/")
-
-	full := filepath.Clean(filepath.Join(h.rootDir, filepath.FromSlash(p)))
-
+	p := strings.ReplaceAll(reqPath, "\\", "/")
+	for _, part := range strings.Split(p, "/") {
+		if part == ".." || strings.ContainsAny(part, ":\x00") {
+			return "", sftp.ErrSSHFxPermissionDenied
+		}
+		// Reject Windows path aliases, ADS, device names, and trailing-dot/space aliases.
+		if part != "" && part != "." && (!filepath.IsLocal(part) || strings.TrimRight(part, ". ") != part) {
+			return "", sftp.ErrSSHFxPermissionDenied
+		}
+	}
+	p = strings.TrimPrefix(path.Clean("/"+p), "/")
+	full := filepath.Join(h.rootDir, filepath.FromSlash(p))
 	rel, err := filepath.Rel(h.rootDir, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("permission denied: path traversal attempt")
+		return "", sftp.ErrSSHFxPermissionDenied
 	}
-
 	return full, nil
 }
 
-func (h *chrootHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
-	absPath, err := h.safePath(r.Filepath)
-	if err != nil {
-		return nil, err
-	}
-	return os.Open(absPath)
+// Never return a raw file: READ/WRITE on an already-open handle must consult the
+// database too, not only OPEN. Do not embed os.File and accidentally expose an
+// unguarded ReadFrom/WriteTo/Stat shortcut.
+type guardedFile struct {
+	file               *os.File
+	h                  *chrootHandler
+	requestPath        string
+	readable, writable bool
 }
 
-func (h *chrootHandler) openFileInternal(r *sftp.Request) (*os.File, error) {
-	absPath, err := h.safePath(r.Filepath)
-	if err != nil {
-		return nil, err
+func (f *guardedFile) check(permission string) error {
+	if err := f.h.check(permission); err != nil {
+		return err
 	}
-
-	pflags := r.Pflags()
-	var flags int
-	wantsWrite := pflags.Write || pflags.Append || pflags.Creat || pflags.Trunc
-	switch {
-	case wantsWrite:
-		flags = os.O_RDWR
-	default:
-		flags = os.O_RDONLY
-	}
-
-	if pflags.Creat {
-		flags |= os.O_CREATE
-	}
-	if pflags.Trunc {
-		flags |= os.O_TRUNC
-	}
-	if pflags.Excl {
-		flags |= os.O_EXCL
-	}
-	// Never pass os.O_APPEND with io.WriterAt (WriteAt ignores/conflicts with O_APPEND offsets).
-
-	if wantsWrite {
-		_ = os.MkdirAll(filepath.Dir(absPath), 0755)
-	}
-
-	return os.OpenFile(absPath, flags, 0644)
-}
-
-func (h *chrootHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
-	return h.openFileInternal(r)
-}
-
-func (h *chrootHandler) OpenFile(r *sftp.Request) (sftp.WriterAtReaderAt, error) {
-	return h.openFileInternal(r)
-}
-
-func (h *chrootHandler) PosixRename(r *sftp.Request) error {
-	return h.Filecmd(r)
-}
-
-func (h *chrootHandler) Filecmd(r *sftp.Request) error {
-	absPath, err := h.safePath(r.Filepath)
+	current, err := f.h.fsStat(f.requestPath)
 	if err != nil {
 		return err
 	}
-
-	switch r.Method {
-	case "Rename", "PosixRename":
-		targetPath, err := h.safePath(r.Target)
-		if err != nil {
-			return err
-		}
-		_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
-		return os.Rename(absPath, targetPath)
-	case "Remove":
-		return os.Remove(absPath)
-	case "Rmdir":
-		return os.RemoveAll(absPath)
-	case "Mkdir":
-		return os.MkdirAll(absPath, 0755)
-	case "Symlink":
-		targetPath, err := h.safePath(r.Target)
-		if err != nil {
-			return err
-		}
-		_ = os.Remove(targetPath)
-		return os.Symlink(absPath, targetPath)
-	case "Link":
-		targetPath, err := h.safePath(r.Target)
-		if err != nil {
-			return err
-		}
-		_ = os.Remove(targetPath)
-		return os.Link(absPath, targetPath)
-	case "Setstat":
-		attrFlags := r.AttrFlags()
-		attrs := r.Attributes()
-		if attrs != nil {
-			if attrFlags.Size {
-				if err := os.Truncate(absPath, int64(attrs.Size)); err != nil {
-					return err
-				}
-			}
-			if attrFlags.Permissions {
-				if mode := attrs.FileMode().Perm(); mode != 0 {
-					if err := os.Chmod(absPath, mode); err != nil {
-						return err
-					}
-				}
-			}
-			if attrFlags.Acmodtime {
-				atime := time.Unix(int64(attrs.Atime), 0)
-				mtime := time.Unix(int64(attrs.Mtime), 0)
-				if err := os.Chtimes(absPath, atime, mtime); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	default:
-		return nil
+	opened, err := f.file.Stat()
+	if err != nil {
+		return err
 	}
+	if !os.SameFile(current, opened) {
+		return sftp.ErrSSHFxPermissionDenied
+	}
+	return nil
 }
 
-type fileListerAt []os.FileInfo
+func (f *guardedFile) ReadAt(p []byte, off int64) (int, error) {
+	if !f.readable {
+		return 0, sftp.ErrSSHFxPermissionDenied
+	}
+	if err := f.check("files.view"); err != nil {
+		return 0, err
+	}
+	return f.file.ReadAt(p, off)
+}
 
-func (f fileListerAt) ListAt(ls []os.FileInfo, offset int64) (int, error) {
-	if offset >= int64(len(f)) {
+func (f *guardedFile) WriteAt(p []byte, off int64) (int, error) {
+	if !f.writable {
+		return 0, sftp.ErrSSHFxPermissionDenied
+	}
+	if err := f.check("files.edit"); err != nil {
+		return 0, err
+	}
+	return f.file.WriteAt(p, off)
+}
+
+func (f *guardedFile) Close() error { return f.file.Close() }
+
+func (h *chrootHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
+	if err := h.check("files.view"); err != nil {
+		return nil, err
+	}
+	file, err := h.fsOpen(r.Filepath, os.O_RDONLY)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		file.Close()
+		return nil, sftp.ErrSSHFxPermissionDenied
+	}
+	return &guardedFile{file: file, h: h, requestPath: r.Filepath, readable: true}, nil
+}
+
+func (h *chrootHandler) openFileInternal(r *sftp.Request) (*guardedFile, error) {
+	pf := r.Pflags()
+	writes := pf.Write || pf.Append || pf.Creat || pf.Trunc
+	if err := h.check(""); err != nil {
+		return nil, err
+	}
+	if writes {
+		if err := h.check("files.edit"); err != nil {
+			return nil, err
+		}
+	}
+	if pf.Read {
+		if err := h.check("files.view"); err != nil {
+			return nil, err
+		}
+	}
+	flags := os.O_RDONLY
+	if writes {
+		flags = os.O_WRONLY
+	}
+	if writes && pf.Read {
+		flags = os.O_RDWR
+	}
+	if pf.Creat {
+		flags |= os.O_CREATE
+	}
+	if pf.Trunc {
+		flags |= os.O_TRUNC
+	}
+	if pf.Excl {
+		flags |= os.O_EXCL
+	}
+	// O_APPEND conflicts with WriterAt; SFTP supplies the write offset.
+	file, err := h.fsOpen(r.Filepath, flags)
+	if err != nil {
+		return nil, err
+	}
+	return &guardedFile{file: file, h: h, requestPath: r.Filepath, readable: pf.Read, writable: writes}, nil
+}
+
+func (h *chrootHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) { return h.openFileInternal(r) }
+func (h *chrootHandler) OpenFile(r *sftp.Request) (sftp.WriterAtReaderAt, error) {
+	return h.openFileInternal(r)
+}
+func (h *chrootHandler) PosixRename(r *sftp.Request) error { return h.Filecmd(r) }
+
+func (h *chrootHandler) Filecmd(r *sftp.Request) error {
+	permission := "files.edit"
+	if r.Method == "Remove" || r.Method == "Rmdir" {
+		permission = "files.delete"
+	}
+	if err := h.check(permission); err != nil {
+		return err
+	}
+	if r.Method == "Rename" || r.Method == "PosixRename" {
+		if err := h.check("files.delete"); err != nil {
+			return err
+		}
+	}
+	return h.fsCommand(r)
+}
+
+type fileListerAt struct {
+	infos       []os.FileInfo
+	h           *chrootHandler
+	requestPath string
+}
+
+func (f *fileListerAt) ListAt(ls []os.FileInfo, offset int64) (int, error) {
+	if err := f.h.check("files.view"); err != nil {
+		return 0, err
+	}
+	if _, err := f.h.fsStat(f.requestPath); err != nil {
+		return 0, err
+	}
+	if offset < 0 {
+		return 0, os.ErrInvalid
+	}
+	if offset >= int64(len(f.infos)) {
 		return 0, io.EOF
 	}
-	n := copy(ls, f[offset:])
+	n := copy(ls, f.infos[offset:])
 	if n < len(ls) {
 		return n, io.EOF
 	}
 	return n, nil
 }
 
-type symlinkFileInfo struct {
-	os.FileInfo
-	target string
-}
-
-func (s symlinkFileInfo) Name() string {
-	return s.target
-}
-
 func (h *chrootHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
-	absPath, err := h.safePath(r.Filepath)
-	if err != nil {
+	if err := h.check("files.view"); err != nil {
 		return nil, err
 	}
-
+	var infos []os.FileInfo
 	switch r.Method {
 	case "List":
-		entries, err := os.ReadDir(absPath)
+		var err error
+		infos, err = h.fsList(r.Filepath)
 		if err != nil {
 			return nil, err
 		}
-		var infos []os.FileInfo
-		for _, e := range entries {
-			if info, err := e.Info(); err == nil {
-				infos = append(infos, info)
-			}
-		}
-		return fileListerAt(infos), nil
-	case "Stat":
-		fi, err := os.Stat(absPath)
+	case "Stat", "Lstat":
+		info, err := h.fsStat(r.Filepath)
 		if err != nil {
 			return nil, err
 		}
-		return fileListerAt([]os.FileInfo{fi}), nil
-	case "Lstat":
-		fi, err := os.Lstat(absPath)
-		if err != nil {
-			return nil, err
-		}
-		return fileListerAt([]os.FileInfo{fi}), nil
-	case "Readlink":
-		target, err := os.Readlink(absPath)
-		if err != nil {
-			return nil, err
-		}
-		fi, err := os.Lstat(absPath)
-		if err != nil {
-			return nil, err
-		}
-		return fileListerAt([]os.FileInfo{symlinkFileInfo{FileInfo: fi, target: target}}), nil
+		infos = []os.FileInfo{info}
 	default:
-		return nil, fmt.Errorf("unsupported list method: %s", r.Method)
+		return nil, sftp.ErrSSHFxOpUnsupported
 	}
+	return &fileListerAt{infos: infos, h: h, requestPath: r.Filepath}, nil
 }

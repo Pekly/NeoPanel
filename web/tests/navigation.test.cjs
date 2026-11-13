@@ -15,8 +15,8 @@ function setup() {
 }
 test('admin navigation has one canonical label per preserved route', () => {
   const c=setup();
-  assert.deepEqual(Array.from(c.sections, s=>s.label), ['Overview','Nodes','Servers','Users','Appearance','Audit logs','Extensions','Email & SMTP']);
-  assert.deepEqual(Array.from(c.slugs), ['health','nodes','servers','users','branding','audit','mods','email']);
+  assert.deepEqual(Array.from(c.sections, s=>s.label), ['Overview','Nodes','Servers','Users','Appearance','Audit logs','Extensions','Email & SMTP','Roles']);
+  assert.deepEqual(Array.from(c.slugs), ['health','nodes','servers','users','branding','audit','mods','email','roles']);
   assert.equal(c.sections.length,c.slugs.length);
   assert.match(source,/ADMIN_SECTIONS\.map\(\(section, index\)/);
 });

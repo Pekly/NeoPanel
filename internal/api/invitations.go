@@ -37,6 +37,7 @@ var invitationID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 func validateInvitationPermissions(ps []string) error {
 	allowed := map[string]bool{"console.view": true, "console.command": true, "server.power": true, "files.view": true, "files.edit": true, "files.delete": true, "settings.view": true, "settings.edit": true, "settings.ram": true, "database.manage": true, "backup.manage": true, "subusers.manage": true, "schedules.manage": true}
+	allowed["sftp.access"] = true
 	seen := map[string]bool{}
 	if len(ps) > len(allowed) {
 		return fmt.Errorf("invalid permissions")
@@ -181,13 +182,18 @@ func (h *InvitationHandler) remote(r *http.Request, node *database.ClusterNode, 
 	}
 	return resp, nil
 }
-func (h *InvitationHandler) authorize(r *http.Request, server string, node *database.ClusterNode, c *JWTClaims) (string, error) {
+func (h *InvitationHandler) authorize(r *http.Request, server string, node *database.ClusterNode, c *JWTClaims, grants ...[]string) (string, error) {
 	if !invitationID.MatchString(server) {
 		return "", &invitationRemoteError{400, "Invalid server ID"}
 	}
 	if node == nil {
 		if code := authorizeServer(h.db, c, server, "subusers.manage"); code != 0 {
 			return "", &invitationRemoteError{code, "Server missing or subusers.manage permission required"}
+		}
+		for _, requested := range grants {
+			if !canGrantServerPermissions(h.db, c, server, requested) {
+				return "", database.ErrInvitationForbidden
+			}
 		}
 		s, e := h.db.GetServer(server)
 		if e != nil {
@@ -220,6 +226,13 @@ func (h *InvitationHandler) authorize(r *http.Request, server string, node *data
 	}
 	if !allowed {
 		return "", database.ErrInvitationForbidden
+	}
+	if !p.Owner && !p.Admin {
+		for _, requested := range grants {
+			if !permissionsContainAll(p.Permissions, requested) {
+				return "", database.ErrInvitationForbidden
+			}
+		}
 	}
 	// Fetch the name only after authorization; never use the node hostname for email links.
 	sr, err := h.remote(r, node, c, "GET", "/api/servers/"+server, nil, false)
@@ -345,7 +358,7 @@ func (h *InvitationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		invitationError(w, e)
 		return
 	}
-	serverName, e := h.authorize(r, req.ServerID, n, c)
+	serverName, e := h.authorize(r, req.ServerID, n, c, req.Permissions)
 	if e != nil {
 		invitationError(w, e)
 		return
@@ -420,7 +433,7 @@ func (h *InvitationHandler) Resend(w http.ResponseWriter, r *http.Request) {
 		invitationError(w, e)
 		return
 	}
-	serverName, e := h.authorize(r, i.ServerID, n, c)
+	serverName, e := h.authorize(r, i.ServerID, n, c, i.Permissions)
 	if e != nil {
 		invitationError(w, e)
 		return
@@ -489,7 +502,7 @@ func (h *InvitationHandler) inviter(r *http.Request, i *database.Invitation) (*d
 	if e != nil {
 		return nil, "", e
 	}
-	name, e := h.authorize(r, i.ServerID, n, &JWTClaims{UserID: u.ID, Username: u.Username, Role: u.Role})
+	name, e := h.authorize(r, i.ServerID, n, &JWTClaims{UserID: u.ID, Username: u.Username, Role: u.Role}, i.Permissions)
 	return n, name, e
 }
 func (h *InvitationHandler) Inspect(w http.ResponseWriter, r *http.Request) {

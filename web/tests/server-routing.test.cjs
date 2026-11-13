@@ -36,6 +36,7 @@ function setup(url = '/server/11ac29/console') {
     isModdedEngine: () => false, esc: value => String(value ?? ''), ic: () => '',
     setAppearanceMode: () => {}, toggleCompact: () => {}, togglePrivacy: () => {},
     openPendingInvitation: async () => false, loadPublicBranding: async () => {}, loadRuntimeMods: async () => [],
+    loadPublicCommunity: async () => {}, serverPagePermission: () => '',
     computeGravatarHash: async () => '', loadInitialRouteData: async view => entered.push(view), loadVersionsCatalog: () => {},
     showSetupScreen: () => { c.setupShown = true; }, showLoginScreen: () => { c.loginShown = true; },
     fetch: async endpoint => ({ ok: true, json: async () => endpoint === '/api/auth/status' ? {} : { username: 'User', role: 'user' } }),

@@ -235,15 +235,19 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 
 // GetCodeSamples returns integration code snippets for external billing portals
 func (h *ClientAPIHandler) GetCodeSamples(w http.ResponseWriter, r *http.Request) {
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	if claims == nil || claims.Role != "admin" {
+		writeError(w, http.StatusForbidden, "Administrator privileges required")
+		return
+	}
 	panelURL := fmt.Sprintf("http://%s:%d", h.cfg.Server.Host, h.cfg.Server.Port)
 	if h.cfg.Server.Host == "0.0.0.0" || h.cfg.Server.Host == "" {
 		panelURL = "http://YOUR_PANEL_IP:" + fmt.Sprintf("%d", h.cfg.Server.Port)
 	}
 
-	apiKey := h.cfg.Security.NodeToken
-	if apiKey == "" {
-		apiKey = "YOUR_PANEL_API_KEY"
-	}
+	// Examples must never disclose the cluster node token. Use a separately
+	// managed, revocable administrator API key for billing integrations.
+	apiKey := "YOUR_ADMIN_API_KEY"
 
 	phpCode := fmt.Sprintf(`<?php
 // NeoPanel Automated Server Provisioning (WHMCS / Blesta / Custom Hook)
@@ -358,4 +362,3 @@ def provision_server(client_email, server_name, memory_mb=4096):
 		"curl":   curlCode,
 	})
 }
-

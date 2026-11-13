@@ -31,6 +31,8 @@ type JWTClaims struct {
 	Username string `json:"username"`
 	Role     string `json:"role"`
 	Scope    string `json:"scope,omitempty"`
+	// Set only by trusted node-forwarding middleware, never parsed from JWTs.
+	AuthorizedServerCreate bool `json:"-"`
 	jwt.RegisteredClaims
 }
 
@@ -151,7 +153,16 @@ func (h *AuthHandler) ValidateAuthToken(tokenStr string) (*JWTClaims, error) {
 			Role:     user.Role,
 		}, nil
 	}
-	return h.ValidateToken(tokenStr)
+	claims, err := h.ValidateToken(tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	user, err := h.db.GetUserByID(claims.UserID)
+	if err != nil || user == nil {
+		return nil, jwt.ErrSignatureInvalid
+	}
+	claims.UserID, claims.Username, claims.Role = user.ID, user.Username, user.Role
+	return claims, nil
 }
 
 func (h *AuthHandler) getNodeToken() string {
@@ -427,6 +438,9 @@ func (h *AuthHandler) Login2FA(w http.ResponseWriter, r *http.Request) {
 // --- Admin User Management Endpoints ---
 
 func (h *AuthHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePanelRoleAdmin(w, r) {
+		return
+	}
 	users, err := h.db.ListUsers()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -596,9 +610,6 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	if claims.UserID > 0 {
 		dbUser, err = h.db.GetUserByID(claims.UserID)
 	}
-	if dbUser == nil || err != nil {
-		dbUser, err = h.db.GetUserByUsername(claims.Username)
-	}
 	if err == nil && dbUser != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id":                 dbUser.ID,
@@ -608,12 +619,22 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 			"last_name":          dbUser.LastName,
 			"email":              dbUser.Email,
 			"role":               dbUser.Role,
+			"panel_role_id":      dbUser.PanelRoleID,
+			"panel_role_name":    dbUser.PanelRoleName,
+			"panel_permissions":  dbUser.PanelPermissions,
 			"avatar_url":         dbUser.AvatarURL,
 			"two_factor_enabled": dbUser.TwoFactorEnabled,
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, claims)
+	if claims.UserID == 0 && claims.Role == "admin" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"id": 0, "user_id": 0, "username": claims.Username, "role": claims.Role,
+			"panel_role_id": "", "panel_role_name": "", "panel_permissions": []string{database.PermissionServersCreate},
+		})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Unable to resolve current user"})
 }
 
 func (h *AuthHandler) GetTurnstileConfig(w http.ResponseWriter, r *http.Request) {

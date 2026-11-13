@@ -38,6 +38,7 @@ func invitationEmail(brand PanelBrandingConfig, i *database.Invitation, serverNa
 	labels := map[string]string{
 		"console.view": "View console", "console.command": "Send console commands", "server.power": "Control server power",
 		"files.view": "Browse files", "files.edit": "Create and edit files", "files.delete": "Delete files",
+		"sftp.access":   "Connect with SFTP (file permissions still apply)",
 		"settings.view": "View settings", "settings.edit": "Edit settings", "settings.ram": "Change memory limits",
 		"database.manage": "Manage databases", "backup.manage": "Manage backups", "subusers.manage": "Manage team", "schedules.manage": "Manage schedules",
 	}

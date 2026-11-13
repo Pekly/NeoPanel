@@ -60,6 +60,15 @@ func (h *SubuserHandler) AddSubuser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if err := validateInvitationPermissions(req.Permissions); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !canGrantServerPermissions(h.db, claims, serverID, req.Permissions) {
+		writeError(w, 403, "Team managers cannot grant permissions they do not hold")
+		return
+	}
 
 	if req.InvitationID != "" {
 		claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
@@ -171,6 +180,15 @@ func (h *SubuserHandler) UpdateSubuser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if err := validateInvitationPermissions(req.Permissions); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	claims, _ := r.Context().Value(contextUserKey).(*JWTClaims)
+	if !canGrantServerPermissions(h.db, claims, serverID, req.Permissions) {
+		writeError(w, 403, "Team managers cannot grant permissions they do not hold")
+		return
+	}
 
 	if err := h.db.UpdateServerSubuser(serverID, subuserIntID, req.Permissions); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -242,7 +260,7 @@ func (h *SubuserHandler) GetMyPermissions(w http.ResponseWriter, r *http.Request
 			"is_owner": true,
 			"permissions": []string{
 				"console.view", "console.command", "server.power",
-				"files.view", "files.edit", "files.delete",
+				"files.view", "files.edit", "files.delete", "sftp.access",
 				"settings.view", "settings.edit", "settings.ram",
 				"database.manage", "backup.manage", "subusers.manage", "schedules.manage",
 			},
@@ -262,7 +280,7 @@ func (h *SubuserHandler) GetMyPermissions(w http.ResponseWriter, r *http.Request
 			"is_owner": true,
 			"permissions": []string{
 				"console.view", "console.command", "server.power",
-				"files.view", "files.edit", "files.delete",
+				"files.view", "files.edit", "files.delete", "sftp.access",
 				"settings.view", "settings.edit", "settings.ram",
 				"database.manage", "backup.manage", "subusers.manage", "schedules.manage",
 			},

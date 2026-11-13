@@ -165,6 +165,15 @@ type CreateServerRequest struct {
 }
 
 func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
+	allowed, err := canCreateServer(h.db, r)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Unable to resolve server creation permission"})
+		return
+	}
+	if !allowed {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Server creation requires the servers.create permission"})
+		return
+	}
 	var req CreateServerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})

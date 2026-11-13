@@ -3,12 +3,15 @@ const TeamUI = { sequence: 0, inviteServer: null, memberServer: null, sending: f
 const InvitationUI = { token: '', info: null, error: '', busy: false, accepted: false };
 
 function canManageTeam(permission = S.teamState?.permission) {
+  if (typeof hasServerPermission === 'function' && !hasServerPermission('subusers.manage')) return false;
   return Boolean(permission && (permission.is_admin || permission.is_owner || permission.permissions?.includes('subusers.manage')));
 }
 function teamInvitationPath(srv) {
   return '/api/team/invitations?' + new URLSearchParams({ server_id: srv.id, node_id: srv.node_id || 'local' });
 }
 async function loadTeamPage(skipRender = false) {
+  if (typeof canServerPage === 'function' && !canServerPage('team')) return;
+  const token = S.token;
   const srv = curServer();
   if (!srv) return;
   const sequence = ++TeamUI.sequence;
@@ -16,23 +19,23 @@ async function loadTeamPage(skipRender = false) {
   if (!skipRender && S.view === 'team') R();
   try {
     const permission = await api(srvApiPath(srv, '/permissions'), { suppressToast: true });
-    if (sequence !== TeamUI.sequence || !sameQolServer(srv, curServer())) return;
+    if (token !== S.token || sequence !== TeamUI.sequence || !sameQolServer(srv, curServer())) return;
     const state = { permission, invitations: [], smtp_configured: false, error: '' };
     if (canManageTeam(permission)) {
       const [members, invites] = await Promise.all([
         api(srvApiPath(srv, '/subusers'), { suppressToast: true }),
         api(teamInvitationPath(srv), { suppressToast: true })
       ]);
-      if (sequence !== TeamUI.sequence || !sameQolServer(srv, curServer())) return;
+      if (token !== S.token || sequence !== TeamUI.sequence || !sameQolServer(srv, curServer())) return;
       S.serverSubusers = Array.isArray(members) ? members : (members.subusers || []);
       state.invitations = invites.invitations || [];
       state.smtp_configured = Boolean(invites.smtp_configured);
     } else S.serverSubusers = [];
     S.teamState = state;
   } catch (err) {
-    if (sequence === TeamUI.sequence && sameQolServer(srv, curServer())) S.teamState = { error: err.message, invitations: [] };
+    if (token === S.token && sequence === TeamUI.sequence && sameQolServer(srv, curServer())) S.teamState = { error: err.message, invitations: [] };
   } finally {
-    if (sequence === TeamUI.sequence && sameQolServer(srv, curServer())) {
+    if (token === S.token && sequence === TeamUI.sequence && sameQolServer(srv, curServer())) {
       S.teamLoading = false;
       if (!skipRender && S.view === 'team') R();
     }
