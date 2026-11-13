@@ -189,6 +189,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/content", r.requireAuth(r.files.SaveContent))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/create", r.requireAuth(r.files.Create))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files", r.requireAuth(r.files.Delete))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/delete-bulk", r.requireAuth(r.files.DeleteBulk))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload", r.requireAuth(r.files.Upload))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/download", r.requireAuth(r.files.Download))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/rename", r.requireAuth(r.files.Rename))
@@ -554,6 +555,9 @@ func serverActionPermission(method, suffix string) string {
 	case "power":
 		return "server.power"
 	case "files":
+		if method == http.MethodPost && suffix == "files/delete-bulk" {
+			return "files.delete"
+		}
 		if read {
 			return "files.view"
 		}

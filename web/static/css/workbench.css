@@ -29,6 +29,8 @@ main > * { max-width: 1440px; }
 .nsearch kbd, kbd { background: var(--card-inner); color: var(--tx-muted); border: 1px solid var(--border-light); border-radius: 4px; }
 #nav .chip2 { background: var(--card-inner); padding: 12px; border-radius: 8px; }
 .chip2 .who b { color: var(--tx); }
+#nav .chip2 > .av, #nav .chip2 > svg { flex-shrink: 0; }
+#nav .chip2 .who .mu { display: block; max-width: 100%; }
 h1, h2, h3 { color: var(--tx); }
 h1 { letter-spacing: -.035em; font-size: 28px; line-height: 1.25; }
 h2 { letter-spacing: -.02em; font-size: 16px; }
@@ -68,11 +70,11 @@ html body :is(button, a, input, select, textarea, [tabindex]):focus-visible { ou
 .tabs button, .atabs button { font-size: 13px; padding: 12px 14px; transition: color var(--np-fast), background-color var(--np-fast); }
 .tabs button.on, .atabs button.on { color: var(--tx); }
 
-/* Server identity: information first; custom artwork remains opt-in. */
+/* Server identity: honor all configured artwork, including the default URLs. */
 .card.srvh { background: var(--card-bg); padding: 24px; gap: 20px; border-color: var(--border); box-shadow: none; }
 .srvh-bg { display: none; }
 .srvh.has-brand-art .srvh-bg { display: block; }
-.srvh.has-brand-art .srvh-bg::after { background: color-mix(in srgb, var(--card-bg-solid) 90%, transparent); }
+.srvh.has-brand-art .srvh-bg::after { background: linear-gradient(90deg, color-mix(in srgb, var(--card-bg-solid) 88%, transparent), color-mix(in srgb, var(--card-bg-solid) 45%, transparent)); }
 .srvh h1, html[data-theme=light] .srvh h1 { color: var(--tx); font-size: 24px; font-weight: 600; letter-spacing: -.03em; }
 .srv-hero-meta { gap: 10px; }
 .srv-hero-sub, html[data-theme=light] .srv-hero-sub { color: var(--tx-muted); font-size: 12px; }
@@ -91,7 +93,7 @@ html body :is(button, a, input, select, textarea, [tabindex]):focus-visible { ou
 .srvh .btn.stop { color: var(--er); background: var(--er-glow); border-color: transparent; }
 .srvh .btn.stop:hover { border-color: var(--er); }
 
-/* Dashboard: summary strip, fleet, then activity. No decorative card covers. */
+/* Dashboard: summary strip, fleet, and activity with configured card artwork. */
 .dash-grid { grid-template-columns: minmax(0, 1fr) 280px; grid-template-areas: 'overview overview' 'fleet activity'; gap: 24px; }
 .np-dash-aside { display: contents; }
 .np-allocation { grid-area: overview; display: flex; align-items: center; gap: 32px; padding: 20px 24px; }
@@ -107,7 +109,8 @@ html body :is(button, a, input, select, textarea, [tabindex]):focus-visible { ou
 .srv-card-banner { height: 52px; background-color: transparent; }
 .srv-card-banner::after { display: none; }
 .srv-card-banner.has-brand-art { height: 100px; }
-.srv-card-banner.has-brand-art::after { display: block; background: color-mix(in srgb, var(--card-bg-solid) 65%, transparent); }
+.srv-card-banner.has-brand-art::after { display: block; background: linear-gradient(180deg, rgb(0 0 0 / 8%), rgb(0 0 0 / 38%)); }
+.srv-card-banner.has-brand-art .srv-card-badge, .srv-card-banner.has-brand-art .srv-card-action-btn { background: var(--card-bg-solid); color: var(--tx); }
 .srv-card-badge { background: var(--card-inner); color: var(--tx-muted); border-color: var(--border); backdrop-filter: none; left: 20px; top: 16px; font-size: 10px; }
 .srv-card-actions { top: 12px; right: 16px; }
 .srv-card-action-btn { background: transparent; color: var(--tx-dim); border-color: transparent; backdrop-filter: none; transition: background-color var(--np-fast); }
@@ -127,7 +130,7 @@ html body :is(button, a, input, select, textarea, [tabindex]):focus-visible { ou
 .create-icon-bubble { width: 32px; height: 32px; border-radius: 8px; background: var(--card-inner); }
 .np-create-hint { font-size: 11px; font-weight: 400; color: var(--tx-dim); }
 #srv-card-grid.vm-dash-list { grid-template-columns: minmax(0, 1fr); }
-.vm-dash-row-bg { opacity: .12; }
+.vm-dash-row-bg { opacity: .25; }
 .vm-dash-row .srv-meter-head { flex-direction: row; }
 
 /* Console: dedicated working surface + restrained telemetry rail. */
@@ -157,7 +160,8 @@ html body :is(button, a, input, select, textarea, [tabindex]):focus-visible { ou
 .np-files-toolbar > .row { width: 100%; }
 .breadcrumb { overflow-wrap: anywhere; }
 .breadcrumb span:hover { color: var(--ac); }
-.card.tw { padding: 0; }
+/* Only a table-only card is edge-to-edge; admin cards also contain headings/forms. */
+.card.tw:has(> table:first-child), .card.tw.np-schedule-table { padding: 0; }
 th { background: var(--card-inner); font-size: 10px; letter-spacing: .07em; padding: 12px 16px; }
 td { padding: 14px 16px; font-size: 13px; }
 tr:hover td { background: var(--pn2); }
@@ -199,6 +203,35 @@ tr:hover td { background: var(--pn2); }
 .toast, .upload-progress-widget { background: var(--card-bg-solid); color: var(--tx); border-color: var(--border-light); box-shadow: var(--np-shadow); }
 .upload-progress-widget { max-width: calc(100vw - 32px); }
 .upload-error { color: var(--er); overflow-wrap: anywhere; }
+
+/* Admin content must wrap naturally; only the wide table gets a scroll region. */
+.np-admin-info-card .row { flex-wrap: wrap; gap: 8px 12px; }
+.np-admin-info-card .row > div, .np-admin-cluster-card > .row > div { min-width: 0; }
+.np-admin-info-card .row > span, .np-admin-info-card .row > div > span { overflow-wrap: anywhere; }
+.np-table-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; border: 1px solid var(--border); border-radius: 8px; }
+.np-admin-server-table { min-width: 1120px; }
+.np-admin-server-table td:first-child { min-width: 180px; max-width: 280px; overflow-wrap: anywhere; }
+.np-admin-server-table :is(td:nth-child(2), td:nth-child(3), td:nth-child(5)) .chip { white-space: nowrap; }
+.np-admin-server-table :is(td:nth-child(4), td:nth-child(7)) { white-space: nowrap; }
+.np-server-id { display: block; margin-top: 4px; }
+.np-server-actions { display: grid; grid-template-columns: repeat(2, max-content); justify-content: end; gap: 6px; }
+.np-server-actions .btn { white-space: nowrap; }
+
+/* Give URL fields useful space instead of squeezing them between three controls. */
+.brand-media-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; }
+.brand-media-field { min-width: 0; }
+.brand-media-field > label { color: var(--tx-muted); font-size: 13px; font-weight: 500; }
+.brand-media-grid .brand-upload-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px; }
+.brand-media-grid .brand-upload-row input[type="text"] { grid-column: 2 / -1; width: 100%; min-width: 0; }
+.brand-media-grid [data-upload-btn] { grid-column: 2; justify-self: end; }
+
+/* Native wheel, touch, and keyboard behavior with theme-aware scrollbar chrome. */
+.pbox, .pal, .np-table-scroll { scrollbar-width: thin; scrollbar-color: var(--tx-dim) transparent; }
+.pbox { scrollbar-gutter: stable; overscroll-behavior: contain; }
+:is(.pbox, .pal, .np-table-scroll)::-webkit-scrollbar { width: 8px; height: 8px; }
+:is(.pbox, .pal, .np-table-scroll)::-webkit-scrollbar-track { background: transparent; }
+:is(.pbox, .pal, .np-table-scroll)::-webkit-scrollbar-thumb { background: var(--tx-dim); border: 2px solid transparent; border-radius: 8px; background-clip: padding-box; }
+:is(.pbox, .pal, .np-table-scroll)::-webkit-scrollbar-corner { background: transparent; }
 .np-skeleton { opacity: .5; }
 
 @keyframes np-workspace-enter { from { opacity: .4; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }

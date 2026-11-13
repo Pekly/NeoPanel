@@ -4895,8 +4895,8 @@ function srvh() {
     ? S.props.motd
     : (srv?.motd || '');
 
-  return `<div class="card srvh ${heroUrl && heroUrl !== SERVER_HERO_URL ? 'has-brand-art' : ''}">
-    <div class="srvh-bg" ${heroUrl && heroUrl !== SERVER_HERO_URL ? `style="background-image: url('${esc(heroUrl)}');"` : ''} aria-hidden="true"></div>
+  return `<div class="card srvh ${heroUrl ? 'has-brand-art' : ''}">
+    <div class="srvh-bg" ${heroUrl ? `style="background-image: url('${esc(heroUrl)}');"` : ''} aria-hidden="true"></div>
     <div class="srvh-main">
       <div class="srv-hero-meta">
         <h1 id="srv-hero-name">${renderMinecraftTextHtml(panelName, { allowNewlines: false })}</h1>
@@ -5656,7 +5656,7 @@ const V = {
             const srvLogoUrl = (s.icon_url && String(s.icon_url).trim()) ? s.icon_url : defaultSrvIcon;
             return `
             <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
-              <div class="vm-dash-row-bg" ${coverUrl && coverUrl !== MINECRAFT_COVER_URL ? `style="background-image: url('${esc(coverUrl)}');"` : ''} aria-hidden="true"></div>
+              <div class="vm-dash-row-bg" ${coverUrl ? `style="background-image: url('${esc(coverUrl)}');"` : ''} aria-hidden="true"></div>
               <div class="vm-dash-row-main">
                 <div class="srv-row-thumb" style="background-image: url('${esc(srvLogoUrl)}'), url('/static/img/default-server-icon.png'), url('/img/default-server-icon.png');"></div>
                 <div style="min-width: 0; flex: 1;">
@@ -5697,7 +5697,7 @@ const V = {
 
           return `
           <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card ${dashVm === 'icons' ? 'vm-dash-icon' : ''}" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
-            <div class="srv-card-banner ${coverUrl && coverUrl !== MINECRAFT_COVER_URL ? 'has-brand-art' : ''}" ${coverUrl && coverUrl !== MINECRAFT_COVER_URL ? `style="background-image: url('${esc(coverUrl)}');"` : ''}>
+            <div class="srv-card-banner ${coverUrl ? 'has-brand-art' : ''}" ${coverUrl ? `style="background-image: url('${esc(coverUrl)}');"` : ''}>
               <div class="srv-card-badges-left">
                 <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:6px;">${engBadgeIcon} <span>${esc(coreLabel)}</span></span>
               </div>
@@ -7626,7 +7626,7 @@ const V = {
           </div>
         </div>
 
-        <div class="card tw" style="margin-bottom:18px;">
+        <div class="card tw np-admin-info-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx);">System Optimization &amp; Garbage Collection</h2>
@@ -7654,7 +7654,7 @@ const V = {
           </div>
         </div>
 
-        <div class="card tw" style="margin-bottom:18px;">
+        <div class="card tw np-admin-info-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx); display:flex; align-items:center; gap:8px;">
@@ -7719,7 +7719,7 @@ const V = {
           </div>
         </div>
 
-        <div class="card tw" style="margin-bottom:18px;">
+        <div class="card tw np-admin-info-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:10px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx);">Local Java Runtimes (25, 21, 17 &amp; 8)</h2>
@@ -7898,7 +7898,7 @@ const V = {
     } else if (t === 2) {
       const admSrvVm = getViewMode('admin_servers', 'list');
       content = `
-        <div class="card tw" style="margin-bottom:18px;">
+        <div class="card tw np-admin-cluster-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx);">All Cluster Servers (${S.servers.length})</h2>
@@ -7912,7 +7912,7 @@ const V = {
             </div>
           </div>
           ${admSrvVm === 'list' ? `
-          <table>
+          <div class="np-table-scroll" role="region" aria-label="Cluster servers" tabindex="0"><table class="np-admin-server-table">
             <thead><tr><th>Server</th><th>Owner</th><th>Node</th><th>Port</th><th>Engine</th><th>Resource Limits</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>
             <tbody>
               ${S.servers.length ? S.servers.map((s, idx) => {
@@ -7927,7 +7927,7 @@ const V = {
                 const diskLabel = s.disk_limit_mb > 0 ? (s.disk_limit_mb >= 1024 ? `${(s.disk_limit_mb / 1024).toFixed(1)} GB` : `${s.disk_limit_mb} MB`) : '∞ Disk';
                 return `
                 <tr>
-                  <td><b>${esc(s.name)}</b> <span class="mono mu" style="font-size:11px;">(${esc(s.id)})</span></td>
+                  <td><b>${esc(s.name)}</b><span class="mono mu np-server-id" style="font-size:11px;">${esc(s.id)}</span></td>
                   <td><span class="chip" style="font-size:11px; display:inline-flex; align-items:center; gap:4px;">${ic('user', 11)} ${esc(ownerLabel)}</span></td>
                   <td><span class="chip srv-node-badge">${esc(nodeName)}</span></td>
                   <td class="mono">${s.port}</td>
@@ -7935,7 +7935,7 @@ const V = {
                   <td><span class="mono mu" style="font-size:11.5px;">${(getServerMaxRamMB(s)/1024).toFixed(1)}G RAM &bull; ${cpuLabel} &bull; ${diskLabel}</span></td>
                   <td><span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span></td>
                   <td style="text-align:right">
-                    <div class="row" style="justify-content:flex-end; gap:6px;">
+                    <div class="np-server-actions">
                       <a href="${esc(srvUrl)}" class="btn sm" style="text-decoration:none;" onclick="return handleServerCardClick(event, ${idx}, 'con')">Manage</a>
                       <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openAdminServerSettingsModal(this.dataset.srvId, this.dataset.nodeId)" title="Edit Limits & Ownership">${ic('sliders', 12)} Limits &amp; Owner</button>
                       <button class="btn sm" data-srv-id="${esc(s.id)}" data-node-id="${esc(nid)}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">${ic('refresh', 12)} Reinstall</button>
@@ -7945,7 +7945,7 @@ const V = {
                 </tr>`;
               }).join('') : '<tr><td colspan="8" class="mu" style="text-align:center; padding:24px;">No server instances deployed yet.</td></tr>'}
             </tbody>
-          </table>` : `
+          </table></div>` : `
           <div class="${admSrvVm === 'icons' ? 'vm-icons-grid wide' : 'vm-tiles-grid'}">
             ${S.servers.length ? S.servers.map((s, idx) => {
               const nid = s.node_id || 'local';
@@ -8185,12 +8185,12 @@ const V = {
             </div>
 
             <div style="margin-top: 18px;">
-              <div class="row sb" style="margin-bottom: 10px;">
+              <div class="row sb" style="margin-bottom: 10px; flex-wrap:wrap; gap:8px;">
                 <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted);">Media &amp; Artwork Assets (Upload or URL)</div>
                 <span class="mu" style="font-size: 11px;">PNG, JPG, WebP, SVG, ICO, GIF (up to 12 MB)</span>
               </div>
               <input type="file" id="brand-file-input" accept="image/*,.ico,.svg" style="display:none" onchange="handleBrandingFileSelect(this)">
-              <div class="grid g2">
+              <div class="brand-media-grid">
                 ${[
                   ['logo_url', 'Sidebar Logo (blank = 3D Cube)', 'https://example.com/logo.png', '/favicon.svg'],
                   ['favicon_url', 'Browser Favicon (syncs tab icon)', 'https://example.com/favicon.png', '/favicon.svg'],
@@ -8202,15 +8202,15 @@ const V = {
                 ].map(([field, label, ph, fallbackThumb]) => {
                   const curVal = draft[field] || '';
                   const thumbSrc = curVal || fallbackThumb;
-                  return `<label class="f" style="margin-bottom: 0;">
-                    <span>${label}</span>
+                  return `<div class="f brand-media-field" style="margin-bottom: 0;">
+                    <label for="brand-media-${field}">${label}</label>
                     <div class="brand-upload-row">
                       <img class="brand-thumb-mini" data-brand-thumb="${field}" src="${esc(thumbSrc)}" alt="" onerror="this.src='/favicon.svg'">
-                      <input type="text" data-brand-media="${field}" value="${esc(curVal)}" oninput="onBrandInputChange('${field}', this.value)" placeholder="${esc(ph)}">
+                      <input id="brand-media-${field}" type="text" data-brand-media="${field}" value="${esc(curVal)}" oninput="onBrandInputChange('${field}', this.value)" placeholder="${esc(ph)}">
                       <button type="button" class="btn sm" data-upload-btn="${field}" onclick="triggerBrandingUpload('${field}', this)" title="Upload local image file">${ic('upload', 12)} Upload</button>
-                      <button type="button" class="btn sm" onclick="clearBrandingMedia('${field}')" title="Reset to default">&times;</button>
+                      <button type="button" class="btn sm" onclick="clearBrandingMedia('${field}')" title="Reset to default" aria-label="Reset ${esc(label)}">&times;</button>
                     </div>
-                  </label>`;
+                  </div>`;
                 }).join('')}
               </div>
             </div>
@@ -8889,7 +8889,7 @@ function navHtml() {
 
     <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
       ${av(34)}
-      <span class="who">
+      <span class="who" title="${esc(S.acct.em || S.user?.email || '')}">
         <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
         <span class="mu pv">${esc(S.acct.em || S.user?.email || 'Administrator')}</span>
       </span>
@@ -8944,7 +8944,7 @@ function navHtml() {
 
     <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
       ${av(34)}
-      <span class="who">
+      <span class="who" title="${esc(S.acct.em || S.user?.email || '')}">
         <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
         <span class="mu pv">${esc(S.acct.em || S.user?.email || (S.user?.role === 'admin' ? 'Administrator' : 'Standard User'))}</span>
       </span>
@@ -8993,7 +8993,7 @@ function navHtml() {
 
   <a class="chip2 ${S.view === 'acc' ? 'on' : ''}" href="${esc(accHref)}" onclick="return handleNavClick(event, 'acc')" aria-label="Account Settings" ${S.view === 'acc' ? 'aria-current="page"' : ''}>
     ${av(34)}
-    <span class="who">
+    <span class="who" title="${esc(S.acct.em || S.user?.email || '')}">
       <b>${esc(S.acct.fn ? (S.acct.fn + ' ' + (S.acct.ln || '')) : (S.acct.un || S.user?.username || 'Account'))}</b>
       <span class="mu pv">${esc(S.acct.em || S.user?.email || (S.user?.role === 'admin' ? 'Administrator' : 'Standard User'))}</span>
     </span>
@@ -10398,14 +10398,16 @@ async function promptNewFolder() {
 function renderFileBulkBarHtml() {
   const count = S.selectedFiles ? S.selectedFiles.size : 0;
   if (count <= 0) return '';
+  const deleting = Boolean(QOL.bulkDelete && sameQolServer(QOL.bulkDelete.server, curServer()));
+  const disabled = deleting ? 'disabled' : '';
   return `<div class="bulk-action-bar">
-    <span style="font-weight: 600; font-size: 13.5px; color: #fff;">${count} item${count > 1 ? 's' : ''} selected</span>
+    <span style="font-weight: 600; font-size: 13.5px; color: var(--tx);">${count} item${count > 1 ? 's' : ''} selected</span>
     <div class="row" style="gap: 8px;">
-      <button class="btn sm" onclick="openMoveFilesModal()">${ic('move', 14)} Move</button>
-      <button class="btn sm" onclick="openCompressFilesModal()">${ic('archive', 14)} Archive</button>
-      ${Array.from(S.selectedFiles).some(p => isArchiveFile(p)) ? `<button class="btn sm" onclick="unzipSelectedArchive()">${ic('package', 14)} Extract</button>` : ''}
-      <button class="btn sm dg" onclick="deleteSelectedFiles()">${ic('trash', 14)} Delete Selected</button>
-      <button class="btn sm" onclick="deselectAllFiles()">Deselect</button>
+      <button class="btn sm" ${disabled} onclick="openMoveFilesModal()">${ic('move', 14)} Move</button>
+      <button class="btn sm" ${disabled} onclick="openCompressFilesModal()">${ic('archive', 14)} Archive</button>
+      ${Array.from(S.selectedFiles).some(p => isArchiveFile(p)) ? `<button class="btn sm" ${disabled} onclick="unzipSelectedArchive()">${ic('package', 14)} Extract</button>` : ''}
+      <button class="btn sm dg" ${disabled} aria-busy="${deleting}" onclick="deleteSelectedFiles()">${ic('trash', 14)} ${deleting ? 'Deleting…' : 'Delete Selected'}</button>
+      <button class="btn sm" ${disabled} onclick="deselectAllFiles()">Deselect</button>
     </div>
   </div>`;
 }
@@ -10473,48 +10475,57 @@ function deselectAllFiles() {
 }
 
 async function deleteSelectedFiles() {
-  const count = S.selectedFiles.size;
-  if (count === 0) return;
-  const ok = await uiConfirm({
-    title: 'Delete Selected Items',
-    message: `Are you sure you want to permanently delete <b>${count}</b> selected item${count > 1 ? 's' : ''}? This action cannot be undone.`,
-    confirmText: `Delete ${count} Item${count > 1 ? 's' : ''}`,
-    cancelText: 'Cancel',
-    isDanger: true
-  });
-  if (!ok) return;
-
   const srv = curServer();
-  if (!srv) return;
-
-  toast(`Deleting ${count} items...`);
-  const paths = Array.from(S.selectedFiles);
-  let failed = 0;
-  // Batch deletions to avoid rate-limiting (5 at a time, 350 ms gap between batches)
-  const BATCH = 5;
-  for (let b = 0; b < paths.length; b += BATCH) {
-    const chunk = paths.slice(b, b + BATCH);
-    await Promise.all(chunk.map(async path => {
-      try {
-        await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`), { method: 'DELETE' });
-      } catch (e) {
-        failed++;
-      }
-    }));
-    if (b + BATCH < paths.length) await new Promise(r => setTimeout(r, 350));
-  }
-  S.selectedFiles.clear();
-  if (failed > 0) {
-    toast(`Deleted ${count - failed} items (${failed} failed)`, 'bad');
-    uiAlert({
-      title: 'Bulk Delete Incomplete',
-      message: `Deleted ${count - failed} items. <b>${failed} item(s) could not be deleted</b> (files may be locked or permission denied).`,
-      type: 'error'
+  const selection = S.selectedFiles;
+  const paths = Array.from(selection || []);
+  const directory = S.currentDir;
+  if (!srv || !paths.length || QOL.bulkDelete) return;
+  QOL.bulkDelete = { server: srv };
+  let deleted = 0;
+  const failures = [];
+  try {
+    const ok = await uiConfirm({
+      title: 'Delete Selected Items',
+      message: `Permanently delete <b>${paths.length}</b> selected item${paths.length > 1 ? 's' : ''} from <b>${esc(srv.name)}</b>? This action cannot be undone.`,
+      confirmText: `Delete ${paths.length} Item${paths.length > 1 ? 's' : ''}`,
+      cancelText: 'Cancel', isDanger: true
     });
-  } else {
-    toast(`Deleted ${count} items`, 'ok');
+    if (!ok || !sameQolServer(srv, curServer())) return;
+    syncFileSelectionUI();
+    toast(`Deleting ${paths.length} items…`);
+    // A bulk request costs one rate-limit token, rather than one per file.
+    // Pace unusually large selections so chunks don't create another burst.
+    for (let offset = 0; offset < paths.length; offset += 1000) {
+      const chunk = paths.slice(offset, offset + 1000);
+      try {
+        const result = await api(srvApiPath(srv, '/files/delete-bulk'), {
+          method: 'POST', body: JSON.stringify({ paths: chunk }), suppressToast: true
+        });
+        if (!Array.isArray(result.deleted) || !Array.isArray(result.failed)) throw new Error('Invalid bulk-delete response. Update the panel and worker node together.');
+        const completed = new Set(result.deleted);
+        for (const path of chunk) {
+          if (completed.has(path)) { selection.delete(path); deleted++; }
+          else failures.push(result.failed.find(item => item.path === path) || { path, error: 'Deletion was not confirmed by the server.' });
+        }
+      } catch (err) {
+        failures.push({ path: '', error: err.message || 'Bulk deletion failed.' });
+        break; // Retain unprocessed selections; never retry destructive requests blindly.
+      }
+      if (offset + 1000 < paths.length) await new Promise(resolve => setTimeout(resolve, 1100));
+    }
+    const remaining = paths.length - deleted;
+    if (remaining) {
+      toast(`Deleted ${deleted} of ${paths.length} items. Remaining items are still selected.`, 'bad');
+      if (sameQolServer(srv, curServer())) await uiAlert({
+        title: 'Bulk Delete Incomplete', type: 'error',
+        message: `<p>${remaining} item(s) remain selected for retry.</p><ul>${failures.slice(0, 8).map(item => `<li>${item.path ? `<b>${esc(item.path)}</b>: ` : ''}${esc(item.error)}</li>`).join('')}</ul>`
+      });
+    } else toast(`Deleted ${deleted} items`, 'ok');
+    if (sameQolServer(srv, curServer()) && S.currentDir === directory) await loadFileList(directory);
+  } finally {
+    QOL.bulkDelete = null;
+    if (sameQolServer(srv, curServer())) syncFileSelectionUI();
   }
-  loadFileList(S.currentDir);
 }
 
 function copyFilePath(path) {

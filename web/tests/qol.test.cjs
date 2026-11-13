@@ -187,3 +187,76 @@ test('late failed schedule requests cannot clear another server list or loading 
   assert.equal(c.S.serverSchedules[0].id, 'b-schedule');
   assert.equal(c.S.loading.schedules, true);
 });
+
+function bulkDeleteSetup(paths) {
+  const state = setup(), { c } = state;
+  const start = app.indexOf('async function deleteSelectedFiles('), end = app.indexOf('\nfunction copyFilePath', start);
+  vm.runInContext(app.slice(start, end), c);
+  c.S.selectedFiles = new Set(paths);
+  c.syncFileSelectionUI = () => {};
+  c.uiAlert = async () => {};
+  return state;
+}
+test('bulk deletion uses one request for 100 files instead of a rate-limit burst', async () => {
+  const paths = Array.from({ length: 100 }, (_, i) => `file-${i}.txt`);
+  const { c } = bulkDeleteSetup(paths);
+  const requests = [];
+  c.api = async (url, options) => { requests.push({ url, options }); return { deleted: JSON.parse(options.body).paths, failed: [] }; };
+  await c.deleteSelectedFiles();
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/nodes/local/servers/a/files/delete-bulk');
+  assert.equal(requests[0].options.method, 'POST');
+  assert.equal(c.S.selectedFiles.size, 0);
+  assert.equal(c.qol.bulkDelete, null);
+});
+test('bulk delete preserves failed files and reports partial completion', async () => {
+  const { c } = bulkDeleteSetup(['good.txt', 'locked.txt']);
+  let message;
+  c.api = async () => ({ deleted: ['good.txt'], failed: [{ path: 'locked.txt', error: 'Permission denied' }] });
+  c.uiAlert = async options => { message = options.message; };
+  await c.deleteSelectedFiles();
+  assert.deepEqual([...c.S.selectedFiles], ['locked.txt']);
+  assert.match(message, /Permission denied/);
+});
+test('bulk-delete request failures keep selections and never fall back to per-file requests', async () => {
+  const { c } = bulkDeleteSetup(['one', 'two']);
+  let requests = 0;
+  c.api = async () => { requests++; throw Error('HTTP 429'); };
+  await c.deleteSelectedFiles();
+  assert.equal(requests, 1); assert.equal(c.S.selectedFiles.size, 2);
+  assert.equal(c.qol.bulkDelete, null);
+});
+test('duplicate clicks cannot submit the same bulk deletion twice', async () => {
+  const { c } = bulkDeleteSetup(['one']);
+  let confirm, requests = 0;
+  c.uiConfirm = () => new Promise(resolve => { confirm = resolve; });
+  c.api = async () => { requests++; return { deleted: ['one'], failed: [] }; };
+  const first = c.deleteSelectedFiles();
+  await c.deleteSelectedFiles();
+  confirm(true); await first;
+  assert.equal(requests, 1);
+});
+test('bulk delete does not clear or refresh another server after navigation', async () => {
+  const { c } = bulkDeleteSetup(['one']);
+  const originalSelection = c.S.selectedFiles;
+  let finish, refreshed = false;
+  c.api = () => new Promise(resolve => { finish = resolve; });
+  c.loadFileList = async () => { refreshed = true; };
+  const pending = c.deleteSelectedFiles(); await tick();
+  c.S.servers = [{ id: 'b', node_id: 'remote' }];
+  c.S.selectedFiles = new Set(['other-server-file']);
+  finish({ deleted: ['one'], failed: [] }); await pending;
+  assert.equal(originalSelection.size, 0);
+  assert.deepEqual([...c.S.selectedFiles], ['other-server-file']);
+  assert.equal(refreshed, false);
+});
+test('large bulk selections use bounded, paced chunks', async () => {
+  const paths = Array.from({ length: 1001 }, (_, i) => `file-${i}`);
+  const { c } = bulkDeleteSetup(paths);
+  const sizes = [], delays = [];
+  c.setTimeout = (callback, delay) => { delays.push(delay); callback(); };
+  c.api = async (url, options) => { const batch = JSON.parse(options.body).paths; sizes.push(batch.length); return { deleted: batch, failed: [] }; };
+  await c.deleteSelectedFiles();
+  assert.deepEqual(sizes, [1000, 1]); assert.deepEqual(delays, [1100]);
+  assert.equal(c.S.selectedFiles.size, 0);
+});

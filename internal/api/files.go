@@ -249,6 +249,82 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Deleted successfully"})
 }
 
+const (
+	maxBulkDeletePaths = 1000
+	maxBulkDeleteBody  = 1 << 20 // 1 MiB, including JSON and whitespace
+)
+
+type bulkDeleteFailure struct {
+	Path  string `json:"path"`
+	Error string `json:"error"`
+}
+
+// DeleteBulk validates the whole batch before removing anything. RemoveAll is
+// idempotent, so duplicates, missing paths and overlapping directories are safe.
+func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
+	serverID := getURLParam(r, "id")
+	var req struct {
+		Paths []string `json:"paths"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxBulkDeleteBody)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request (maximum body size 1 MiB): " + err.Error()})
+		return
+	}
+	if err := decoder.Decode(new(interface{})); err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Request must contain one JSON object and fit within 1 MiB"})
+		return
+	}
+	if len(req.Paths) == 0 || len(req.Paths) > maxBulkDeletePaths {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "paths must contain between 1 and 1000 file or directory paths"})
+		return
+	}
+
+	fullPaths := make([]string, len(req.Paths))
+	for i, reqPath := range req.Paths {
+		// Reject traversal above the virtual root rather than silently clamping
+		// it to another deletion target. Leading slashes remain server-relative.
+		depth := 0
+		for _, part := range strings.Split(strings.ReplaceAll(reqPath, "\\", "/"), "/") {
+			switch part {
+			case "", ".":
+			case "..":
+				depth--
+			default:
+				depth++
+			}
+			if depth < 0 {
+				break
+			}
+		}
+		if depth < 0 || strings.ContainsRune(reqPath, '\x00') {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid path %q: traversal outside the server or NUL characters are not allowed", reqPath)})
+			return
+		}
+		fullPath, err := h.destructivePath(serverID, reqPath)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid path %q: %s", reqPath, err)})
+			return
+		}
+		fullPaths[i] = fullPath
+	}
+
+	result := struct {
+		Deleted []string            `json:"deleted"`
+		Failed  []bulkDeleteFailure `json:"failed"`
+	}{Deleted: make([]string, 0, len(req.Paths)), Failed: make([]bulkDeleteFailure, 0)}
+	for i, fullPath := range fullPaths {
+		if err := os.RemoveAll(fullPath); err != nil {
+			result.Failed = append(result.Failed, bulkDeleteFailure{Path: req.Paths[i], Error: err.Error()})
+			continue
+		}
+		result.Deleted = append(result.Deleted, req.Paths[i])
+	}
+	logAudit(h.db, r, "file_delete_bulk", fmt.Sprintf("Bulk delete on %s: %d requested, %d deleted, %d failed", auditServerLabel(h.db, serverID), len(req.Paths), len(result.Deleted), len(result.Failed)))
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
 	targetDir := r.URL.Query().Get("path")
