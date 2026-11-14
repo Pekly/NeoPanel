@@ -4697,7 +4697,6 @@ const CMDS = [
 ];
 
 const CORES = [
-  ['Steel', 'Native server • TOML configuration • No Java plugins/mods'],
   ['Paper', 'High performance, plugin friendly'],
   ['Purpur', 'Paper fork with extreme configurability'],
   ['Leaf', 'Hyper-optimized Paper fork for large SMPs'],
@@ -4708,7 +4707,8 @@ const CORES = [
   ['Vanilla', 'Standard Mojang vanilla server'],
   ['Velocity', 'Modern high-throughput proxy'],
   ['Waterfall', 'PaperMC BungeeCord proxy fork'],
-  ['BungeeCord', 'Classic multi-server proxy']
+  ['BungeeCord', 'Classic multi-server proxy'],
+  ['Steel', 'Experimental native server • TOML configuration • No Java plugins/mods']
 ];
 
 const FAM = [
@@ -13642,7 +13642,6 @@ function openReinstallModal(srvId, nodeId = null) {
             <span>Minecraft Engine / Server Software</span>
           </span>
           <select id="reinst-software" style="height:38px;" onchange="onReinstallEngineChange(this.value)">
-            <option value="steel" ${curType === 'steel' ? 'selected' : ''}>Steel (Native executable, no Java)</option>
             <option value="paper" ${curType === 'paper' ? 'selected' : ''}>Paper (High performance, Bukkit/Spigot plugins)</option>
             <option value="purpur" ${curType === 'purpur' ? 'selected' : ''}>Purpur (Ultra-configurable Paper fork)</option>
             <option value="leaf" ${curType === 'leaf' || curType === 'leafmc' ? 'selected' : ''}>LeafMC (Hyper-optimized Paper fork)</option>
@@ -13654,6 +13653,7 @@ function openReinstallModal(srvId, nodeId = null) {
             <option value="velocity" ${curType === 'velocity' ? 'selected' : ''}>Velocity (High-performance modern proxy)</option>
             <option value="waterfall" ${curType === 'waterfall' ? 'selected' : ''}>Waterfall (PaperMC BungeeCord proxy fork)</option>
             <option value="bungeecord" ${curType === 'bungeecord' ? 'selected' : ''}>BungeeCord (Classic multi-server proxy)</option>
+            <option value="steel" ${curType === 'steel' ? 'selected' : ''}>Steel (Experimental native server, no Java)</option>
           </select>
         </label>
 

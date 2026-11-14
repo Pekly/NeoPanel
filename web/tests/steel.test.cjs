@@ -67,6 +67,20 @@ test('Steel uses a local official PNG and distinct engine identity', () => {
   assert.equal(c.getRecommendedJavaForMcVersion('1.21.11', 'paper'), '21');
 });
 
+test('experimental Steel stays last while Paper remains first and the creation default', () => {
+  const { c } = setup();
+  const engines = Array.from(vm.runInContext('CORES.map(([name]) => name)', c));
+  assert.equal(engines[0], 'Paper');
+  assert.equal(engines.at(-1), 'Steel');
+  assert.match(vm.runInContext('CORES.find(([name]) => name === "Steel")[1]', c), /Experimental/);
+  const reinstall = slice('<select id="reinst-software"', '</select>');
+  const options = Array.from(reinstall.matchAll(/<option value="([^"]+)"/g), match => match[1]);
+  assert.equal(options[0], 'paper');
+  assert.equal(options.at(-1), 'steel');
+  assert.match(reinstall, /Steel \(Experimental/);
+  assert.ok(slice('<select id="cs-type"', '</select>').includes("slug === 'paper' ? 'selected' : ''"));
+});
+
 test('Steel catalog loads release tags only and keeps latest on failures', async () => {
   const { c, calls, notices } = setup();
   assert.deepEqual(Array.from(c.getAllMcVersions('steel')), ['latest']);
