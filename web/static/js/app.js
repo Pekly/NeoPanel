@@ -1400,7 +1400,7 @@ function renderViewModeToggle(scope, fallback = 'list') {
   ];
   return `<div class="vm-toggle" role="group" aria-label="View layout">
     ${opts.map(([m, icon, lbl]) => `
-      <button type="button" class="vm-btn ${cur === m ? 'on' : ''}" onclick="setViewMode('${esc(scope)}', '${m}')" title="${lbl} view" aria-pressed="${cur === m}">
+      <button type="button" class="vm-btn ${cur === m ? 'on' : ''}" data-scope="${esc(scope)}" onclick="setViewMode(this.dataset.scope, '${m}')" title="${lbl} view" aria-pressed="${cur === m}">
         ${ic(icon, 13)}
         <span>${lbl}</span>
       </button>
@@ -3268,8 +3268,8 @@ async function openSQLStudioModal(dbId) {
           </div>
         </div>
         <div class="row" style="gap:8px;">
-          <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(db.id)}', 'sql')">${ic('download', 13)} Export .sql</button>
-          <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(db.id)}', 'db')">${ic('download', 13)} Export .db</button>
+          <button type="button" class="btn sm" data-id="${esc(db.id)}" onclick="exportServerDatabase(this.dataset.id, 'sql')">${ic('download', 13)} Export .sql</button>
+          <button type="button" class="btn sm" data-id="${esc(db.id)}" onclick="exportServerDatabase(this.dataset.id, 'db')">${ic('download', 13)} Export .db</button>
           <button type="button" class="btn sm" onclick="closeModal()" aria-label="Close SQL Studio">&times;</button>
         </div>
       </div>
@@ -4027,15 +4027,9 @@ function formatLogLine(raw) {
   raw = cleanConsoleOutput(raw, isSteelEngine(curServer()?.type));
   if (!raw) return '';
 
-  // 2. If already formatted HTML command row, preserve directly
-  if (typeof raw === 'string') {
-    if (raw.startsWith('<div class="con-cmd-row"')) {
-      return raw;
-    }
-    if (raw.startsWith('<span class="c">&gt;') || raw.startsWith('&gt; ') || raw.startsWith('> ')) {
-      const cleanCmd = raw.replace(/<[^>]+>/g, '').replace(/^[>&;gt\s]+/, '').trim();
-      return formatCommandLine(cleanCmd);
-    }
+  // Only plain command text gets command styling; remote HTML is never trusted.
+  if (typeof raw === 'string' && raw.startsWith('> ')) {
+    return formatCommandLine(raw.slice(2));
   }
 
   // 3. Automatically detect if server is ready
@@ -4210,8 +4204,15 @@ function appendLogToEl(el, html) {
 }
 
 function addLog(line) {
-  if (!line) return;
-  const html = formatLogLine(line);
+  appendFormattedLog(formatLogLine(line));
+}
+
+// Local commands enter through an explicit text-only formatter, never an HTML sentinel.
+function addCommandLog(cmd) {
+  appendFormattedLog(formatCommandLine(cmd));
+}
+
+function appendFormattedLog(html) {
   if (!html) return;
 
   // Prevent consecutive duplicate lines (e.g. concurrent streams or duplicate frames)
@@ -4704,7 +4705,7 @@ async function refreshServerStatus() {
 async function runCmd(cmd) {
   if (!hasServerPermission('console.command')) { toast('Access restricted: console.command required', 'bad'); return; }
   if (!cmd) return;
-  addLog(formatCommandLine(cmd));
+  addCommandLog(cmd);
   const srv = curServer();
   if (!srv) return;
 
@@ -5035,7 +5036,7 @@ function renderJavaAvailabilityStrip(nodeId = null) {
       }
       return `<span class="java-status-chip is-missing" title="Not detected in /usr/lib/jvm">
         <span class="java-status-dot"></span>Java ${esc(item.version)} Missing
-        ${canInstall ? `<button type="button" class="btn sm pr java-install-inline ${busy ? 'is-loading' : ''}" onclick="installJavaRuntime('${esc(item.version)}', this, '${esc(nid)}')" ${busy || S.installingJava ? 'disabled' : ''}>${busy ? '<span class="np-spinner-sm"></span> Installing...' : 'Install'}</button>` : ''}
+        ${canInstall ? `<button type="button" class="btn sm pr java-install-inline ${busy ? 'is-loading' : ''}" data-version="${esc(item.version)}" data-node="${esc(nid)}" onclick="installJavaRuntime(this.dataset.version, this, this.dataset.node)" ${busy || S.installingJava ? 'disabled' : ''}>${busy ? '<span class="np-spinner-sm"></span> Installing...' : 'Install'}</button>` : ''}
       </span>`;
     }).join('')}
   </div>`;
@@ -6123,10 +6124,10 @@ const V = {
               </div>
               <div class="mu mono" style="font-size: 11.5px;">${esc(p.t || 'Online')} &bull; <span class="pv">${esc(p.ip || '—')}</span></div>
               <div class="vm-item-foot">
-                <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(pName)}')">${p.op ? 'Deop' : 'Op'}</button>
+                <button class="btn sm" data-name="${esc(pName)}" onclick="playerAction('${p.op ? 'deop' : 'op'}', this.dataset.name)">${p.op ? 'Deop' : 'Op'}</button>
                 <div class="row" style="gap: 6px;">
-                  <button class="btn sm" onclick="playerAction('kick', '${esc(pName)}')">Kick</button>
-                  <button class="btn sm dg" onclick="playerAction('ban', '${esc(pName)}')">Ban</button>
+                  <button class="btn sm" data-name="${esc(pName)}" onclick="playerAction('kick', this.dataset.name)">Kick</button>
+                  <button class="btn sm dg" data-name="${esc(pName)}" onclick="playerAction('ban', this.dataset.name)">Ban</button>
                 </div>
               </div>
             </div>`;
@@ -6146,9 +6147,9 @@ const V = {
                 <td class="mono pv">${esc(p.ip || '—')}</td>
                 <td style="text-align:right">
                   <div class="row" style="justify-content:flex-end">
-                    <button class="btn sm" onclick="playerAction('${p.op ? 'deop' : 'op'}', '${esc(pName)}')">${p.op ? 'Deop' : 'Op'}</button>
-                    <button class="btn sm" onclick="playerAction('kick', '${esc(pName)}')">Kick</button>
-                    <button class="btn sm dg" onclick="playerAction('ban', '${esc(pName)}')">Ban</button>
+                    <button class="btn sm" data-name="${esc(pName)}" onclick="playerAction('${p.op ? 'deop' : 'op'}', this.dataset.name)">${p.op ? 'Deop' : 'Op'}</button>
+                    <button class="btn sm" data-name="${esc(pName)}" onclick="playerAction('kick', this.dataset.name)">Kick</button>
+                    <button class="btn sm dg" data-name="${esc(pName)}" onclick="playerAction('ban', this.dataset.name)">Ban</button>
                   </div>
                 </td>
               </tr>`;
@@ -6178,7 +6179,7 @@ const V = {
               <div class="mu mono" style="font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${esc(uuid || '')}">${esc(uuid || '—')}</div>
               <div class="vm-item-foot">
                 <span class="chip">Whitelisted</span>
-                <button class="btn sm dg" onclick="playerAction('whitelist_remove', '${esc(name)}')">Remove</button>
+                <button class="btn sm dg" data-name="${esc(name)}" onclick="playerAction('whitelist_remove', this.dataset.name)">Remove</button>
               </div>
             </div>`;
           }).join('')}
@@ -6198,7 +6199,7 @@ const V = {
                 <td>${head(name)}<b>${esc(name)}</b></td>
                 <td class="mono mu">${uuid || '—'}</td>
                 <td style="text-align:right">
-                  <button class="btn sm dg" onclick="playerAction('whitelist_remove', '${esc(name)}')">Remove</button>
+                  <button class="btn sm dg" data-name="${esc(name)}" onclick="playerAction('whitelist_remove', this.dataset.name)">Remove</button>
                 </td>
               </tr>`;
             }).join('')}
@@ -6219,7 +6220,7 @@ const V = {
               <div class="vm-item-sub">${esc(b.reason || 'Banned by operator')}</div>
               <div class="vm-item-foot">
                 <span class="badge offline">Banned</span>
-                <button class="btn sm" onclick="playerAction('pardon', '${esc(b.name)}')">Pardon</button>
+                <button class="btn sm" data-name="${esc(b.name)}" onclick="playerAction('pardon', this.dataset.name)">Pardon</button>
               </div>
             </div>
           `).join('')}
@@ -6233,7 +6234,7 @@ const V = {
                 <td>${head(b.name)}<b>${esc(b.name)}</b></td>
                 <td class="mu">${esc(b.reason || 'Banned by operator')}</td>
                 <td style="text-align:right">
-                  <button class="btn sm" onclick="playerAction('pardon', '${esc(b.name)}')">Pardon</button>
+                  <button class="btn sm" data-name="${esc(b.name)}" onclick="playerAction('pardon', this.dataset.name)">Pardon</button>
                 </td>
               </tr>
             `).join('')}
@@ -6274,7 +6275,7 @@ const V = {
             <span id="editor-save-status" class="mu" role="status" style="font-size:12px;"></span>
           </div>
           <div class="row" style="gap: 8px;">
-            <button class="btn sm" onclick="downloadFileItem('${esc(S.editingFile)}')">${ic('download', 14)} Download</button>
+            <button class="btn sm" data-path="${esc(S.editingFile)}" onclick="downloadFileItem(this.dataset.path)">${ic('download', 14)} Download</button>
             <button id="editor-save-btn" class="btn sm pr" onclick="saveActiveFile()" title="Ctrl/Cmd + S">${ic('download', 14)} Save File</button>
           </div>
         </div>
@@ -6338,15 +6339,15 @@ const V = {
 
               return `
               <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
-                  onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
+                  onclick="${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}"
                   oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <td class="file-select-cell" onclick="event.stopPropagation();">
                   <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''}
-                         onchange="toggleFileSelect('${esc(itemPath)}', this.checked)"
+                         data-path="${esc(itemPath)}" onchange="toggleFileSelect(this.dataset.path, this.checked)"
                          aria-label="Select ${esc(item.name)}">
                 </td>
                 <td class="file-icon-cell">${icon}</td>
-                <td class="file-name-cell" style="font-weight: 500; color: var(--tx);"><button type="button" class="np-file-open" onclick="event.stopPropagation(); ${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}">${esc(item.name)}</button></td>
+                <td class="file-name-cell" style="font-weight: 500; color: var(--tx);"><button type="button" class="np-file-open" data-name="${esc(item.name)}" onclick="event.stopPropagation(); ${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}">${esc(item.name)}</button></td>
                 <td class="mu mono" style="font-size: 12px; width: 90px;">${esc(extLabel)}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 130px;">${sizeStr}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 170px;">${dateStr}</td>
@@ -6389,11 +6390,11 @@ const V = {
               const isSelected = S.selectedFiles.has(itemPath);
               return `
               <div class="vm-icon-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
-                   onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
+                   onclick="${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}"
                    oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <div class="vm-file-head" onclick="event.stopPropagation();">
                   <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''}
-                         onchange="toggleFileSelect('${esc(itemPath)}', this.checked)"
+                         data-path="${esc(itemPath)}" onchange="toggleFileSelect(this.dataset.path, this.checked)"
                          aria-label="Select ${esc(item.name)}">
                   <div style="position: relative;">
                     <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 2px 6px; border: 0; background: transparent; font-size: 16px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
@@ -6440,12 +6441,12 @@ const V = {
               const isSelected = S.selectedFiles.has(itemPath);
               return `
               <div class="vm-tile-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
-                   onclick="${isDir ? `browseFolder('${esc(item.name)}')` : `openFile('${esc(item.name)}')`}"
+                   onclick="${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}"
                    oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <div class="vm-tile-file-row">
                   <div onclick="event.stopPropagation();">
                     <input type="checkbox" class="file-chk" ${isSelected ? 'checked' : ''}
-                           onchange="toggleFileSelect('${esc(itemPath)}', this.checked)"
+                           data-path="${esc(itemPath)}" onchange="toggleFileSelect(this.dataset.path, this.checked)"
                            aria-label="Select ${esc(item.name)}">
                   </div>
                   ${fileListIconHtml(item, 'md', 18)}
@@ -6474,7 +6475,7 @@ const V = {
           ${pathParts.map((part, idx) => {
             const sub = pathParts.slice(0, idx + 1).join('/');
             const isLast = idx === pathParts.length - 1;
-            return `<span onclick="browseFolder('${sub}')" style="cursor: pointer; color: ${isLast ? 'var(--tx)' : 'var(--tx-muted)'};">${esc(part)} /</span>`;
+            return `<span data-path="${esc(sub)}" onclick="browseFolder(this.dataset.path)" style="cursor: pointer; color: ${isLast ? 'var(--tx)' : 'var(--tx-muted)'};">${esc(part)} /</span>`;
           }).join('')}
         </div>
 
@@ -6804,9 +6805,9 @@ const V = {
             </div>
             <div class="mu" style="font-size: 12px;">${esc(bDate)}</div>
             <div class="vm-item-foot">
-              <button class="btn sm" onclick="downloadBackup('${esc(bName)}')">${ic('download', 13)} Download</button>
+              <button class="btn sm" data-name="${esc(bName)}" onclick="downloadBackup(this.dataset.name)">${ic('download', 13)} Download</button>
               <button class="btn sm" data-backup-name="${esc(bName)}" onclick="restoreBackup(this.dataset.backupName, this)">${ic('refresh', 13)} Restore</button>
-              <button class="btn sm dg" onclick="deleteBackup('${esc(bName)}')">${ic('trash', 13)} Delete</button>
+              <button class="btn sm dg" data-name="${esc(bName)}" onclick="deleteBackup(this.dataset.name)">${ic('trash', 13)} Delete</button>
             </div>
           </div>`;
         }).join('')}
@@ -6822,9 +6823,9 @@ const V = {
               <td class="mu">${b.created_at ? new Date(b.created_at).toLocaleString() : b[2]}</td>
               <td style="text-align:right">
                 <div class="row" style="justify-content:flex-end">
-                  <button class="btn sm" onclick="downloadBackup('${esc(b.name || b[0])}')">${ic('download', 14)} Download</button>
+                  <button class="btn sm" data-name="${esc(b.name || b[0])}" onclick="downloadBackup(this.dataset.name)">${ic('download', 14)} Download</button>
                   <button class="btn sm" data-backup-name="${esc(b.name || b[0])}" onclick="restoreBackup(this.dataset.backupName, this)">${ic('refresh', 14)} Restore</button>
-                  <button class="btn sm dg" onclick="deleteBackup('${esc(b.name || b[0])}')">${ic('trash', 14)} Delete</button>
+                  <button class="btn sm dg" data-name="${esc(b.name || b[0])}" onclick="deleteBackup(this.dataset.name)">${ic('trash', 14)} Delete</button>
                 </div>
               </td>
             </tr>
@@ -6859,7 +6860,7 @@ const V = {
             </p>
           </div>
           <div class="row" style="gap: 8px;">
-            <button class="btn sm" onclick="loadServerSchedules('${esc(srv?.id || '')}')">${ic('refresh', 13)} Refresh</button>
+            <button class="btn sm" data-id="${esc(srv?.id || '')}" onclick="loadServerSchedules(this.dataset.id)">${ic('refresh', 13)} Refresh</button>
             <button class="btn pr sm" onclick="openScheduleModal()" style="height: 36px; padding: 0 16px;">
               ${ic('plus', 14)} Create Schedule
             </button>
@@ -6906,15 +6907,15 @@ const V = {
                     <td style="font-size:12px;" class="mu">${esc(formatScheduleUTC(sch.last_run_at || sch.last_run))}<br><b>${esc(sch.last_status || 'Never run')}</b>${sch.last_error ? `<div class="upload-error">${esc(sch.last_error)}</div>` : ''}</td>
                     <td>
                       <label class="sw" title="Toggle active status">
-                        <input type="checkbox" ${sch.is_active ? 'checked' : ''} onchange="toggleServerSchedule('${esc(sch.id)}', this.checked)">
+                        <input type="checkbox" ${sch.is_active ? 'checked' : ''} data-id="${esc(sch.id)}" onchange="toggleServerSchedule(this.dataset.id, this.checked)">
                         <i></i>
                       </label>
                     </td>
                     <td style="text-align: right;">
                       <div class="row" style="justify-content: flex-end; gap: 6px;">
-                        <button class="btn sm" ${sch.last_status === 'running' || sch.last_status === 'started' ? 'disabled' : ''} onclick="runScheduleNow('${esc(sch.id)}')" title="Run immediately once">${ic('play', 12)} Run Now</button>
-                        <button class="btn sm" onclick="openScheduleModal('${esc(sch.id)}')" title="Edit schedule settings">${ic('edit', 12)} Edit</button>
-                        <button class="btn sm dg" onclick="deleteServerSchedule('${esc(sch.id)}')" title="Delete schedule" aria-label="Delete schedule">${ic('trash', 12)}</button>
+                        <button class="btn sm" ${sch.last_status === 'running' || sch.last_status === 'started' ? 'disabled' : ''} data-id="${esc(sch.id)}" onclick="runScheduleNow(this.dataset.id)" title="Run immediately once">${ic('play', 12)} Run Now</button>
+                        <button class="btn sm" data-id="${esc(sch.id)}" onclick="openScheduleModal(this.dataset.id)" title="Edit schedule settings">${ic('edit', 12)} Edit</button>
+                        <button class="btn sm dg" data-id="${esc(sch.id)}" onclick="deleteServerSchedule(this.dataset.id)" title="Delete schedule" aria-label="Delete schedule">${ic('trash', 12)}</button>
                       </div>
                     </td>
                   </tr>`;
@@ -7074,16 +7075,16 @@ const V = {
               ${vm === 'tiles' ? `<div class="db-cred-row">
                 <span class="mu" style="font-size: 11px; width: 32px;">Pass</span>
                 <span class="db-secret-chip">${revealed ? esc(d.password || '') : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;'}</span>
-                <button type="button" class="btn-ico" onclick="toggleDbPasswordReveal('${esc(d.id)}')" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
+                <button type="button" class="btn-ico" data-id="${esc(d.id)}" onclick="toggleDbPasswordReveal(this.dataset.id)" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
                 <button type="button" class="btn-ico" data-val="${esc(d.password || '')}" onclick="copyDbText(this.dataset.val, 'Password')" title="Copy Password">${ic('copy', 12)}</button>
                 <button type="button" class="btn-ico" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="rotateDatabasePassword(this.dataset.id, this.dataset.name)" title="Rotate Password">${ic('key', 12)}</button>
               </div>` : ''}
             </div>
             <div class="vm-item-foot">
-              <button type="button" class="btn sm pr" onclick="openSQLStudioModal('${esc(d.id)}')">${ic('code', 13)} SQL Studio</button>
+              <button type="button" class="btn sm pr" data-id="${esc(d.id)}" onclick="openSQLStudioModal(this.dataset.id)">${ic('code', 13)} SQL Studio</button>
               <div class="row" style="gap: 4px;">
                 <button type="button" class="btn sm" data-val="${esc(jdbcUrl)}" onclick="copyDbText(this.dataset.val, 'JDBC URL')" title="Copy JDBC URL">JDBC</button>
-                <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'sql')" title="Download SQL Dump">.sql</button>
+                <button type="button" class="btn sm" data-id="${esc(d.id)}" onclick="exportServerDatabase(this.dataset.id, 'sql')" title="Download SQL Dump">.sql</button>
                 <button type="button" class="btn sm dg" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="deleteServerDatabase(this.dataset.id, this.dataset.name)" title="Delete Database">${ic('trash', 13)}</button>
               </div>
             </div>
@@ -7125,7 +7126,7 @@ const V = {
                     <div class="db-cred-row">
                       <span class="mu" style="font-size: 11px; width: 34px;">Pass</span>
                       <span class="db-secret-chip">${revealed ? esc(d.password || '') : '&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;'}</span>
-                      <button type="button" class="btn-ico" onclick="toggleDbPasswordReveal('${esc(d.id)}')" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
+                      <button type="button" class="btn-ico" data-id="${esc(d.id)}" onclick="toggleDbPasswordReveal(this.dataset.id)" title="${revealed ? 'Hide password' : 'Reveal password'}">${ic('eye', 12)}</button>
                       <button type="button" class="btn-ico" data-val="${esc(d.password || '')}" onclick="copyDbText(this.dataset.val, 'Password')" title="Copy Password">${ic('copy', 12)}</button>
                       <button type="button" class="btn-ico" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="rotateDatabasePassword(this.dataset.id, this.dataset.name)" title="Rotate Password">${ic('key', 12)}</button>
                     </div>
@@ -7143,9 +7144,9 @@ const V = {
                 </td>
                 <td style="text-align: right;">
                   <div class="row" style="justify-content: flex-end; gap: 6px; flex-wrap: wrap;">
-                    <button type="button" class="btn sm pr" onclick="openSQLStudioModal('${esc(d.id)}')">${ic('code', 13)} SQL Studio</button>
-                    <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'sql')" title="Download SQL Dump">${ic('download', 12)} .sql</button>
-                    <button type="button" class="btn sm" onclick="exportServerDatabase('${esc(d.id)}', 'db')" title="Download SQLite Binary">${ic('download', 12)} .db</button>
+                    <button type="button" class="btn sm pr" data-id="${esc(d.id)}" onclick="openSQLStudioModal(this.dataset.id)">${ic('code', 13)} SQL Studio</button>
+                    <button type="button" class="btn sm" data-id="${esc(d.id)}" onclick="exportServerDatabase(this.dataset.id, 'sql')" title="Download SQL Dump">${ic('download', 12)} .sql</button>
+                    <button type="button" class="btn sm" data-id="${esc(d.id)}" onclick="exportServerDatabase(this.dataset.id, 'db')" title="Download SQLite Binary">${ic('download', 12)} .db</button>
                     <button type="button" class="btn sm dg" data-id="${esc(d.id)}" data-name="${esc(d.name)}" onclick="deleteServerDatabase(this.dataset.id, this.dataset.name)" title="Delete Database">${ic('trash', 13)}</button>
                   </div>
                 </td>
@@ -7304,7 +7305,7 @@ const V = {
                 </td>
                 <td class="mono mu">${esc(rec.ttl || 300)}s</td>
                 <td style="text-align: right;">
-                  <button type="button" class="btn sm" data-val="${esc(rec.value)}" onclick="copyDbText(this.dataset.val, '${esc(rec.type)} Value')">${ic('copy', 12)} Copy</button>
+                  <button type="button" class="btn sm" data-val="${esc(rec.value)}" data-label="${esc(rec.type)} Value" onclick="copyDbText(this.dataset.val, this.dataset.label)">${ic('copy', 12)} Copy</button>
                 </td>
               </tr>
             `).join('')}
@@ -7452,7 +7453,7 @@ const V = {
         </p>
         <div class="row" style="justify-content:center; gap:10px; margin-top:20px; flex-wrap:wrap;">
           <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn pr" style="text-decoration:none;">${ic('server', 14)} Back to Servers</a>
-          ${srv ? `<button type="button" class="btn" onclick="applyRoute(serverRouteUrl('${esc(srv.node_id || 'local')}', '${esc(srv.id)}', 'con'))">${ic('terminal', 14)} Open Active Server</button>` : ''}
+          ${srv ? `<button type="button" class="btn" data-node="${esc(srv.node_id || 'local')}" data-id="${esc(srv.id)}" onclick="applyRoute(serverRouteUrl(this.dataset.node, this.dataset.id, 'con'))">${ic('terminal', 14)} Open Active Server</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -7560,10 +7561,10 @@ const V = {
               <div class="row" style="gap: 8px; flex-wrap: wrap;">
                 <label class="btn sm" style="cursor: pointer; margin: 0;">
                   ${ic('upload', 12)} Upload Icon
-                  <input type="file" accept="image/png,image/jpeg,image/webp" style="display: none;" onchange="if(this.files[0]) uploadServerIcon('${esc(srv?.id || '')}', this.files[0])">
+                  <input type="file" accept="image/png,image/jpeg,image/webp" style="display: none;" data-id="${esc(srv?.id || '')}" onchange="if(this.files[0]) uploadServerIcon(this.dataset.id, this.files[0])">
                 </label>
-                ${srv?.icon_url ? `<button type="button" class="btn sm dg" onclick="deleteServerIcon('${esc(srv?.id || '')}')">${ic('trash', 12)} Remove</button>` : ''}
-                ${native ? `<button type="button" class="btn sm" onclick="go('fi')">Edit config/config.toml in File Manager</button>` : `<button type="button" class="btn sm" onclick="openQuickConfigsModal('${esc(srv?.id || '')}')">${ic('sliders', 12)} Quick Configs</button>`}
+                ${srv?.icon_url ? `<button type="button" class="btn sm dg" data-id="${esc(srv?.id || '')}" onclick="deleteServerIcon(this.dataset.id)">${ic('trash', 12)} Remove</button>` : ''}
+                ${native ? `<button type="button" class="btn sm" onclick="go('fi')">Edit config/config.toml in File Manager</button>` : `<button type="button" class="btn sm" data-id="${esc(srv?.id || '')}" onclick="openQuickConfigsModal(this.dataset.id)">${ic('sliders', 12)} Quick Configs</button>`}
               </div>
             </div>
           </div>
@@ -8058,10 +8059,10 @@ const V = {
                   <td><span class="badge ${n.online ? 'online' : 'offline'}"><i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}</span></td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
-                      <button type="button" class="btn sm" onclick="testClusterNode('${esc(n.id)}', this)">${ic('refresh', 12)} Test</button>
+                      <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                       ${n.is_local
                         ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Configure</button>`
-                        : `<button type="button" class="btn sm" onclick="openNodeModal('${esc(n.id)}')">${ic('edit', 12)} Edit</button>
+                        : `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                            <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)}</button>`}
                     </div>
                   </td>
@@ -8118,11 +8119,11 @@ const V = {
               <div class="row sb" style="margin-top: auto; padding-top: 4px;">
                 <span class="mu mono" style="font-size: 11px;">${n.is_local ? 'id: local' : `key: ${esc(n.token_prefix || 'neo_...')}`}</span>
                 <div class="row" style="gap: 6px;">
-                  <button type="button" class="btn sm" onclick="testClusterNode('${esc(n.id)}', this)">${ic('refresh', 12)} Test</button>
+                  <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                   ${n.is_local
                     ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Panel settings</button>`
                     : `
-                      <button type="button" class="btn sm" onclick="openNodeModal('${esc(n.id)}')">${ic('edit', 12)} Edit</button>
+                      <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                       <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Disconnect</button>
                     `}
                 </div>
@@ -8815,7 +8816,7 @@ const V = {
                 <td class="mono">${esc(k.fingerprint || k[1])}</td>
                 <td class="mu">${esc(k.created_at ? formatFileDate(k.created_at) : (k[2] || 'Recently'))}</td>
                 <td style="text-align:right">
-                  <button class="btn sm dg" onclick="deleteSSHKey('${k.id || i}')">${ic('trash', 14)} Delete</button>
+                  <button class="btn sm dg" data-id="${esc(k.id || i)}" onclick="deleteSSHKey(this.dataset.id)">${ic('trash', 14)} Delete</button>
                 </td>
               </tr>
             `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No SSH keys registered. Add your public key above for secure SFTP access.</td></tr>'}
@@ -8847,7 +8848,7 @@ const V = {
                 <td class="mono">${esc(k.key_prefix || k.prefix || k[1])}</td>
                 <td class="mu">${esc(k.created_at ? formatFileDate(k.created_at) : (k.last_used || k[2] || 'Never'))}</td>
                 <td style="text-align:right">
-                  <button class="btn sm dg" onclick="deleteAPIKey('${k.id || i}')">${ic('trash', 14)} Revoke</button>
+                  <button class="btn sm dg" data-id="${esc(k.id || i)}" onclick="deleteAPIKey(this.dataset.id)">${ic('trash', 14)} Revoke</button>
                 </td>
               </tr>
             `).join('') : '<tr><td colspan="4" class="mu" style="text-align:center;padding:24px;">No API keys generated yet. Create a key above to automate your server.</td></tr>'}
@@ -9056,8 +9057,8 @@ function renderModSidebarItemsHtml(scope) {
     const href = it.url || (it.pageId ? `/mod/${encodeURIComponent(it.pageId)}` : '#');
     const isActive = Boolean(it.pageId && S.view === 'mod' && S.modPageId === it.pageId);
     const clickAttr = it.pageId
-      ? `onclick="return handleNavClick(event, 'mod', { modPageId: '${esc(it.pageId)}' })"`
-      : `onclick="if(window.NP&&window.NP._execSidebarItem){return window.NP._execSidebarItem('${esc(it.id)}', event);}return false;"`;
+      ? `data-page-id="${esc(it.pageId)}" onclick="return handleNavClick(event, 'mod', { modPageId: this.dataset.pageId })"`
+      : `data-item-id="${esc(it.id)}" onclick="if(window.NP&&window.NP._execSidebarItem){return window.NP._execSidebarItem(this.dataset.itemId, event);}return false;"`;
     return `<a class="nav-item ${isActive ? 'on' : ''}" href="${esc(withSafeModeQuery(href))}" ${clickAttr} ${isActive ? 'aria-current="page"' : ''}>
       ${ic(it.icon || 'puzzle', 16)}
       <span>${esc(it.label || 'Extension')}</span>
@@ -9655,7 +9656,7 @@ function openNodeModal(nodeId = null) {
         Enter the reachable HTTP/HTTPS URL of your remote NeoPanel daemon along with its Node Token (<code>neo_node_...</code> via <code>sudo neopanel node-token</code> on cluster nodes) or an admin <code>neo_...</code> API key.
       </p>
 
-      <form onsubmit="submitNodeModal(event, '${isEdit ? esc(existing.id) : ''}')">
+      <form data-id="${isEdit ? esc(existing.id) : ''}" onsubmit="submitNodeModal(event, this.dataset.id)">
         <div class="grid g2">
           <label class="f">
             <span>Node Name</span>
@@ -9743,7 +9744,7 @@ function openNodeModal(nodeId = null) {
         <div id="node-modal-test-res" style="margin-bottom: 14px;"></div>
 
         <div class="row sb" style="gap:10px; margin-top:6px;">
-          <button type="button" id="nm-test-btn" class="btn" onclick="testNodeModalConnection('${isEdit ? esc(existing.id) : ''}')">
+          <button type="button" id="nm-test-btn" class="btn" data-id="${isEdit ? esc(existing.id) : ''}" onclick="testNodeModalConnection(this.dataset.id)">
             ${ic('refresh', 14)} Test Connection
           </button>
           <div class="row" style="gap:8px;">
@@ -11384,7 +11385,7 @@ function askInstallSoftwareModal(srv, software, version) {
           </div>
           <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
             <button type="button" class="btn" onclick="closeUiModal(null)">Cancel</button>
-            <button type="button" id="ui-modal-confirm-btn" class="btn pr" onclick="closeUiModal({ confirmed: true, backup: Boolean(document.getElementById('confirm-bkf')?.checked), syncJava: Boolean(document.getElementById('confirm-sync-java')?.checked), recJava: '${esc(recJava)}' })">
+            <button type="button" id="ui-modal-confirm-btn" class="btn pr" data-java="${esc(recJava)}" onclick="closeUiModal({ confirmed: true, backup: Boolean(document.getElementById('confirm-bkf')?.checked), syncJava: Boolean(document.getElementById('confirm-sync-java')?.checked), recJava: this.dataset.java })">
               ${ic('download', 14)} Download &amp; Install
             </button>
           </div>
@@ -11801,15 +11802,15 @@ async function openEnable2FAWizard() {
         <span class="mu" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">Secret Key</span>
         <div class="mono" style="background:var(--con-bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; font-size:14px; font-weight:700; user-select:all; color:#fff; display:inline-flex; align-items:center; gap:8px;">
           <span>${esc(formattedSecret)}</span>
-          <button type="button" class="btn sm" onclick="navigator.clipboard.writeText('${esc(res.secret)}'); toast('Secret copied to clipboard', 'ok');">${ic('copy', 12)}</button>
+          <button type="button" class="btn sm" data-secret="${esc(res.secret)}" onclick="navigator.clipboard.writeText(this.dataset.secret); toast('Secret copied to clipboard', 'ok');">${ic('copy', 12)}</button>
         </div>
       </div>
       <p class="mu" style="font-size:13px; margin:0 0 10px; text-align:left;">
         2. Enter the 6-digit confirmation code shown on your phone:
       </p>
       <div class="row" style="gap:8px; margin-bottom:16px; justify-content:center;">
-        <input type="text" id="tfa-verify-code" maxlength="6" placeholder="000000" autocomplete="one-time-code" style="width:180px; text-align:center; font-size:20px; font-weight:700; letter-spacing:4px;" onkeydown="if(event.key==='Enter')confirmEnable2FA('${esc(res.secret)}')">
-        <button type="button" id="tfa-confirm-btn" class="btn pr" onclick="confirmEnable2FA('${esc(res.secret)}')">Activate</button>
+        <input type="text" id="tfa-verify-code" maxlength="6" placeholder="000000" autocomplete="one-time-code" style="width:180px; text-align:center; font-size:20px; font-weight:700; letter-spacing:4px;" data-secret="${esc(res.secret)}" onkeydown="if(event.key==='Enter')confirmEnable2FA(this.dataset.secret)">
+        <button type="button" id="tfa-confirm-btn" class="btn pr" data-secret="${esc(res.secret)}" onclick="confirmEnable2FA(this.dataset.secret)">Activate</button>
       </div>
       <div id="tfa-wizard-err" style="color:var(--err); font-size:13px; min-height:18px;"></div>
     `;
@@ -11852,7 +11853,7 @@ async function confirmEnable2FA(secret) {
           ${codes.map(c => `<div class="mono" style="font-size:13px; font-weight:700; color:#fff; padding:4px;">${esc(c)}</div>`).join('')}
         </div>
         <div class="row" style="gap:10px; justify-content:center;">
-          <button type="button" class="btn" onclick="navigator.clipboard.writeText('${codes.join('\\n')}'); toast('Recovery codes copied!', 'ok');">${ic('copy', 13)} Copy All Codes</button>
+          <button type="button" class="btn" data-codes="${esc(codes.join('\n'))}" onclick="navigator.clipboard.writeText(this.dataset.codes); toast('Recovery codes copied!', 'ok');">${ic('copy', 13)} Copy All Codes</button>
           <button type="button" class="btn pr" onclick="closeModal(); R();">Done</button>
         </div>
       `;
@@ -12398,7 +12399,7 @@ function openCreateServerModal() {
             ${CORES.map(([label, desc]) => {
               const slug = label.toLowerCase();
               return `
-              <button type="button" class="card engine-card sel ${slug === 'paper' ? 'on' : ''}" data-engine="${esc(slug)}" onclick="setCreateEngine('${esc(slug)}')" style="padding:10px 8px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:5px; min-width:0;">
+              <button type="button" class="card engine-card sel ${slug === 'paper' ? 'on' : ''}" data-engine="${esc(slug)}" onclick="setCreateEngine(this.dataset.engine)" style="padding:10px 8px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:5px; min-width:0;">
                 ${engineIcon(slug, 18, true)}
                 <b style="font-size:13px;">${esc(label)}</b>
                 <span class="mu" style="font-size:10.5px; display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${esc(desc)}">${esc(desc)}</span>
@@ -12989,8 +12990,8 @@ function renderSubusersListHtml(srv) {
             <td class="mu" style="font-size: 12px;">${formatFileDate(sub.created_at)}</td>
             <td style="text-align: right;">
               <div class="row" style="justify-content: flex-end; gap: 6px;">
-                <button type="button" class="btn sm" onclick="openSubuserModal('${esc(sub.id)}')">${ic('sliders', 12)} Edit</button>
-                <button type="button" class="btn sm dg" onclick="deleteServerSubuser('${esc(sub.id)}')" aria-label="Revoke access for ${esc(sub.username)}">${ic('trash', 12)}</button>
+                <button type="button" class="btn sm" data-id="${esc(sub.id)}" onclick="openSubuserModal(this.dataset.id)">${ic('sliders', 12)} Edit</button>
+                <button type="button" class="btn sm dg" data-id="${esc(sub.id)}" onclick="deleteServerSubuser(this.dataset.id)" aria-label="Revoke access for ${esc(sub.username)}">${ic('trash', 12)}</button>
               </div>
             </td>
           </tr>`;
@@ -13025,7 +13026,7 @@ function openSubuserModal(subuserId = null) {
         ${isEdit ? `Update server permissions for <b>${esc(existing.username)}</b>.` : `Add an existing NeoPanel account to <b>${esc(srv?.name || 'this server')}</b>. For someone without an account, use Invite by email on the Team page.`}
       </p>
 
-      <form onsubmit="submitSubuserModal(event, '${isEdit ? esc(existing.id) : ''}')">
+      <form data-id="${isEdit ? esc(existing.id) : ''}" onsubmit="submitSubuserModal(event, this.dataset.id)">
         ${!isEdit ? `
           <label class="f">
             <span>User Email or Username</span>
@@ -13258,7 +13259,7 @@ function renderQuickConfigsModalBody(srv) {
       </div>
     </div>
 
-    <form onsubmit="saveQuickConfigs(event, '${esc(srv.id)}')">
+    <form data-id="${esc(srv.id)}" onsubmit="saveQuickConfigs(event, this.dataset.id)">
       <div class="grid g2" style="margin-bottom: 14px;">
         <label class="f" style="margin-bottom: 0;">
           <span>View Distance (<b id="lbl-qc-view">${cfg.view_distance ?? 10}</b> chunks)</span>
@@ -13936,7 +13937,7 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
         Configure server tenant ownership, compute resource limits (CPU &amp; RAM), and disk storage quotas. Moving a server between nodes requires a real stop-and-transfer operation, not a settings change.
       </p>
 
-      <form onsubmit="submitAdminServerSettings(event, '${esc(targetId)}', '${esc(targetNodeId)}')">
+      <form data-id="${esc(targetId)}" data-node="${esc(targetNodeId)}" onsubmit="submitAdminServerSettings(event, this.dataset.id, this.dataset.node)">
         <!-- Server Owner -->
         <div style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
@@ -16400,7 +16401,7 @@ function renderAdminModsTabHtml() {
           ${mods.length ? mods.map(m => {
             const isSel = S.selectedModId === m.id && !isNew;
             const modPageExists = window.NP?._pages?.has(m.id);
-            return `<div class="mod-card ${isSel ? 'on' : ''}" onclick="selectAdminMod('${esc(m.id)}')">
+            return `<div class="mod-card ${isSel ? 'on' : ''}" data-id="${esc(m.id)}" onclick="selectAdminMod(this.dataset.id)">
               <div class="row sb" style="gap: 8px; align-items: flex-start;">
                 <div style="min-width: 0;">
                   <div class="row" style="gap: 6px; flex-wrap: wrap;">
@@ -16410,7 +16411,7 @@ function renderAdminModsTabHtml() {
                   <div class="mono mu" style="font-size: 11px; margin-top: 2px;">${esc(m.id)}${m.author ? ` &bull; ${esc(m.author)}` : ''}</div>
                 </div>
                 <label class="sw" onclick="event.stopPropagation();" title="${m.enabled ? 'Enabled' : 'Disabled'}">
-                  <input type="checkbox" ${m.enabled ? 'checked' : ''} onchange="toggleAdminModEnabled('${esc(m.id)}', this.checked)">
+                  <input type="checkbox" ${m.enabled ? 'checked' : ''} data-id="${esc(m.id)}" onchange="toggleAdminModEnabled(this.dataset.id, this.checked)">
                   <i></i>
                 </label>
               </div>
@@ -16422,8 +16423,8 @@ function renderAdminModsTabHtml() {
                   ${!m.enabled ? '<span class="chip" style="font-size: 10px; padding: 1px 6px; color: #f87171;">Disabled</span>' : ''}
                 </div>
                 <div class="row" style="gap: 6px;" onclick="event.stopPropagation();">
-                  ${modPageExists ? `<a href="/mod/${esc(m.id)}" onclick="return handleNavClick(event, 'mod', { modPageId: '${esc(m.id)}' })" class="btn sm" style="text-decoration:none; padding: 3px 8px; font-size: 11px;">Open</a>` : ''}
-                  <button type="button" class="btn sm dg" onclick="deleteAdminMod('${esc(m.id)}', '${esc(m.name || m.id)}')" style="padding: 3px 8px; font-size: 11px;">${ic('trash', 12)}</button>
+                  ${modPageExists ? `<a href="/mod/${esc(m.id)}" data-id="${esc(m.id)}" onclick="return handleNavClick(event, 'mod', { modPageId: this.dataset.id })" class="btn sm" style="text-decoration:none; padding: 3px 8px; font-size: 11px;">Open</a>` : ''}
+                  <button type="button" class="btn sm dg" data-id="${esc(m.id)}" data-name="${esc(m.name || m.id)}" onclick="deleteAdminMod(this.dataset.id, this.dataset.name)" style="padding: 3px 8px; font-size: 11px;">${ic('trash', 12)}</button>
                 </div>
               </div>
             </div>`;
@@ -16492,10 +16493,10 @@ function renderAdminModsTabHtml() {
 
           <div class="row sb" style="margin-top: 14px; flex-wrap: wrap; gap: 10px;">
             <div class="row" style="gap: 8px;">
-              ${!isNew ? `<button type="button" class="btn dg sm" onclick="deleteAdminMod('${esc(draft.id)}', '${esc(draft.name || draft.id)}')">${ic('trash', 13)} Delete Mod</button>` : ''}
+              ${!isNew ? `<button type="button" class="btn dg sm" data-id="${esc(draft.id)}" data-name="${esc(draft.name || draft.id)}" onclick="deleteAdminMod(this.dataset.id, this.dataset.name)">${ic('trash', 13)} Delete Mod</button>` : ''}
             </div>
             <div class="row" style="gap: 8px;">
-              ${!isNew && window.NP?._pages?.has(draft.id) ? `<a href="/mod/${esc(draft.id)}" onclick="return handleNavClick(event, 'mod', { modPageId: '${esc(draft.id)}' })" class="btn sm" style="text-decoration:none;">Open Page</a>` : ''}
+              ${!isNew && window.NP?._pages?.has(draft.id) ? `<a href="/mod/${esc(draft.id)}" data-id="${esc(draft.id)}" onclick="return handleNavClick(event, 'mod', { modPageId: this.dataset.id })" class="btn sm" style="text-decoration:none;">Open Page</a>` : ''}
               <button type="submit" id="mod-save-btn" class="btn pr">${ic('check', 14)} Save &amp; Apply Live</button>
             </div>
           </div>
@@ -16885,10 +16886,10 @@ function show2FALoginScreen(tempToken) {
     </p>
     <label class="lf" style="margin-bottom:14px;">
       ${ic('key', 16)}
-      <input id="l2fa-code" type="text" maxlength="9" placeholder="Authentication code" aria-label="Authentication or recovery code" autofocus autocomplete="one-time-code" autocapitalize="off" spellcheck="false" onkeydown="if(event.key==='Enter')submit2FALogin('${esc(tempToken)}')">
+      <input id="l2fa-code" type="text" maxlength="9" placeholder="Authentication code" aria-label="Authentication or recovery code" autofocus autocomplete="one-time-code" autocapitalize="off" spellcheck="false" data-token="${esc(tempToken)}" onkeydown="if(event.key==='Enter')submit2FALogin(this.dataset.token)">
     </label>
     <div class="lerr" id="lerr" role="alert"></div>
-    <button class="lbtn" onclick="submit2FALogin('${esc(tempToken)}')">Verify &amp; sign in</button>
+    <button class="lbtn" data-token="${esc(tempToken)}" onclick="submit2FALogin(this.dataset.token)">Verify &amp; sign in</button>
     <button type="button" class="btn sm" style="width:100%; margin-top:12px; justify-content:center;" onclick="$('#login')?.remove(); showLoginScreen();">
       &larr; Back to sign in
     </button>

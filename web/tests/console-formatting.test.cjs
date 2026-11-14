@@ -56,3 +56,50 @@ test('Java logs retain colors and submitted commands still render as commands', 
   assert.match(c.formatLogLine('> help'), /con-cmd-row/);
   assert.match(setup().formatLogLine('> help'), /con-cmd-row/);
 });
+
+test('remote command-row HTML is escaped, including timestamp-prefixed JSON log envelopes', () => {
+  for (const type of ['steel', 'paper']) {
+    const c = setup(type);
+    const payload = '<div class="con-cmd-row"><img src=x onerror="globalThis.__securityProbe=1"><svg onload="globalThis.__securityProbe=1"></svg></div>';
+    for (const raw of [payload, JSON.stringify({ event: 'log', data: payload }), '[03:06:34] ' + JSON.stringify({ event: 'log', data: payload })]) {
+      const html = c.formatLogLine(raw);
+      assert.match(html, /&lt;div class=&quot;con-cmd-row&quot;&gt;/);
+      assert.match(html, /&lt;img/);
+      assert.doesNotMatch(html, /<(?:div|img|svg)\b/i);
+      assert.equal(c.__securityProbe, undefined);
+    }
+  }
+});
+
+test('addLog renders untrusted text while runCmd uses the escaped local command path', async () => {
+  const c = setup('paper');
+  const logs = new Map(['#log', '#fly-log'].map(key => [key, {
+    children: [], scrollHeight: 0, scrollTop: 0, clientHeight: 100,
+    appendChild(row) { this.children.push(row); }
+  }]));
+  c.$ = key => logs.get(key) || null;
+  c.document = { createElement: () => ({}) };
+  c.S.log = []; c.S.view = 'con';
+  c.updateConBufferCount = () => {};
+  c.hasServerPermission = () => true;
+  c.srvApiPath = () => '/command';
+  let sent;
+  c.api = async (_, options) => { sent = JSON.parse(options.body).command; };
+  vm.runInContext(section('function appendLogToEl(', 'function paintTargetLog(') + section('async function runCmd(', '// --- Categorized Navigation'), c);
+  const raw = '<div class="con-cmd-row"><img src=x onerror="globalThis.__securityProbe=1"></div>';
+  c.addLog(raw);
+  for (const log of logs.values()) {
+    assert.match(log.children[0].innerHTML, /&lt;img/);
+    assert.doesNotMatch(log.children[0].innerHTML, /<(?:img|div)\b/);
+  }
+  const cmd = `say x');globalThis.__securityProbe=1;//\\\n<img src=x>`;
+  await c.runCmd(cmd);
+  assert.equal(sent, cmd);
+  assert.match(c.S.log[1], /<div class="con-cmd-row">/);
+  assert.match(c.S.log[1], /&lt;img src=x&gt;/);
+  assert.doesNotMatch(c.S.log[1], /<img\b/);
+  c.addLog('\x1b[32mGreen\x1b[0m §cRed');
+  assert.match(c.S.log[2], /color:#10b981/);
+  assert.match(c.S.log[2], /color:#ff5555/);
+  assert.equal(c.__securityProbe, undefined);
+});

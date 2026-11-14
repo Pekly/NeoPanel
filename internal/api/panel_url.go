@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -93,9 +92,8 @@ func (h *AuthHandler) UpdatePanelURL(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, panelURLSettings{PublicURL: origin, Source: "settings"})
 }
 
-// Keep request-origin links working on installations without a configured URL,
-// but never confuse the game/SFTP address with the panel or trust forwarded headers.
-func (h *AuthHandler) panelLinkOrigin(r *http.Request) (string, error) {
+// Email links must use an administrator-configured origin, never request headers.
+func (h *AuthHandler) panelLinkOrigin(_ *http.Request) (string, error) {
 	settings, err := h.panelURL()
 	if err != nil {
 		return "", err
@@ -103,13 +101,5 @@ func (h *AuthHandler) panelLinkOrigin(r *http.Request) (string, error) {
 	if settings.PublicURL != "" {
 		return settings.PublicURL, nil
 	}
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	u, err := url.Parse(scheme + "://" + r.Host)
-	if err != nil || u.Hostname() == "" || u.Host != r.Host || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || strings.ContainsAny(r.Host, "\r\n\t \\") {
-		return "", errors.New("Invalid panel origin")
-	}
-	return u.Scheme + "://" + u.Host, nil
+	return "", errors.New("Configure the public panel URL before sending account emails")
 }

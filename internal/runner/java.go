@@ -233,6 +233,38 @@ func ResolveJavaBinary(versionOrPath string) (binaryPath string, displayLabel st
 	return "java-" + targetTag, "Java " + targetTag + " (Not Installed)"
 }
 
+// Only host-managed runtime installations may add mounts. Tenant executables
+// run under the existing server bind; neither their ancestors nor symlinked
+// conf/security targets are inferred as host mounts.
+func javaRuntimeMountArgs(binary, serverDir string) []string {
+	if rel, e := filepath.Rel(serverDir, binary); e == nil && filepath.IsLocal(rel) {
+		return nil
+	}
+	real, e := filepath.EvalSymlinks(binary)
+	if e != nil {
+		return nil
+	}
+	if rel, e := filepath.Rel(serverDir, real); e == nil && filepath.IsLocal(rel) {
+		return nil
+	}
+	for _, base := range []string{"/usr/lib/jvm", "/usr/java", "/opt/java"} {
+		rel, e := filepath.Rel(base, real)
+		if e != nil || !filepath.IsLocal(rel) {
+			continue
+		}
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) < 3 || parts[len(parts)-2] != "bin" || parts[len(parts)-1] != "java" {
+			return nil
+		}
+		home := filepath.Join(base, parts[0])
+		if !hostManagedJavaPath(real) || !hostManagedJavaPath(home) {
+			return nil
+		}
+		return []string{"--ro-bind", home, home}
+	}
+	return nil
+}
+
 func scanLinuxJVMsForMajor(targetTag string) string {
 	roots := []string{"/usr/lib/jvm", "/opt/java", "/usr/java"}
 	for _, root := range roots {

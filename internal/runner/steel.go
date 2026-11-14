@@ -1,8 +1,9 @@
 package runner
 
 import (
+	"context"
 	"fmt"
-	"os"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -26,12 +27,22 @@ func steelExecutable(dir, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	info, err := os.Lstat(path)
+	root, err := rooted.Open(dir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	f, err := root.Open(name)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		return "", fmt.Errorf("Steel executable %q not found or not a regular file; reinstall Steel or upload its native binary", name)
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0111 == 0 {
-		if err := os.Chmod(path, info.Mode().Perm()|0700); err != nil {
+		if _, err := root.Copy(context.Background(), name, f, 1<<30, info.Mode().Perm()|0700); err != nil {
 			return "", fmt.Errorf("make Steel executable: %w", err)
 		}
 	}
@@ -45,8 +56,13 @@ func SyncSteelPort(dir string, port int) error {
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("invalid Steel port: %d", port)
 	}
-	path := filepath.Join(dir, "config", "config.toml")
-	raw, err := os.ReadFile(path)
+	root, err := rooted.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	path := filepath.Join("config", "config.toml")
+	raw, err := root.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read Steel config/config.toml (reinstall Steel or upload its release configuration): %w", err)
 	}
@@ -75,7 +91,7 @@ func SyncSteelPort(dir string, port int) error {
 	if updated == string(raw) {
 		return nil
 	}
-	return os.WriteFile(path, []byte(updated), 0644)
+	return root.WriteFile(path, []byte(updated), 0644)
 }
 
 func serverReadyLine(serverType, line string) bool {

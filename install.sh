@@ -27,8 +27,10 @@ DATA_DIR="/var/lib/neopanel"
 SERVICE_FILE="/etc/systemd/system/neopanel.service"
 INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="neopanel"
-LOG_FILE="/tmp/neopanel-install.log"
-BUILD_DIR="/tmp/neopanel-build"
+INSTALL_STATE_DIR="/var/lib/neopanel/installer"
+LOG_FILE="$INSTALL_STATE_DIR/install.log"
+BUILD_DIR="$INSTALL_STATE_DIR/build"
+INSTALL_WORKSPACE_READY="false"
 
 # Git repository & branch configuration
 GIT_REPO_URL="${NEOPANEL_REPO_URL:-${GIT_REPO_URL:-https://github.com/Pekly/NeoPanel.git}}"
@@ -64,8 +66,6 @@ ASSUME_YES="false"
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
 
-# Initialize log file
-: > "$LOG_FILE"
 
 # -----------------------------------------------------------------------------
 # Premium UI & Animated Progress System
@@ -180,6 +180,25 @@ check_root() {
     echo -e "  ${CYAN}curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash${NC}\n"
     exit 1
   fi
+  initialize_installer_workspace
+}
+
+# Never build as root or write update logs in a predictable world-writable /tmp path.
+initialize_installer_workspace() {
+  [ "$INSTALL_WORKSPACE_READY" = true ] && return 0
+  if [ -L "$INSTALL_STATE_DIR" ] || { [ -e "$INSTALL_STATE_DIR" ] && { [ ! -d "$INSTALL_STATE_DIR" ] || [ "$(stat -c %u "$INSTALL_STATE_DIR")" != 0 ]; }; }; then
+    log_error "Installer state directory must be a real root-owned directory: $INSTALL_STATE_DIR"
+    return 1
+  fi
+  mkdir -p -- "$INSTALL_STATE_DIR"
+  chmod 700 "$INSTALL_STATE_DIR"
+  if [ -L "$LOG_FILE" ] || { [ -e "$LOG_FILE" ] && { [ ! -f "$LOG_FILE" ] || [ "$(stat -c %u "$LOG_FILE")" != 0 ] || [ "$(stat -c %h "$LOG_FILE")" != 1 ]; }; }; then
+    log_error "Refusing unsafe installer log: $LOG_FILE"
+    return 1
+  fi
+  (umask 077; : >> "$LOG_FILE")
+  chmod 600 "$LOG_FILE"
+  INSTALL_WORKSPACE_READY=true
 }
 
 check_os() {
@@ -511,39 +530,46 @@ step_java() {
   install_java_25 || true
 }
 
+go_compiler_supported() {
+  command -v go &>/dev/null || return 1
+  local version
+  version="$(go env GOVERSION 2>/dev/null)" || return 1
+  [[ "$version" =~ ^go([0-9]+)\.([0-9]+)(\.[0-9]+)?$ ]] || return 1
+  [ "${BASH_REMATCH[1]}" -gt 1 ] || { [ "${BASH_REMATCH[1]}" -eq 1 ] && [ "${BASH_REMATCH[2]}" -ge 26 ]; }
+}
+
 step_go_compiler() {
-  if command -v go &>/dev/null; then
-    return 0
-  fi
+  if go_compiler_supported; then return 0; fi
   detect_os_pkg_manager
   case "$PKG_MGR" in
-    apt)
-      apt-get update -y -q
-      apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" golang-go || true
-      ;;
-    dnf|yum)
-      $PKG_MGR install -y golang || true
-      ;;
-    pacman)
-      pacman -Sy --noconfirm go || true
-      ;;
-    apk)
-      apk add go || true
-      ;;
+    apt) apt-get update -y -q; apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" golang-go || true ;;
+    dnf|yum) $PKG_MGR install -y golang || true ;;
+    pacman) pacman -Sy --noconfirm go || true ;;
+    apk) apk add go || true ;;
   esac
-
-  if ! command -v go &>/dev/null; then
-    local arch="amd64"
-    if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
-      arch="arm64"
-    fi
-    curl -fsSL "https://go.dev/dl/go1.22.4.linux-${arch}.tar.gz" -o /tmp/go.tar.gz 2>/dev/null || true
-    if [ -f /tmp/go.tar.gz ]; then
-      tar -C /usr/local -xzf /tmp/go.tar.gz 2>/dev/null || true
-      export PATH=$PATH:/usr/local/go/bin
-      rm -f /tmp/go.tar.gz
-    fi
+  if go_compiler_supported; then return 0; fi
+  local arch tmp metadata filename checksum
+  case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) log_error "Install Go 1.26 or newer for this CPU architecture."; return 1 ;;
+  esac
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/neopanel-go.XXXXXX")" || return 1
+  metadata="$(curl -fsSL --proto '=https' --proto-redir '=https' 'https://go.dev/dl/?mode=json')" || { rm -rf -- "$tmp"; return 1; }
+  filename="$(printf '%s' "$metadata" | jq -r --arg arch "$arch" '[.[] | select(.stable) | .files[] | select(.os == "linux" and .arch == $arch and .kind == "archive")][0].filename // empty')"
+  checksum="$(printf '%s' "$metadata" | jq -r --arg arch "$arch" '[.[] | select(.stable) | .files[] | select(.os == "linux" and .arch == $arch and .kind == "archive")][0].sha256 // empty')"
+  if [[ ! "$filename" =~ ^go[0-9]+\.[0-9]+\.[0-9]+\.linux-(amd64|arm64)\.tar\.gz$ ]] || [[ ! "$checksum" =~ ^[0-9a-f]{64}$ ]]; then
+    rm -rf -- "$tmp"; log_error "Could not resolve a verified Go compiler download."; return 1
   fi
+  if ! curl -fsSL --proto '=https' --proto-redir '=https' "https://go.dev/dl/$filename" -o "$tmp/go.tar.gz"; then rm -rf -- "$tmp"; return 1; fi
+  if ! printf '%s  %s\n' "$checksum" "$tmp/go.tar.gz" | sha256sum -c -; then rm -rf -- "$tmp"; log_error "Go compiler checksum mismatch."; return 1; fi
+  if ! tar -C "$tmp" -xzf "$tmp/go.tar.gz"; then rm -rf -- "$tmp"; return 1; fi
+  if [ ! -x "$tmp/go/bin/go" ]; then rm -rf -- "$tmp"; log_error "Compiler archive is incomplete."; return 1; fi
+  rm -rf -- /usr/local/go
+  mv -- "$tmp/go" /usr/local/go
+  rm -rf -- "$tmp"
+  export PATH="/usr/local/go/bin:$PATH"
+  go_compiler_supported || { log_error "Go 1.26 or newer is required by patched security dependencies."; return 1; }
 }
 
 write_global_shortcuts() {
@@ -763,6 +789,7 @@ security:
   jwt_secret: "${secret}"
   token_expiration_hours: 72
   node_token: "${node_tok}"
+  trusted_proxies: ["127.0.0.1/32", "::1/128"]
   turnstile:
     enabled: ${ts_enabled}
     site_key: "${ts_site}"
@@ -1282,6 +1309,7 @@ step_update_fetch() {
 }
 
 step_update_compile() {
+  step_go_compiler
   local -a go_tags=()
   if [ "$INSTALL_ROLE" = "node" ]; then
     go_tags=(-tags node)

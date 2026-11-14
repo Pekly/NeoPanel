@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Pekly/NeoPanel/internal/database"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"github.com/Pekly/NeoPanel/internal/runner"
 )
 
@@ -81,15 +82,21 @@ func (h *FileHandler) destructivePath(serverID, reqPath string) (string, error) 
 
 func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 	reqPath := r.URL.Query().Get("path")
 
-	fullPath, err := h.safePath(serverID, reqPath)
+	fullPath, err := root.Path(reqPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	entries, err := os.ReadDir(fullPath)
+	entries, err := root.ReadDir(fullPath)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read directory"})
 		return
@@ -174,6 +181,17 @@ func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnsupportedMediaType, "Only UTF-8 text files can be saved")
 		return
 	}
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
+	name, err := root.Path(req.Path)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
 	f, info, err := h.openPreviewFile(serverID, req.Path, os.O_RDWR)
 	if os.IsNotExist(err) {
 		f, info, err = h.openPreviewFile(serverID, req.Path, os.O_RDWR|os.O_CREATE|os.O_EXCL)
@@ -196,12 +214,8 @@ func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnsupportedMediaType, "Cannot overwrite a binary file with text")
 		return
 	}
-	if _, err = f.Seek(0, io.SeekStart); err == nil {
-		_, err = io.WriteString(f, req.Content)
-	}
-	if err == nil {
-		err = f.Truncate(int64(len(req.Content)))
-	}
+	f.Close()
+	err = root.WriteFile(name, []byte(req.Content), info.Mode().Perm())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to save file")
 		return
@@ -212,6 +226,12 @@ func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Create(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 	var req struct {
 		Path  string `json:"path"`
 		IsDir bool   `json:"is_dir"`
@@ -221,28 +241,26 @@ func (h *FileHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath, err := h.safePath(serverID, req.Path)
+	fullPath, err := root.Path(req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	if req.IsDir {
-		if err := os.MkdirAll(fullPath, 0755); err != nil {
+		if err := root.MkdirAll(fullPath, 0755); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create directory"})
 			return
 		}
 	} else {
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create parent directory"})
 			return
 		}
-		f, err := os.Create(fullPath)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create file"})
+		if err := root.WriteFile(fullPath, nil, 0644); err != nil {
+			writeError(w, 500, "Failed to create file: "+err.Error())
 			return
 		}
-		_ = f.Close()
 	}
 
 	kind := "file"
@@ -256,19 +274,25 @@ func (h *FileHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 	reqPath := r.URL.Query().Get("path")
 	if reqPath == "" || reqPath == "/" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot delete root directory"})
 		return
 	}
 
-	fullPath, err := h.destructivePath(serverID, reqPath)
+	fullPath, err := root.Destructive(reqPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	if err := os.RemoveAll(fullPath); err != nil {
+	if err := root.RemoveAll(fullPath); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete file/folder"})
 		return
 	}
@@ -292,6 +316,12 @@ type bulkDeleteFailure struct {
 // idempotent, so duplicates, missing paths and overlapping directories are safe.
 func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 	var req struct {
 		Paths []string `json:"paths"`
 	}
@@ -331,7 +361,7 @@ func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid path %q: traversal outside the server or NUL characters are not allowed", reqPath)})
 			return
 		}
-		fullPath, err := h.destructivePath(serverID, reqPath)
+		fullPath, err := root.Destructive(reqPath)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("Invalid path %q: %s", reqPath, err)})
 			return
@@ -344,7 +374,7 @@ func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 		Failed  []bulkDeleteFailure `json:"failed"`
 	}{Deleted: make([]string, 0, len(req.Paths)), Failed: make([]bulkDeleteFailure, 0)}
 	for i, fullPath := range fullPaths {
-		if err := os.RemoveAll(fullPath); err != nil {
+		if err := root.RemoveAll(fullPath); err != nil {
 			result.Failed = append(result.Failed, bulkDeleteFailure{Path: req.Paths[i], Error: err.Error()})
 			continue
 		}
@@ -354,12 +384,29 @@ func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func parseUploadForm(w http.ResponseWriter, r *http.Request, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	return r.ParseMultipartForm(8 << 20)
+}
+
 func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 	targetDir := r.URL.Query().Get("path")
 
-	// Limit upload to 200MB
-	_ = r.ParseMultipartForm(200 << 20)
+	err = parseUploadForm(w, r, 200<<20)
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	if err != nil {
+		writeError(w, http.StatusRequestEntityTooLarge, "Upload exceeds 200 MiB or invalid multipart body")
+		return
+	}
 
 	file, handler, err := r.FormFile("file")
 	if err != nil {
@@ -367,22 +414,19 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	if !rooted.Basename(handler.Filename) {
+		writeError(w, 400, "Invalid filename")
+		return
+	}
 
 	destRel := filepath.Join(targetDir, handler.Filename)
-	fullPath, err := h.safePath(serverID, destRel)
+	fullPath, err := root.Path(destRel)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	dst, err := os.Create(fullPath)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create destination file"})
-		return
-	}
-	defer dst.Close()
-
-	written, err := io.Copy(dst, file)
+	written, err := root.Copy(r.Context(), fullPath, file, 200<<20, 0644)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write file"})
 		return
@@ -396,24 +440,42 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
 	reqPath := r.URL.Query().Get("path")
-	fullPath, err := h.safePath(serverID, reqPath)
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeError(w, 400, err.Error())
 		return
 	}
-	info, err := os.Stat(fullPath)
-	if err != nil || info.IsDir() {
-		http.Error(w, "File not found or is a directory", http.StatusNotFound)
+	defer root.Close()
+	fullPath, err := root.Path(reqPath)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	f, err := root.Open(fullPath)
+	if err != nil {
+		writeError(w, 404, err.Error())
+		return
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 	logAudit(h.db, r, "file_download", fmt.Sprintf("Downloaded '%s' (%s) from %s", reqPath, formatBytesAudit(info.Size()), auditServerLabel(h.db, serverID)))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(fullPath)))
 	w.Header().Set("Content-Type", "application/octet-stream")
-	http.ServeFile(w, r, fullPath)
+	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 }
 
 func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 	var req struct {
 		OldPath string `json:"old_path"`
 		NewPath string `json:"new_path"`
@@ -422,17 +484,17 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 		return
 	}
-	oldFull, err := h.destructivePath(serverID, req.OldPath)
+	oldFull, err := root.Destructive(req.OldPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	newFull, err := h.destructivePath(serverID, req.NewPath)
+	newFull, err := root.Destructive(req.NewPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if err := os.Rename(oldFull, newFull); err != nil {
+	if err := root.Rename(oldFull, newFull); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to rename: " + err.Error()})
 		return
 	}
@@ -442,7 +504,13 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
-	baseDir := h.manager.GetWorkingDir(serverID)
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
+	baseDir := "."
 
 	var req struct {
 		Paths       []string `json:"paths"`
@@ -469,7 +537,7 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot move server root directory"})
 			return
 		}
-		srcFull, err := h.destructivePath(serverID, fromRel)
+		srcFull, err := root.Destructive(fromRel)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -478,7 +546,7 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot move server root directory"})
 			return
 		}
-		srcInfo, err := os.Stat(srcFull)
+		srcInfo, err := root.Lstat(srcFull)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Source path not found"})
 			return
@@ -492,15 +560,15 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Destination path is required"})
 				return
 			}
-			dstFull, err := h.safePath(serverID, toRel)
+			dstFull, err := root.Path(toRel)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			if dstInfo, statErr := os.Stat(dstFull); statErr == nil && dstInfo.IsDir() {
+			if dstInfo, statErr := root.Lstat(dstFull); statErr == nil && dstInfo.IsDir() {
 				dstFull = filepath.Join(dstFull, filepath.Base(srcFull))
 			} else if strings.HasSuffix(toRel, "/") || strings.HasSuffix(toRel, "\\") {
-				if err := os.MkdirAll(dstFull, 0755); err != nil {
+				if err := root.MkdirAll(dstFull, 0755); err != nil {
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create destination folder: " + err.Error()})
 					return
 				}
@@ -516,18 +584,21 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Item is already at destination", "count": 0})
 				return
 			}
-			if _, statErr := os.Stat(dstFull); statErr == nil {
+			if _, statErr := root.Lstat(dstFull); statErr == nil {
 				if !req.Overwrite {
 					writeJSON(w, http.StatusConflict, map[string]string{"error": "Destination already exists"})
 					return
 				}
-				_ = os.RemoveAll(dstFull)
+				if err := root.RemoveAll(dstFull); err != nil {
+					writeError(w, 400, err.Error())
+					return
+				}
 			}
-			if err := os.MkdirAll(filepath.Dir(dstFull), 0755); err != nil {
+			if err := root.MkdirAll(filepath.Dir(dstFull), 0755); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create parent folder: " + err.Error()})
 				return
 			}
-			if err := moveFileOrDir(srcFull, dstFull); err != nil {
+			if err := root.Rename(srcFull, dstFull); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to move item: " + err.Error()})
 				return
 			}
@@ -546,12 +617,12 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 	if destDir == "/" || destDir == "." {
 		destDir = ""
 	}
-	destFull, err := h.safePath(serverID, destDir)
+	destFull, err := root.Path(destDir)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid destination folder: " + err.Error()})
 		return
 	}
-	if st, err := os.Stat(destFull); err == nil && !st.IsDir() {
+	if st, err := root.Lstat(destFull); err == nil && !st.IsDir() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Destination path is an existing file, not a folder"})
 		return
 	}
@@ -576,7 +647,7 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[srcRel] = true
 
-		srcFull, err := h.destructivePath(serverID, srcRel)
+		srcFull, err := root.Destructive(srcRel)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -585,7 +656,7 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Cannot move server root directory"})
 			return
 		}
-		srcInfo, err := os.Stat(srcFull)
+		srcInfo, err := root.Lstat(srcFull)
 		if err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("Item '%s' not found", srcRel)})
 			return
@@ -605,7 +676,7 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if _, err := os.Stat(dstFull); err == nil && !req.Overwrite {
+		if _, err := root.Lstat(dstFull); err == nil && !req.Overwrite {
 			writeJSON(w, http.StatusConflict, map[string]string{
 				"error": fmt.Sprintf("'%s' already exists in destination folder", baseName),
 			})
@@ -628,16 +699,19 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.MkdirAll(destFull, 0755); err != nil {
+	if err := root.MkdirAll(destFull, 0755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create destination folder: " + err.Error()})
 		return
 	}
 
 	for _, op := range ops {
 		if req.Overwrite {
-			_ = os.RemoveAll(op.dstFull)
+			if err := root.RemoveAll(op.dstFull); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
 		}
-		if err := moveFileOrDir(op.srcFull, op.dstFull); err != nil {
+		if err := root.Rename(op.srcFull, op.dstFull); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{
 				"error": fmt.Sprintf("Failed to move '%s': %v", filepath.Base(op.srcFull), err),
 			})
@@ -661,7 +735,13 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
-	baseDir := h.manager.GetWorkingDir(serverID)
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
+	baseDir := "."
 
 	var req struct {
 		Paths       []string `json:"paths"`
@@ -706,12 +786,12 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	destFull, err := h.safePath(serverID, destDir)
+	destFull, err := root.Path(destDir)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid destination directory: " + err.Error()})
 		return
 	}
-	if err := os.MkdirAll(destFull, 0755); err != nil {
+	if err := root.MkdirAll(destFull, 0755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to prepare destination directory: " + err.Error()})
 		return
 	}
@@ -741,12 +821,12 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	outRel := strings.Trim(filepath.ToSlash(filepath.Join(destDir, rawName)), "/")
-	outFull, err := h.safePath(serverID, outRel)
+	outFull, err := root.Path(outRel)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid archive filename: " + err.Error()})
 		return
 	}
-	if _, err := os.Stat(outFull); err == nil {
+	if _, err := root.Lstat(outFull); err == nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("Archive '%s' already exists", rawName)})
 		return
 	}
@@ -763,7 +843,7 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[srcRel] = true
 
-		srcFull, err := h.safePath(serverID, srcRel)
+		srcFull, err := root.Path(srcRel)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -771,7 +851,7 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 		if srcFull == baseDir {
 			continue
 		}
-		if _, err := os.Stat(srcFull); err != nil {
+		if _, err := root.Lstat(srcFull); err != nil {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("Source '%s' not found", srcRel)})
 			return
 		}
@@ -791,29 +871,23 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpFull := outFull + ".neopanel-tmp"
-	_ = os.Remove(tmpFull)
-
 	var fileCount int
-	if format == "tar.gz" {
-		fileCount, err = buildTarGzArchive(tmpFull, items, map[string]bool{outFull: true, tmpFull: true})
-	} else {
-		fileCount, err = buildZipArchive(tmpFull, items, map[string]bool{outFull: true, tmpFull: true})
-	}
+	err = root.Publish(outFull, 0644, func(out *os.File) error {
+		skip := map[string]bool{outFull: true}
+		if format == "tar.gz" {
+			fileCount, err = buildTarGzArchive(root, out, items, skip)
+		} else {
+			fileCount, err = buildZipArchive(root, out, items, skip)
+		}
+		return err
+	})
 	if err != nil {
-		_ = os.Remove(tmpFull)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create archive: " + err.Error()})
-		return
-	}
-
-	if err := os.Rename(tmpFull, outFull); err != nil {
-		_ = os.Remove(tmpFull)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to finalize archive: " + err.Error()})
+		writeError(w, 500, "Failed to create archive: "+err.Error())
 		return
 	}
 
 	var outSize int64
-	if st, statErr := os.Stat(outFull); statErr == nil {
+	if st, statErr := root.Lstat(outFull); statErr == nil {
 		outSize = st.Size()
 	}
 
@@ -828,92 +902,26 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func moveFileOrDir(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
-		return nil
-	}
-	info, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	if info.IsDir() {
-		if err := copyDirRecursive(src, dst); err != nil {
-			return err
-		}
-		return os.RemoveAll(src)
-	}
-	if err := copySingleFile(src, dst, info.Mode()); err != nil {
-		return err
-	}
-	return os.Remove(src)
-}
-
-func copyDirRecursive(srcDir, dstDir string) error {
-	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(srcDir, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dstDir, rel)
-		if info.IsDir() {
-			mode := info.Mode()
-			if mode == 0 {
-				mode = 0755
-			}
-			return os.MkdirAll(target, mode)
-		}
-		return copySingleFile(path, target, info.Mode())
-	})
-}
-
-func copySingleFile(src, dst string, mode os.FileMode) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-		return err
-	}
-	if mode == 0 {
-		mode = 0644
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
-}
-
 type archiveSource struct {
 	full      string
 	entryRoot string
 }
 
-func buildZipArchive(outPath string, sources []archiveSource, skipPaths map[string]bool) (int, error) {
-	outFile, err := os.Create(outPath)
-	if err != nil {
-		return 0, err
-	}
-	defer outFile.Close()
+func buildZipArchive(root *rooted.Root, outFile io.Writer, sources []archiveSource, skipPaths map[string]bool) (int, error) {
 
 	zw := zip.NewWriter(outFile)
 	defer zw.Close()
 
 	count := 0
 	for _, src := range sources {
-		err := filepath.Walk(src.full, func(path string, info os.FileInfo, walkErr error) error {
+		err := root.Walk(src.full, func(path string, info os.FileInfo, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			if skipPaths[path] {
+			if skipPaths[path] || strings.HasPrefix(filepath.Base(path), ".neopanel-") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if info.Mode()&os.ModeSymlink != 0 {
@@ -946,7 +954,7 @@ func buildZipArchive(outPath string, sources []archiveSource, skipPaths map[stri
 			if err != nil {
 				return err
 			}
-			f, err := os.Open(path)
+			f, err := root.Open(path)
 			if err != nil {
 				return err
 			}
@@ -966,15 +974,10 @@ func buildZipArchive(outPath string, sources []archiveSource, skipPaths map[stri
 	if err := zw.Close(); err != nil {
 		return count, err
 	}
-	return count, outFile.Close()
+	return count, nil
 }
 
-func buildTarGzArchive(outPath string, sources []archiveSource, skipPaths map[string]bool) (int, error) {
-	outFile, err := os.Create(outPath)
-	if err != nil {
-		return 0, err
-	}
-	defer outFile.Close()
+func buildTarGzArchive(root *rooted.Root, outFile io.Writer, sources []archiveSource, skipPaths map[string]bool) (int, error) {
 
 	gw := gzip.NewWriter(outFile)
 	defer gw.Close()
@@ -984,11 +987,14 @@ func buildTarGzArchive(outPath string, sources []archiveSource, skipPaths map[st
 
 	count := 0
 	for _, src := range sources {
-		err := filepath.Walk(src.full, func(path string, info os.FileInfo, walkErr error) error {
+		err := root.Walk(src.full, func(path string, info os.FileInfo, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
 			}
-			if skipPaths[path] {
+			if skipPaths[path] || strings.HasPrefix(filepath.Base(path), ".neopanel-") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			if info.Mode()&os.ModeSymlink != 0 {
@@ -1020,7 +1026,7 @@ func buildTarGzArchive(outPath string, sources []archiveSource, skipPaths map[st
 				return nil
 			}
 
-			f, err := os.Open(path)
+			f, err := root.Open(path)
 			if err != nil {
 				return err
 			}
@@ -1043,11 +1049,17 @@ func buildTarGzArchive(outPath string, sources []archiveSource, skipPaths map[st
 	if err := gw.Close(); err != nil {
 		return count, err
 	}
-	return count, outFile.Close()
+	return count, nil
 }
 
 func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 	var req struct {
 		Path        string `json:"path"`
 		Destination string `json:"destination"`
@@ -1062,7 +1074,7 @@ func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	archiveFullPath, err := h.safePath(serverID, req.Path)
+	archiveFullPath, err := root.Path(req.Path)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -1076,27 +1088,24 @@ func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	destFullPath, err := h.safePath(serverID, destDir)
+	destFullPath, err := root.Path(destDir)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid destination directory: " + err.Error()})
 		return
 	}
 
-	if err := os.MkdirAll(destFullPath, 0755); err != nil {
+	if err := root.MkdirAll(destFullPath, 0755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create destination folder: " + err.Error()})
 		return
 	}
 
-	lower := strings.ToLower(req.Path)
-	var count int
-	if strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") {
-		count, err = extractTarGz(archiveFullPath, destFullPath)
-	} else if strings.HasSuffix(lower, ".tar") {
-		count, err = extractTar(archiveFullPath, destFullPath)
-	} else {
-		// Default to standard zip (handles .zip, .jar, etc.)
-		count, err = extractZip(archiveFullPath, destFullPath)
+	archive, err := root.Open(archiveFullPath)
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
 	}
+	defer archive.Close()
+	count, err := rooted.Extract(r.Context(), root, archive, req.Path, destFullPath, rooted.DefaultArchiveLimits)
 
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to extract archive: " + err.Error()})
@@ -1109,125 +1118,4 @@ func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("Successfully extracted %d file(s)", count),
 		"count":   count,
 	})
-}
-
-func extractZip(zipPath, destDir string) (int, error) {
-	r, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return 0, err
-	}
-	defer r.Close()
-
-	count := 0
-	for _, f := range r.File {
-		cleanName := filepath.Clean("/" + f.Name)
-		target := filepath.Join(destDir, cleanName)
-		rel, err := filepath.Rel(destDir, target)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			continue // skip illegal paths (ZipSlip protection)
-		}
-
-		if f.FileInfo().IsDir() {
-			_ = os.MkdirAll(target, 0755)
-			continue
-		}
-
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			return count, err
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return count, err
-		}
-
-		mode := f.Mode()
-		if mode == 0 {
-			mode = 0644
-		}
-		outFile, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-		if err != nil {
-			rc.Close()
-			return count, err
-		}
-
-		_, copyErr := io.Copy(outFile, rc)
-		rc.Close()
-		outFile.Close()
-		if copyErr != nil {
-			return count, copyErr
-		}
-		count++
-	}
-	return count, nil
-}
-
-func extractTarGz(tarGzPath, destDir string) (int, error) {
-	f, err := os.Open(tarGzPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	gzr, err := gzip.NewReader(f)
-	if err != nil {
-		return 0, err
-	}
-	defer gzr.Close()
-
-	return extractTarReader(tar.NewReader(gzr), destDir)
-}
-
-func extractTar(tarPath, destDir string) (int, error) {
-	f, err := os.Open(tarPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	return extractTarReader(tar.NewReader(f), destDir)
-}
-
-func extractTarReader(tr *tar.Reader, destDir string) (int, error) {
-	count := 0
-	for {
-		header, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return count, err
-		}
-
-		cleanName := filepath.Clean("/" + header.Name)
-		target := filepath.Join(destDir, cleanName)
-		rel, err := filepath.Rel(destDir, target)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			continue // ZipSlip protection
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			_ = os.MkdirAll(target, 0755)
-		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return count, err
-			}
-			mode := header.FileInfo().Mode()
-			if mode == 0 {
-				mode = 0644
-			}
-			outFile, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-			if err != nil {
-				return count, err
-			}
-			_, copyErr := io.Copy(outFile, tr)
-			outFile.Close()
-			if copyErr != nil {
-				return count, copyErr
-			}
-			count++
-		}
-	}
-	return count, nil
 }

@@ -78,3 +78,30 @@ func TestPanelURLPasswordResetEmail(t *testing.T) {
 	default:
 	}
 }
+
+func TestPanelURLPasswordResetRejectsUnconfiguredHost(t *testing.T) {
+	smtp := newInvitationSMTP(t)
+	h := newInvitationHarness(t, smtp)
+	if err := h.db.SetPanelSetting(database.PanelPublicURLKey, ""); err != nil {
+		t.Fatal(err)
+	}
+	var response string
+	for _, identity := range []string{"owner", "missing"} {
+		r := httptest.NewRequest("POST", "https://attacker.example/", strings.NewReader(`{"identity":"`+identity+`"}`))
+		r.Header.Set("X-Forwarded-Host", "attacker.example")
+		w := httptest.NewRecorder()
+		h.router.email.RequestPasswordReset(w, r)
+		if w.Code != 200 || (response != "" && response != w.Body.String()) {
+			t.Fatal("origin rejection must not disclose account existence", w.Code, w.Body.String())
+		}
+		response = w.Body.String()
+		if origin, err := h.router.auth.panelLinkOrigin(r); err == nil || origin != "" {
+			t.Fatal("unconfigured origin trusted request Host", origin, err)
+		}
+	}
+	select {
+	case <-smtp.messages:
+		t.Fatal("reset email sent to an attacker-controlled origin")
+	default:
+	}
+}

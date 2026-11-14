@@ -3,9 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -81,8 +81,9 @@ func (h *PluginHandler) ListInstalled(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	defer pluginsDir.Close()
 
-	entries, err := os.ReadDir(pluginsDir)
+	entries, err := pluginsDir.ReadDir(".")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to read %s directory", folderName)})
 		return
@@ -165,7 +166,8 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	filename, err := downloader.DownloadModrinthPlugin(slug, pluginsDir, srv.Type, srv.Version, req.VersionID)
+	defer pluginsDir.Close()
+	filename, err := downloader.DownloadModrinthPluginRoot(slug, pluginsDir, srv.Type, srv.Version, req.VersionID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -214,8 +216,8 @@ func (h *PluginHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	filePath := filepath.Join(dir, filename)
-	if err := os.Remove(filePath); err != nil {
+	defer dir.Close()
+	if err := dir.Remove(filename); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to remove %s: %s", kind, err.Error())})
 		return
 	}
@@ -234,25 +236,36 @@ func validInstalledPluginName(name string) bool {
 	return name != "" && !strings.ContainsAny(name, "/\\:") && !strings.Contains(name, "..") && (strings.HasSuffix(low, ".jar") || strings.HasSuffix(low, ".jar.disabled"))
 }
 
-func (h *PluginHandler) pluginDir(serverID, folder string) (string, error) {
-	dir := filepath.Join(h.manager.GetWorkingDir(serverID), folder)
-	if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("plugin directory must not be a symbolic link")
-	} else if err != nil && !os.IsNotExist(err) {
-		return "", err
+func (h *PluginHandler) pluginDir(serverID, folder string) (*rooted.Root, error) {
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		return nil, err
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
+	defer root.Close()
+	if err := root.Check(folder); err != nil {
+		return nil, err
 	}
-	return dir, nil
+	if err := root.MkdirAll(folder, 0755); err != nil {
+		return nil, err
+	}
+	return root.Sub(folder)
 }
 
 func setPluginEnabled(dir, filename string, enabled bool) (string, error) {
+	root, err := rooted.Open(dir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	return setPluginEnabledRoot(root, filename, enabled)
+}
+
+func setPluginEnabledRoot(dir *rooted.Root, filename string, enabled bool) (string, error) {
 	if !validInstalledPluginName(filename) {
 		return "", fmt.Errorf("invalid plugin filename")
 	}
-	src := filepath.Join(dir, filename)
-	info, err := os.Lstat(src)
+	src := filename
+	info, err := dir.Lstat(src)
 	if err != nil {
 		return "", err
 	}
@@ -267,12 +280,12 @@ func setPluginEnabled(dir, filename string, enabled bool) (string, error) {
 	if enabled {
 		destName = filename[:len(filename)-len(".disabled")]
 	}
-	dest := filepath.Join(dir, destName)
-	if err := os.Link(src, dest); err != nil {
+	dest := destName
+	if err := dir.Link(src, dest); err != nil {
 		return "", fmt.Errorf("cannot change plugin state (destination may exist): %w", err)
 	}
-	if err := os.Remove(src); err != nil {
-		_ = os.Remove(dest)
+	if err := dir.Remove(src); err != nil {
+		_ = dir.Remove(dest)
 		return "", err
 	}
 	return destName, nil
@@ -304,7 +317,8 @@ func (h *PluginHandler) Toggle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	filename, err := setPluginEnabled(dir, req.Filename, *req.Enabled)
+	defer dir.Close()
+	filename, err := setPluginEnabledRoot(dir, req.Filename, *req.Enabled)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return

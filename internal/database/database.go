@@ -225,6 +225,11 @@ func (db *DB) migrate() error {
 	_ = db.addColumnIfNotExists("users", "two_factor_enabled", "BOOLEAN NOT NULL DEFAULT 0")
 	_ = db.addColumnIfNotExists("users", "two_factor_secret", "TEXT NOT NULL DEFAULT ''")
 	_ = db.addColumnIfNotExists("users", "recovery_codes", "TEXT NOT NULL DEFAULT ''")
+	// Existing databases start at version zero; fail startup if migration fails.
+	_ = db.addColumnIfNotExists("users", "auth_version", "INTEGER NOT NULL DEFAULT 0")
+	if _, err := db.conn.Exec("SELECT auth_version FROM users LIMIT 0"); err != nil {
+		return fmt.Errorf("auth version migration: %w", err)
+	}
 	_ = db.addColumnIfNotExists("servers", "icon_url", "TEXT DEFAULT ''")
 	_ = db.addColumnIfNotExists("servers", "owner_id", "INTEGER DEFAULT 1")
 	_ = db.addColumnIfNotExists("servers", "node_id", "TEXT DEFAULT 'local'")
@@ -267,10 +272,10 @@ func (db *DB) GetUserCount() (int, error) {
 }
 
 func (db *DB) GetUserByUsername(username string) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ?", username)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version FROM users WHERE username = ?", username)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -279,10 +284,10 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 }
 
 func (db *DB) GetUserByID(id int) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE id = ?", id)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version FROM users WHERE id = ?", id)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -292,10 +297,10 @@ func (db *DB) GetUserByID(id int) (*User, error) {
 
 func (db *DB) GetUserByEmailOrUsername(lookup string) (*User, error) {
 	lookup = strings.TrimSpace(lookup)
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at FROM users WHERE username = ? OR (email != '' AND LOWER(email) = LOWER(?))", lookup, lookup)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version FROM users WHERE username = ? OR (email != '' AND LOWER(email) = LOWER(?))", lookup, lookup)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +363,7 @@ func (db *DB) AdminUpdateUser(id int, username, firstName, lastName, email, role
 	}
 
 	if newPasswordHash != "" {
-		_, err := db.conn.Exec("UPDATE users SET username = ?, first_name = ?, last_name = ?, email = ?, role = ?, password_hash = ? WHERE id = ?",
+		_, err := db.conn.Exec("UPDATE users SET username = ?, first_name = ?, last_name = ?, email = ?, role = ?, password_hash = ?, auth_version = auth_version + 1 WHERE id = ?",
 			username, firstName, lastName, email, role, newPasswordHash, id)
 		return err
 	}
@@ -396,7 +401,7 @@ func (db *DB) UpdateUserRole(id int, role string) error {
 }
 
 func (db *DB) ListUsers() ([]*User, error) {
-	rows, err := db.conn.Query("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), created_at FROM users ORDER BY created_at ASC")
+	rows, err := db.conn.Query("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), created_at, auth_version FROM users ORDER BY created_at ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +411,7 @@ func (db *DB) ListUsers() ([]*User, error) {
 	for rows.Next() {
 		u := &User{}
 		var tfa int
-		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.AvatarURL, &tfa, &u.CreatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.AvatarURL, &tfa, &u.CreatedAt, &u.AuthVersion); err != nil {
 			return nil, err
 		}
 		u.TwoFactorEnabled = tfa == 1
@@ -577,7 +582,7 @@ func (db *DB) DeleteServer(id string) error {
 }
 
 func (db *DB) UpdateUserPassword(userID int, newHash string) error {
-	_, err := db.conn.Exec("UPDATE users SET password_hash = ? WHERE id = ?", newHash, userID)
+	_, err := db.conn.Exec("UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE id = ?", newHash, userID)
 	return err
 }
 
@@ -704,7 +709,7 @@ func (db *DB) UpsertSyncedUser(id int, username, email, passwordHash, role strin
 	var existingID int
 	err := db.conn.QueryRow("SELECT id FROM users WHERE username = ? OR id = ?", username, id).Scan(&existingID)
 	if err == nil {
-		_, err = db.conn.Exec("UPDATE users SET username=?, email=?, password_hash=?, role=? WHERE id=?", username, email, passwordHash, role, existingID)
+		_, err = db.conn.Exec("UPDATE users SET username=?, email=?, auth_version=auth_version + CASE WHEN password_hash != ? THEN 1 ELSE 0 END, password_hash=?, role=? WHERE id=?", username, email, passwordHash, passwordHash, role, existingID)
 		return err
 	}
 	_, err = db.conn.Exec("INSERT INTO users (id, username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, username, email, passwordHash, role, now)
@@ -962,13 +967,13 @@ func (db *DB) DeleteAllServerPorts(serverID string) error {
 
 func (db *DB) GetUserByAPIKeyHash(keyHash string) (*User, error) {
 	row := db.conn.QueryRow(`
-		SELECT u.id, u.username, u.password_hash, u.role, u.created_at
+		SELECT u.id, u.username, u.password_hash, u.role, u.created_at, u.auth_version
 		FROM api_keys ak
 		JOIN users u ON u.id = ak.user_id
 		WHERE ak.key_hash = ?
 		LIMIT 1`, keyHash)
 	user := &User{}
-	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt); err != nil {
+	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.AuthVersion); err != nil {
 		return nil, err
 	}
 	return db.loadUserPanelRole(user)

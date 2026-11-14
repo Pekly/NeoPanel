@@ -48,6 +48,7 @@ type Router struct {
 	invitations    *InvitationHandler
 	globalLimiter  *IPRateLimiter
 	authLimiter    *IPRateLimiter
+	clientIPs      *clientIPPolicy
 	embeddedStatic fs.FS
 }
 
@@ -94,6 +95,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		email:          emailHandler,
 		globalLimiter:  NewIPRateLimiter(60, 100),
 		authLimiter:    NewIPRateLimiter(1, 15),
+		clientIPs:      newClientIPPolicy(cfg.Security.TrustedProxies),
 		embeddedStatic: embeddedStatic,
 	}
 	r.invitations = NewInvitationHandler(r)
@@ -107,6 +109,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
+	if !limitAuthBody(w, req) {
+		return
+	}
+	req = r.clientIPs.request(req)
 
 	if r.globalLimiter != nil {
 		r.globalLimiter.Middleware(r.mux).ServeHTTP(w, req)
@@ -802,6 +808,28 @@ func (r *Router) proxyWebSocket(w http.ResponseWriter, req *http.Request) {
 	u.RawQuery = ""
 	header := http.Header{}
 	claims, _ := req.Context().Value(contextUserKey).(*JWTClaims)
+	// Capture the same original credential selected by requireAuth. The node
+	// connection uses a machine credential and cannot revoke this client session.
+	token := ""
+	if value := req.Header.Get("Authorization"); strings.HasPrefix(value, "Bearer ") {
+		token = strings.TrimPrefix(value, "Bearer ")
+	}
+	if token == "" {
+		if cookie, err := req.Cookie("neopanel_token"); err == nil {
+			token = cookie.Value
+		}
+	}
+	if token == "" {
+		token = strings.TrimSpace(req.URL.Query().Get("token"))
+	}
+	revalidate := func() bool {
+		_, err := r.auth.revalidateConsoleClaims(req, token, claims)
+		return err == nil
+	}
+	if !revalidate() {
+		writeError(w, http.StatusUnauthorized, "Console session expired; reconnect required")
+		return
+	}
 	if err := r.checkProxyIdentity(req, node, claims); err != nil {
 		writeError(w, 502, err.Error())
 		return
@@ -830,12 +858,22 @@ func (r *Router) proxyWebSocket(w http.ResponseWriter, req *http.Request) {
 	}
 	defer client.Close()
 	client.SetReadLimit(65536)
+	stopAuthorization := watchConsoleAuthorization(revalidate, func() {
+		_ = client.Close()
+		_ = remote.Close()
+	})
+	defer stopAuthorization()
 	done := make(chan struct{}, 2)
-	relay := func(dst, src *websocket.Conn) {
+	relay := func(dst, src *websocket.Conn, fromClient bool) {
 		defer func() { done <- struct{}{} }()
 		for {
 			kind, payload, err := src.ReadMessage()
 			if err != nil {
+				return
+			}
+			// Check before forwarding commands (and other client messages), not
+			// for every high-volume log frame flowing in the opposite direction.
+			if fromClient && !revalidate() {
 				return
 			}
 			if err := dst.WriteMessage(kind, payload); err != nil {
@@ -843,8 +881,8 @@ func (r *Router) proxyWebSocket(w http.ResponseWriter, req *http.Request) {
 			}
 		}
 	}
-	go relay(remote, client)
-	go relay(client, remote)
+	go relay(remote, client, true)
+	go relay(client, remote, false)
 	<-done
 }
 

@@ -1,12 +1,13 @@
 package downloader
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
 	"os"
-	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -29,6 +30,12 @@ func httpGet(url string) (*http.Response, error) {
 // DownloadServerJar installs the server distribution (a native binary for Steel).
 // Java distributions also get an automatically accepted eula.txt.
 func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
+	if err := ValidateSoftware(flavor, version); err != nil {
+		return err
+	}
+	if !rooted.Basename(jarFileName) {
+		return fmt.Errorf("invalid server filename")
+	}
 	if IsNativeSoftware(flavor) {
 		return downloadSteel(version, destDir, jarFileName)
 	}
@@ -36,15 +43,18 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// Try fast, reliable mcjarfiles.com API first for supported engines
-	if err := DownloadWithMCJarFiles(flavor, version, destDir, jarFileName); err == nil {
+	root, err := rooted.Open(destDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	// Keep the same pinned root across both upstream attempts.
+	if err := downloadMCJarFiles(flavor, version, root, jarFileName); err == nil {
 		return nil
 	}
 
-	destPath := filepath.Join(destDir, jarFileName)
-
 	var downloadURL string
-	var err error
+	err = nil
 
 	switch flavor {
 	case "paper":
@@ -69,20 +79,35 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 		return fmt.Errorf("failed to resolve download URL for %s %s: %w", flavor, version, err)
 	}
 
-	if err := downloadFile(destPath, downloadURL); err != nil {
+	if err := downloadRootFile(root, jarFileName, downloadURL); err != nil {
 		return fmt.Errorf("failed to download file from %s: %w", downloadURL, err)
 	}
 
 	// Automatically agree to Minecraft EULA
-	eulaPath := filepath.Join(destDir, "eula.txt")
-	_ = os.WriteFile(eulaPath, []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
-
-	return nil
+	return root.WriteFile("eula.txt", []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
 }
 
 // DownloadWithMCJarFiles downloads a Minecraft server JAR from mcjarfiles.com REST API.
 // Automatically follows 302 redirects to the official upstream builds.
 func DownloadWithMCJarFiles(flavor, version, destDir, jarFileName string) error {
+	if err := ValidateSoftware(flavor, version); err != nil {
+		return err
+	}
+	if !rooted.Basename(jarFileName) {
+		return fmt.Errorf("invalid server filename")
+	}
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return err
+	}
+	root, err := rooted.Open(destDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return downloadMCJarFiles(flavor, version, root, jarFileName)
+}
+
+func downloadMCJarFiles(flavor, version string, root *rooted.Root, jarFileName string) error {
 	fl := strings.ToLower(strings.TrimSpace(flavor))
 	ver := strings.TrimSpace(version)
 
@@ -146,8 +171,7 @@ func DownloadWithMCJarFiles(flavor, version, destDir, jarFileName string) error 
 		return fmt.Errorf("flavor %s is not supported on mcjarfiles", fl)
 	}
 
-	_ = os.MkdirAll(destDir, 0755)
-	destPath := filepath.Join(destDir, jarFileName)
+	// root was pinned before any remote request.
 
 	resp, err := httpGet(endpoint)
 	if err != nil {
@@ -159,24 +183,13 @@ func DownloadWithMCJarFiles(flavor, version, destDir, jarFileName string) error 
 		return fmt.Errorf("mcjarfiles returned non-200 status: %d %s", resp.StatusCode, resp.Status)
 	}
 
-	out, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create destination file: %w", err)
+	if _, err := root.Copy(context.Background(), jarFileName, resp.Body, 1<<30, 0644); err != nil {
+		return err
 	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, resp.Body); err != nil {
-		return fmt.Errorf("failed to write server jar: %w", err)
-	}
-
-	// Auto-accept EULA
-	eulaPath := filepath.Join(destDir, "eula.txt")
-	_ = os.WriteFile(eulaPath, []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
-
-	return nil
+	return root.WriteFile("eula.txt", []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
 }
 
-func downloadFile(filepath string, url string) error {
+func downloadRootFile(root *rooted.Root, name string, url string) error {
 	resp, err := httpGet(url)
 	if err != nil {
 		return err
@@ -187,13 +200,7 @@ func downloadFile(filepath string, url string) error {
 		return fmt.Errorf("bad status: %s", resp.Status)
 	}
 
-	out, err := os.Create(filepath)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, resp.Body)
+	_, err = root.Copy(context.Background(), name, resp.Body, 1<<30, 0644)
 	return err
 }
 
@@ -400,4 +407,17 @@ func getWaterfallURL(version string) (string, error) {
 
 func getBungeeCordURL() (string, error) {
 	return "https://ci.md-5.net/job/BungeeCord/lastSuccessfulBuild/artifact/bootstrap/target/BungeeCord.jar", nil
+}
+
+var softwareIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+\-]{0,127}$`)
+
+func ValidateSoftware(flavor, version string) error {
+	if !softwareIdentifier.MatchString(flavor) || !softwareIdentifier.MatchString(version) {
+		return fmt.Errorf("invalid software or version identifier")
+	}
+	switch strings.ToLower(flavor) {
+	case "paper", "purpur", "leaf", "leafmc", "folia", "fabric", "forge", "neoforge", "vanilla", "velocity", "waterfall", "bungeecord", "steel":
+		return nil
+	}
+	return fmt.Errorf("unsupported server software")
 }

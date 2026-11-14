@@ -2,9 +2,11 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -48,6 +50,10 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 	req.Version = strings.TrimSpace(req.Version)
 	if req.Software == "" || req.Version == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Software and version are required"})
+		return
+	}
+	if err := downloader.ValidateSoftware(req.Software, req.Version); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	release, err := h.manager.BeginServerOperation(serverID)
@@ -103,10 +109,20 @@ func (h *SoftwareHandler) GetProperties(w http.ResponseWriter, r *http.Request) 
 	if rejectSteelJavaConfig(h.db, serverID, w) {
 		return
 	}
-	propPath := filepath.Join(h.manager.GetWorkingDir(serverID), "server.properties")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 
 	props := make(map[string]string)
-	if file, err := os.Open(propPath); err == nil {
+	file, err := root.Open("server.properties")
+	if err != nil && !os.IsNotExist(err) {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if err == nil {
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
 		for scanner.Scan() {
@@ -129,7 +145,12 @@ func (h *SoftwareHandler) SaveProperties(w http.ResponseWriter, r *http.Request)
 	if rejectSteelJavaConfig(h.db, serverID, w) {
 		return
 	}
-	propPath := filepath.Join(h.manager.GetWorkingDir(serverID), "server.properties")
+	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	defer root.Close()
 
 	var newProps map[string]string
 	if err := json.NewDecoder(r.Body).Decode(&newProps); err != nil {
@@ -140,10 +161,14 @@ func (h *SoftwareHandler) SaveProperties(w http.ResponseWriter, r *http.Request)
 	var sb strings.Builder
 	sb.WriteString("# Minecraft server properties saved by NeoPanel\n")
 	for k, v := range newProps {
+		if !rooted.PropertyText(k) || !rooted.PropertyText(v) {
+			writeError(w, 400, "Property keys and values must not contain line controls")
+			return
+		}
 		sb.WriteString(fmt.Sprintf("%s=%s\n", k, v))
 	}
 
-	if err := os.WriteFile(propPath, []byte(sb.String()), 0644); err != nil {
+	if err := root.WriteFile("server.properties", []byte(sb.String()), 0644); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save server.properties: " + err.Error()})
 		return
 	}
@@ -190,6 +215,10 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 			req.Version = "latest"
 		}
 	}
+	if err := downloader.ValidateSoftware(req.Software, req.Version); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Keep the same gate as restore through stop, cleanup, download and DB update.
 	release, err := h.manager.BeginServerMaintenance(r.Context(), serverID)
@@ -200,6 +229,12 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 	defer release()
 
 	serverDir := h.manager.GetWorkingDir(serverID)
+	root, err := rooted.Open(serverDir)
+	if err != nil {
+		writeServerOperationError(w, err)
+		return
+	}
+	defer root.Close()
 	// Stage native downloads before destructive cleanup: bad tags, unsupported
 	// hosts or network failures must leave the existing installation untouched.
 	staged := ""
@@ -221,7 +256,7 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 	}
 
 	// 2. Perform selective cleanup based on preservation flags
-	entries, err := os.ReadDir(serverDir)
+	entries, err := root.ReadDir(".")
 	if err != nil && !os.IsNotExist(err) {
 		writeServerOperationError(w, err)
 		return
@@ -247,7 +282,7 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 			}
 
 			// Remove all other runtime files, old jars, cache directories
-			if err := os.RemoveAll(filepath.Join(serverDir, name)); err != nil {
+			if err := root.RemoveAll(name); err != nil {
 				writeServerOperationError(w, err)
 				return
 			}
@@ -257,17 +292,34 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 	// Install the staged native executable or download the Java distribution.
 	jarName := downloader.ServerFileName(req.Software)
 	if staged != "" {
-		if err := os.Rename(filepath.Join(staged, jarName), filepath.Join(serverDir, jarName)); err != nil {
+		stagedRoot, err := rooted.Open(staged)
+		if err != nil {
 			writeServerOperationError(w, err)
 			return
 		}
-		configPath := filepath.Join(serverDir, "config", "config.toml")
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		defer stagedRoot.Close()
+		binary, err := stagedRoot.Open(jarName)
+		if err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
+		defer binary.Close()
+		if _, err := root.Copy(context.Background(), jarName, binary, 1<<30, 0755); err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
+		configPath := filepath.Join("config", "config.toml")
+		if _, err := root.Lstat(configPath); os.IsNotExist(err) {
+			if err := root.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 				writeServerOperationError(w, err)
 				return
 			}
-			if err := os.Rename(filepath.Join(staged, "config", "config.toml"), configPath); err != nil {
+			config, err := stagedRoot.ReadFile(configPath)
+			if err != nil {
+				writeServerOperationError(w, err)
+				return
+			}
+			if err := root.WriteFile(configPath, config, 0644); err != nil {
 				writeServerOperationError(w, err)
 				return
 			}
@@ -283,10 +335,12 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 
 	// 4. Ensure server.properties exists with port
 	if !downloader.IsNativeSoftware(req.Software) {
-		propsPath := filepath.Join(serverDir, "server.properties")
-		if _, err := os.Stat(propsPath); os.IsNotExist(err) {
-			propsContent := fmt.Sprintf("# Minecraft server properties generated by NeoPanel\nserver-port=%d\nquery.port=%d\nmotd=%s\nenable-rcon=false\n", srv.Port, srv.Port, srv.Name)
-			_ = os.WriteFile(propsPath, []byte(propsContent), 0644)
+		if _, err := root.Lstat("server.properties"); os.IsNotExist(err) {
+			propsContent := fmt.Sprintf("# Minecraft server properties generated by NeoPanel\nserver-port=%d\nquery.port=%d\nmotd=A NeoPanel Minecraft Server\nenable-rcon=false\n", srv.Port, srv.Port)
+			if err := root.WriteFile("server.properties", []byte(propsContent), 0644); err != nil {
+				writeServerOperationError(w, err)
+				return
+			}
 		}
 	}
 

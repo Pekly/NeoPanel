@@ -1,9 +1,10 @@
 package downloader
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
 	"net/url"
 	"os"
@@ -198,6 +199,18 @@ func validPluginJarName(name string) bool {
 // DownloadModrinthPlugin revalidates the selected release against the server, then
 // publishes a completed JAR without replacing an existing enabled or disabled file.
 func DownloadModrinthPlugin(project, destDir, loader, mcVersion, versionID string) (string, error) {
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return "", err
+	}
+	root, err := rooted.Open(destDir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	return DownloadModrinthPluginRoot(project, root, loader, mcVersion, versionID)
+}
+
+func DownloadModrinthPluginRoot(project string, root *rooted.Root, loader, mcVersion, versionID string) (string, error) {
 	versions, err := CompatibleModrinthVersions(project, loader, mcVersion)
 	if err != nil {
 		return "", err
@@ -225,12 +238,9 @@ func DownloadModrinthPlugin(project, destDir, loader, mcVersion, versionID strin
 		return "", fmt.Errorf("compatible release has no safe JAR file")
 	}
 	f := chosen.Files[fileIndex]
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return "", err
-	}
-	dest := filepath.Join(destDir, f.Filename)
+	dest := f.Filename
 	for _, path := range []string{dest, dest + ".disabled"} {
-		if _, err := os.Lstat(path); err == nil {
+		if _, err := root.Lstat(path); err == nil {
 			return "", fmt.Errorf("%s already exists; remove it explicitly before reinstalling", filepath.Base(path))
 		} else if !os.IsNotExist(err) {
 			return "", err
@@ -244,12 +254,17 @@ func DownloadModrinthPlugin(project, destDir, loader, mcVersion, versionID strin
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download returned status %s", resp.Status)
 	}
-	tmp, err := os.CreateTemp(destDir, ".neopanel-plugin-*")
+	dir, stage, err := root.TempDir()
 	if err != nil {
 		return "", err
 	}
-	defer os.Remove(tmp.Name())
-	n, copyErr := io.Copy(tmp, resp.Body)
+	defer root.RemoveAll(dir)
+	defer stage.Close()
+	tmp, err := stage.OpenFile("plugin", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		return "", err
+	}
+	n, copyErr := rooted.Copy(context.Background(), tmp, resp.Body, 200<<20)
 	closeErr := tmp.Close()
 	if copyErr != nil {
 		return "", copyErr
@@ -260,11 +275,8 @@ func DownloadModrinthPlugin(project, destDir, loader, mcVersion, versionID strin
 	if f.Size > 0 && n != f.Size {
 		return "", fmt.Errorf("incomplete plugin download: expected %d bytes, received %d", f.Size, n)
 	}
-	if err := os.Chmod(tmp.Name(), 0644); err != nil {
-		return "", err
-	}
 	// Link is atomic and, unlike Rename on Unix, never overwrites the destination.
-	if err := os.Link(tmp.Name(), dest); err != nil {
+	if err := root.Link(filepath.Join(dir, "plugin"), dest); err != nil {
 		return "", fmt.Errorf("cannot publish plugin (file may already exist): %w", err)
 	}
 	return f.Filename, nil

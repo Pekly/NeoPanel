@@ -9,6 +9,7 @@ type User struct {
 	LastName         string    `json:"last_name"`
 	Email            string    `json:"email"`
 	PasswordHash     string    `json:"-"`
+	AuthVersion      int64     `json:"-"`
 	Role             string    `json:"role"` // "admin" or "user"
 	PanelRoleID      string    `json:"panel_role_id"`
 	PanelRoleName    string    `json:"panel_role_name"`

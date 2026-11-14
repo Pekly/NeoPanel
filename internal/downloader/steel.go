@@ -1,10 +1,12 @@
 package downloader
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"io"
 	"net/http"
 	"net/url"
@@ -99,6 +101,17 @@ func downloadSteel(version, destDir, filename string) error {
 	if filename == "" || filepath.Base(filename) != filename || strings.ContainsAny(filename, `/\\:`) || filename == "." || filename == ".." {
 		return fmt.Errorf("invalid Steel executable filename")
 	}
+	if err := ValidateSoftware("steel", version); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return err
+	}
+	root, err := rooted.Open(destDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	endpoint := steelReleasesURL + "/latest"
 	if version = strings.TrimSpace(version); version != "" && !strings.EqualFold(version, "latest") {
 		endpoint = steelReleasesURL + "/tags/" + url.PathEscape(version)
@@ -133,15 +146,17 @@ func downloadSteel(version, destDir, filename string) error {
 	if err != nil || u.Scheme != "https" || u.Host != "github.com" || !strings.HasPrefix(u.Path, "/Steel-Foundation/SteelMC/releases/download/") {
 		return fmt.Errorf("invalid official Steel asset URL")
 	}
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-	// Stage the executable and config before publishing either one.
-	temp, err := os.CreateTemp(destDir, ".steel-download-*")
+	// The destination is pinned before release metadata or asset requests.
+	dir, stage, err := root.TempDir()
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temp.Name())
+	defer root.RemoveAll(dir)
+	defer stage.Close()
+	temp, err := stage.OpenFile("binary", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
+	if err != nil {
+		return err
+	}
 	defer temp.Close()
 	// Native release binaries can exceed the shared metadata timeout on slow links.
 	client := *httpClient
@@ -160,7 +175,7 @@ func downloadSteel(version, destDir, filename string) error {
 		return fmt.Errorf("Steel binary download returned HTTP %d", resp.StatusCode)
 	}
 	hash := sha256.New()
-	size, err := io.Copy(io.MultiWriter(temp, hash), resp.Body)
+	size, err := rooted.Copy(context.Background(), io.MultiWriter(temp, hash), resp.Body, 1<<30)
 	if err != nil {
 		return err
 	}
@@ -176,8 +191,11 @@ func downloadSteel(version, destDir, filename string) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	configPath := filepath.Join(destDir, "config", "config.toml")
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	configPath := filepath.Join("config", "config.toml")
+	if err := root.Check(configPath); err != nil {
+		return err
+	}
+	if _, err := root.Lstat(configPath); os.IsNotExist(err) {
 		configURL := "https://raw.githubusercontent.com/Steel-Foundation/SteelMC/" + url.PathEscape(release.Tag) + "/package-content/config.toml"
 		configResp, err := httpGet(configURL)
 		if err != nil {
@@ -187,21 +205,24 @@ func downloadSteel(version, destDir, filename string) error {
 		if configResp.StatusCode != http.StatusOK {
 			return fmt.Errorf("Steel default configuration download returned HTTP %d", configResp.StatusCode)
 		}
-		config, err := io.ReadAll(io.LimitReader(configResp.Body, 2<<20))
+		config, err := rooted.ReadBounded(configResp.Body, 2<<20)
 		if err != nil {
 			return err
 		}
 		if !strings.Contains(string(config), "[server]") || !strings.Contains(string(config), "server_port") {
 			return fmt.Errorf("invalid Steel default configuration")
 		}
-		if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(configPath, config, 0644); err != nil {
+		if err := root.WriteFile(configPath, config, 0644); err != nil {
 			return err
 		}
 	} else if err != nil {
 		return err
 	}
-	return os.Rename(temp.Name(), filepath.Join(destDir, filename))
+	if err := root.Check(filename); err != nil {
+		return err
+	}
+	return root.Rename(filepath.Join(dir, "binary"), filename)
 }

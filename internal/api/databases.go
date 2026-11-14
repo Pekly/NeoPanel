@@ -350,7 +350,9 @@ func (h *DatabaseHandler) Tables(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	rows, err := conn.Query(`SELECT name, type, COALESCE(sql, '') FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name`)
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	rows, err := conn.QueryContext(ctx, `SELECT name, type, COALESCE(sql, '') FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY type, name LIMIT 500`)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to inspect schema: " + err.Error()})
 		return
@@ -369,9 +371,12 @@ func (h *DatabaseHandler) Tables(w http.ResponseWriter, r *http.Request) {
 
 	for i := range tables {
 		qIdent := quoteSQLIdent(tables[i].Name)
-		_ = conn.QueryRow("SELECT COUNT(*) FROM " + qIdent).Scan(&tables[i].RowCount)
+		// Views can contain arbitrary recursive queries; never execute them here.
+		if tables[i].Type == "table" {
+			_ = conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+qIdent).Scan(&tables[i].RowCount)
+		}
 
-		colRows, err := conn.Query("PRAGMA table_info(" + qIdent + ")")
+		colRows, err := conn.QueryContext(ctx, "PRAGMA table_info("+qIdent+")")
 		if err == nil {
 			for colRows.Next() {
 				var cid int
@@ -392,6 +397,11 @@ func (h *DatabaseHandler) Tables(w http.ResponseWriter, r *http.Request) {
 		if tables[i].Columns == nil {
 			tables[i].Columns = []DBColumnInfo{}
 		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		writeJSON(w, http.StatusRequestTimeout, map[string]string{"error": "Schema inspection timed out or was cancelled"})
+		return
 	}
 
 	if tables == nil {
@@ -459,7 +469,17 @@ func (h *DatabaseHandler) Query(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SQL string `json:"sql"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, maxServerSQLRequestBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		status := http.StatusBadRequest
+		if _, tooLarge := err.(*http.MaxBytesError); tooLarge {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeJSON(w, status, map[string]string{"error": "SQL request body is invalid or too large"})
+		return
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
 		return
 	}
@@ -470,21 +490,37 @@ func (h *DatabaseHandler) Query(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := h.openServerSQLite(record.FilePath)
+	kw, batch, err := inspectServerSQL(req.SQL)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	pool, err := h.openServerSQLite(record.FilePath)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to open SQLite database: " + err.Error()})
 		return
 	}
-	defer conn.Close()
+	defer pool.Close()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	started := time.Now()
-	kw := firstSQLKeyword(query)
-	isQuery := kw == "SELECT" || kw == "PRAGMA" || kw == "EXPLAIN" || kw == "WITH" || kw == "VALUES"
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to acquire SQLite connection: " + err.Error()})
+		return
+	}
+	defer conn.Close()
+	if err := restrictServerSQLConn(conn); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to restrict SQLite connection: " + err.Error()})
+		return
+	}
 
-	if isQuery && !strings.Contains(strings.TrimSuffix(query, ";"), ";") {
+	started := time.Now()
+	isQuery := kw == "SELECT" || kw == "EXPLAIN" || kw == "WITH" || kw == "VALUES"
+
+	if isQuery && !batch {
 		rows, err := conn.QueryContext(ctx, query)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -500,6 +536,8 @@ func (h *DatabaseHandler) Query(w http.ResponseWriter, r *http.Request) {
 
 		const maxRows = 500
 		resultRows := [][]interface{}{}
+		const maxResponseBytes = 8 << 20
+		responseBytes := 0
 		truncated := false
 
 		for rows.Next() {
@@ -520,6 +558,16 @@ func (h *DatabaseHandler) Query(w http.ResponseWriter, r *http.Request) {
 			for i, v := range dest {
 				rowOut[i] = normalizeSQLValue(v)
 			}
+			encoded, err := json.Marshal(rowOut)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "SQL result cannot be encoded"})
+				return
+			}
+			if responseBytes+len(encoded) > maxResponseBytes {
+				truncated = true
+				break
+			}
+			responseBytes += len(encoded)
 			resultRows = append(resultRows, rowOut)
 		}
 		if err := rows.Err(); err != nil {

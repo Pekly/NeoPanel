@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"mime"
 	"net"
@@ -214,7 +213,7 @@ func (h *EmailHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request)
 
 func (h *EmailHandler) HandleSaveSettings(w http.ResponseWriter, r *http.Request) {
 	var s database.SMTPSettings
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
+	if err := decodeAuthJSON(w, r, &s); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
 	}
@@ -232,7 +231,10 @@ func (h *EmailHandler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ToEmail string `json:"to_email"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := decodeAuthJSON(w, r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
+		return
+	}
 
 	s, err := h.GetSMTPSettings()
 	if err != nil || !s.Enabled || s.Host == "" {
@@ -271,7 +273,7 @@ func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
 		TurnstileResp  string `json:"cf-turnstile-response"`
 		TurnstileToken string `json:"turnstile_token"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
 	}
@@ -294,37 +296,29 @@ func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
 			}
 		}
 	}
+	// Every account lookup and delivery outcome has the same public response.
+	defer writeJSON(w, http.StatusOK, map[string]string{
+		"message": "If an account matches that username or email address, password reset instructions have been sent.",
+	})
 
 	user, err := h.db.GetUserByEmailOrUsername(identity)
 	if err != nil || user == nil {
-		// Prevent user enumeration by returning standard positive message
-		writeJSON(w, http.StatusOK, map[string]string{
-			"message": "If an account matches that username or email address, password reset instructions have been sent.",
-		})
 		return
 	}
 
 	tokenBytes := make([]byte, 32)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate security token"})
 		return
 	}
 	resetToken := hex.EncodeToString(tokenBytes)
 	expiresAt := time.Now().UTC().Add(1 * time.Hour)
 
-	if err := h.db.CreatePasswordResetToken(user.ID, resetToken, expiresAt); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to register password reset request"})
-		return
-	}
-
 	smtpCfg, _ := h.GetSMTPSettings()
-	smtpReady := smtpCfg != nil && smtpCfg.Enabled && smtpCfg.Host != "" && user.Email != ""
+	smtpReady := smtpCfg != nil && smtpCfg.Enabled && smtpCfg.Host != "" && user.Email != "" && h.auth != nil
 
 	if smtpReady {
 		origin, err := h.auth.panelLinkOrigin(r)
 		if err != nil {
-			// Keep the response identical for existing and unknown accounts.
-			writeJSON(w, http.StatusOK, map[string]string{"message": "If an account matches that username or email address, password reset instructions have been sent."})
 			return
 		}
 		resetLink := origin + "/#reset-token=" + resetToken
@@ -360,25 +354,19 @@ func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
 
 		if err := h.SendEmail(smtpCfg, user.Email, user.Username, subject, bodyHTML, bodyPlain); err != nil {
 			logAuditUser(h.db, user.ID, r, "auth_password_reset_email_fail", fmt.Sprintf("Failed to send reset email: %v", err))
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"message": "Password reset token generated, but failed to deliver email via SMTP: " + err.Error(),
-				"token":   resetToken,
-			})
+			// No recovery credential is stored when delivery fails.
 			return
 		}
 
+		if err := h.db.CreatePasswordResetToken(user.ID, resetToken, expiresAt); err != nil {
+			logAuditUser(h.db, user.ID, r, "auth_password_reset_email_fail", "Could not activate delivered reset credential")
+			return
+		}
 		logAuditUser(h.db, user.ID, r, "auth_password_reset_email_sent", fmt.Sprintf("Sent password reset link to %s", user.Email))
-		writeJSON(w, http.StatusOK, map[string]string{
-			"message": "Password reset instructions have been sent to your registered email address.",
-		})
 		return
 	}
 
 	logAuditUser(h.db, user.ID, r, "auth_password_reset_nosmtp", "Password reset requested without active SMTP")
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message": "Password reset token generated. Note: SMTP email delivery is not configured on this server.",
-		"token":   resetToken,
-	})
 }
 
 func (h *EmailHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
@@ -386,7 +374,7 @@ func (h *EmailHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Reque
 		Token       string `json:"token"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
 	}
@@ -428,12 +416,11 @@ func (h *EmailHandler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.db.UpdateUserPassword(user.ID, string(hash)); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update password in database"})
+	if err := h.db.ResetUserPassword(token, string(hash)); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid or expired password reset token"})
 		return
 	}
 
-	_ = h.db.MarkPasswordResetUsed(token)
 	logAuditUser(h.db, user.ID, r, "auth_password_reset_success", fmt.Sprintf("Password was successfully reset for user %s", user.Username))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

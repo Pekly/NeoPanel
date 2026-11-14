@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -27,10 +27,12 @@ type AuthHandler struct {
 }
 
 type JWTClaims struct {
-	UserID   int    `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	Scope    string `json:"scope,omitempty"`
+	UserID      int    `json:"user_id"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+	Scope       string `json:"scope,omitempty"`
+	AuthVersion int64  `json:"auth_version,omitempty"`
+	APIKey      bool   `json:"-"`
 	// Set only by trusted node-forwarding middleware, never parsed from JWTs.
 	AuthorizedServerCreate bool `json:"-"`
 	jwt.RegisteredClaims
@@ -67,9 +69,10 @@ func (h *AuthHandler) CheckPasswordHash(password, hash string) bool {
 
 func (h *AuthHandler) GenerateToken(user *database.User) (string, error) {
 	claims := JWTClaims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Role:     user.Role,
+		UserID:      user.ID,
+		Username:    user.Username,
+		Role:        user.Role,
+		AuthVersion: user.AuthVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(h.expHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -81,10 +84,11 @@ func (h *AuthHandler) GenerateToken(user *database.User) (string, error) {
 
 func (h *AuthHandler) Generate2FATempToken(user *database.User) (string, error) {
 	claims := JWTClaims{
-		UserID:   user.ID,
-		Username: user.Username,
-		Role:     user.Role,
-		Scope:    "2fa_pending",
+		UserID:      user.ID,
+		Username:    user.Username,
+		Role:        user.Role,
+		Scope:       "2fa_pending",
+		AuthVersion: user.AuthVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(5 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -97,12 +101,15 @@ func (h *AuthHandler) Generate2FATempToken(user *database.User) (string, error) 
 func (h *AuthHandler) Validate2FATempToken(tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
 		return h.jwtSecret, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return nil, err
 	}
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
 		if claims.Scope != "2fa_pending" {
+			return nil, jwt.ErrTokenInvalidClaims
+		}
+		if !h.validSessionVersion(claims) {
 			return nil, jwt.ErrTokenInvalidClaims
 		}
 		return claims, nil
@@ -113,12 +120,15 @@ func (h *AuthHandler) Validate2FATempToken(tokenStr string) (*JWTClaims, error) 
 func (h *AuthHandler) ValidateToken(tokenStr string) (*JWTClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JWTClaims{}, func(t *jwt.Token) (interface{}, error) {
 		return h.jwtSecret, nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return nil, err
 	}
 	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
 		if claims.Scope == "2fa_pending" {
+			return nil, jwt.ErrTokenInvalidClaims
+		}
+		if !h.validSessionVersion(claims) {
 			return nil, jwt.ErrTokenInvalidClaims
 		}
 		return claims, nil
@@ -148,9 +158,11 @@ func (h *AuthHandler) ValidateAuthToken(tokenStr string) (*JWTClaims, error) {
 			return nil, jwt.ErrSignatureInvalid
 		}
 		return &JWTClaims{
-			UserID:   user.ID,
-			Username: user.Username,
-			Role:     user.Role,
+			UserID:      user.ID,
+			Username:    user.Username,
+			Role:        user.Role,
+			AuthVersion: user.AuthVersion,
+			APIKey:      true,
 		}, nil
 	}
 	claims, err := h.ValidateToken(tokenStr)
@@ -158,7 +170,7 @@ func (h *AuthHandler) ValidateAuthToken(tokenStr string) (*JWTClaims, error) {
 		return nil, err
 	}
 	user, err := h.db.GetUserByID(claims.UserID)
-	if err != nil || user == nil {
+	if err != nil || user == nil || user.AuthVersion != claims.AuthVersion {
 		return nil, jwt.ErrSignatureInvalid
 	}
 	claims.UserID, claims.Username, claims.Role = user.ID, user.Username, user.Role
@@ -235,7 +247,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		TurnstileResp  string `json:"cf-turnstile-response"`
 		TurnstileToken string `json:"turnstile_token"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid input"})
 		return
 	}
@@ -268,7 +280,11 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.CreateUserWithDetails(req.Username, req.Email, hash, "admin", "")
+	user, err := h.db.CreateInitialAdmin(req.Username, req.Email, hash)
+	if errors.Is(err, database.ErrSetupCompleted) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Setup has already been completed"})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create admin user"})
 		return
@@ -295,7 +311,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		TurnstileResp  string `json:"cf-turnstile-response"`
 		TurnstileToken string `json:"turnstile_token"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
 		return
 	}
@@ -372,7 +388,7 @@ func (h *AuthHandler) Login2FA(w http.ResponseWriter, r *http.Request) {
 		TempToken string `json:"temp_token"`
 		Code      string `json:"code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -384,7 +400,7 @@ func (h *AuthHandler) Login2FA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.db.GetUserByID(claims.UserID)
-	if err != nil || user == nil || !user.TwoFactorEnabled {
+	if err != nil || user == nil || !user.TwoFactorEnabled || user.AuthVersion != claims.AuthVersion {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "User not found or 2FA not enabled"})
 		return
 	}
@@ -397,8 +413,10 @@ func (h *AuthHandler) Login2FA(w http.ResponseWriter, r *http.Request) {
 		var remaining string
 		isValid, remaining = CheckAndConsumeRecoveryCode(user.RecoveryCodes, cleanCode)
 		if isValid {
-			usedRecovery = true
-			_ = h.db.UpdateUserTwoFactor(user.ID, true, user.TwoFactorSecret, remaining)
+			// Verification of the snapshot is not enough: only a committed CAS
+			// may authorize a session, and stale/error results must fail closed.
+			isValid = h.db.ConsumeUserRecoveryCode(user.ID, user.AuthVersion, user.TwoFactorSecret, user.RecoveryCodes, remaining) == nil
+			usedRecovery = isValid
 		}
 	}
 
@@ -459,7 +477,7 @@ func (h *AuthHandler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
 		Role      string `json:"role"`
 		AvatarURL string `json:"avatar_url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -512,7 +530,7 @@ func (h *AuthHandler) AdminUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Role      string `json:"role"`
 		Password  string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -654,7 +672,7 @@ func (h *AuthHandler) UpdateTurnstileConfig(w http.ResponseWriter, r *http.Reque
 		SiteKey   string `json:"site_key"`
 		SecretKey string `json:"secret_key"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request payload"})
 		return
 	}

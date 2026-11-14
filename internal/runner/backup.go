@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"fmt"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"io"
 	"os"
 	"path/filepath"
@@ -73,27 +74,42 @@ func CreateBackup(sourceDir, backupDir, name string) (int64, error) {
 }
 
 func writeBackupArchive(source string, out io.Writer) error {
+	root, err := rooted.Open(source)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	gw := gzip.NewWriter(out)
 	tw := tar.NewWriter(gw)
-	walkErr := filepath.Walk(source, func(p string, info os.FileInfo, walkErr error) error {
+	walkErr := root.Walk(".", func(p string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if p == source {
+		if p == "." {
 			return nil
 		}
-		rel, err := filepath.Rel(source, p)
-		if err != nil {
-			return err
-		}
+		rel := p
+		var err error
 		link := ""
 		if info.Mode()&os.ModeSymlink != 0 {
-			link, err = os.Readlink(p)
+			link, err = root.Readlink(p)
 			if err != nil {
 				return err
 			}
 		} else if !info.IsDir() && !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported file type: %s", rel)
+		}
+		var f *os.File
+		if info.Mode().IsRegular() {
+			f, err = root.Open(p)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			info, err = f.Stat()
+			if err != nil {
+				return err
+			}
 		}
 		header, err := tar.FileInfoHeader(info, link)
 		if err != nil {
@@ -104,10 +120,7 @@ func writeBackupArchive(source string, out io.Writer) error {
 			return fmt.Errorf("archive header %s: %w", rel, err)
 		}
 		if info.Mode().IsRegular() {
-			f, err := os.Open(p)
-			if err != nil {
-				return fmt.Errorf("read %s: %w", rel, err)
-			}
+			// Read from the same regular-file handle used for the header.
 			_, copyErr := io.Copy(tw, f)
 			if err := errors.Join(copyErr, f.Close()); err != nil {
 				return fmt.Errorf("archive %s: %w", rel, err)

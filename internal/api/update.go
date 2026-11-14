@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -24,7 +26,7 @@ import (
 const (
 	defaultUpdateRepoURL = "https://github.com/Pekly/NeoPanel.git"
 	defaultUpdateBranch  = "main"
-	updateLogPath        = "/tmp/neopanel-install.log"
+	updateLogPath        = "/var/lib/neopanel/installer/install.log"
 )
 
 var (
@@ -55,13 +57,13 @@ type UpdateStatus struct {
 // https://github.com/owner/repo or https://github.com/owner/repo.git
 func parseGithubRepo(rawURL string) (owner, repo string, ok bool) {
 	u, err := url.Parse(strings.TrimSpace(rawURL))
-	if err != nil {
+	if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, "github.com") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return "", "", false
 	}
 	path := strings.Trim(u.Path, "/")
 	path = strings.TrimSuffix(path, ".git")
 	parts := strings.Split(path, "/")
-	if len(parts) >= 2 {
+	if len(parts) == 2 && validUpdateRepoPart(parts[0]) && validUpdateRepoPart(parts[1]) {
 		return parts[0], parts[1], true
 	}
 	return "", "", false
@@ -108,8 +110,8 @@ func getLocalCommit(db *database.DB) string {
 		}
 	}
 
-	// 6. Check /tmp/neopanel-build git workspace if present
-	if out, err := exec.Command("git", "-C", "/tmp/neopanel-build", "rev-parse", "HEAD").Output(); err == nil {
+	// 6. Check the protected installer workspace if present.
+	if out, err := exec.Command("git", "-C", filepath.Join(filepath.Dir(updateLogPath), "build"), "rev-parse", "HEAD").Output(); err == nil {
 		if c := strings.TrimSpace(string(out)); len(c) >= 7 {
 			return c
 		}
@@ -160,13 +162,16 @@ func HandleGetUpdateStatus(db *database.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := getEffectiveUpdateConfig(db)
 		localCommit := getLocalCommit(db)
+		updateMu.Lock()
+		running := updateRunning
+		updateMu.Unlock()
 
 		status := UpdateStatus{
 			RepoURL:        cfg.RepoURL,
 			Branch:         cfg.Branch,
 			CurrentVersion: "1.0.0",
 			CurrentCommit:  localCommit,
-			IsUpdating:     updateRunning,
+			IsUpdating:     running,
 			CanAutoUpdate:  runtime.GOOS == "linux",
 		}
 
@@ -252,14 +257,18 @@ func HandleSaveUpdateConfig(db *database.DB) http.HandlerFunc {
 		if repoURL == "" {
 			repoURL = defaultUpdateRepoURL
 		}
-		if !strings.HasPrefix(repoURL, "http://") && !strings.HasPrefix(repoURL, "https://") {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Repository URL must start with http:// or https://"})
+		if _, _, ok := parseGithubRepo(repoURL); !ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Repository must be an HTTPS github.com owner/repository URL"})
 			return
 		}
 
 		branch := strings.TrimSpace(req.Branch)
 		if branch == "" {
 			branch = defaultUpdateBranch
+		}
+		if !validUpdateBranch(branch) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid Git branch or tag"})
+			return
 		}
 
 		if err := db.SetPanelSetting("update_repo_url", repoURL); err != nil {
@@ -320,7 +329,7 @@ func executeSystemUpdate(db *database.DB, repoURL, branch string) {
 		updateMu.Unlock()
 	}()
 
-	logFile, err := os.OpenFile(updateLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := openUpdateLog(updateLogPath)
 	if err != nil {
 		return
 	}
@@ -331,26 +340,40 @@ func executeSystemUpdate(db *database.DB, repoURL, branch string) {
 	_, _ = logFile.WriteString(header)
 
 	owner, repo, ok := parseGithubRepo(repoURL)
-	rawInstallURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/install.sh", owner, repo, branch)
-	if !ok {
-		rawInstallURL = "https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh"
+	if !ok || !validUpdateBranch(branch) {
+		_, _ = logFile.WriteString("\n[NeoPanel Update ERROR] Invalid HTTPS GitHub repository or branch; update refused.\n")
+		return
 	}
-
-	// Prefer /usr/local/bin/neopanel-update if present; otherwise stream install.sh via curl
-	// NEOPANEL_WEB_UPDATE=1 signals install.sh to schedule service restart gracefully in background.
-	var scriptCmd string
-	if _, err := os.Stat("/usr/local/bin/neopanel-update"); err == nil {
-		scriptCmd = fmt.Sprintf("NEOPANEL_WEB_UPDATE=1 NEOPANEL_REPO_URL=%q NEOPANEL_REPO_BRANCH=%q /usr/local/bin/neopanel-update --repo %q --branch %q",
-			repoURL, branch, repoURL, branch)
-	} else {
-		scriptCmd = fmt.Sprintf("curl -sSL %q | NEOPANEL_WEB_UPDATE=1 NEOPANEL_REPO_URL=%q NEOPANEL_REPO_BRANCH=%q bash -s -- --update --repo %q --branch %q",
-			rawInstallURL, repoURL, branch, repoURL, branch)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "/bin/bash", "-c", scriptCmd)
+	useHelper := false
+	if info, err := os.Stat("/usr/local/bin/neopanel-update"); err == nil && !info.IsDir() {
+		useHelper = true
+	}
+	var script []byte
+	if !useHelper {
+		endpoint := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/install.sh", owner, repo, url.PathEscape(branch))
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return
+		}
+		response, err := (&http.Client{Timeout: time.Minute}).Do(request)
+		if err != nil {
+			_, _ = fmt.Fprintf(logFile, "\n[NeoPanel Update ERROR] Download failed: %v\n", err)
+			return
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			_, _ = fmt.Fprintf(logFile, "\n[NeoPanel Update ERROR] Download HTTP %d\n", response.StatusCode)
+			return
+		}
+		script, err = io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
+		if err != nil || len(script) == 0 || len(script) > 2<<20 {
+			_, _ = logFile.WriteString("\n[NeoPanel Update ERROR] Invalid or oversized installer response.\n")
+			return
+		}
+	}
+	cmd := updateCommand(ctx, repoURL, branch, script, useHelper)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 
@@ -415,7 +438,7 @@ func HandleGetUpdateLogs(w http.ResponseWriter, r *http.Request) {
 	updateMu.Unlock()
 
 	var rawLines []string
-	if file, err := os.Open(updateLogPath); err == nil {
+	if file, err := openPreviewPath(filepath.Dir(updateLogPath), filepath.Base(updateLogPath), os.O_RDONLY); err == nil {
 		defer file.Close()
 		scanner := bufio.NewScanner(file)
 		// Keep ring buffer of last 250 lines
@@ -444,4 +467,41 @@ func HandleGetUpdateLogs(w http.ResponseWriter, r *http.Request) {
 		"logs":     cleanedLogs,
 		"lines":    len(rawLines),
 	})
+}
+
+var updateRepoPartRe = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+var updateBranchRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$`)
+
+func validUpdateRepoPart(part string) bool {
+	return part != "." && part != ".." && updateRepoPartRe.MatchString(part)
+}
+
+func validUpdateBranch(branch string) bool {
+	return updateBranchRe.MatchString(branch) && !strings.Contains(branch, "..") && !strings.Contains(branch, "//") && !strings.HasSuffix(branch, "/") && !strings.HasSuffix(branch, ".lock")
+}
+
+func openUpdateLog(path string) (*os.File, error) {
+	dir := filepath.Dir(path)
+	if info, err := os.Lstat(dir); err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0) {
+		return nil, fmt.Errorf("unsafe update log directory")
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return nil, err
+	}
+	return openPreviewPath(dir, filepath.Base(path), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+}
+
+func updateCommand(ctx context.Context, repo, branch string, script []byte, helper bool) *exec.Cmd {
+	var cmd *exec.Cmd
+	if helper {
+		cmd = exec.CommandContext(ctx, "/usr/local/bin/neopanel-update", "--repo", repo, "--branch", branch)
+	} else {
+		cmd = exec.CommandContext(ctx, "/bin/bash", "-s", "--", "--update", "--repo", repo, "--branch", branch)
+		cmd.Stdin = bytes.NewReader(script)
+	}
+	cmd.Env = append(os.Environ(), "NEOPANEL_WEB_UPDATE=1", "NEOPANEL_REPO_URL="+repo, "NEOPANEL_REPO_BRANCH="+branch)
+	return cmd
 }

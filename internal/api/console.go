@@ -99,6 +99,15 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer conn.Close()
+	// Independent of log writes: a slow client must not delay revocation checks.
+	revalidate := func() (*JWTClaims, error) {
+		return h.auth.revalidateConsoleClaims(r, token, claims)
+	}
+	stopAuthorization := watchConsoleAuthorization(func() bool {
+		fresh, err := revalidate()
+		return err == nil && authorizeServer(h.db, fresh, serverID, "console.view") == 0
+	}, func() { _ = conn.Close() })
+	defer stopAuthorization()
 
 	const (
 		writeWait  = 10 * time.Second
@@ -182,10 +191,6 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 				}
 
 			case <-statsTicker.C:
-				if authorizeServer(h.db, claims, serverID, "console.view") != 0 {
-					_ = conn.Close()
-					return
-				}
 				st, ok := h.manager.GetStatsByID(serverID)
 				if !ok {
 					continue
@@ -242,16 +247,17 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 		if err := json.Unmarshal(msgBytes, &incoming); err == nil {
 			switch incoming.Event {
 			case "command":
-				// Re-check each command so permission revocation takes effect on open sockets.
-				if authorizeServer(h.db, claims, serverID, "console.command") != 0 {
+				// Use a new claims snapshot; never share mutable claims with the watcher.
+				fresh, err := revalidate()
+				if err != nil || authorizeServer(h.db, fresh, serverID, "console.view") != 0 || authorizeServer(h.db, fresh, serverID, "console.command") != 0 {
 					return
 				}
 				cmd := strings.TrimSpace(incoming.Data)
 				if cmd != "" {
 					if err := h.manager.SendCommand(serverID, incoming.Data); err == nil {
 						uid := 0
-						if claims != nil {
-							uid = claims.UserID
+						if fresh != nil {
+							uid = fresh.UserID
 						}
 						logAuditUser(h.db, uid, r, "console_command", fmt.Sprintf("Executed command on %s: %s", auditServerLabel(h.db, serverID), truncateAuditText(cmd, 120)))
 					}
@@ -264,4 +270,47 @@ func (h *ConsoleHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
+}
+
+const consoleAuthorizationInterval = time.Second
+
+// Revalidate the original credential, not the privileged credential used for a
+// node hop. Role changes require reconnecting so forwarded privileges cannot stay
+// pinned to the handshake. Every caller gets its own fresh claims instance.
+func (h *AuthHandler) revalidateConsoleClaims(req *http.Request, token string, initial *JWTClaims) (*JWTClaims, error) {
+	fresh, err := h.ValidateAuthToken(token)
+	if err != nil {
+		return nil, err
+	}
+	fresh, err = forwardedClaims(h.db, req, fresh)
+	if err != nil {
+		return nil, err
+	}
+	if initial == nil || fresh.UserID != initial.UserID || fresh.Role != initial.Role {
+		return nil, fmt.Errorf("console identity changed; reconnect required")
+	}
+	return fresh, nil
+}
+
+// Close is safe concurrently with WebSocket readers/writers. This watcher never
+// writes frames or mutates shared claims, and its stop function joins the worker.
+func watchConsoleAuthorization(allowed func() bool, closeSockets func()) func() {
+	stop, done := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(consoleAuthorizationInterval)
+		defer ticker.Stop()
+		for {
+			if !allowed() {
+				closeSockets()
+				return
+			}
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() { close(stop); <-done }
 }

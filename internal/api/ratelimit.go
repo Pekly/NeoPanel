@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -49,49 +50,106 @@ func NewIPRateLimiter(defaultLimit float64, authLimit float64) *IPRateLimiter {
 	}
 }
 
-// extractClientIP extracts the real client IP, respecting trusted proxy headers.
-func extractClientIP(r *http.Request) string {
-	// Check standard proxy headers
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			ip := strings.TrimSpace(parts[0])
-			if net.ParseIP(ip) != nil {
-				return ip
+type clientIPContextKey struct{}
+
+// clientIPPolicy is immutable and local to a router. No forwarding header is
+// trusted unless the socket peer is explicitly configured as a trusted proxy.
+type clientIPPolicy struct{ trusted []*net.IPNet }
+
+func newClientIPPolicy(proxies []string) *clientIPPolicy {
+	p := &clientIPPolicy{}
+	for _, value := range proxies {
+		value = strings.TrimSpace(value)
+		if ip := net.ParseIP(value); ip != nil {
+			bits := 128
+			if ip.To4() != nil {
+				ip = ip.To4()
+				bits = 32
+			}
+			p.trusted = append(p.trusted, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+		} else if _, block, err := net.ParseCIDR(value); err == nil {
+			p.trusted = append(p.trusted, block)
+		}
+	}
+	return p
+}
+
+func (p *clientIPPolicy) trusts(ip net.IP) bool {
+	if p != nil {
+		for _, block := range p.trusted {
+			if block.Contains(ip) {
+				return true
 			}
 		}
 	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		ip := strings.TrimSpace(xri)
-		if net.ParseIP(ip) != nil {
-			return ip
-		}
-	}
-	if cfip := r.Header.Get("CF-Connecting-IP"); cfip != "" {
-		ip := strings.TrimSpace(cfip)
-		if net.ParseIP(ip) != nil {
-			return ip
-		}
-	}
+	return false
+}
 
+func peerIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil && net.ParseIP(host) != nil {
-		return host
+	if err != nil {
+		host = r.RemoteAddr
 	}
-	return r.RemoteAddr
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return host
+}
+
+func (p *clientIPPolicy) resolve(r *http.Request) string {
+	peer := peerIP(r)
+	if !p.trusts(net.ParseIP(peer)) {
+		return peer
+	}
+	// Bound allocation and parsing, including repeated header lines.
+	values := r.Header.Values("X-Forwarded-For")
+	size := 0
+	for _, value := range values {
+		size += len(value) + 1
+		if size > 4096 {
+			return peer
+		}
+	}
+	if size == 0 {
+		return peer
+	}
+	hops := strings.Split(strings.Join(values, ","), ",")
+	if len(hops) > 32 {
+		return peer
+	}
+	current := peer
+	for i := len(hops) - 1; i >= 0; i-- {
+		if !p.trusts(net.ParseIP(current)) {
+			return current
+		}
+		ip := net.ParseIP(strings.TrimSpace(hops[i]))
+		if ip == nil {
+			return peer
+		}
+		current = ip.String()
+	}
+	return current
+}
+
+func (p *clientIPPolicy) request(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), clientIPContextKey{}, p.resolve(r)))
+}
+
+// Audit, Turnstile and all limiters share the same router-resolved identity.
+// Direct handler calls use only the socket peer.
+func extractClientIP(r *http.Request) string {
+	if ip, ok := r.Context().Value(clientIPContextKey{}).(string); ok {
+		return ip
+	}
+	return peerIP(r)
 }
 
 // Allow checks if the request from the client IP should be permitted.
 func (lim *IPRateLimiter) Allow(r *http.Request) bool {
 	ip := extractClientIP(r)
 
-	// Always permit local loopback and inter-daemon node traffic
-	if ip == "127.0.0.1" || ip == "::1" || ip == "localhost" {
-		return true
-	}
-
 	now := time.Now()
-	isAuth := strings.HasPrefix(r.URL.Path, "/api/auth/login") || strings.HasPrefix(r.URL.Path, "/api/auth/setup") || strings.HasPrefix(r.URL.Path, "/api/auth/invitations/") || strings.HasPrefix(r.URL.Path, "/api/auth/passkeys/")
+	isAuth := strings.HasPrefix(r.URL.Path, "/api/auth/")
 
 	lim.mu.Lock()
 	defer lim.mu.Unlock()

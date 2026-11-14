@@ -134,6 +134,7 @@ func newInvitationHarness(t *testing.T, smtp *invitationSMTP) *invitationHarness
 	cfg.FilePath = filepath.Join(cfg.Paths.DataDir, "config.yml")
 	cfg.Security.NodeToken = "neo_node_test"
 	cfg.Server.Role = "panel"
+	cfg.Server.PublicURL = "https://panel.example"
 	auth := NewAuthHandler(db, cfg)
 	router := &Router{cfg: cfg, auth: auth}
 	router.email = NewEmailHandler(db, cfg, auth)

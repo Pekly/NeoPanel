@@ -3,8 +3,9 @@ package api
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,15 +89,20 @@ func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
 		return
 	}
+	// Never upgrade a session that was revoked between middleware and this read.
+	if !claims.APIKey && user.AuthVersion != claims.AuthVersion {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Session expired"})
+		return
+	}
 
 	var req struct {
-		Username  string `json:"username"`
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
-		Email     string `json:"email"`
-		AvatarURL string `json:"avatar_url"`
+		Username  string  `json:"username"`
+		FirstName string  `json:"first_name"`
+		LastName  string  `json:"last_name"`
+		Email     string  `json:"email"`
+		AvatarURL *string `json:"avatar_url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -131,7 +137,15 @@ func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.UpdateUserProfile(user.ID, req.Username, req.FirstName, req.LastName, req.Email); err != nil {
+	var expectedVersion *int64
+	if !claims.APIKey {
+		expectedVersion = &claims.AuthVersion
+	}
+	if err := h.db.UpdateUserProfileForSession(user.ID, expectedVersion, req.Username, req.FirstName, req.LastName, req.Email, req.AvatarURL); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Session expired"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update profile: " + err.Error()})
 		return
 	}
@@ -141,9 +155,8 @@ func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	user.LastName = req.LastName
 	user.Email = req.Email
 
-	if req.AvatarURL != "" {
-		_ = h.db.UpdateUserAvatar(user.ID, req.AvatarURL)
-		user.AvatarURL = req.AvatarURL
+	if req.AvatarURL != nil {
+		user.AvatarURL = strings.TrimSpace(*req.AvatarURL)
 	}
 
 	newToken, _ := h.auth.GenerateToken(user)
@@ -316,7 +329,7 @@ func (h *AccountHandler) Enable2FA(w http.ResponseWriter, r *http.Request) {
 		Secret string `json:"secret"`
 		Code   string `json:"code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -329,8 +342,8 @@ func (h *AccountHandler) Enable2FA(w http.ResponseWriter, r *http.Request) {
 	recoveryCodes := GenerateRecoveryCodes(8)
 	recoveryCSV := strings.Join(recoveryCodes, ",")
 
-	if err := h.db.UpdateUserTwoFactor(user.ID, true, req.Secret, recoveryCSV); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to enable 2FA: " + err.Error()})
+	if err := h.db.EnableUserTwoFactor(user.ID, req.Secret, recoveryCSV); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Two-factor authentication is already enabled or could not be enabled"})
 		return
 	}
 
@@ -359,7 +372,7 @@ func (h *AccountHandler) Disable2FA(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		Code     string `json:"code"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -393,7 +406,7 @@ func (h *AccountHandler) UpdatePassword(w http.ResponseWriter, r *http.Request) 
 		CurrentPassword string `json:"current_password"`
 		NewPassword     string `json:"new_password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -468,7 +481,7 @@ func (h *AccountHandler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		Name      string `json:"name"`
 		PublicKey string `json:"public_key"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeAuthJSON(w, r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid payload"})
 		return
 	}
@@ -573,7 +586,7 @@ func (h *AccountHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Name) == "" {
+	if err := decodeAuthJSON(w, r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Key name is required"})
 		return
 	}
