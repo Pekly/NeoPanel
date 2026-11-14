@@ -59,7 +59,7 @@ test('Steel uses a local official PNG and distinct engine identity', () => {
   const { c } = setup();
   assert.equal(c.engineMeta('Steel').key, 'steel');
   assert.equal(c.getEngineIconUrl('Steel'), '/static/img/steel-logo.png');
-  assert.match(c.fileListIconHtml({ name: 'steel.exe' }), /Steel native executable/);
+  assert.match(c.fileListIconHtml({ name: 'steel.exe' }), /Steel executable \(Rust\)/);
   assert.match(c.fileListIconHtml({ name: 'steel.exe' }), /steel-logo.png/);
   const logo = fs.readFileSync(path.join(__dirname, '../static/img/steel-logo.png'));
   assert.equal(logo.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
@@ -185,9 +185,9 @@ test('Steel settings and plugin entry points avoid Java properties and plugin AP
   assert.match(html, /config\/config\.toml/);
   assert.match(html, /server_port/);
   assert.match(html, /\[server\]/);
-  assert.match(html, /Bubblewrap \+ Systemd enforces the configured memory limit/);
-  assert.match(html, /direct process or bubblewrap execution alone does not enforce this limit/);
-  assert.match(html, /Without systemd, Steel still runs/);
+  assert.match(html, /including Bubblewrap \+ Systemd launches/);
+  assert.match(html, /Without systemd, Steel can still run, but no hard RAM cap is applied/);
+  assert.match(html, /<summary>Configuration &amp; resource limits in NeoPanel<\/summary>/);
   assert.ok(!source.includes('config/' + 'server.toml'), 'all Steel guidance uses the upstream config path');
   assert.match(html, /steel.exe/);
   assert.doesNotMatch(html, /id="prop-java"|id="prop-motd"|id="prop-args"|-Xmx|nogui/);
@@ -204,4 +204,21 @@ test('software install posts native type and preserves backend version/filename 
   assert.equal(srv.jar_file, 'steel.exe');
   assert.equal(c.S.core, 'Steel');
   assert.equal(c.S.ver, 'v0.17.0+mc26.3');
+});
+
+test('Steel explanation uses its real name, Rust implementation and pre-alpha status', () => {
+  const { c } = setup();
+  const html = c.steelConfigNotice();
+  assert.match(html, /<h2>Steel<\/h2>/);
+  assert.match(html, /Minecraft Java Edition server implementation written in Rust/);
+  assert.match(html, /Experimental · Pre-alpha/);
+  assert.match(html, /Gameplay features are incomplete and save formats may change/);
+  assert.match(html, /Not a Paper or Fabric fork/);
+  assert.match(html, /https:\/\/steelmc.dev\/getting-started\/introduction\//);
+  assert.match(html, /<details class="steel-info-details">/);
+  assert.doesNotMatch(html, /<details[^>]*\bopen\b|Steel native server/);
+  assert.match(html, /Open File Manager/);
+  assert.doesNotMatch(c.steelConfigNotice(false), /Open File Manager/);
+  const css = fs.readFileSync(path.join(__dirname, '../static/css/workbench.css'), 'utf8');
+  assert.match(css, /\.srvh\s*\+\s*\.steel-info\s*\{\s*margin-top:\s*20px/);
 });

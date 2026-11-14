@@ -65,7 +65,7 @@ function fileListIconHtml(item, extraCls = '', iconSize = 15) {
   const ext = name.includes('.') ? name.split('.').pop() : '';
   const srv = curServer();
   if (isSteelEngine(srv?.type) && name === serverExecutable(srv).split(/[\\/]/).pop().toLowerCase()) {
-    return `<span class="fi-badge${cls}" title="Steel native executable">${engineIcon('steel', iconSize)}</span>`;
+    return `<span class="fi-badge${cls}" title="Steel executable (Rust)">${engineIcon('steel', iconSize)}</span>`;
   }
   if (ext === 'jar') {
     const jarEngine = detectJarEngine(name);
@@ -154,7 +154,31 @@ function nativeCommandPreview(filename) {
 }
 
 function steelConfigNotice(showLink = true) {
-  return `<div class="card" data-steel-config><h2>Steel native server</h2><p>Steel runs a native executable, not a JVM. Edit <code>config/config.toml</code> in the File Manager; NeoPanel synchronizes <code>server_port</code> in the <code>[server]</code> section with your assigned port on startup. Worlds are stored in <code>saves/</code>. Java plugins and mods are incompatible. Memory allocation is a resource limit, not a Java heap setting. <b>Bubblewrap + Systemd enforces the configured memory limit.</b> Systemd-only launches enforce it too. Without systemd, Steel still runs, but direct process or bubblewrap execution alone does not enforce this limit. Check the console's Isolation line for the launch mode and MemoryMax.</p>${showLink ? `<button type="button" class="btn" onclick="go('fi')">Open File Manager</button>` : ''}</div>`;
+  return `<section class="card steel-info" data-steel-config>
+    <div class="steel-info-heading">
+      <img src="/static/img/steel-logo.png" alt="" width="40" height="40">
+      <div><h2>Steel</h2><span class="steel-info-subtitle">Written in Rust · Minecraft Java Edition</span></div>
+      <span class="steel-info-badge">Experimental · Pre-alpha</span>
+    </div>
+    <p class="steel-info-intro">Steel is an alternative Minecraft Java Edition server implementation written in Rust. It is designed for performance, memory safety, and efficient resource use, and runs without a Java runtime.</p>
+    <div class="steel-info-warning"><strong>Still under active development.</strong> Gameplay features are incomplete and save formats may change. Use a separate test world and keep backups before updating or switching server software.</div>
+    <div class="steel-info-grid">
+      <div><h3>Java Edition clients</h3><p>Players connect using a compatible Minecraft Java Edition client. The supported Minecraft version depends on the Steel release you install.</p></div>
+      <div><h3>Not a Paper or Fabric fork</h3><p>Steel is a separate server implementation. Bukkit/Spigot plugins and Forge/Fabric mods are not compatible.</p></div>
+    </div>
+    <details class="steel-info-details">
+      <summary>Configuration &amp; resource limits in NeoPanel</summary>
+      <dl>
+        <div><dt>Configuration</dt><dd>Edit <code>config/config.toml</code> in the File Manager. Steel does not use Java <code>server.properties</code>.</dd></div>
+        <div><dt>Port &amp; saves</dt><dd>NeoPanel applies your assigned port to <code>server_port</code> in the <code>[server]</code> section on startup. Worlds are stored in <code>saves/</code>.</dd></div>
+        <div><dt>Memory limit</dt><dd>When launched with systemd, NeoPanel enforces the configured memory limit, including Bubblewrap + Systemd launches. Without systemd, Steel can still run, but no hard RAM cap is applied. Check the console's Isolation line for the launch mode and MemoryMax.</dd></div>
+      </dl>
+    </details>
+    <div class="steel-info-actions">
+      <a class="btn" href="https://steelmc.dev/getting-started/introduction/" target="_blank" rel="noopener noreferrer">About Steel ↗</a>
+      ${showLink ? `<button type="button" class="btn" onclick="go('fi')">Open File Manager</button>` : ''}
+    </div>
+  </section>`;
 }
 
 function engineFamily(type) {
@@ -4708,7 +4732,7 @@ const CORES = [
   ['Velocity', 'Modern high-throughput proxy'],
   ['Waterfall', 'PaperMC BungeeCord proxy fork'],
   ['BungeeCord', 'Classic multi-server proxy'],
-  ['Steel', 'Experimental native server • TOML configuration • No Java plugins/mods']
+  ['Steel', 'Experimental Minecraft Java Edition server written in Rust']
 ];
 
 const FAM = [
@@ -6685,7 +6709,7 @@ const V = {
           <div>
             <span class="mu">Currently Running</span>
             <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
-            <span class="mu">${isSteelEngine(srv?.type) ? 'Steel native executable • No Java runtime required' : 'Java 25, 21, 17 &amp; 8 supported • Direct server installer'}</span>
+            <span class="mu">${isSteelEngine(srv?.type) ? 'Steel • Written in Rust • No Java runtime required' : 'Java 25, 21, 17 &amp; 8 supported • Direct server installer'}</span>
           </div>
         </div>
         <button class="btn pr" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">
@@ -11260,7 +11284,7 @@ function askInstallSoftwareModal(srv, software, version) {
           </div>
           <div class="ui-modal-body" style="line-height: 1.55;">
             Download and install <b>${esc(software)} ${esc(version)}</b> onto <b>${esc(srv.name)}</b>? This will replace your current server executable and restart the instance.
-            ${isSteelEngine(software) ? '<p>Steel is native: no Java runtime required. Edit <code>config/config.toml</code> in File Manager; worlds use <code>saves/</code>.</p>' : ''}
+            ${isSteelEngine(software) ? '<p>Steel is an experimental Minecraft Java Edition server written in Rust; it does not require Java. Edit <code>config/config.toml</code> in File Manager; worlds use <code>saves/</code>.</p>' : ''}
             ${incompatibleEngineChange(srv.type, software) ? '<p class="banner warn"><b>Incompatible engine change:</b> worlds/data, plugins/mods and configuration may be incompatible and are not converted. Java plugins/mods cannot run on Steel. Back up first; use Reinstall for a clean installation.</p>' : ''}
             <div style="margin-top: 14px; padding: 12px 14px; background: rgba(56, 122, 255, 0.08); border: 1px solid rgba(56, 122, 255, 0.25); border-radius: 10px;">
               <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
@@ -13653,7 +13677,7 @@ function openReinstallModal(srvId, nodeId = null) {
             <option value="velocity" ${curType === 'velocity' ? 'selected' : ''}>Velocity (High-performance modern proxy)</option>
             <option value="waterfall" ${curType === 'waterfall' ? 'selected' : ''}>Waterfall (PaperMC BungeeCord proxy fork)</option>
             <option value="bungeecord" ${curType === 'bungeecord' ? 'selected' : ''}>BungeeCord (Classic multi-server proxy)</option>
-            <option value="steel" ${curType === 'steel' ? 'selected' : ''}>Steel (Experimental native server, no Java)</option>
+            <option value="steel" ${curType === 'steel' ? 'selected' : ''}>Steel (Experimental, written in Rust)</option>
           </select>
         </label>
 
