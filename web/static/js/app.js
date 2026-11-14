@@ -1322,6 +1322,7 @@ function toast(msg, type = 'info') {
   if (!t) return;
   t.textContent = msg;
   t.classList.add('s');
+  window.NPMotion?.notify(t);
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.remove('s'), 2600);
 }
@@ -2536,6 +2537,7 @@ function loaderHtml(label = 'Loading...') {
 
 function setBtnLoading(btn, isLoading, loadingText = 'Loading...') {
   if (!btn) return;
+  const wasLoading = btn.classList.contains('is-loading');
   if (isLoading) {
     if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
     btn.disabled = true;
@@ -2550,6 +2552,7 @@ function setBtnLoading(btn, isLoading, loadingText = 'Loading...') {
       btn.innerHTML = btn.dataset.origHtml;
       delete btn.dataset.origHtml;
     }
+    if (wasLoading) window.NPMotion?.feedback(btn);
   }
 }
 
@@ -9281,6 +9284,7 @@ window.R = function() {
     if (main) {
       main.innerHTML = V.maintenance();
       main.scrollTop = 0;
+      window.NPMotion?.afterRender(main, 'maintenance');
     }
     const fly = $('#fly-console-root');
     if (fly) {
@@ -9322,6 +9326,7 @@ window.R = function() {
       bindEditorTabKey();
     }
     enhanceSelects(main);
+    window.NPMotion?.afterRender(main, window.NPMotion.viewKey(S, typeof FILE_PREVIEW === 'undefined' ? null : FILE_PREVIEW.current) + (blocked ? '|restricted' : ''));
   }
   renderFlyConsole();
   if (typeof mountPanelModHooks === 'function') {
@@ -17931,7 +17936,12 @@ function organizeServerSettings(root) {
   const nav = document.createElement('div'); nav.className = 'tabs np-settings-tabs'; nav.setAttribute('aria-label', 'Server settings sections');
   groups.forEach(([label], i) => {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.settingsSection = String(i); button.className = i === selected ? 'on' : ''; button.setAttribute('aria-pressed', String(i === selected));
-    button.onclick = () => { S.serverSettingsSection = i; root.querySelectorAll('[data-settings-panel]').forEach(panel => { panel.hidden = Number(panel.dataset.settingsPanel) !== i; }); nav.querySelectorAll('button').forEach((b, j) => { b.classList.toggle('on', i === j); b.setAttribute('aria-pressed', String(i === j)); }); };
+    button.onclick = () => {
+      S.serverSettingsSection = i;
+      root.querySelectorAll('[data-settings-panel]').forEach(panel => { panel.hidden = Number(panel.dataset.settingsPanel) !== i; });
+      nav.querySelectorAll('button').forEach((b, j) => { b.classList.toggle('on', i === j); b.setAttribute('aria-pressed', String(i === j)); });
+      window.NPMotion?.reveal(root.querySelector(`[data-settings-panel="${i}"]`));
+    };
     nav.append(button);
   });
   wrapper.prepend(nav);
