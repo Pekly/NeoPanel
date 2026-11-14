@@ -221,6 +221,10 @@ func (r *Router) registerRoutes(db *database.DB) {
 	// File manager routes
 	r.mux.HandleFunc("GET /api/servers/{id}/files", r.requireAuth(r.files.ListFiles))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/content", r.requireAuth(r.files.GetContent))
+	r.mux.HandleFunc("GET /api/servers/{id}/files/preview", r.requireAuth(r.files.Preview))
+	r.mux.HandleFunc("GET /api/servers/{id}/files/media", r.requireAuth(r.files.Media))
+	r.mux.HandleFunc("GET /api/servers/{id}/files/zip", r.requireAuth(r.files.ZipPreview))
+	r.mux.HandleFunc("GET /api/servers/{id}/files/zip-entry", r.requireAuth(r.files.ZipEntryPreview))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/content", r.requireAuth(r.files.SaveContent))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/create", r.requireAuth(r.files.Create))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files", r.requireAuth(r.files.Delete))
@@ -753,18 +757,23 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	remote.Header.Set("Content-Type", req.Header.Get("Content-Type"))
 	remote.Header.Set("Accept", req.Header.Get("Accept"))
+	for _, key := range []string{"Range", "If-Range", "If-Modified-Since", "If-Unmodified-Since"} {
+		if value := req.Header.Get(key); value != "" {
+			remote.Header.Set(key, value)
+		}
+	}
 	remote.ContentLength = req.ContentLength
 	setProxyIdentity(remote.Header, claims, node.APIToken)
 	if createAuthorized && claims.UserID > 0 && claims.Role != "admin" {
 		remote.Header.Set("X-NeoPanel-Can-Create-Server", "true")
 	}
-	resp, err := r.nodes.httpClient.Do(remote)
+	resp, err := fileMediaProxyClient(r.nodes.httpClient, req.Method, rest).Do(remote)
 	if err != nil {
 		writeError(w, 502, "Failed to reach node: "+err.Error())
 		return
 	}
 	defer resp.Body.Close()
-	for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Cache-Control"} {
+	for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Cache-Control", "Content-Range", "Accept-Ranges", "Last-Modified", "X-Content-Type-Options", "Content-Security-Policy"} {
 		if v := resp.Header.Get(key); v != "" {
 			w.Header().Set(key, v)
 		}

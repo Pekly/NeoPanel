@@ -89,7 +89,7 @@ test('opening a file offers recovery and ignores responses after server switchin
   const { c, storage, server } = setup();
   const key = c.editorDraftKey(server, 'plugins/config.yml');
   storage.set(key, JSON.stringify({ content: 'draft content', base: 'server content' }));
-  c.api = async () => ({ content: 'server content' });
+  c.api = async url => url.includes('/files/preview?') ? { kind: 'text', editable: true } : { content: 'server content' };
   await c.openQolFile('config.yml'); assert.equal(c.qol.editor.content, 'draft content');
   c.qol.editor = null;
   let finish; c.api = () => new Promise(resolve => { finish = resolve; });

@@ -568,7 +568,7 @@ let _settingsAutoTimer = null;
 let _settingsSaveInFlight = false;
 let _settingsSaveQueued = null;
 let _settingsLastSaved = {};
-let _settingsUiState = { status: 'saved', text: 'Real-time auto-save active' };
+let _settingsUiState = { status: 'saved', text: '' };
 
 function clearSettingsAutoSaveTimer() {
   if (_settingsAutoTimer) {
@@ -591,6 +591,7 @@ function setSettingsSaveStatus(status = 'saved', text = '') {
   for (const id of ['set-autosave-pill', 'set-autosave-status']) {
     const el = document.getElementById(id);
     if (!el) continue;
+    el.style.display = msg ? '' : 'none';
     el.classList.remove(...classes);
     el.classList.add(`is-${status}`);
     const labelEl = el.querySelector('.settings-autosave-text');
@@ -1800,13 +1801,14 @@ function syncActiveServerState(srv) {
 
   if (changed) {
     ++QOL.openSequence;
+    if (typeof disposeFilePreview === 'function') disposeFilePreview();
     QOL.editor = null;
     ++TeamUI.sequence;
     S.teamState = null;
     S.teamLoading = false;
     S.serverSubusers = [];
     clearSettingsAutoSaveTimer();
-    _settingsUiState = { status: 'saved', text: 'Real-time auto-save active' };
+    _settingsUiState = { status: 'saved', text: '' };
     S.log = [];
     S.ports = [];
     S.databases = [];
@@ -6238,6 +6240,8 @@ const V = {
   },
 
   fi() {
+    const preview = typeof renderFilePreview === 'function' ? renderFilePreview() : '';
+    if (preview) return `${srvh()}${preview}`;
     const f = S.editingFile || S.ftab;
     if (S.editingFile) {
       return `${srvh()}
@@ -6269,7 +6273,7 @@ const V = {
 
     const renderFileCtxMenuHtml = (item, idx, isDir, itemPath) => `
       <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
-        ${!isDir ? `<button data-name="${esc(item.name)}" onclick="openFile(this.dataset.name); closeAllCtx();">${ic('edit', 14)} Edit</button>` : ''}
+        ${!isDir ? `<button data-name="${esc(item.name)}" onclick="openFile(this.dataset.name); closeAllCtx();">${ic('eye', 14)} Open / Preview</button>` : ''}
         ${!isDir ? `<button data-path="${esc(itemPath)}" onclick="downloadFileItem(this.dataset.path); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
         ${isArchiveFile(item.name) ? `<button data-path="${esc(itemPath)}" onclick="unzipFileItem(this.dataset.path); closeAllCtx();">${ic('package', 14)} Extract</button>` : ''}
         <button data-path="${esc(itemPath)}" onclick="openMoveFilesModal([this.dataset.path]); closeAllCtx();">${ic('move', 14)} Move</button>
@@ -7510,7 +7514,7 @@ const V = {
     const allV = getAllMcVersions(srv?.type || S.core || '');
     const verList = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
     const saveStatus = _settingsUiState?.status || 'saved';
-    const saveText = _settingsUiState?.text || 'Real-time auto-save active';
+    const saveText = _settingsUiState?.text || '';
     const node = getNodeById(srv?.node_id || 'local');
     const isAdmin = S.user?.role === 'admin';
     const isOwner = isAdmin || (srv?.owner_id && S.user?.id && srv.owner_id === S.user.id);
@@ -7532,7 +7536,7 @@ const V = {
         <div class="card" style="padding: 20px;">
           <div class="row sb" style="margin-bottom: 12px; gap: 10px; flex-wrap: wrap; align-items: center;">
             <h2 style="font-size: 16px; margin: 0;">Server Identity &amp; Startup Command</h2>
-            <span id="set-autosave-pill" class="settings-autosave-pill is-${esc(saveStatus)}" aria-live="polite">
+            <span id="set-autosave-pill" class="settings-autosave-pill is-${esc(saveStatus)}" aria-live="polite" ${saveText ? '' : 'style="display:none;"'}>
               <span class="settings-autosave-dot"></span>
               <span class="settings-autosave-text">${esc(saveText)}</span>
             </span>
@@ -7705,7 +7709,7 @@ const V = {
               <i></i>
             </span>
           </label>
-          <div id="set-autosave-status" class="settings-autosave-footer is-${esc(saveStatus)}" aria-live="polite">
+          <div id="set-autosave-status" class="settings-autosave-footer is-${esc(saveStatus)}" aria-live="polite" ${saveText ? '' : 'style="display:none;"'}>
             <span class="settings-autosave-dot"></span>
             <span class="settings-autosave-text">${esc(saveText)}</span>
           </div>
@@ -9255,6 +9259,7 @@ window.addEventListener('hashchange', () => {
 // --- Main Render Function (R) ---
 window.R = function() {
   captureEditor();
+  if (typeof filePreviewActive === 'function' && !filePreviewActive()) disposeFilePreview();
   closeAllCustomSelects();
   const nav = $('#nav');
   const main = $('#main');
@@ -9266,6 +9271,7 @@ window.R = function() {
   const showMaintLockout = (isMaintEnabled && !isAdmin) || (S.maintPreview && isAdmin);
 
   if (showMaintLockout) {
+    if (typeof disposeFilePreview === 'function') disposeFilePreview();
     if (nav) nav.innerHTML = '';
     if (main) {
       main.innerHTML = V.maintenance();
@@ -9295,7 +9301,10 @@ window.R = function() {
       : '';
     const viewFn = V[S.view] || V.notfound;
     const blocked = serverPagePermission(S.view) && !canServerPage(S.view);
+    if (blocked && typeof disposeFilePreview === 'function') disposeFilePreview();
+    const retainedPreviewMedia = typeof captureFilePreviewMedia === 'function' ? captureFilePreviewMedia() : null;
     main.innerHTML = renderAnnouncement() + maintBannerHtml + (blocked ? renderAccessRestricted() : (S.view === 'admin' && !isAdmin ? renderAccessRestricted(false) : viewFn())) + (S.view === 'dash' ? renderDiscordCard() : '');
+    if (typeof restoreFilePreviewMedia === 'function') restoreFilePreviewMedia(retainedPreviewMedia);
     if (S.view === 'set' && !blocked) organizeServerSettings(main);
     applyPermissionControls(main);
     main.scrollTop = prevMainScroll;
@@ -9997,6 +10006,10 @@ async function loadFileList(path = '', skipRender = false) {
   if (!srv) return;
   if (!S.loading) S.loading = {};
   const dirChanged = path !== S.currentDir;
+  if (dirChanged) {
+    ++QOL.openSequence;
+    if (typeof disposeFilePreview === 'function') disposeFilePreview();
+  }
   if (dirChanged && S.selectedFiles) {
     S.selectedFiles.clear();
   }
@@ -10824,7 +10837,7 @@ function handleFileContextMenu(e, idx) {
   menu.innerHTML = `
     ${!isDir ? `
       <button data-name="${esc(name)}" onclick="openFile(this.dataset.name); closeFloatingCtx();">
-        ${ic('edit', 14)} Edit File
+        ${ic('eye', 14)} Open / Preview
       </button>
       <button data-path="${esc(path)}" onclick="downloadFileItem(this.dataset.path); closeFloatingCtx();">
         ${ic('download', 14)} Download

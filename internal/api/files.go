@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/runner"
@@ -122,36 +123,31 @@ func (h *FileHandler) ListFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FileHandler) GetContent(w http.ResponseWriter, r *http.Request) {
-	serverID := getURLParam(r, "id")
 	reqPath := r.URL.Query().Get("path")
-
-	fullPath, err := h.safePath(serverID, reqPath)
+	f, info, err := h.openPreviewFile(getURLParam(r, "id"), reqPath, os.O_RDONLY)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		status := http.StatusBadRequest
+		if os.IsNotExist(err) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, "Cannot open text file: "+err.Error())
 		return
 	}
-
-	info, err := os.Stat(fullPath)
-	if err != nil || info.IsDir() {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "File not found or is a directory"})
+	defer f.Close()
+	if info.Size() > fileEditorLimit {
+		writeError(w, http.StatusBadRequest, "File exceeds 5 MiB text editor limit")
 		return
 	}
-
-	if info.Size() > 5*1024*1024 { // 5MB limit for text editor
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "File exceeds 5MB text editor limit"})
-		return
-	}
-
-	content, err := os.ReadFile(fullPath)
+	content, err := readFileBounded(f, fileEditorLimit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read file"})
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]string{
-		"path":    reqPath,
-		"content": string(content),
-	})
+	if !editableFileText(info.Name(), content) {
+		writeError(w, http.StatusUnsupportedMediaType, "Only UTF-8 text files can be edited")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": reqPath, "content": string(content)})
 }
 
 func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
@@ -160,24 +156,57 @@ func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 		Path    string `json:"path"`
 		Content string `json:"content"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
-		return
-	}
-
-	fullPath, err := h.safePath(serverID, req.Path)
+	// JSON may encode each decoded byte as a six-byte Unicode escape.
+	body, err := readFileBounded(r.Body, 6*fileEditorLimit+(64<<10))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeError(w, http.StatusRequestEntityTooLarge, "Request body exceeds text editor limit")
 		return
 	}
-
-	if err := os.WriteFile(fullPath, []byte(req.Content), 0644); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save file"})
+	if !utf8.Valid(body) || json.Unmarshal(body, &req) != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
-
+	if len(req.Content) > fileEditorLimit {
+		writeError(w, http.StatusRequestEntityTooLarge, "Content exceeds 5 MiB text editor limit")
+		return
+	}
+	if !editableFileText(req.Path, []byte(req.Content)) {
+		writeError(w, http.StatusUnsupportedMediaType, "Only UTF-8 text files can be saved")
+		return
+	}
+	f, info, err := h.openPreviewFile(serverID, req.Path, os.O_RDWR)
+	if os.IsNotExist(err) {
+		f, info, err = h.openPreviewFile(serverID, req.Path, os.O_RDWR|os.O_CREATE|os.O_EXCL)
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Cannot open text file: "+err.Error())
+		return
+	}
+	defer f.Close()
+	if info.Size() > fileEditorLimit {
+		writeError(w, http.StatusRequestEntityTooLarge, "Existing file exceeds 5 MiB text editor limit")
+		return
+	}
+	old, err := readFileBounded(f, fileEditorLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Cannot validate existing file")
+		return
+	}
+	if !editableFileText(info.Name(), old) {
+		writeError(w, http.StatusUnsupportedMediaType, "Cannot overwrite a binary file with text")
+		return
+	}
+	if _, err = f.Seek(0, io.SeekStart); err == nil {
+		_, err = io.WriteString(f, req.Content)
+	}
+	if err == nil {
+		err = f.Truncate(int64(len(req.Content)))
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save file")
+		return
+	}
 	logAudit(h.db, r, "file_save", fmt.Sprintf("Saved file '%s' on %s (%s)", req.Path, auditServerLabel(h.db, serverID), formatBytesAudit(int64(len(req.Content)))))
-
 	writeJSON(w, http.StatusOK, map[string]string{"message": "File saved successfully"})
 }
 

@@ -121,28 +121,36 @@ async function openQolFile(name) {
   if (!await guardEditorLeave()) return;
   const srv = curServer();
   if (!srv) return;
+  if (typeof hasServerPermission === 'function' && !hasServerPermission('files.view', srv)) return;
+  const token = S.token;
   const path = S.currentDir ? `${S.currentDir}/${name}` : name;
   const sequence = ++QOL.openSequence;
   try {
+    const metadata = await api(srvApiPath(srv, `/files/preview?path=${encodeURIComponent(path)}`));
+    if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || !sameQolServer(srv, curServer())) return;
+    if (!metadata || !['text', 'image', 'video', 'zip', 'binary'].includes(metadata.kind)) throw Error('File type could not be verified. Refresh the panel and check that the node is updated.');
+    if (metadata.kind !== 'text' || metadata.editable !== true) return openFilePreview(srv, path, metadata);
     const data = await api(srvApiPath(srv, `/files/content?path=${encodeURIComponent(path)}`));
-    if (sequence !== QOL.openSequence || S.view !== 'fi' || !sameQolServer(srv, curServer())) return;
-    const base = String(data.content ?? data);
+    if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || !sameQolServer(srv, curServer())) return;
+    if (typeof data?.content !== 'string' || /[\x00-\x08\x0b\x0e-\x1a\x1c-\x1f]/.test(data.content)) throw Error('This file is not safe to open as text. Download it instead.');
+    const base = data.content;
     const e = { server: { ...srv }, path, base, content: base, key: editorDraftKey(srv, path), url: location.pathname + location.search };
     let draft;
     try { draft = JSON.parse(sessionStorage.getItem(e.key)); } catch (_) {}
     if (draft && typeof draft.content === 'string' && draft.content !== base) {
       const recover = await uiConfirm({ title: 'Recover file draft?', message: `An unsaved draft exists for <b>${esc(path)}</b>.${draft.base !== base ? ' The server copy has changed since this draft was created; review it before saving.' : ''}`, confirmText: 'Recover draft', cancelText: 'Use server copy' });
-      if (sequence !== QOL.openSequence || S.view !== 'fi' || !sameQolServer(srv, curServer())) return;
+      if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || !sameQolServer(srv, curServer())) return;
       if (recover) e.content = draft.content;
       else { try { sessionStorage.removeItem(e.key); } catch (_) {} }
     }
+    if (typeof disposeFilePreview === 'function') disposeFilePreview();
     QOL.editor = e;
     S.editingFile = path;
     S.ftab = path;
     S.files[path] = base;
     persistEditorDraft();
     R();
-  } catch (err) { toast(`Could not open ${path}: ${err.message}`, 'bad'); }
+  } catch (err) { if (sequence === QOL.openSequence && token === S.token && S.view === 'fi' && sameQolServer(srv, curServer())) toast(`Could not open ${path}: ${err.message}`, 'bad'); }
 }
 async function saveQolFile() {
   captureEditor();
