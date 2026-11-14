@@ -2639,6 +2639,26 @@ function isPngOrSvgUrl(url) {
   return lower.endsWith('.png') || lower.includes('.png?') || lower.endsWith('.svg') || lower.includes('.svg?') || lower.startsWith('data:image/png') || lower.startsWith('data:image/svg');
 }
 
+function serverRowIconHtml(server) {
+  const fallback = String(getBrand('default_server_icon_url') || '/static/img/default-server-icon.png');
+  const source = String(server?.icon_url || '').trim() || fallback;
+  return `<img class="srv-row-thumb" src="${esc(source)}" data-fallback-icon="${esc(fallback)}" width="44" height="44" alt="" loading="lazy" decoding="async" onerror="onServerRowIconError(this)">`;
+}
+
+function onServerRowIconError(image) {
+  const bundled = '/static/img/default-server-icon.png';
+  const fallbacks = [...new Set([image.dataset.fallbackIcon, bundled].filter(Boolean))];
+  let next = Number(image.dataset.fallbackIndex || 0);
+  while (next < fallbacks.length) {
+    const source = fallbacks[next++];
+    image.dataset.fallbackIndex = String(next);
+    if (source !== image.getAttribute('src')) { image.src = source; return; }
+  }
+  image.onerror = null;
+  image.removeAttribute('src');
+  image.hidden = true;
+}
+
 function brandLogoHtml(forLogin = false, override = null) {
   const b = override || ((S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : (S.branding || DEFAULT_BRANDING));
   const name = (b.brand_name || 'NeoPanel').trim() || 'NeoPanel';
@@ -5888,13 +5908,11 @@ const V = {
           const srvUrl = serverRouteUrl(nid, s.id, 'con');
 
           if (dashVm === 'list') {
-            const defaultSrvIcon = getBrand('default_server_icon_url') || '/static/img/default-server-icon.png';
-            const srvLogoUrl = (s.icon_url && String(s.icon_url).trim()) ? s.icon_url : defaultSrvIcon;
             return `
             <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card vm-dash-row" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
               <div class="vm-dash-row-bg" ${coverUrl ? `style="background-image: url('${esc(coverUrl)}');"` : ''} aria-hidden="true"></div>
               <div class="vm-dash-row-main">
-                <div class="srv-row-thumb" style="background-image: url('${esc(srvLogoUrl)}'), url('/static/img/default-server-icon.png'), url('/img/default-server-icon.png');"></div>
+                ${serverRowIconHtml(s)}
                 <div style="min-width: 0; flex: 1;">
                   <div class="row" style="gap: 10px; align-items: center; flex-wrap: wrap;">
                     <span class="srv-card-title" title="${esc(s.name)}">${renderMinecraftTextHtml(s.name || 'Minecraft Server', { allowNewlines: false })}</span>
@@ -6271,17 +6289,6 @@ const V = {
     const allSelected = sortedFiles.length > 0 && sortedFiles.every(i => S.selectedFiles.has(i.path || i.name));
     const vm = getViewMode('files', 'list');
 
-    const renderFileCtxMenuHtml = (item, idx, isDir, itemPath) => `
-      <div class="file-ctx-menu" id="fctx-${idx}" style="display: none;">
-        ${!isDir ? `<button data-name="${esc(item.name)}" onclick="openFile(this.dataset.name); closeAllCtx();">${ic('eye', 14)} Open / Preview</button>` : ''}
-        ${!isDir ? `<button data-path="${esc(itemPath)}" onclick="downloadFileItem(this.dataset.path); closeAllCtx();">${ic('download', 14)} Download</button>` : ''}
-        ${isArchiveFile(item.name) ? `<button data-path="${esc(itemPath)}" onclick="unzipFileItem(this.dataset.path); closeAllCtx();">${ic('package', 14)} Extract</button>` : ''}
-        <button data-path="${esc(itemPath)}" onclick="openMoveFilesModal([this.dataset.path]); closeAllCtx();">${ic('move', 14)} Move</button>
-        <button data-path="${esc(itemPath)}" onclick="openCompressFilesModal([this.dataset.path]); closeAllCtx();">${ic('archive', 14)} Archive / Zip</button>
-        <button data-path="${esc(itemPath)}" onclick="promptRenameFile(this.dataset.path); closeAllCtx();">${ic('settings', 14)} Rename</button>
-        <button data-path="${esc(itemPath)}" onclick="copyFilePath(this.dataset.path); closeAllCtx();">${ic('copy', 14)} Copy Path</button>
-        <button class="dg" data-path="${esc(itemPath)}" onclick="deleteFileItem(this.dataset.path); closeAllCtx();">${ic('trash', 14)} Delete</button>
-      </div>`;
 
     let filesContainerHtml = '';
     if (vm === 'list') {
@@ -6342,7 +6349,6 @@ const V = {
                 <td class="mu mono" style="font-size: 12.5px; width: 170px;">${dateStr}</td>
                 <td style="width: 50px; text-align: right; padding-right: 18px; position: relative;" onclick="event.stopPropagation();">
                   <button class="btn sm" aria-label="File actions for ${esc(item.name)}" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 18px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
-                  ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
                 </td>
               </tr>`;
             }).join('')}
@@ -6388,7 +6394,6 @@ const V = {
                          aria-label="Select ${esc(item.name)}">
                   <div style="position: relative;">
                     <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 2px 6px; border: 0; background: transparent; font-size: 16px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
-                    ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
                   </div>
                 </div>
                 <div class="vm-file-center">
@@ -6447,7 +6452,6 @@ const V = {
                   </div>
                   <div style="position: relative;" onclick="event.stopPropagation();">
                     <button class="btn sm" onclick="toggleFileCtx(event, ${idx})" style="padding: 4px 8px; border: 0; background: transparent; font-size: 16px; line-height: 1; color: var(--tx-muted);">&#8942;</button>
-                    ${renderFileCtxMenuHtml(item, idx, isDir, itemPath)}
                   </div>
                 </div>
               </div>`;
@@ -9261,6 +9265,7 @@ window.R = function() {
   captureEditor();
   if (typeof filePreviewActive === 'function' && !filePreviewActive()) disposeFilePreview();
   closeAllCustomSelects();
+  closeFloatingCtx();
   const nav = $('#nav');
   const main = $('#main');
   const prevNavScroll = nav ? nav.scrollTop : 0;
@@ -10093,18 +10098,17 @@ function filterFileList(q) {
 
 function toggleFileCtx(e, idx) {
   if (e) e.stopPropagation();
-  const targetId = `fctx-${idx}`;
-  $$('.file-ctx-menu').forEach(m => {
-    if (m.id !== targetId) m.style.display = 'none';
-  });
-  const m = $(`#${targetId}`);
-  if (m) {
-    m.style.display = m.style.display === 'block' ? 'none' : 'block';
+  const menu = $('#floating-ctx');
+  if (menu?.style.display === 'block' && menu.dataset.fileIndex === String(idx) && menu.dataset.fileTrigger === 'button') {
+    closeFloatingCtx();
+    return;
   }
+  handleFileContextMenu(e, idx, true);
 }
 
 function closeAllCtx() {
   $$('.file-ctx-menu').forEach(m => m.style.display = 'none');
+  closeFloatingCtx();
 }
 window.addEventListener('click', closeAllCtx);
 
@@ -10817,7 +10821,55 @@ function copyFilePath(path) {
 }
 
 // --- Floating Context Menu ---
-function handleFileContextMenu(e, idx) {
+function fileMenuViewport() {
+  const visible = window.visualViewport;
+  return {
+    left: visible?.offsetLeft || 0,
+    top: visible?.offsetTop || 0,
+    width: visible?.width || document.documentElement.clientWidth || window.innerWidth,
+    height: visible?.height || window.innerHeight
+  };
+}
+
+function fileMenuPosition(point, size, viewport, anchor = null) {
+  const padding = Math.min(8, viewport.width / 4, viewport.height / 4);
+  const left = viewport.left + padding, top = viewport.top + padding;
+  const right = viewport.left + viewport.width - padding, bottom = viewport.top + viewport.height - padding;
+  let x = anchor ? anchor.right - size.width : point.x;
+  let y = anchor ? anchor.bottom + 4 : point.y;
+  if (!Number.isFinite(x)) x = left;
+  if (!Number.isFinite(y)) y = top;
+  if (x + size.width > right && !anchor) x -= size.width;
+  if (y + size.height > bottom) y = anchor ? anchor.top - size.height - 4 : y - size.height;
+  return {
+    left: Math.max(left, Math.min(x, right - size.width)),
+    top: Math.max(top, Math.min(y, bottom - size.height)),
+    maxWidth: Math.max(1, viewport.width - padding * 2),
+    maxHeight: Math.max(1, viewport.height - padding * 2)
+  };
+}
+
+function positionFileContextMenu(menu, point, anchor = null) {
+  const viewport = fileMenuViewport();
+  const limits = fileMenuPosition(point, { width: 0, height: 0 }, viewport, anchor);
+  if (menu.parentNode !== document.body) document.body.appendChild(menu);
+  Object.assign(menu.style, {
+    display: 'block', visibility: 'hidden', left: '0px', top: '0px',
+    width: 'max-content', minWidth: `${Math.min(175, limits.maxWidth)}px`,
+    maxWidth: `${limits.maxWidth}px`, maxHeight: `${limits.maxHeight}px`
+  });
+  const rect = menu.getBoundingClientRect();
+  const position = fileMenuPosition(point, rect, viewport, anchor);
+  menu.style.left = `${position.left}px`;
+  menu.style.top = `${position.top}px`;
+  // Keep subsequent font/content growth inside the same visible bounds.
+  const padding = (viewport.width - limits.maxWidth) / 2;
+  menu.style.maxWidth = `${Math.max(1, viewport.left + viewport.width - padding - position.left)}px`;
+  menu.style.maxHeight = `${Math.max(1, viewport.top + viewport.height - padding - position.top)}px`;
+  menu.style.visibility = 'visible';
+}
+
+function handleFileContextMenu(e, idx, fromButton = false) {
   if (e) {
     e.preventDefault();
     e.stopPropagation();
@@ -10873,13 +10925,10 @@ function handleFileContextMenu(e, idx) {
 
   const clientX = e?.clientX ?? (e?.touches?.[0]?.clientX ?? 100);
   const clientY = e?.clientY ?? (e?.touches?.[0]?.clientY ?? 150);
-  const menuWidth = 190;
-  const x = Math.max(10, Math.min(clientX, window.innerWidth - menuWidth - 10));
-  const y = Math.max(10, Math.min(clientY, window.innerHeight - 315));
-
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
-  menu.style.display = 'block';
+  menu.dataset.fileIndex = String(idx);
+  menu.dataset.fileTrigger = fromButton ? 'button' : 'pointer';
+  const anchor = fromButton ? e?.currentTarget?.getBoundingClientRect() : null;
+  positionFileContextMenu(menu, { x: clientX, y: clientY }, anchor);
 }
 
 function closeFloatingCtx() {
@@ -10889,6 +10938,14 @@ function closeFloatingCtx() {
 
 // Global click dismisses floating context menu
 document.addEventListener('click', () => closeFloatingCtx());
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeFloatingCtx(); });
+document.addEventListener('scroll', event => {
+  const menu = $('#floating-ctx');
+  if (menu && !menu.contains(event.target)) closeFloatingCtx();
+}, true);
+window.addEventListener('resize', closeFloatingCtx);
+window.visualViewport?.addEventListener('resize', closeFloatingCtx);
+window.visualViewport?.addEventListener('scroll', closeFloatingCtx);
 
 // --- Upload with Live Progress & Drag-and-Drop ---
 function uploadFileDialog() {

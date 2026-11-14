@@ -2611,6 +2611,12 @@ html[data-theme="light"] input[type="checkbox"]:not(.no-ccheck):not(:checked):no
 /* Floating Right-Click Context Menu */
 .floating-ctx-menu {
   position: fixed;
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   min-width: 175px;
   background: var(--card-bg-solid);
   border: 1px solid var(--border-light);
@@ -2620,7 +2626,7 @@ html[data-theme="light"] input[type="checkbox"]:not(.no-ccheck):not(:checked):no
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  animation: fadeIn 0.1s ease-out;
+  animation: none;
 }
 
 .floating-ctx-menu button {
@@ -2637,6 +2643,8 @@ html[data-theme="light"] input[type="checkbox"]:not(.no-ccheck):not(:checked):no
   cursor: pointer;
   transition: all 0.12s ease;
   user-select: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .floating-ctx-menu button:hover {
@@ -4628,7 +4636,7 @@ html[data-theme="light"] .act-cat-nodes {
   border: none;
   background: transparent;
   /* Contours the exact alpha silhouette of the logo instead of drawing a rectangular box */
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.5)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
+  filter: var(--np-logo-outline);
   transition: filter 0.18s ease, transform 0.18s ease;
 }
 
@@ -5125,12 +5133,12 @@ a.sift-server-card {
   width: 44px;
   height: 44px;
   aspect-ratio: 1 / 1;
-  border-radius: 9px;
-  background-size: cover;
-  background-position: center;
-  background-color: #141b2b;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  border-radius: 0;
+  object-fit: contain;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  filter: var(--np-logo-outline);
   flex-shrink: 0;
   image-rendering: pixelated;
 }
@@ -6160,4 +6168,8 @@ html[data-theme="light"] .settings-autosave-footer.is-error {
   font-size: 13px;
   font-weight: 600;
   color: var(--tx);
+}
+
+:root {
+  --np-logo-outline: drop-shadow(0 0 1px rgba(255, 255, 255, 0.5)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.65));
 }
