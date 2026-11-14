@@ -328,7 +328,9 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	isAdmin := user != nil && user.Role == "admin"
 	if req.NodeID != "" {
 		currentNode := server.NodeID
-		if currentNode == "" { currentNode = "local" }
+		if currentNode == "" {
+			currentNode = "local"
+		}
 		if req.NodeID != currentNode {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "Changing node_id does not migrate a running server and is not supported. Stop and transfer the server to the destination node instead."})
 			return

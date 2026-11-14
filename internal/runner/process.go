@@ -465,8 +465,10 @@ func (p *ProcessInstance) Start() error {
 
 	// Wait for process exit in background
 	go func(runID uint64, started time.Time) {
-		waitErr := cmd.Wait()
-		cleanupErr := owned.stop(true)
+		waitErr, cleanupErr := owned.wait()
+		if cleanupErr == nil {
+			cleanupErr = ensureServerProcessesStopped(p.workingDir)
+		}
 		drained := make(chan struct{})
 		go func() { streamWg.Wait(); close(drained) }()
 		select {
@@ -928,6 +930,28 @@ func (p *ProcessInstance) Stop(graceful bool) error {
 	if done == nil {
 		return fmt.Errorf("server process completion is unavailable; restart refused")
 	}
+	select {
+	case <-done:
+		p.mu.RLock()
+		cleanupErr := p.cleanupErr
+		p.mu.RUnlock()
+		if cleanupErr == nil {
+			return nil
+		}
+		if err := owned.reconcile(p.workingDir); err != nil {
+			return err
+		}
+		p.mu.Lock()
+		if p.runLock != nil {
+			p.runLock.Close()
+			p.runLock = nil
+		}
+		p.cleanupErr, p.cmd, p.status = nil, nil, "offline"
+		p.mu.Unlock()
+		return nil
+	default:
+	}
+
 	if graceful && stdin != nil {
 		p.broadcast("[NeoPanel] Sending 'stop' command; waiting for the server to exit...")
 		// A full stdin pipe must not prevent the shutdown timeout from firing.

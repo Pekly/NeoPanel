@@ -30,10 +30,52 @@ func (c *ownedCommand) stop(final bool) error {
 		return c.err
 	}
 	err := terminateOwnedCommand(c.cmd, final)
-	if final {
-		c.reaped, c.err = true, err
-	}
 	return err
+}
+
+// Observe exit without reaping first. Keeping the child unreaped pins its PID
+// and process-group identity until cleanup finishes under the same mutex used
+// by Stop. Never send a group signal after cmd.Wait releases that identity.
+func (c *ownedCommand) wait() (error, error) {
+	observeErr := waitForOwnedExit(c.cmd)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var cleanupErr error
+	if observeErr == nil {
+		cleanupErr = terminateOwnedCommand(c.cmd, true)
+	} else {
+		cleanupErr = fmt.Errorf("cannot safely observe server exit: %w", observeErr)
+		// Fail closed without leaving Stop blocked behind a running launcher.
+		// This targets only the still-owned child, never an unverified group.
+		_ = c.cmd.Process.Kill()
+	}
+	waitErr := c.cmd.Wait()
+	c.reaped, c.err = true, cleanupErr
+	return waitErr, cleanupErr
+}
+
+func (c *ownedCommand) reconcile(dir string) error {
+	if c == nil {
+		return fmt.Errorf("process ownership is unavailable")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.reaped {
+		return fmt.Errorf("server process has not been reaped")
+	}
+	// Only the unique scope may be stopped after reap. Numeric process groups
+	// are inspected, never signalled here, since their IDs can now be reused.
+	if err := stopOwnedScope(c.cmd); err != nil {
+		return err
+	}
+	if err := verifyProcessTreeStopped(c.cmd); err != nil {
+		return err
+	}
+	if err := ensureServerProcessesStopped(dir); err != nil {
+		return err
+	}
+	c.err = nil
+	return nil
 }
 
 // Each launch has a unique scope name, so cleanup can only address this run.
@@ -48,11 +90,17 @@ func stopOwnedScope(cmd *exec.Cmd) error {
 			stop := exec.CommandContext(ctx, "systemctl", "stop", strings.TrimPrefix(arg, "--unit="))
 			stop.Env = append(os.Environ(), "LC_ALL=C")
 			out, err := stop.CombinedOutput()
-			// A scope that has already exited is collected automatically.
-			if err != nil && !strings.Contains(string(out), "not loaded") && !strings.Contains(string(out), "not found") {
-				return fmt.Errorf("stop owned systemd scope: %w: %s", err, strings.TrimSpace(string(out)))
+			// Do not interpret generic "not found" errors (for example a missing
+			// system bus) as proof the scope and its children are gone.
+			verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer verifyCancel()
+			verify := exec.CommandContext(verifyCtx, "systemctl", "show", strings.TrimPrefix(arg, "--unit="), "--property=LoadState,ActiveState")
+			verify.Env = append(os.Environ(), "LC_ALL=C")
+			state, verifyErr := verify.CombinedOutput()
+			if verifyErr == nil && scopeStopped(string(state)) {
+				return nil
 			}
-			return nil
+			return fmt.Errorf("cannot confirm owned systemd scope stopped: stop=%v (%s), verify=%v (%s)", err, strings.TrimSpace(string(out)), verifyErr, strings.TrimSpace(string(state)))
 		}
 	}
 	return nil
@@ -94,4 +142,14 @@ func checkServerWorldLocks(dir, serverType string) error {
 		}
 	}
 	return nil
+}
+
+func scopeStopped(output string) bool {
+	properties := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		if key, value, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
+			properties[key] = value
+		}
+	}
+	return (properties["LoadState"] == "not-found" || properties["LoadState"] == "loaded") && properties["ActiveState"] == "inactive"
 }

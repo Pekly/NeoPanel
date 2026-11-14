@@ -39,3 +39,26 @@ func checkWorldLock(path string) error { return nil }
 // Linux production nodes additionally inspect /proc for untracked survivors.
 // Windows development hosts rely on the tracked process completion handle.
 func ensureServerProcessesStopped(dir string) error { return nil }
+
+func waitForOwnedExit(cmd *exec.Cmd) error {
+	handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(cmd.Process.Pid))
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(handle)
+	status, err := windows.WaitForSingleObject(handle, windows.INFINITE)
+	if err != nil {
+		return err
+	}
+	if status != windows.WAIT_OBJECT_0 {
+		return fmt.Errorf("unexpected process wait status %d", status)
+	}
+	return nil
+}
+
+func verifyProcessTreeStopped(cmd *exec.Cmd) error {
+	if cmd != nil && cmd.ProcessState == nil {
+		return fmt.Errorf("server process completion is not confirmed")
+	}
+	return nil
+}

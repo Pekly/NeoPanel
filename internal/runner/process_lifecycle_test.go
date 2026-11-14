@@ -3,6 +3,7 @@ package runner
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,6 +24,16 @@ func init() {
 	if mode == "timeout" {
 		time.Sleep(time.Minute)
 		os.Exit(0)
+	}
+	if mode == "listener" {
+		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+		if err != nil {
+			os.Exit(4)
+		}
+		defer listener.Close()
+		if err := os.WriteFile("listener.addr", []byte(listener.Addr().String()), 0600); err != nil {
+			os.Exit(5)
+		}
 	}
 	if mode == "steel" {
 		if len(os.Args) != 1 {

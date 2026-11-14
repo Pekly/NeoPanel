@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 	"syscall"
+	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // The file is never unlinked: removing a locked inode allows a second owner.
@@ -40,17 +42,30 @@ func killProcessTree(cmd *exec.Cmd) error {
 		return nil
 	}
 	err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	if err != nil && !errors.Is(err, syscall.ESRCH) { return err }
+	if err != nil && !errors.Is(err, syscall.ESRCH) {
+		return err
+	}
 	// SIGKILL delivery is asynchronous. Do not publish "offline" while a
 	// surviving group member can still own sockets or write server files.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		processes, err := liveProcIdentities("/proc")
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		alive := false
-		for _, process := range processes { if process.Group == cmd.Process.Pid { alive = true; break } }
-		if !alive { return nil }
-		if time.Now().After(deadline) { return fmt.Errorf("process group %d did not exit after termination", cmd.Process.Pid) }
+		for _, process := range processes {
+			if process.Group == cmd.Process.Pid {
+				alive = true
+				break
+			}
+		}
+		if !alive {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("process group %d did not exit after termination", cmd.Process.Pid)
+		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
@@ -76,14 +91,46 @@ func checkWorldLock(path string) error {
 func ensureServerProcessesStopped(dir string) error {
 	return inspectServerProcesses("/proc", dir, func(path string) (string, error) {
 		target, err := os.Readlink(path)
-		if errors.Is(err, syscall.ESRCH) { return "", os.ErrNotExist }
+		if errors.Is(err, syscall.ESRCH) {
+			return "", os.ErrNotExist
+		}
 		if os.IsPermission(err) {
-			// Unprivileged nodes cannot inspect other users' processes. Never
-			// suppress an inspection failure for the account running our servers.
-			if info, statErr := os.Stat(filepath.Dir(path)); statErr == nil {
-				if st, ok := info.Sys().(*syscall.Stat_t); ok && st.Uid != uint32(os.Geteuid()) { return "", os.ErrNotExist }
+			// Proc-directory ownership changes for non-dumpable processes.
+			// Read the kernel's UID fields instead; an unreadable/unknown UID
+			// cannot be treated as proof that this is an unrelated process.
+			if raw, statusErr := os.ReadFile(filepath.Join(filepath.Dir(path), "status")); statusErr == nil {
+				if ours, parseErr := processHasUID(string(raw), os.Geteuid()); parseErr == nil && !ours {
+					return "", os.ErrNotExist
+				}
 			}
 		}
 		return target, err
 	})
+}
+
+func waitForOwnedExit(cmd *exec.Cmd) error {
+	var info unix.Siginfo
+	for {
+		err := unix.Waitid(unix.P_PID, cmd.Process.Pid, &info, unix.WEXITED|unix.WNOWAIT, nil)
+		if err == unix.EINTR {
+			continue
+		}
+		return err
+	}
+}
+
+func verifyProcessTreeStopped(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	processes, err := liveProcIdentities("/proc")
+	if err != nil {
+		return err
+	}
+	for _, process := range processes {
+		if process.Group == cmd.Process.Pid {
+			return fmt.Errorf("%w: process group %d still contains PID %d", ErrServerProcessAlive, cmd.Process.Pid, process.PID)
+		}
+	}
+	return nil
 }

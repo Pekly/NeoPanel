@@ -76,7 +76,9 @@ func (m *ServerManager) DeleteServer(ctx context.Context, id string, cleanup fun
 		return err
 	}
 	defer release()
-	if err := cleanup(); err != nil { return err }
+	if err := cleanup(); err != nil {
+		return err
+	}
 	m.removeInstanceLocked(id)
 	return nil
 }
