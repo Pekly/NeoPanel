@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"mime"
 	"net"
 	"net/http"
@@ -254,9 +255,18 @@ func (h *EmailHandler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	origin := ""
+	if h.auth != nil {
+		if settings, err := h.auth.panelURL(); err == nil {
+			origin = settings.PublicURL
+		}
+	} else if h.cfg != nil {
+		origin = h.cfg.Server.PublicURL
+	}
+	brand := emailBrand(LoadBrandingConfig(h.db), origin)
 	subject := "[NeoPanel] SMTP Delivery Test"
 	bodyPlain := fmt.Sprintf("Success! Your SMTP email server at %s:%d successfully delivered this message.\nSent: %s\n", s.Host, s.Port, time.Now().Format(time.RFC1123))
-	bodyHTML := fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;background:#0f172a;color:#f8fafc;padding:30px;"><div style="max-width:480px;margin:0 auto;background:#1e293b;padding:24px;border-radius:10px;"><h2 style="color:#10b981;margin-top:0;">✔ SMTP Test Successful</h2><p>Your NeoPanel email server is functioning properly.</p><p style="color:#94a3b8;font-size:12px;">Host: %s:%d &bull; Sent: %s</p></div></body></html>`, s.Host, s.Port, time.Now().Format(time.RFC1123))
+	bodyHTML := fmt.Sprintf(`<!DOCTYPE html><html><body style="font-family:sans-serif;background:#0f172a;color:#f8fafc;padding:30px;"><div style="max-width:480px;margin:0 auto;background:#1e293b;padding:24px;border-radius:10px;"><div style="margin-bottom:24px;">%s</div><h2 style="color:#10b981;margin-top:0;">✔ SMTP Test Successful</h2><p>Your NeoPanel email server is functioning properly.</p><p style="color:#94a3b8;font-size:12px;">Host: %s:%d &bull; Sent: %s</p></div></body></html>`, renderEmailBrand(brand), html.EscapeString(s.Host), s.Port, time.Now().Format(time.RFC1123))
 
 	if err := h.SendEmail(s, toEmail, "NeoPanel Administrator", subject, bodyHTML, bodyPlain); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "SMTP delivery test failed: " + err.Error()})
@@ -322,6 +332,7 @@ func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		resetLink := origin + "/#reset-token=" + resetToken
+		brand := emailBrand(LoadBrandingConfig(h.db), origin)
 
 		subject := fmt.Sprintf("[NeoPanel] Reset Password for %s", user.Username)
 		bodyPlain := fmt.Sprintf("Hello %s,\n\nA request was received to reset your NeoPanel password.\n\nTo choose a new password, click the link below (valid for 1 hour):\n%s\n\nReset Code: %s\n\nIf you did not request this, you can safely ignore this email.\n", user.Username, resetLink, resetToken)
@@ -330,7 +341,7 @@ func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background:#0b0f19; color:#f8fafc; padding:32px 16px; margin:0;">
   <div style="max-width:520px; margin:0 auto; background:#121827; border:1px solid #1e293b; border-radius:12px; padding:32px 28px;">
     <div style="margin-bottom:24px; text-align:center;">
-      <h1 style="color:#387aff; margin:0; font-size:24px; font-weight:800;">NeoPanel</h1>
+      %s
       <p style="color:#94a3b8; font-size:13px; margin:4px 0 0;">Password Recovery Assistance</p>
     </div>
     <h2 style="color:#ffffff; font-size:18px; margin:0 0 12px;">Password Reset Request</h2>
@@ -350,7 +361,7 @@ func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Reque
     </p>
   </div>
 </body>
-</html>`, user.Username, resetLink, resetToken)
+</html>`, renderEmailBrand(brand), html.EscapeString(user.Username), html.EscapeString(resetLink), resetToken)
 
 		if err := h.SendEmail(smtpCfg, user.Email, user.Username, subject, bodyHTML, bodyPlain); err != nil {
 			logAuditUser(h.db, user.ID, r, "auth_password_reset_email_fail", fmt.Sprintf("Failed to send reset email: %v", err))

@@ -9,12 +9,12 @@ import (
 	"github.com/Pekly/NeoPanel/internal/database"
 )
 
-var invitationEmailTemplate = template.Must(template.New("invitation").Parse(`<!doctype html>
+var invitationEmailTemplate = template.Must(template.New("invitation").Parse(emailBrandHeaderTemplate + `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Team invitation</title></head>
 <body style="margin:0;padding:0;background:#f3f5f9;color:#202b3c;font-family:Arial,Helvetica,sans-serif;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f5f9;"><tr><td align="center" style="padding:32px 12px;">
 <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e0e5ed;border-radius:12px;">
-<tr><td style="padding:24px 28px;border-top:4px solid {{.Accent}};font-size:20px;font-weight:bold;">{{.Brand}}</td></tr>
+<tr><td style="padding:24px 28px;border-top:4px solid {{.Accent}};font-size:20px;font-weight:bold;text-align:center;">{{template "emailBrand" .Branding}}</td></tr>
 <tr><td style="padding:0 28px 28px;font-size:16px;line-height:1.6;">
 <h1 style="margin:0 0 16px;font-size:26px;line-height:1.3;">You're invited to the team</h1>
 <p>You have been invited to collaborate on <strong>{{.Server}}</strong> through {{.Brand}}.</p>
@@ -56,7 +56,8 @@ func invitationEmail(brand PanelBrandingConfig, i *database.Invitation, serverNa
 	}
 	data := struct {
 		Brand, Accent, Server, Username, Permissions, Link, Expires string
-	}{name, accent, serverName, i.Username, permissions, link, i.ExpiresAt.UTC().Format("02 Jan 2006 at 15:04 UTC")}
+		Branding                                                    emailBranding
+	}{name, accent, serverName, i.Username, permissions, link, i.ExpiresAt.UTC().Format("02 Jan 2006 at 15:04 UTC"), emailBrand(brand, link)}
 	var html bytes.Buffer
 	if err := invitationEmailTemplate.Execute(&html, data); err != nil {
 		return "", "", err
