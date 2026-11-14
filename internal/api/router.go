@@ -255,6 +255,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// Software, Minecraft Versions & Properties routes
 	r.mux.HandleFunc("GET /api/versions", r.requireAuth(HandleGetMinecraftVersions))
+	r.mux.HandleFunc("GET /api/steel/versions", r.requireAuth(HandleGetSteelVersions))
 	r.mux.HandleFunc("POST /api/servers/{id}/software", r.requireAuth(r.software.ChangeSoftware))
 	r.mux.HandleFunc("POST /api/servers/{id}/reinstall", r.requireAuth(r.software.ReinstallServer))
 	r.mux.HandleFunc("GET /api/servers/{id}/properties", r.requireAuth(r.software.GetProperties))
@@ -722,7 +723,7 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	claims, _ := req.Context().Value(contextUserKey).(*JWTClaims)
 	// Only server operations and public catalogs are available through a user proxy.
-	if claims.Role != "admin" && !strings.HasPrefix(rest, "api/servers/") && rest != "api/servers" && rest != "api/plugins/search" && rest != "api/versions" && rest != "api/system/java" {
+	if claims.Role != "admin" && !strings.HasPrefix(rest, "api/servers/") && rest != "api/servers" && rest != "api/plugins/search" && rest != "api/versions" && rest != "api/steel/versions" && rest != "api/system/java" {
 		writeError(w, 403, "Proxy operation requires administrator privileges")
 		return
 	}

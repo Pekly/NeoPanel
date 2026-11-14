@@ -24,7 +24,15 @@ func init() {
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	}
-	fmt.Println(`Done (0.01s)! For help, type "help"`)
+	if mode == "steel" {
+		if len(os.Args) != 1 {
+			fmt.Println("Unexpected Java arguments:", os.Args[1:])
+			os.Exit(2)
+		}
+		fmt.Println("Started Steel Server")
+	} else {
+		fmt.Println(`Done (0.01s)! For help, type "help"`)
+	}
 	if mode == "tail" {
 		fmt.Println("FINAL-OUTPUT-PRESERVED")
 		os.Exit(0)

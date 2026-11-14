@@ -59,17 +59,29 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 
 	serverDir := h.manager.GetWorkingDir(serverID)
 	jarName := fmt.Sprintf("%s-%s.jar", req.Software, req.Version)
+	if downloader.IsNativeSoftware(req.Software) {
+		jarName = downloader.ServerFileName(req.Software)
+	}
 
 	// Download jar
 	if err := downloader.DownloadServerJar(req.Software, req.Version, serverDir, jarName); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Download failed: " + err.Error()})
 		return
 	}
+	if downloader.IsNativeSoftware(req.Software) {
+		if err := runner.SyncSteelPort(serverDir, srv.Port); err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
+	}
 
 	// Update DB record
 	srv.Type = req.Software
 	srv.Version = req.Version
 	srv.JarFile = jarName
+	if downloader.IsNativeSoftware(req.Software) {
+		srv.MemoryMinMB, srv.JavaArgs, srv.JavaPath = 0, "", ""
+	}
 	if err := h.db.UpdateServer(srv); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server record: " + err.Error()})
 		return
@@ -88,6 +100,9 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 
 func (h *SoftwareHandler) GetProperties(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	if rejectSteelJavaConfig(h.db, serverID, w) {
+		return
+	}
 	propPath := filepath.Join(h.manager.GetWorkingDir(serverID), "server.properties")
 
 	props := make(map[string]string)
@@ -111,6 +126,9 @@ func (h *SoftwareHandler) GetProperties(w http.ResponseWriter, r *http.Request) 
 
 func (h *SoftwareHandler) SaveProperties(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	if rejectSteelJavaConfig(h.db, serverID, w) {
+		return
+	}
 	propPath := filepath.Join(h.manager.GetWorkingDir(serverID), "server.properties")
 
 	var newProps map[string]string
@@ -182,6 +200,25 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 	defer release()
 
 	serverDir := h.manager.GetWorkingDir(serverID)
+	// Stage native downloads before destructive cleanup: bad tags, unsupported
+	// hosts or network failures must leave the existing installation untouched.
+	staged := ""
+	if downloader.IsNativeSoftware(req.Software) {
+		staged, err = os.MkdirTemp(filepath.Dir(serverDir), ".steel-reinstall-*")
+		if err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
+		defer os.RemoveAll(staged)
+		if err := downloader.DownloadServerJar(req.Software, req.Version, staged, downloader.ServerFileName(req.Software)); err != nil {
+			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Steel reinstall download failed: " + err.Error()})
+			return
+		}
+		if err := runner.SyncSteelPort(staged, srv.Port); err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
+	}
 
 	// 2. Perform selective cleanup based on preservation flags
 	entries, err := os.ReadDir(serverDir)
@@ -195,7 +232,7 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 			lower := strings.ToLower(name)
 
 			// Keep worlds?
-			if req.PreserveWorld && (lower == "world" || lower == "world_nether" || lower == "world_the_end") {
+			if req.PreserveWorld && (lower == "world" || lower == "world_nether" || lower == "world_the_end" || (downloader.IsNativeSoftware(srv.Type) && lower == "saves")) {
 				continue
 			}
 
@@ -217,24 +254,49 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	// 3. Download fresh server JAR
-	jarName := "server.jar"
-	if err := downloader.DownloadServerJar(req.Software, req.Version, serverDir, jarName); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Reinstall failed to download jar: " + err.Error()})
+	// Install the staged native executable or download the Java distribution.
+	jarName := downloader.ServerFileName(req.Software)
+	if staged != "" {
+		if err := os.Rename(filepath.Join(staged, jarName), filepath.Join(serverDir, jarName)); err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
+		configPath := filepath.Join(serverDir, "config", "config.toml")
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+				writeServerOperationError(w, err)
+				return
+			}
+			if err := os.Rename(filepath.Join(staged, "config", "config.toml"), configPath); err != nil {
+				writeServerOperationError(w, err)
+				return
+			}
+		}
+		if err := runner.SyncSteelPort(serverDir, srv.Port); err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
+	} else if err := downloader.DownloadServerJar(req.Software, req.Version, serverDir, jarName); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Reinstall failed to download server: " + err.Error()})
 		return
 	}
 
 	// 4. Ensure server.properties exists with port
-	propsPath := filepath.Join(serverDir, "server.properties")
-	if _, err := os.Stat(propsPath); os.IsNotExist(err) {
-		propsContent := fmt.Sprintf("# Minecraft server properties generated by NeoPanel\nserver-port=%d\nquery.port=%d\nmotd=%s\nenable-rcon=false\n", srv.Port, srv.Port, srv.Name)
-		_ = os.WriteFile(propsPath, []byte(propsContent), 0644)
+	if !downloader.IsNativeSoftware(req.Software) {
+		propsPath := filepath.Join(serverDir, "server.properties")
+		if _, err := os.Stat(propsPath); os.IsNotExist(err) {
+			propsContent := fmt.Sprintf("# Minecraft server properties generated by NeoPanel\nserver-port=%d\nquery.port=%d\nmotd=%s\nenable-rcon=false\n", srv.Port, srv.Port, srv.Name)
+			_ = os.WriteFile(propsPath, []byte(propsContent), 0644)
+		}
 	}
 
 	// 5. Update database record
 	srv.Type = req.Software
 	srv.Version = req.Version
 	srv.JarFile = jarName
+	if downloader.IsNativeSoftware(req.Software) {
+		srv.MemoryMinMB, srv.JavaArgs, srv.JavaPath = 0, "", ""
+	}
 	if err := h.db.UpdateServer(srv); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server record: " + err.Error()})
 		return
@@ -257,4 +319,22 @@ func writeServerOperationError(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	}
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func HandleGetSteelVersions(w http.ResponseWriter, r *http.Request) {
+	versions, err := downloader.GetSteelVersions()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, versions)
+}
+
+func rejectSteelJavaConfig(db *database.DB, serverID string, w http.ResponseWriter) bool {
+	srv, err := db.GetServer(serverID)
+	if err == nil && downloader.IsNativeSoftware(srv.Type) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Steel uses config/config.toml, not Java server.properties or eula.txt. Edit its configuration in Files."})
+		return true
+	}
+	return false
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Pekly/NeoPanel/internal/database"
+	"github.com/Pekly/NeoPanel/internal/downloader"
 )
 
 type OnlinePlayer struct {
@@ -235,73 +236,84 @@ func (p *ProcessInstance) Start() error {
 		return err
 	}
 
-	// Build Java command
-	javaBinary, javaLabel := ResolveJavaBinary(srv.JavaPath)
-	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Starting instance using %s (%s)...\x1b[0m", javaLabel, javaBinary))
-
-	// Validate Java binary existence
-	if !isExecutableBinary(javaBinary) {
-		p.mu.Lock()
-		p.status = "offline"
-		p.mu.Unlock()
-
-		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		p.broadcast("\x1b[31;1m[NeoPanel ERROR] JAVA RUNTIME NOT FOUND!\x1b[0m")
-		p.broadcast(fmt.Sprintf("\x1b[31mThe specified Java binary does not exist or is not executable on this host:\x1b[0m"))
-		p.broadcast(fmt.Sprintf("  \x1b[33;1mPath:  %s\x1b[0m", javaBinary))
-		p.broadcast(fmt.Sprintf("  \x1b[33;1mLabel: %s\x1b[0m", javaLabel))
-		p.broadcast("\x1b[36m👉 Solution: Open Server -> Settings and choose or install a Java runtime (Java 25, 21, 17, or 8), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
-		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		return fmt.Errorf("Java binary '%s' (%s) was not found. Please install it or verify your Java settings in Settings", javaBinary, javaLabel)
-	}
-
-	jarPath := filepath.Join(p.workingDir, srv.JarFile)
-	if fi, err := os.Stat(jarPath); os.IsNotExist(err) || (err == nil && fi.IsDir()) {
-		p.mu.Lock()
-		p.status = "offline"
-		p.mu.Unlock()
-
-		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		p.broadcast("\x1b[31;1m[NeoPanel ERROR] SERVER JAR FILE NOT FOUND!\x1b[0m")
-		p.broadcast("\x1b[31mCould not locate the executable JAR file in server directory:\x1b[0m")
-		p.broadcast(fmt.Sprintf("  \x1b[33;1mExpected file: %s\x1b[0m", srv.JarFile))
-		p.broadcast(fmt.Sprintf("  \x1b[33;1mFull path:     %s\x1b[0m", jarPath))
-		p.broadcast("\x1b[36m👉 Solution: Click 'Reinstall Server' in Settings to cleanly download an official JAR from mcjarfiles.com, or upload your server JAR to the root folder via the File Manager.\x1b[0m")
-		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		return fmt.Errorf("server JAR file '%s' not found. Please upload it or use 'Reinstall Server'", srv.JarFile)
-	}
-
-	// Validate memory settings
-	if srv.MemoryMinMB > 0 && srv.MemoryMaxMB > 0 && srv.MemoryMinMB > srv.MemoryMaxMB {
-		p.mu.Lock()
-		p.status = "offline"
-		p.mu.Unlock()
-
-		errMsg := fmt.Sprintf("Minimum RAM (%d MB) cannot exceed Maximum RAM (%d MB)", srv.MemoryMinMB, srv.MemoryMaxMB)
-		p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] INVALID RAM SETTINGS: %s\x1b[0m", errMsg))
-		return fmt.Errorf("%s", errMsg)
-	}
-
+	native := downloader.IsNativeSoftware(srv.Type)
+	javaBinary, javaLabel := "", ""
 	args := []string{}
-	if srv.MemoryMinMB > 0 {
-		args = append(args, fmt.Sprintf("-Xms%dM", srv.MemoryMinMB))
-	}
-	if srv.MemoryMaxMB > 0 {
-		args = append(args, fmt.Sprintf("-Xmx%dM", srv.MemoryMaxMB))
-	}
+	if native {
+		javaBinary, err = steelExecutable(p.workingDir, srv.JarFile)
+		if err != nil {
+			p.broadcast("[NeoPanel] " + err.Error())
+			return err
+		}
+		p.broadcast("[NeoPanel] Starting Steel native server (no Java runtime required)...")
+	} else {
+		javaBinary, javaLabel = ResolveJavaBinary(srv.JavaPath)
+		p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Starting instance using %s (%s)...\x1b[0m", javaLabel, javaBinary))
 
-	// Force full ANSI terminal color output even when piped in daemons/subprocesses
-	args = append(args,
-		"-Dterminal.ansi=true",
-		"-Dterminal.jline=false",
-		"-Dnet.minecrell.terminalconsole.ansi=true",
-		"-Dlog4j.skipJansi=false",
-	)
+		// Validate Java binary existence
+		if !isExecutableBinary(javaBinary) {
+			p.mu.Lock()
+			p.status = "offline"
+			p.mu.Unlock()
 
-	// Add custom JVM flags if provided
-	if strings.TrimSpace(srv.JavaArgs) != "" {
-		customArgs := strings.Fields(srv.JavaArgs)
-		args = append(args, customArgs...)
+			p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+			p.broadcast("\x1b[31;1m[NeoPanel ERROR] JAVA RUNTIME NOT FOUND!\x1b[0m")
+			p.broadcast(fmt.Sprintf("\x1b[31mThe specified Java binary does not exist or is not executable on this host:\x1b[0m"))
+			p.broadcast(fmt.Sprintf("  \x1b[33;1mPath:  %s\x1b[0m", javaBinary))
+			p.broadcast(fmt.Sprintf("  \x1b[33;1mLabel: %s\x1b[0m", javaLabel))
+			p.broadcast("\x1b[36m👉 Solution: Open Server -> Settings and choose or install a Java runtime (Java 25, 21, 17, or 8), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
+			p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+			return fmt.Errorf("Java binary '%s' (%s) was not found. Please install it or verify your Java settings in Settings", javaBinary, javaLabel)
+		}
+
+		jarPath := filepath.Join(p.workingDir, srv.JarFile)
+		if fi, err := os.Stat(jarPath); os.IsNotExist(err) || (err == nil && fi.IsDir()) {
+			p.mu.Lock()
+			p.status = "offline"
+			p.mu.Unlock()
+
+			p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+			p.broadcast("\x1b[31;1m[NeoPanel ERROR] SERVER JAR FILE NOT FOUND!\x1b[0m")
+			p.broadcast("\x1b[31mCould not locate the executable JAR file in server directory:\x1b[0m")
+			p.broadcast(fmt.Sprintf("  \x1b[33;1mExpected file: %s\x1b[0m", srv.JarFile))
+			p.broadcast(fmt.Sprintf("  \x1b[33;1mFull path:     %s\x1b[0m", jarPath))
+			p.broadcast("\x1b[36m👉 Solution: Click 'Reinstall Server' in Settings to cleanly download an official JAR from mcjarfiles.com, or upload your server JAR to the root folder via the File Manager.\x1b[0m")
+			p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
+			return fmt.Errorf("server JAR file '%s' not found. Please upload it or use 'Reinstall Server'", srv.JarFile)
+		}
+
+		// Validate memory settings
+		if srv.MemoryMinMB > 0 && srv.MemoryMaxMB > 0 && srv.MemoryMinMB > srv.MemoryMaxMB {
+			p.mu.Lock()
+			p.status = "offline"
+			p.mu.Unlock()
+
+			errMsg := fmt.Sprintf("Minimum RAM (%d MB) cannot exceed Maximum RAM (%d MB)", srv.MemoryMinMB, srv.MemoryMaxMB)
+			p.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] INVALID RAM SETTINGS: %s\x1b[0m", errMsg))
+			return fmt.Errorf("%s", errMsg)
+		}
+
+		args = []string{}
+		if srv.MemoryMinMB > 0 {
+			args = append(args, fmt.Sprintf("-Xms%dM", srv.MemoryMinMB))
+		}
+		if srv.MemoryMaxMB > 0 {
+			args = append(args, fmt.Sprintf("-Xmx%dM", srv.MemoryMaxMB))
+		}
+
+		// Force full ANSI terminal color output even when piped in daemons/subprocesses
+		args = append(args,
+			"-Dterminal.ansi=true",
+			"-Dterminal.jline=false",
+			"-Dnet.minecrell.terminalconsole.ansi=true",
+			"-Dlog4j.skipJansi=false",
+		)
+
+		// Add custom JVM flags if provided
+		if strings.TrimSpace(srv.JavaArgs) != "" {
+			customArgs := strings.Fields(srv.JavaArgs)
+			args = append(args, customArgs...)
+		}
 	}
 
 	// Ensure server game port is synchronized to configuration file
@@ -309,15 +321,23 @@ func (p *ProcessInstance) Start() error {
 	if port <= 0 {
 		port = 25565
 	}
-	syncServerPort(p.workingDir, srv.Type, port)
+	if native {
+		if err := SyncSteelPort(p.workingDir, port); err != nil {
+			return err
+		}
+	} else {
+		syncServerPort(p.workingDir, srv.Type, port)
+	}
 	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Bound game server port: %d (TCP/UDP)\x1b[0m", port))
 
-	args = append(args, "-jar", srv.JarFile, "nogui")
+	if !native {
+		args = append(args, "-jar", srv.JarFile, "nogui")
 
-	// Pass CLI port parameter for game servers that support port override
-	lowerType := strings.ToLower(srv.Type)
-	if lowerType != "velocity" && lowerType != "bungeecord" && lowerType != "waterfall" {
-		args = append(args, "--port", fmt.Sprintf("%d", port))
+		// Pass CLI port parameter for game servers that support port override
+		lowerType := strings.ToLower(srv.Type)
+		if lowerType != "velocity" && lowerType != "bungeecord" && lowerType != "waterfall" {
+			args = append(args, "--port", fmt.Sprintf("%d", port))
+		}
 	}
 
 	cmd, isolationMode, err := p.buildCommand(javaBinary, args)
@@ -372,10 +392,10 @@ func (p *ProcessInstance) Start() error {
 
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 		p.broadcast("\x1b[31;1m[NeoPanel ERROR] PROCESS LAUNCH FAILED!\x1b[0m")
-		p.broadcast(fmt.Sprintf("\x1b[31mFailed to start Java process: %v\x1b[0m", err))
+		p.broadcast(fmt.Sprintf("\x1b[31mFailed to start server process: %v\x1b[0m", err))
 		p.broadcast(fmt.Sprintf("  \x1b[33;1mCommand: %s %s\x1b[0m", javaBinary, strings.Join(args, " ")))
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-		return fmt.Errorf("failed to start Java process: %w", err)
+		return fmt.Errorf("failed to start server process: %w", err)
 	}
 	stdoutWriter.Close()
 	stderrWriter.Close()
@@ -521,7 +541,7 @@ func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 		var readyCallback func(string)
 		var readySrvID string
 		p.mu.Lock()
-		if p.runID == runID && p.status == "starting" && (strings.Contains(line, "Done (") || strings.Contains(line, "For help, type \"help\"") || strings.Contains(line, "Listening on /")) {
+		if p.runID == runID && p.status == "starting" && serverReadyLine(p.server.Type, line) {
 			p.status = "online"
 			p.reachedOnline = true
 			p.stopStartupTimerLocked()
@@ -546,6 +566,16 @@ func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 
 func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 	clean := strings.TrimSpace(ansiEscapeRe.ReplaceAllString(rawLine, ""))
+	p.mu.RLock()
+	native := downloader.IsNativeSoftware(p.server.Type)
+	p.mu.RUnlock()
+	if native {
+		// Steel redraws its interactive prompt with carriage returns before logs.
+		if i := strings.LastIndex(clean, "\r"); i >= 0 {
+			clean = strings.TrimSpace(clean[i+1:])
+		}
+		clean = steelLogPrefix.ReplaceAllString(clean, "")
+	}
 	if clean == "" {
 		return
 	}
@@ -1095,6 +1125,9 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 			"-q",
 			fmt.Sprintf("--property=TasksMax=%d", tasksMax),
 		}
+		if downloader.IsNativeSoftware(srv.Type) && srv.MemoryMaxMB > 0 {
+			sysArgs = append(sysArgs, fmt.Sprintf("--property=MemoryMax=%dM", srv.MemoryMaxMB))
+		}
 		if srv.CPULimitPercent > 0 {
 			sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", srv.CPULimitPercent))
 		}
@@ -1158,26 +1191,28 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 			}
 		}
 
-		// Resolve java binary symlinks and ensure conf / security targets are explicitly bound
-		if realJava, err := filepath.EvalSymlinks(javaBinary); err == nil {
-			javaBinDir := filepath.Dir(realJava)
-			bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaBinDir, javaBinDir)
-			javaHome := filepath.Dir(javaBinDir)
-			bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaHome, javaHome)
+		if !downloader.IsNativeSoftware(srv.Type) {
+			// Resolve java binary symlinks and ensure conf / security targets are explicitly bound
+			if realJava, err := filepath.EvalSymlinks(javaBinary); err == nil {
+				javaBinDir := filepath.Dir(realJava)
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaBinDir, javaBinDir)
+				javaHome := filepath.Dir(javaBinDir)
+				bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaHome, javaHome)
 
-			// Modern OpenJDK: conf directory symlinks to /etc/java-<version>-openjdk
-			confDir := filepath.Join(javaHome, "conf")
-			if realConf, err := filepath.EvalSymlinks(confDir); err == nil {
-				bwrapArgs = append(bwrapArgs, "--ro-bind-try", realConf, realConf)
-			}
+				// Modern OpenJDK: conf directory symlinks to /etc/java-<version>-openjdk
+				confDir := filepath.Join(javaHome, "conf")
+				if realConf, err := filepath.EvalSymlinks(confDir); err == nil {
+					bwrapArgs = append(bwrapArgs, "--ro-bind-try", realConf, realConf)
+				}
 
-			// Legacy OpenJDK 8: jre/lib/security symlinks to /etc/java-8-openjdk/security
-			for _, secPath := range []string{
-				filepath.Join(javaHome, "lib", "security"),
-				filepath.Join(javaHome, "jre", "lib", "security"),
-			} {
-				if realSec, err := filepath.EvalSymlinks(secPath); err == nil {
-					bwrapArgs = append(bwrapArgs, "--ro-bind-try", realSec, realSec)
+				// Legacy OpenJDK 8: jre/lib/security symlinks to /etc/java-8-openjdk/security
+				for _, secPath := range []string{
+					filepath.Join(javaHome, "lib", "security"),
+					filepath.Join(javaHome, "jre", "lib", "security"),
+				} {
+					if realSec, err := filepath.EvalSymlinks(secPath); err == nil {
+						bwrapArgs = append(bwrapArgs, "--ro-bind-try", realSec, realSec)
+					}
 				}
 			}
 		}
@@ -1189,7 +1224,7 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 		)
 
 		javaDir := filepath.Dir(javaBinary)
-		if !strings.HasPrefix(javaDir, "/usr") && !strings.HasPrefix(javaDir, "/bin") && !strings.HasPrefix(javaDir, "/lib") {
+		if !downloader.IsNativeSoftware(srv.Type) && !strings.HasPrefix(javaDir, "/usr") && !strings.HasPrefix(javaDir, "/bin") && !strings.HasPrefix(javaDir, "/lib") {
 			if _, err := os.Stat(javaDir); err == nil {
 				bwrapArgs = append(bwrapArgs, "--ro-bind-try", javaDir, javaDir)
 			}
@@ -1205,6 +1240,9 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 				"--property=KillMode=control-group",
 				"-q",
 				fmt.Sprintf("--property=TasksMax=%d", tasksMax),
+			}
+			if downloader.IsNativeSoftware(srv.Type) && srv.MemoryMaxMB > 0 {
+				sysArgs = append(sysArgs, fmt.Sprintf("--property=MemoryMax=%dM", srv.MemoryMaxMB))
 			}
 			if srv.CPULimitPercent > 0 {
 				sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", srv.CPULimitPercent))

@@ -26,9 +26,12 @@ func httpGet(url string) (*http.Response, error) {
 	return httpClient.Do(req)
 }
 
-// DownloadServerJar downloads the specified server flavor and version into destDir as jarFileName.
-// It also writes eula.txt (eula=true) automatically so the server is ready to run immediately.
+// DownloadServerJar installs the server distribution (a native binary for Steel).
+// Java distributions also get an automatically accepted eula.txt.
 func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
+	if IsNativeSoftware(flavor) {
+		return downloadSteel(version, destDir, jarFileName)
+	}
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}

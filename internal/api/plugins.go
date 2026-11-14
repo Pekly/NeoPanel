@@ -64,6 +64,9 @@ func (h *PluginHandler) ListInstalled(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
 		return
 	}
+	if rejectSteelPlugins(srv, w) {
+		return
+	}
 
 	isMod := downloader.IsModdedSoftware(srv.Type)
 	folderName := "plugins"
@@ -115,6 +118,9 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 	srv, err := h.db.GetServer(serverID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
+		return
+	}
+	if rejectSteelPlugins(srv, w) {
 		return
 	}
 
@@ -313,10 +319,21 @@ func (h *PluginHandler) Versions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
 		return
 	}
+	if rejectSteelPlugins(srv, w) {
+		return
+	}
 	versions, err := downloader.CompatibleModrinthVersions(r.URL.Query().Get("slug"), srv.Type, srv.Version)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"versions": versions, "minecraft_version": srv.Version, "loader": srv.Type})
+}
+
+func rejectSteelPlugins(srv *database.Server, w http.ResponseWriter) bool {
+	if downloader.IsNativeSoftware(srv.Type) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Steel does not support Java plugins or mods from this catalog."})
+		return true
+	}
+	return false
 }

@@ -19,7 +19,7 @@ I built it because running Pterodactyl for a Minecraft-only setup meant PHP, Ngi
 - **Live console** over WebSocket with colors, command history, a popout terminal, and a slide-out drawer you can open from any server page with `Ctrl + \``. CPU, memory and network charts sit alongside it.
 - **File manager** with an in-browser editor, unsaved-change prompts, per-user/server draft recovery within the same browser tab, and `Ctrl/Cmd + S`. Drag-and-drop uploads have a queue with per-file errors, cancel/retry controls and a completion summary. Bulk select/move and zip/tar.gz archiving/extraction are also included.
 - **Built-in SFTP** on port 2022. Log in with your panel credentials or an SSH key, and each user is jailed to their server's directory.
-- **11 server engines**: Paper, Purpur, LeafMC, Folia, Vanilla, Fabric, Forge, NeoForge, Velocity, Waterfall and BungeeCord. Downloads come from mcjarfiles.com, the Paper, Purpur and Fabric APIs, and Mojang's manifest. Reinstalling lets you keep your worlds, configs and plugins.
+- **12 server engines**: Paper, Purpur, LeafMC, Folia, Vanilla, Fabric, Forge, NeoForge, Velocity, Waterfall, BungeeCord and Steel. Java downloads come from mcjarfiles.com, the Paper, Purpur and Fabric APIs, and Mojang's manifest; Steel uses official GitHub native releases. Reinstalling lets you keep your worlds, configs and plugins.
 - **Java manager** for Java 25, 21, 17 and 8. It detects what's installed, installs what's missing, and picks the right version for each Minecraft release. If a server fails to start twice in a row, it stops retrying instead of crash-looping.
 - **Modrinth store** for plugins and mods. Installation verifies both Minecraft version and loader, offers compatible release selection, and refuses incompatible releases or existing filenames. Enable/disable switches persist as `.jar` / `.jar.disabled`; restart the server to apply changes.
 - **Per-server SQLite databases** with a small SQL studio in the browser, and `.sql` or `.db` export.
@@ -35,7 +35,7 @@ I built it because running Pterodactyl for a Minecraft-only setup meant PHP, Ngi
 
 ## What it doesn't do
 
-- No Docker eggs. Servers run as plain JVM processes, so no SteamCMD, Rust, Python or Discord bot eggs.
+- No Docker eggs. Java servers run as JVM processes and Steel runs as a native executable; arbitrary SteamCMD, Rust game-server, Python or Discord bot eggs are not supported.
 - No hosted MySQL or MariaDB. Databases are embedded SQLite.
 - No payment processing. You can link your own storefront, but NeoPanel won't handle checkout.
 
@@ -86,6 +86,16 @@ curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sud
 ```
 
 It builds the binary, installs Java, opens the firewall ports, starts the service, and registers itself with your master panel. The node doesn't serve a web UI. Everything shows up in the master.
+
+### Steel (native Rust server)
+
+Choose **Steel** when creating a server, or from Software / Reinstall. Select a Steel release tag (for example `v0.17.0+mc26.3`) or `latest`, not a Minecraft version. NeoPanel downloads the official executable for the **server node's** platform: Linux x64 (preferring the static musl build), Windows x64, or macOS ARM64. Other platforms require a self-built executable and automatic download disabled. See [Steel installation](https://steelmc.dev/getting-started/installation/).
+
+Steel starts directly without Java, JVM flags, `nogui`, or Java heap arguments. The existing `jar_file` API field stores `steel` (`steel.exe` on Windows). Its full default `config/config.toml` is downloaded from the selected release; NeoPanel synchronizes `[server].server_port` with the assigned port before each launch. Use Files to edit TOML settings. For manual installs, upload the matching release configuration as well as the executable. macOS may require the development-mode setup described by Steel.
+
+Reinstall preservation includes Steel's `saves/` and `config/` directories. Back up before changing between Steel and Java engines: their plugins, mods, configuration and world layouts are not interchangeable. Java quick configuration and the Modrinth JAR catalog are unavailable for Steel. Memory maximum is enforced by systemd when that isolation backend is available; unrestricted processes and bubblewrap alone do not impose a native memory cap.
+
+Steel logo supplied by [SteelMC](https://steelmc.dev/), credited upstream to colonthreeing.
 
 ## Command line
 

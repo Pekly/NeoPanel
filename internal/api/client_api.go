@@ -14,6 +14,7 @@ import (
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
+	"github.com/Pekly/NeoPanel/internal/downloader"
 	"github.com/Pekly/NeoPanel/internal/runner"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -167,7 +168,7 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 	}
 
 	srvID := fmt.Sprintf("srv-%x", time.Now().UnixNano()%0xFFFFFF)
-	jarName := "server.jar"
+	jarName := downloader.ServerFileName(srvType)
 
 	srv := database.Server{
 		ID:              srvID,
@@ -186,6 +187,12 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 		CPULimitPercent: req.CPULimitPercent,
 		DiskLimitMB:     req.DiskMB,
 	}
+	if downloader.IsNativeSoftware(srvType) {
+		srv.MemoryMinMB, srv.JavaArgs = 0, ""
+		if strings.TrimSpace(srv.Version) == "" {
+			srv.Version = "latest"
+		}
+	}
 
 	err = h.db.CreateServer(&srv)
 	if err != nil {
@@ -197,12 +204,14 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 	srvDir := h.manager.GetWorkingDir(srvID)
 	_ = os.MkdirAll(srvDir, 0755)
 
-	// Accept EULA
-	_ = os.WriteFile(filepath.Join(srvDir, "eula.txt"), []byte("eula=true\n"), 0644)
+	if !downloader.IsNativeSoftware(srvType) {
+		// Accept EULA
+		_ = os.WriteFile(filepath.Join(srvDir, "eula.txt"), []byte("eula=true\n"), 0644)
 
-	// Sync server.properties port
-	props := fmt.Sprintf("server-port=%d\nquery.port=%d\nmotd=%s\n", port, port, srvName)
-	_ = os.WriteFile(filepath.Join(srvDir, "server.properties"), []byte(props), 0644)
+		// Sync server.properties port
+		props := fmt.Sprintf("server-port=%d\nquery.port=%d\nmotd=%s\n", port, port, srvName)
+		_ = os.WriteFile(filepath.Join(srvDir, "server.properties"), []byte(props), 0644)
+	}
 
 	_ = h.db.CreateAuditLog("client-api", "server.provision", fmt.Sprintf("Provisioned server %s (%s) for %s on node %s", srvName, srvID, clientEmail, targetNode.Name), getClientIP(r))
 

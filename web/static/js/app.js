@@ -63,6 +63,10 @@ function fileListIconHtml(item, extraCls = '', iconSize = 15) {
   }
   const name = String(item.name || '').toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop() : '';
+  const srv = curServer();
+  if (isSteelEngine(srv?.type) && name === serverExecutable(srv).split(/[\\/]/).pop().toLowerCase()) {
+    return `<span class="fi-badge${cls}" title="Steel native executable">${engineIcon('steel', iconSize)}</span>`;
+  }
   if (ext === 'jar') {
     const jarEngine = detectJarEngine(name);
     const iconUrl = getEngineIconUrl(jarEngine);
@@ -92,6 +96,7 @@ function fileListIconHtml(item, extraCls = '', iconSize = 15) {
 
 // --- Server Software Icons & Helpers ---
 const ENGINE_ICONS = {
+  steel: '/static/img/steel-logo.png',
   vanilla: 'https://i.ibb.co/MmxPTbN/image.jpg',
   paper: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc.svg',
   purpur: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/purpurmc.svg',
@@ -133,10 +138,43 @@ function isModdedEngine(type) {
   return k === 'fabric' || k === 'forge' || k === 'neoforge';
 }
 
+function isSteelEngine(type) {
+  return String(type || '').toLowerCase().trim() === 'steel';
+}
+
+function serverExecutable(srv) {
+  return srv?.jar_file || (isSteelEngine(srv?.type) ? 'steel' : 'server.jar');
+}
+
+function nativeCommandPreview(filename) {
+  const name = String(filename || 'steel');
+  const windows = /\.exe$/i.test(name);
+  const command = /^[./\\]|^[A-Za-z]:/.test(name) ? name : (windows ? '.\\' : './') + name;
+  return /\s/.test(command) ? `"${command}"` : command;
+}
+
+function steelConfigNotice(showLink = true) {
+  return `<div class="card" data-steel-config><h2>Steel native server</h2><p>Steel runs a native executable, not a JVM. Edit <code>config/config.toml</code> in the File Manager; set <code>server_port</code> in the <code>[server]</code> section. Worlds are stored in <code>saves/</code>. Java plugins and mods are incompatible. Memory allocation is a resource limit, not a Java heap setting. Enforcement requires systemd; direct process or bubblewrap execution alone does not enforce this limit.</p>${showLink ? `<button type="button" class="btn" onclick="go('fi')">Open File Manager</button>` : ''}</div>`;
+}
+
+function engineFamily(type) {
+  const t = String(type || '').toLowerCase().trim();
+  if (['paper', 'purpur', 'leaf', 'folia', 'spigot'].includes(t)) return 'bukkit';
+  if (['fabric', 'quilt'].includes(t)) return 'fabric';
+  if (['forge', 'neoforge'].includes(t)) return 'forge';
+  if (['velocity', 'waterfall', 'bungeecord'].includes(t)) return 'proxy';
+  return t;
+}
+
+function incompatibleEngineChange(from, to) {
+  return Boolean(from && to && engineFamily(from) !== engineFamily(to));
+}
+
 function engineMeta(type) {
   const raw = String(type || 'paper').toLowerCase().trim();
   const key = raw === 'leafmc' ? 'leaf' : (raw === 'neoforged' ? 'neoforge' : raw);
   const map = {
+    steel: { key: 'steel', label: 'Steel', color: '#94a3b8' },
     paper: { key: 'paper', label: 'Paper', color: '#3b82f6' },
     purpur: { key: 'purpur', label: 'Purpur', color: '#a855f7' },
     leaf: { key: 'leaf', label: 'Leaf', color: '#22c55e' },
@@ -559,10 +597,10 @@ function buildSettingsSnapshots(srv, data) {
     version: data.ver,
     jar_file: data.jar,
     port: data.port,
-    memory_min: Math.min(1024, data.ram),
+    memory_min: isSteelEngine(srv?.type) ? 0 : Math.min(1024, data.ram),
     memory_max: data.ram,
-    java_path: data.javaPath,
-    java_args: data.args,
+    java_path: isSteelEngine(srv?.type) ? '' : data.javaPath,
+    java_args: isSteelEngine(srv?.type) ? '' : data.args,
     auto_restart: data.autoRestart,
     cpu_limit_percent: Number(data.cpuLimit) || 0,
     disk_limit_mb: Number(data.diskLimit) || 0
@@ -603,11 +641,11 @@ function collectSettingsFormPayload(srv) {
   if (!name) return { ok: false, reason: 'Server name cannot be empty' };
 
   const desc = descEl ? descEl.value.trim() : (srv.description || '');
-  const ver = verEl ? verEl.value.trim() : (srv.version || '1.21.11');
+  const ver = verEl ? verEl.value.trim() : (srv.version || (isSteelEngine(srv.type) ? 'latest' : '1.21.11'));
   if (!ver) return { ok: false, reason: 'Minecraft version cannot be empty' };
 
-  const jar = jarEl ? jarEl.value.trim() : (srv.jar_file || 'server.jar');
-  if (!jar) return { ok: false, reason: 'Executable JAR filename cannot be empty' };
+  const jar = jarEl ? jarEl.value.trim() : serverExecutable(srv);
+  if (!jar) return { ok: false, reason: 'Executable filename cannot be empty' };
 
   const args = argsEl ? argsEl.value.trim() : (srv.java_args !== undefined && srv.java_args !== null ? srv.java_args : '-XX:+UseG1GC');
 
@@ -857,6 +895,10 @@ function updateSettingsCmdPreview() {
   const el = $('#set-cmd-preview');
   if (!el) return;
   const srv = curServer();
+  if (isSteelEngine(srv?.type)) {
+    el.textContent = nativeCommandPreview($('#prop-jar')?.value?.trim() || serverExecutable(srv));
+    return;
+  }
   let javaVal = $('#prop-java')?.value || resolveJavaSelectValue(srv?.java_path || '', srv?.version, srv?.type);
   let javaCmd = `java (OpenJDK ${javaVal})`;
   if (javaVal === 'custom') {
@@ -4542,20 +4584,20 @@ async function power(action, skipConfirm = false) {
 
     const lower = (err.message || '').toLowerCase();
     if (lower.includes('jar file') || lower.includes('jar') || lower.includes('not found')) {
-      modalTitle = 'Server Executable JAR Not Found';
+      modalTitle = 'Server Executable Not Found';
       modalMsg = `<div style="line-height:1.6;">
-        The server executable JAR file <b>${esc(srv.jar_file || 'server.jar')}</b> could not be found in the server directory.<br><br>
+        The server executable <b>${esc(serverExecutable(srv))}</b> could not be found in the server directory.<br><br>
         <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#fca5a5;">
           ${esc(err.message)}
         </div>
         <b>How to resolve:</b>
         <ol style="margin: 8px 0 0 18px; padding: 0; line-height: 1.6;">
-          <li>Click <b>Reinstall Server</b> in Settings to automatically download an official build from mcjarfiles.com.</li>
-          <li>Or navigate to <b>Files</b> and upload your JAR as <code>${esc(srv.jar_file || 'server.jar')}</code>.</li>
+          <li>Click <b>Reinstall Server</b> in Settings to download an official ${isSteelEngine(srv.type) ? 'Steel release' : 'build from mcjarfiles.com'}.</li>
+          <li>Or navigate to <b>Files</b> and upload the ${isSteelEngine(srv.type) ? 'native executable' : 'JAR'} as <code>${esc(serverExecutable(srv))}</code>.</li>
           <li>Or verify your <b>Server Executable File</b> name in <b>Startup Settings</b>.</li>
         </ol>
       </div>`;
-    } else if (lower.includes('java')) {
+    } else if (!isSteelEngine(srv.type) && lower.includes('java')) {
       modalTitle = 'Java Runtime Error';
       modalMsg = `<div style="line-height:1.6;">
         The server could not launch with the selected Java runtime.<br><br>
@@ -4638,6 +4680,7 @@ const CMDS = [
 ];
 
 const CORES = [
+  ['Steel', 'Native server • TOML configuration • No Java plugins/mods'],
   ['Paper', 'High performance, plugin friendly'],
   ['Purpur', 'Paper fork with extreme configurability'],
   ['Leaf', 'Hyper-optimized Paper fork for large SMPs'],
@@ -4713,6 +4756,7 @@ function getFamilyMetaForVersion(v) {
 
 function getAllMcVersions(engine = '') {
   const eng = String(engine || '').toLowerCase().trim();
+  if (isSteelEngine(eng)) return Array.from(new Set(['latest', ...(S.steelVersions || [])]));
   const cat = S.versionsCatalog;
   if (eng === 'velocity') {
     const base = ['3.4.0-SNAPSHOT', '3.3.0-SNAPSHOT', '3.2.0-SNAPSHOT', '3.1.1'];
@@ -4799,7 +4843,30 @@ function refreshOpenVersionSelects() {
   }
 }
 
+let steelVersionsRequest = null;
+async function loadSteelVersions(force = false) {
+  if (steelVersionsRequest) return steelVersionsRequest;
+  if (!force && Array.isArray(S.steelVersions)) return S.steelVersions;
+  steelVersionsRequest = (async () => {
+    try {
+      const releases = await api('/api/steel/versions');
+      if (!Array.isArray(releases) || releases.some(v => typeof v !== 'string')) throw new Error('Invalid Steel release catalog');
+      S.steelVersions = releases.filter(v => v.trim()).map(v => v.trim());
+      refreshOpenVersionSelects();
+      return S.steelVersions;
+    } catch (e) {
+      toast('Could not load Steel releases. You can still select latest or enter an official release tag.', 'bad');
+      return [];
+    } finally {
+      steelVersionsRequest = null;
+    }
+  })();
+  return steelVersionsRequest;
+}
+
 async function loadVersionsCatalog(force = false) {
+  const selectedEngine = $('#cs-type')?.value || $('#reinst-software')?.value || (S.view === 'ver' ? S.sel || S.core : curServer()?.type);
+  if (isSteelEngine(selectedEngine)) return loadSteelVersions(force);
   if (!S.token) return S.versionsCatalog;
   if (!force && S.versionsCatalog && Array.isArray(S.versionsCatalog.all_mc) && S.versionsCatalog.all_mc.length > 0) {
     return S.versionsCatalog;
@@ -4831,6 +4898,7 @@ function isStandardJavaChoice(val) {
 
 function getRecommendedJavaForMcVersion(ver, engine = '') {
   const eng = String(engine || '').toLowerCase().trim();
+  if (isSteelEngine(eng)) return '';
   const v = String(ver || '').toLowerCase().trim();
   if (eng === 'velocity') {
     return v.startsWith('3.3') ? '17' : '21';
@@ -6389,6 +6457,7 @@ const V = {
 
   plug() {
     const srv = curServer();
+    if (isSteelEngine(srv?.type)) return `${srvh()}${steelConfigNotice()}`;
     const engSlug = String(srv?.type || S.core || 'paper').toLowerCase().trim();
     const isMod = isModdedEngine(engSlug);
     const nounSing = isMod ? 'Mod' : 'Plugin';
@@ -6599,11 +6668,11 @@ const V = {
           <div>
             <span class="mu">Currently Running</span>
             <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
-            <span class="mu">Java 25, 21, 17 &amp; 8 supported &bull; Direct installer for all server engines &amp; Minecraft versions</span>
+            <span class="mu">${isSteelEngine(srv?.type) ? 'Steel native executable • No Java runtime required' : 'Java 25, 21, 17 &amp; 8 supported • Direct server installer'}</span>
           </div>
         </div>
         <button class="btn pr" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">
-          ${ic('refresh', 14)} Reinstall Server (mcjarfiles.com)
+          ${ic('refresh', 14)} Reinstall Server
         </button>
       </div>
     </div>
@@ -6611,7 +6680,7 @@ const V = {
     <h2 style="margin-top:20px">1. Choose Server Engine</h2>
     <div class="grid g4">
       ${CORES.map(([name, desc]) => `
-        <button class="card sel ${sel === name ? 'on' : ''}" onclick="S.sel='${name}'; R();">
+        <button class="card sel ${sel === name ? 'on' : ''}" onclick="S.sel='${name}'; S.vq=''; S.vf='All Families'; loadVersionsCatalog(); R();">
           <div class="engine-card-head" style="width:100%;">
             <span class="engine-card-title">
               ${engineIcon(name, 16, true)}
@@ -6633,10 +6702,10 @@ const V = {
       <div class="ver-toolbar" style="justify-content: space-between;">
         <div class="row" style="gap: 10px; flex-wrap: wrap; flex: 1;">
           <div class="ver-search-wrap">
-            <input type="text" placeholder="Search versions (e.g. 1.21.11, 1.20.4, 1.8.9)..." value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
+            <input type="text" placeholder="${isSteelEngine(sel) ? 'Search Steel release tags...' : 'Search Minecraft versions...'}" value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
             <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted); pointer-events: none;">${ic('search', 15)}</span>
           </div>
-          ${!isProxy ? `
+          ${!isProxy && !isSteelEngine(sel) ? `
             <select data-searchable="1" onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
               <option value="All Families" ${(S.vf === 'All Families' || S.vf === 'All') ? 'selected' : ''}>All Release Families (1.0 – 26.x)</option>
               <option value="Popular" ${S.vf === 'Popular' ? 'selected' : ''}>Popular / Recommended</option>
@@ -6650,7 +6719,7 @@ const V = {
       ${vm === 'list' ? `
         <div class="tw">
           <table>
-            <thead><tr><th>Version</th><th>Release / Notes</th><th>Java</th><th>Engine</th><th style="text-align:right">Action</th></tr></thead>
+            <thead><tr><th>Version</th><th>Release / Notes</th><th>Runtime</th><th>Engine</th><th style="text-align:right">Action</th></tr></thead>
             <tbody id="vres">${versionRowsHtml()}</tbody>
           </table>
         </div>
@@ -7376,6 +7445,7 @@ const V = {
   set() {
     const p = S.props;
     const srv = curServer();
+    const native = isSteelEngine(srv?.type);
     const o = (v, a) => a.map(x => `<option ${x === v ? 'selected' : ''}>${x}</option>`).join('');
     const sw = (k, l) => `<label class="row sb" style="padding:7px 0; border-bottom:1px solid var(--ln);">
       <span>${l}</span>
@@ -7391,11 +7461,11 @@ const V = {
     const curMem = getServerMaxRamMB(srv);
     const memMin = srv?.memory_min || Math.min(1024, curMem);
     const jvmFlags = (srv?.java_args !== undefined && srv?.java_args !== null) ? srv.java_args : '-XX:+UseG1GC';
-    const jarName = srv?.jar_file || 'server.jar';
+    const jarName = serverExecutable(srv);
     const javaCmd = isCustom ? (rawJava || 'java') : `java (OpenJDK ${curJava})`;
     const editName = (S.activeServerId === srv?.id && S.editSrvName !== '') ? S.editSrvName : (srv?.name || '');
     const editDesc = (S.activeServerId === srv?.id && typeof S.editSrvDesc === 'string') ? S.editSrvDesc : (srv?.description || '');
-    const curV = srv?.version || '1.21.11';
+    const curV = srv?.version || (native ? 'latest' : '1.21.11');
     const allV = getAllMcVersions(srv?.type || S.core || '');
     const verList = (curV && !allV.includes(curV)) ? [curV, ...allV] : allV;
     const saveStatus = _settingsUiState?.status || 'saved';
@@ -7441,7 +7511,7 @@ const V = {
                   <input type="file" accept="image/png,image/jpeg,image/webp" style="display: none;" onchange="if(this.files[0]) uploadServerIcon('${esc(srv?.id || '')}', this.files[0])">
                 </label>
                 ${srv?.icon_url ? `<button type="button" class="btn sm dg" onclick="deleteServerIcon('${esc(srv?.id || '')}')">${ic('trash', 12)} Remove</button>` : ''}
-                <button type="button" class="btn sm" onclick="openQuickConfigsModal('${esc(srv?.id || '')}')">${ic('sliders', 12)} Quick Configs</button>
+                ${native ? `<button type="button" class="btn sm" onclick="go('fi')">Edit config/config.toml in File Manager</button>` : `<button type="button" class="btn sm" onclick="openQuickConfigsModal('${esc(srv?.id || '')}')">${ic('sliders', 12)} Quick Configs</button>`}
               </div>
             </div>
           </div>
@@ -7457,10 +7527,11 @@ const V = {
             </label>
           </div>
           <div class="mu" style="font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;">Active Startup Command</div>
-          <div id="set-cmd-preview" class="mono" style="background: var(--con-bg); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.55; word-break: break-all;">${esc(javaCmd)} -Xms${memMin}M -Xmx${curMem}M ${jvmFlags ? esc(jvmFlags) + ' ' : ''}-jar ${esc(jarName)} nogui</div>
+          <div id="set-cmd-preview" class="mono" style="background: var(--con-bg); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.55; word-break: break-all;">${native ? esc(nativeCommandPreview(jarName)) : `${esc(javaCmd)} -Xms${memMin}M -Xmx${curMem}M ${jvmFlags ? esc(jvmFlags) + ' ' : ''}-jar ${esc(jarName)} nogui`}</div>
           <span class="mu" style="font-size: 11.5px; margin-top: 8px; display: block;">Auto-restart automatically times out after 2 consecutive startup failures.</span>
         </div>
 
+        ${native ? '' : `
         <div class="card" style="padding: 20px;">
           <h2 style="font-size: 16px; margin-bottom: 12px;">Java version</h2>
           <label class="f" style="margin-bottom: 8px;">
@@ -7477,11 +7548,12 @@ const V = {
           </div>
           ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
           <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Choose Java 25, 21, 17, 8, or a custom JVM binary path for this server.</span>
-        </div>
+        </div>`}
       </div>
 
       <!-- Main Unified Configuration & Startup Grid -->
       <div class="grid g2">
+        ${native ? steelConfigNotice() : `
         <div class="card">
           <h2>Server Properties (<code>server.properties</code>)</h2>
           <label class="f">
@@ -7522,14 +7594,14 @@ const V = {
           ${sw('pvp', 'Player versus Player (PvP)')}
           ${sw('wl', 'Enforce Whitelist')}
           ${sw('cmd', 'Enable Command Blocks')}
-        </div>
+        </div>`}
 
         <div class="card">
           <h2>Startup Variables &amp; Allocation</h2>
           <div class="grid g2">
             <label class="f">
               <span class="row sb">
-                <span>Allocated Memory (-Xmx)</span>
+                <span>${native ? 'Memory Resource Limit (systemd only)' : 'Allocated Memory (-Xmx)'}</span>
                 ${isRamLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked by Node Policy</span>' : ''}
               </span>
               ${isRamLocked ? `
@@ -7548,8 +7620,8 @@ const V = {
               `}
             </label>
             <label class="f">
-              <span>Server Executable JAR</span>
-              <input type="text" id="prop-jar" value="${esc(jarName)}" placeholder="server.jar" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
+              <span>${native ? 'Server Executable' : 'Server Executable JAR'}</span>
+              <input type="text" id="prop-jar" value="${esc(jarName)}" placeholder="${native ? 'steel or steel.exe' : 'server.jar'}" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
             </label>
           </div>
           <div class="grid g2" style="margin-bottom: 12px;">
@@ -7577,10 +7649,11 @@ const V = {
               <input type="text" id="prop-ver" value="${esc(curV)}" style="font-weight: 600;" oninput="onPropVersionInput(this.value)" onblur="flushSettingsAutoSave()">
             </div>
           </div>
+          ${native ? '' : `
           <label class="f">
             <span>Custom JVM Flags (JAVA_ARGS)</span>
             <input type="text" id="prop-args" value="${esc(jvmFlags)}" placeholder="-XX:+UseG1GC" oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
-          </label>
+          </label>`}
           <label class="row sb" style="padding: 10px 0; border-top: 1px solid var(--ln); border-bottom: 1px solid var(--ln); margin-bottom: 14px;">
             <div>
               <span style="display:block; font-weight: 600; color: var(--tx);">Auto-Restart Crashed Server</span>
@@ -7632,7 +7705,7 @@ const V = {
               ${ic('refresh', 16)} Reinstall Server Instance
             </h2>
             <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
-              Re-download and deploy a fresh Minecraft server binary (Paper, Purpur, Leaf, Folia, Fabric, Forge, NeoForge, Vanilla, Velocity) via <b>mcjarfiles.com</b> API. You can choose to preserve world data, configs, and plugins/mods.
+              Re-download a fresh server executable from official upstream releases (Steel) or mcjarfiles.com (Java engines). Back up your files before switching engines; preserved worlds, configs and plugins are not converted.
             </p>
           </div>
           <button class="btn" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
@@ -8777,6 +8850,19 @@ function versionRowsHtml() {
   const fam = S.vf || 'All Families';
   const vm = getViewMode('ver', 'list');
 
+  if (isSteelEngine(sel)) {
+    const versions = getAllMcVersions(sel).filter(v => !q || v.toLowerCase().includes(q));
+    if (!versions.length) return vm === 'list' ? '<tr><td colspan="5">No matching Steel releases.</td></tr>' : '<div>No matching Steel releases.</div>';
+    return versions.map(v => {
+      const installing = S.installingSoftware === `steel:${v}`;
+      const active = isSteelEngine(S.core) && S.ver === v && v !== 'latest';
+      const action = active ? '<span class="badge online">Active</span>' : `<button class="btn sm pr" data-soft="steel" data-ver="${esc(v)}" onclick="installSoftware(this.dataset.soft, this.dataset.ver, this)" ${installing ? 'disabled' : ''}>${installing ? 'Installing...' : 'Install Steel ' + esc(v)}</button>`;
+      const notes = v === 'latest' ? 'Latest official Steel release' : 'Official Steel release';
+      if (vm !== 'list') return `<div class="${vm === 'icons' ? 'vm-icon-card' : 'vm-tile-card'}"><div class="vm-item-head">${engineIcon('steel', 16)} <b>${esc(v)}</b></div><div class="vm-item-sub">${notes} • Native executable</div><div class="vm-item-foot">${action}</div></div>`;
+      return `<tr><td class="mono">${esc(v)}</td><td>${notes}</td><td>Native executable</td><td>${engineIcon('steel', 12)} Steel</td><td style="text-align:right">${action}</td></tr>`;
+    }).join('');
+  }
+
   if (sel === 'Velocity' || sel === 'Waterfall' || sel === 'BungeeCord') {
     const dynamicProxy = getAllMcVersions(sel);
     const descMap = {
@@ -9236,11 +9322,11 @@ async function loadInitialRouteData(view) {
     jobs.push(loadProperties(true));
     jobs.push(loadVersionsCatalog());
     // SFTP loads only on its dedicated, separately authorized page.
-    jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
+    if (!isSteelEngine(curServer()?.type)) jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
   }
   else if (view === 'ver') {
     jobs.push(loadVersionsCatalog());
-    jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
+    if (!isSteelEngine(curServer()?.type)) jobs.push(loadJavaRuntimes(false, curServer()?.node_id || 'local', true));
   }
   else if (view === 'sub') jobs.push(loadSubdomainData(true));
   else if (view === 'net') {
@@ -9277,9 +9363,9 @@ window.onEnterView = function(view) {
     loadProperties();
     loadVersionsCatalog();
     // SFTP is intentionally not prefetched.
-    loadJavaRuntimes(false, curServer()?.node_id || 'local');
+    if (!isSteelEngine(curServer()?.type)) loadJavaRuntimes(false, curServer()?.node_id || 'local');
   }
-  else if (view === 'ver') { loadVersionsCatalog(); loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
+  else if (view === 'ver') { loadVersionsCatalog(); if (!isSteelEngine(curServer()?.type)) loadJavaRuntimes(false, curServer()?.node_id || 'local'); }
   else if (view === 'sub') loadSubdomainData();
   else if (view === 'net') { loadServerPorts(); }
   else if (view === 'act') loadActivityLog();
@@ -10807,6 +10893,7 @@ function initDragAndDrop() {
 async function loadPluginsList(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
+  if (isSteelEngine(srv.type)) return;
   if (!S.loading) S.loading = {};
   S.loading.plugins = true;
   if (!skipRender && S.view === 'plug' && (S.plugTab || 'browse') === 'installed') R();
@@ -10971,6 +11058,7 @@ function renderModrinthHitsHtml(hits) {
 
 async function searchModrinth(skipDomWrite = false) {
   const srv = curServer();
+  if (isSteelEngine(srv?.type)) return;
   const isMod = isModdedEngine(srv?.type || S.core);
   const engSlug = engineMeta(srv?.type || S.core).key;
   const grid = $('#store-grid');
@@ -11017,6 +11105,7 @@ function setPlugSkipConfirm(val) {
 async function installPlugin(projectSlug, title, btnEl) {
   const srv = curServer();
   if (!srv || !projectSlug) return;
+  if (isSteelEngine(srv.type)) { toast('Java plugins and mods are incompatible with Steel.', 'bad'); return; }
   if (!S.installingPlugins) S.installingPlugins = new Set();
   const installKey = `${srv.node_id || 'local'}:${srv.id}:${projectSlug}`;
   if (S.installingPlugins.has(installKey)) return;
@@ -11136,9 +11225,9 @@ function askInstallSoftwareModal(srv, software, version) {
 
     const recJava = getRecommendedJavaForMcVersion(version, software);
     const curJava = resolveJavaSelectValue(srv.java_path || '', srv.version || '', srv.type || '');
-    const needsJavaSwitch = curJava !== recJava;
+    const needsJavaSwitch = !isSteelEngine(software) && curJava !== recJava;
     const javaInfo = getPremadeJavaStatusMap(srv?.node_id || 'local').get(recJava);
-    const javaMissingNote = javaInfo && !javaInfo.installed
+    const javaMissingNote = !isSteelEngine(software) && javaInfo && !javaInfo.installed
       ? `<span class="mu" style="font-size: 11.5px; display: block; margin-top: 4px; color: #fbbf24;">Java ${esc(recJava)} is not installed yet. Install it from Settings or Admin before starting the server.</span>`
       : '';
 
@@ -11153,13 +11242,15 @@ function askInstallSoftwareModal(srv, software, version) {
             <button class="btn sm" onclick="closeUiModal(null)" aria-label="Close" style="padding: 4px 8px; font-size: 15px; opacity: 0.8;">&times;</button>
           </div>
           <div class="ui-modal-body" style="line-height: 1.55;">
-            Download and install <b>${esc(software)} ${esc(version)}</b> onto <b>${esc(srv.name)}</b>? This will replace your current server JAR and restart the instance.
+            Download and install <b>${esc(software)} ${esc(version)}</b> onto <b>${esc(srv.name)}</b>? This will replace your current server executable and restart the instance.
+            ${isSteelEngine(software) ? '<p>Steel is native: no Java runtime required. Edit <code>config/config.toml</code> in File Manager; worlds use <code>saves/</code>.</p>' : ''}
+            ${incompatibleEngineChange(srv.type, software) ? '<p class="banner warn"><b>Incompatible engine change:</b> worlds/data, plugins/mods and configuration may be incompatible and are not converted. Java plugins/mods cannot run on Steel. Back up first; use Reinstall for a clean installation.</p>' : ''}
             <div style="margin-top: 14px; padding: 12px 14px; background: rgba(56, 122, 255, 0.08); border: 1px solid rgba(56, 122, 255, 0.25); border-radius: 10px;">
               <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
                 <input type="checkbox" id="confirm-bkf" checked style="margin-top: 2px;">
                 <div>
                   <b style="color: var(--tx); display: block; font-size: 13.5px;">Back up the world first (Recommended)</b>
-                  <span class="mu" style="font-size: 12px; display: block; margin-top: 2px;">Creates a full <code>before-${esc(version)}</code> backup archive before downloading and replacing the server JAR.</span>
+                  <span class="mu" style="font-size: 12px; display: block; margin-top: 2px;">Creates a full <code>before-${esc(version)}</code> backup archive before replacing the server executable.</span>
                 </div>
               </label>
             </div>
@@ -11190,6 +11281,7 @@ function askInstallSoftwareModal(srv, software, version) {
 }
 
 async function installSoftware(software, version, btnEl) {
+  if (isSteelEngine(software)) software = 'steel';
   const srv = curServer();
   if (!srv) return;
   if (S.installingSoftware) {
@@ -11217,7 +11309,7 @@ async function installSoftware(software, version, btnEl) {
     }
     curBtn = findBtn();
     if (curBtn) setBtnLoading(curBtn, true, 'Installing...');
-    toast(`Downloading ${software} ${version} server jar...`);
+    toast(`Downloading ${software} ${version} server ${isSteelEngine(software) ? 'executable' : 'jar'}...`);
     const softRes = await api(srvApiPath(srv, '/software'), {
       method: 'POST',
       body: JSON.stringify({ software, version })
@@ -11226,7 +11318,7 @@ async function installSoftware(software, version, btnEl) {
     srv.version = softRes?.version || version;
     if (softRes?.jar_file) srv.jar_file = softRes.jar_file;
 
-    if (choice.syncJava && choice.recJava) {
+    if (!isSteelEngine(software) && choice.syncJava && choice.recJava) {
       await api(srvApiPath(srv, ''), {
         method: 'PUT',
         body: JSON.stringify({
@@ -11246,8 +11338,8 @@ async function installSoftware(software, version, btnEl) {
       srv.java_path = choice.recJava;
     }
 
-    S.core = software;
-    S.ver = version;
+    S.core = isSteelEngine(software) ? 'Steel' : software;
+    S.ver = srv.version;
     toast(`Successfully installed ${software} ${version}! Restarting...`);
     power('restart', true);
   } catch (e) {
@@ -11316,6 +11408,7 @@ function shouldSkipSettingsBgRender() {
 async function loadProperties(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
+  if (isSteelEngine(srv.type)) { seedSettingsSavedSnapshot(srv); return; }
   try {
     const props = await api(srvApiPath(srv, '/properties'));
     if (shouldSkipSettingsBgRender()) return;
@@ -11346,7 +11439,7 @@ async function persistSettingsPayload(targetSrv, collected, opts = {}) {
   const snaps = buildSettingsSnapshots(targetSrv, collected.data);
   const key = getSettingsSnapshotKey(targetSrv);
   const prev = _settingsLastSaved[key];
-  const sendProps = force || !prev || prev.propsJson !== snaps.propsJson;
+  const sendProps = !isSteelEngine(targetSrv.type) && (force || !prev || prev.propsJson !== snaps.propsJson);
   const sendSrv = force || !prev || prev.srvJson !== snaps.srvJson;
 
   if (!sendProps && !sendSrv) {
@@ -11381,13 +11474,13 @@ async function persistSettingsPayload(targetSrv, collected, opts = {}) {
     targetSrv.description = d.desc;
     targetSrv.version = d.ver;
     targetSrv.jar_file = d.jar;
-    targetSrv.java_args = d.args;
+    targetSrv.java_args = snaps.srvPayload.java_args;
     targetSrv.auto_restart = d.autoRestart;
     targetSrv.port = d.port;
     targetSrv.memory_max = d.ram;
-    targetSrv.memory_min = Math.min(1024, d.ram);
+    targetSrv.memory_min = snaps.srvPayload.memory_min;
     targetSrv.motd = d.motd;
-    if (d.javaPath) targetSrv.java_path = d.javaPath;
+    if (isSteelEngine(targetSrv.type) || d.javaPath) targetSrv.java_path = snaps.srvPayload.java_path;
 
     _settingsLastSaved[key] = {
       propsJson: snaps.propsJson,
@@ -12015,6 +12108,7 @@ function setCreateRam(mb) {
 
 function syncCreateJavaFromVersion(ver) {
   const engine = $('#cs-type')?.value || 'paper';
+  if (isSteelEngine(engine)) return;
   const v = String(ver ?? $('#cs-ver')?.value ?? '').trim();
   $$('.ver-pill').forEach(btn => {
     btn.classList.toggle('pr', btn.dataset.ver === v);
@@ -12045,6 +12139,7 @@ function onCreateVersionInput(ver) {
 
 function setCreateEngine(type) {
   const sel = $('#cs-type');
+  const previousType = sel?.value;
   if (sel) sel.value = type;
   $$('.engine-card').forEach(card => {
     card.classList.toggle('on', card.dataset.engine === type);
@@ -12052,7 +12147,24 @@ function setCreateEngine(type) {
 
   const verInp = $('#cs-ver');
   const portInp = $('#cs-port');
-  if (type === 'velocity') {
+  const native = isSteelEngine(type);
+  for (const id of ['cs-java', 'cs-aikar']) {
+    const input = $('#' + id);
+    if (input) { input.disabled = native; input.closest('label').style.display = native ? 'none' : ''; }
+  }
+  const strip = $('#cs-java-status');
+  if (strip) strip.style.display = native ? 'none' : '';
+  const note = $('#cs-steel-note');
+  if (note) { note.style.display = native ? '' : 'none'; note.innerHTML = native ? steelConfigNotice(false) : ''; }
+  const label = $('#cs-version-label');
+  if (label) label.textContent = native ? 'Steel Release Tag' : 'Minecraft Version (Recent & Popular)';
+  $$('.ver-pill').forEach(btn => { btn.style.display = native ? 'none' : ''; });
+  if (verInp) verInp.placeholder = native ? 'latest or official Steel release tag' : 'Minecraft version or latest';
+  if (native) { if (verInp) verInp.value = 'latest'; loadSteelVersions(); }
+  else if (isSteelEngine(previousType) && verInp) verInp.value = '1.21.11';
+  if (native) {
+    // Steel release tags are independent of Minecraft versions.
+  } else if (type === 'velocity') {
     if (verInp) verInp.value = '3.4.0-SNAPSHOT';
     if (portInp) portInp.value = '25565';
     setCreateRam(1024);
@@ -12111,6 +12223,7 @@ function onCreateNodeChange(nodeId) {
   const nid = nodeId || 'local';
   const portInp = $('#cs-port');
   if (portInp) portInp.value = getNextSuggestedPort(nid);
+  if (isSteelEngine($('#cs-type')?.value)) return;
   const strip = document.querySelector('#modal-container .java-status-strip');
   if (strip) {
     strip.dataset.nodeId = nid;
@@ -12162,7 +12275,7 @@ function openCreateServerModal() {
           </label>` : `<input type="hidden" id="cs-node" value="${esc(defaultNodeId)}">`}
         </div>
 
-        <!-- Category: Game Server vs Network Proxy (All 11 Engines) -->
+        <!-- Game Servers & Network Proxies -->
         <div style="margin-bottom:14px;">
           <span class="mu" style="display:block; margin-bottom:6px; font-size:13px; font-weight:600;">Engine / Flavor</span>
           <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap:8px;">
@@ -12183,11 +12296,12 @@ function openCreateServerModal() {
             }).join('')}
           </select>
         </div>
+        <div id="cs-steel-note" style="display:none; margin-bottom:14px;"></div>
 
         <!-- Version Searchable Catalog + Custom Input + Popular Pills -->
         <div style="margin-bottom:14px;">
           <div class="row sb" style="margin-bottom:6px; flex-wrap:wrap; gap:6px;">
-            <span class="mu" style="font-size:13px; font-weight:600;">Minecraft Version (Recent &amp; Popular)</span>
+            <span id="cs-version-label" class="mu" style="font-size:13px; font-weight:600;">Minecraft Version (Recent &amp; Popular)</span>
             <div class="row" style="gap:4px; flex-wrap:wrap;">
               ${['1.21.11', '1.21.8', '1.21.4', '1.20.4', '1.20.1', '1.19.4', '1.16.5', '1.12.2', '1.8.9'].map(v => `
                 <button type="button" class="btn sm ver-pill ${v === '1.21.11' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
@@ -12215,7 +12329,7 @@ function openCreateServerModal() {
             </select>
           </label>
         </div>
-        <div style="margin-bottom:14px;">
+        <div id="cs-java-status" style="margin-bottom:14px;">
           ${renderJavaAvailabilityStrip(defaultNodeId)}
         </div>
 
@@ -12284,7 +12398,7 @@ function openCreateServerModal() {
           </label>
           <label class="row" style="margin-bottom:8px; cursor:pointer;">
             <input type="checkbox" id="cs-dl" checked style="width:auto; margin-right:8px;">
-            <span>Automatically download official server jar immediately</span>
+            <span>Automatically download official server executable immediately</span>
           </label>
           <label class="row" style="cursor:pointer;">
             <input type="checkbox" id="cs-aikar" checked style="width:auto; margin-right:8px;">
@@ -12330,11 +12444,11 @@ async function handleCreateServer(e) {
   const targetNodeId = $('#cs-node')?.value || 'local';
   const name = $('#cs-name')?.value.trim() || 'Minecraft Server';
   const type = $('#cs-type')?.value || 'paper';
-  const version = $('#cs-ver')?.value.trim() || '1.21.11';
+  const version = $('#cs-ver')?.value.trim() || (isSteelEngine(type) ? 'latest' : '1.21.11');
   const memoryMax = parseInt($('#cs-mem')?.value) || 2048;
-  const memoryMin = Math.min(1024, memoryMax);
+  const memoryMin = isSteelEngine(type) ? 0 : Math.min(1024, memoryMax);
   const port = parseInt($('#cs-port')?.value) || 25565;
-  const javaPath = $('#cs-java')?.value || '21';
+  const javaPath = isSteelEngine(type) ? '' : ($('#cs-java')?.value || '21');
   const autoDownload = $('#cs-dl')?.checked ?? true;
   const useAikar = $('#cs-aikar')?.checked;
   const cpuLimit = parseInt($('#cs-cpu')?.value) || 0;
@@ -12345,6 +12459,7 @@ async function handleCreateServer(e) {
   if (useAikar) {
     javaArgs = '-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch';
   }
+  if (isSteelEngine(type)) javaArgs = '';
 
   toast(`Creating and configuring ${name}...`);
 
@@ -12983,6 +13098,7 @@ async function openQuickConfigsModal(srvId) {
   if (!container) return;
   const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
   if (!srv) return;
+  if (isSteelEngine(srv.type)) { uiAlert({ title: 'Steel Configuration', message: steelConfigNotice() }); return; }
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding: 26px; max-width: 640px; max-height: 90vh; overflow-y: auto;">
@@ -13387,7 +13503,7 @@ function updateReinstallJavaPreview() {
   const sw = $('#reinst-software')?.value || 'paper';
   const ver = $('#reinst-version')?.value.trim() || '1.21.11';
   const el = $('#reinst-java-rec');
-  if (el) el.textContent = `Java ${getRecommendedJavaForMcVersion(ver, sw)}`;
+  if (el) el.textContent = isSteelEngine(sw) ? 'Not required (native)' : `Java ${getRecommendedJavaForMcVersion(ver, sw)}`;
 }
 
 function syncReinstallSelectFromInput(ver) {
@@ -13413,6 +13529,19 @@ function onReinstallEngineChange(sw) {
   const sel = $('#reinst-ver-sel');
   const inp = $('#reinst-version');
   const curV = inp?.value?.trim() || '1.21.11';
+  const native = isSteelEngine(sw);
+  const previousType = $('#reinstall-form')?.dataset.selectedType;
+  if (native && previousType && !isSteelEngine(previousType) && inp) inp.value = 'latest';
+  else if (!native && isSteelEngine(previousType) && inp) inp.value = '1.21.11';
+  if ($('#reinstall-form')) $('#reinstall-form').dataset.selectedType = sw;
+  if (inp) inp.placeholder = native ? 'latest or official Steel release tag' : 'Minecraft version or latest';
+  const sync = $('#reinst-sync-java');
+  if (sync) { sync.disabled = native; sync.closest('label').parentElement.style.display = native ? 'none' : ''; }
+  const plugins = $('#reinst-plugins');
+  if (plugins) { plugins.disabled = native; plugins.closest('label').style.display = native ? 'none' : ''; }
+  const note = $('#reinst-steel-note');
+  if (note) { note.style.display = native ? '' : 'none'; note.innerHTML = native ? steelConfigNotice(false) : ''; }
+  if (native) loadSteelVersions();
   if (sw === 'velocity' && !curV.includes('SNAPSHOT')) {
     if (inp) inp.value = '3.4.0-SNAPSHOT';
   } else if (sw === 'waterfall' && curV !== '1.20') {
@@ -13436,16 +13565,7 @@ function onReinstallEngineChange(sw) {
   if (!wipeWarn || !origType) { updateReinstallJavaPreview(); return; }
 
   // Define incompatible engine families: switching between families requires a wipe
-  const family = t => {
-    if (['paper','purpur','leaf','folia','spigot'].includes(t)) return 'bukkit';
-    if (['fabric','quilt'].includes(t)) return 'fabric';
-    if (['forge','neoforge'].includes(t)) return 'forge';
-    if (['velocity','waterfall','bungeecord'].includes(t)) return 'proxy';
-    if (t === 'vanilla') return 'vanilla';
-    return t;
-  };
-  const changed = origType && sw && origType !== sw;
-  const incompatible = changed && family(origType) !== family(sw);
+  const incompatible = incompatibleEngineChange(origType, sw);
   wipeWarn.style.display = incompatible ? '' : 'none';
   wipeWarn.innerHTML = incompatible ? `
     <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.45);border-radius:8px;padding:12px 14px;margin-bottom:14px;display:flex;gap:10px;align-items:flex-start;">
@@ -13453,9 +13573,8 @@ function onReinstallEngineChange(sw) {
       <div>
         <b style="color:#f87171;">Incompatible engine change detected</b>
         <p style="margin:4px 0 0;font-size:12.5px;color:var(--text-muted);line-height:1.5;">
-          You are switching from <b>${esc(origType)}</b> to <b>${esc(sw)}</b> which use different plugin/mod formats.
-          Leftover files from the previous engine may cause crashes or conflicts.<br>
-          <b style="color:#fbbf24;">Recommended: wipe all server files before reinstalling.</b>
+          You are switching from <b>${esc(origType)}</b> to <b>${esc(sw)}</b>. Worlds/data, plugins/mods and configuration may be incompatible and are not converted. Steel uses <code>saves/</code> and <code>config/config.toml</code>; Java plugins/mods cannot run on Steel.<br>
+          <b style="color:#fbbf24;">Back up first. Recommended: wipe all server files before reinstalling; do not preserve incompatible data.</b>
         </p>
         <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;cursor:pointer;">
           <input type="checkbox" id="reinst-wipe-files" style="accent-color:#ef4444;width:14px;height:14px;">
@@ -13476,7 +13595,7 @@ function openReinstallModal(srvId, nodeId = null) {
   const targetNodeId = nodeId || targetSrv.node_id || 'local';
   const targetName = targetSrv.name || 'Server';
   const curType = (targetSrv.type || 'paper').toLowerCase();
-  const curVer = targetSrv.version || '1.21.11';
+  const curVer = isSteelEngine(curType) ? 'latest' : (targetSrv.version || '1.21.11');
   const recJava = getRecommendedJavaForMcVersion(curVer, curType);
   const allVers = getAllMcVersions(curType);
   const verList = (curVer && !allVers.includes(curVer)) ? [curVer, ...allVers] : allVers;
@@ -13491,17 +13610,19 @@ function openReinstallModal(srvId, nodeId = null) {
       </div>
 
       <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
-        Reinstalls the server software from <b>mcjarfiles.com</b> official upstream distribution. This will replace the server executable JAR.
+        Reinstalls the server executable from official upstream releases (Steel) or mcjarfiles.com (Java engines).
       </p>
 
-      <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" data-orig-type="${esc(curType)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
+      <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" data-orig-type="${esc(curType)}" data-selected-type="${esc(curType)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
         <div id="reinst-wipe-warn" style="display:none;"></div>
+        <div id="reinst-steel-note" style="display:none; margin-bottom:14px;"></div>
         <label class="f" style="margin-bottom:12px;">
           <span style="display:flex; align-items:center; gap:8px;">
             <span id="reinst-eng-icon">${engineIcon(curType, 18, true)}</span>
             <span>Minecraft Engine / Server Software</span>
           </span>
           <select id="reinst-software" style="height:38px;" onchange="onReinstallEngineChange(this.value)">
+            <option value="steel" ${curType === 'steel' ? 'selected' : ''}>Steel (Native executable, no Java)</option>
             <option value="paper" ${curType === 'paper' ? 'selected' : ''}>Paper (High performance, Bukkit/Spigot plugins)</option>
             <option value="purpur" ${curType === 'purpur' ? 'selected' : ''}>Purpur (Ultra-configurable Paper fork)</option>
             <option value="leaf" ${curType === 'leaf' || curType === 'leafmc' ? 'selected' : ''}>LeafMC (Hyper-optimized Paper fork)</option>
@@ -13530,11 +13651,11 @@ function openReinstallModal(srvId, nodeId = null) {
           <b style="font-size:13px; color:#fff; display:block; margin-bottom:8px;">Preservation Options</b>
           <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-world" checked>
-            <span>Preserve Worlds (keep <code>world</code>, <code>world_nether</code>, <code>world_the_end</code>)</span>
+            <span>Preserve Worlds (Java: <code>world*</code>; Steel: <code>saves/</code>; no format conversion)</span>
           </label>
           <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-config" checked>
-            <span>Preserve Configurations (keep <code>server.properties</code>, <code>bukkit.yml</code>, <code>spigot.yml</code>, <code>paper-*.yml</code>)</span>
+            <span>Preserve Configurations (Java properties/YAML; Steel: <code>config/config.toml</code>; no format conversion)</span>
           </label>
           <label class="row" style="cursor:pointer; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-plugins" checked>
@@ -13563,7 +13684,8 @@ function openReinstallModal(srvId, nodeId = null) {
   </div>`;
 
   enhanceSelects(container);
-  loadVersionsCatalog();
+  onReinstallEngineChange(curType);
+  if (!isSteelEngine(curType)) loadVersionsCatalog();
 }
 
 async function submitReinstall(e, srvId, nodeId = 'local') {
@@ -13579,8 +13701,8 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
   const version = $('#reinst-version')?.value.trim() || 'latest';
   const preserveWorld = $('#reinst-world')?.checked ?? true;
   const preserveConfig = $('#reinst-config')?.checked ?? true;
-  const preservePlugins = $('#reinst-plugins')?.checked ?? true;
-  const syncJava = $('#reinst-sync-java')?.checked ?? false;
+  const preservePlugins = !isSteelEngine(software) && ($('#reinst-plugins')?.checked ?? true);
+  const syncJava = !isSteelEngine(software) && ($('#reinst-sync-java')?.checked ?? false);
   const wipeFiles = $('#reinst-wipe-files')?.checked ?? false;
 
   toast(`Initiating reinstallation of ${software} ${version}...`);
@@ -13601,7 +13723,7 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
     const targetSrv = findServerRef(srvId, targetNodeId) || curServer();
     if (targetSrv) {
       targetSrv.type = software;
-      targetSrv.version = version;
+      targetSrv.version = res?.version || version;
       if (res?.jar_file) targetSrv.jar_file = res.jar_file;
     }
 
@@ -13633,7 +13755,7 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
 
     const cur = curServer();
     if (cur && cur.id === srvId && (cur.node_id || 'local') === targetNodeId) {
-      S.ver = version;
+      S.ver = targetSrv?.version || version;
       S.core = software.charAt(0).toUpperCase() + software.slice(1);
     }
     await refreshServerStatus();
@@ -13651,7 +13773,7 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
         <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#fca5a5;">
           ${esc(err.message)}
         </div>
-        Please verify the version and software engine, or check network connectivity to mcjarfiles.com.`,
+        Please verify the release tag and software engine, or check connectivity to the upstream release provider.`,
       type: 'error'
     });
   }
@@ -13728,7 +13850,7 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
           <label class="f" style="margin-bottom:0;">
             <div class="row sb" style="margin-bottom:4px;">
               <span>Allocated RAM (MB)</span>
-              <span class="mu" style="font-size:11.5px;">-Xmx memory ceiling</span>
+              <span class="mu" style="font-size:11.5px;">${isSteelEngine(targetSrv.type) ? 'Native resource limit (enforced with systemd only)' : '-Xmx memory ceiling'}</span>
             </div>
             <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
               <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#adm-set-ram').value=1024">1 GB</button>
@@ -13808,10 +13930,10 @@ async function submitAdminServerSettings(e, srvId, nodeId) {
     version: targetSrv.version,
     jar_file: targetSrv.jar_file,
     port: port,
-    memory_min: Math.min(1024, ram),
+    memory_min: isSteelEngine(targetSrv.type) ? 0 : Math.min(1024, ram),
     memory_max: ram,
-    java_path: targetSrv.java_path,
-    java_args: targetSrv.java_args,
+    java_path: isSteelEngine(targetSrv.type) ? '' : targetSrv.java_path,
+    java_args: isSteelEngine(targetSrv.type) ? '' : targetSrv.java_args,
     auto_restart: targetSrv.auto_restart !== false,
     owner_id: ownerId,
     node_id: assignedNodeId,
@@ -13829,7 +13951,7 @@ async function submitAdminServerSettings(e, srvId, nodeId) {
     targetSrv.node_id = assignedNodeId;
     targetSrv.port = port;
     targetSrv.memory_max = ram;
-    targetSrv.memory_min = Math.min(1024, ram);
+    targetSrv.memory_min = payload.memory_min;
     targetSrv.cpu_limit_percent = cpu;
     targetSrv.disk_limit_mb = disk;
 
@@ -17691,7 +17813,7 @@ function organizeServerSettings(root) {
   if (!identity) return;
   const wrapper = identity.parentElement.parentElement;
   const groups = [
-    ['General', [identity, root.querySelector('#prop-motd')?.closest('.card')]],
+    ['General', [identity, root.querySelector('#prop-motd')?.closest('.card') || root.querySelector('[data-steel-config]')]],
     ['Startup & resources', [root.querySelector('#prop-java')?.closest('.card'), root.querySelector('#prop-jar')?.closest('.card')]],
     ['Administration', [...wrapper.children].filter(el => el.classList.contains('card'))]
   ];
