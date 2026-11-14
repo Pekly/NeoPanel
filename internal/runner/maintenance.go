@@ -26,7 +26,7 @@ func (m *ServerManager) BeginServerMaintenance(ctx context.Context, id string) (
 	m.restorePaused.Store(id, true)
 	inst := m.instances[id]
 	m.mu.Unlock()
-	if inst != nil && inst.GetStatus() != "offline" {
+	if inst != nil {
 		if err := inst.Stop(false); err != nil {
 			release()
 			return nil, err
@@ -59,6 +59,11 @@ func (m *ServerManager) BeginServerMaintenance(ctx context.Context, id string) (
 		release()
 		return nil, fmt.Errorf("maintenance refused: %w", err)
 	}
+	if err := ensureServerProcessesStopped(m.GetWorkingDir(id)); err != nil {
+		lock.Close()
+		release()
+		return nil, err
+	}
 	var once sync.Once
 	return func() { once.Do(func() { lock.Close(); release() }) }, nil
 }
@@ -71,6 +76,7 @@ func (m *ServerManager) DeleteServer(ctx context.Context, id string, cleanup fun
 		return err
 	}
 	defer release()
+	if err := cleanup(); err != nil { return err }
 	m.removeInstanceLocked(id)
-	return cleanup()
+	return nil
 }

@@ -35,3 +35,7 @@ func killProcessTree(cmd *exec.Cmd) error {
 	return cmd.Process.Kill()
 }
 func checkWorldLock(path string) error { return nil }
+
+// Linux production nodes additionally inspect /proc for untracked survivors.
+// Windows development hosts rely on the tracked process completion handle.
+func ensureServerProcessesStopped(dir string) error { return nil }

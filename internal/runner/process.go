@@ -328,7 +328,7 @@ func (p *ProcessInstance) Start() error {
 	} else {
 		syncServerPort(p.workingDir, srv.Type, port)
 	}
-	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Bound game server port: %d (TCP/UDP)\x1b[0m", port))
+	p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Configured game server port: %d (waiting for server to bind)\x1b[0m", port))
 
 	if !native {
 		args = append(args, "-jar", srv.JarFile, "nogui")
@@ -531,11 +531,21 @@ func (p *ProcessInstance) Start() error {
 }
 
 func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
+	p.mu.RLock()
+	native := downloader.IsNativeSoftware(p.server.Type)
+	p.mu.RUnlock()
 	scanner := bufio.NewScanner(r)
 	// Support very large single-line outputs (up to 1MB) without dropping stream
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
+		if native {
+			var keep bool
+			line, keep = normalizeSteelConsoleLine(line)
+			if !keep {
+				continue
+			}
+		}
 
 		// Detect when Minecraft / Proxy finishes startup
 		var readyCallback func(string)
@@ -798,6 +808,17 @@ func (p *ProcessInstance) GetOnlinePlayers() []OnlinePlayer {
 
 func (p *ProcessInstance) detectRuntimeDiagnostics(line string) {
 	lower := strings.ToLower(line)
+	p.mu.RLock()
+	srv := *p.server
+	p.mu.RUnlock()
+	if downloader.IsNativeSoftware(srv.Type) && strings.Contains(lower, "failed to bind to server port") &&
+		(strings.Contains(lower, "address in use") || strings.Contains(lower, "address already in use")) {
+		p.broadcast("\x1b[31;1m[NeoPanel DIAGNOSTIC] STEEL TCP PORT BIND FAILED\x1b[0m")
+		p.broadcast(fmt.Sprintf("[NeoPanel] Steel could not bind 0.0.0.0:%d. Configuring a port in NeoPanel does not reserve or bind it.", srv.Port))
+		p.broadcast(fmt.Sprintf("[NeoPanel] On this server's Linux node, inspect all TCP socket states: sudo ss -tanp '( sport = :%d )'", srv.Port))
+		p.broadcast("[NeoPanel] Check IPv4 and IPv6 listeners and non-listening sockets, including TIME_WAIT. Identify the owner before stopping anything, or assign another unused port in Settings -> Network.")
+		return
+	}
 
 	// 1. Java Version Mismatch / UnsupportedClassVersionError
 	if strings.Contains(line, "UnsupportedClassVersionError") ||
@@ -894,9 +915,10 @@ func (p *ProcessInstance) Stop(graceful bool) error {
 	p.lifecycleMu.Lock()
 	defer p.lifecycleMu.Unlock()
 	p.mu.Lock()
-	if p.cmd == nil || p.status == "offline" {
+	if p.cmd == nil {
+		err := p.cleanupErr
 		p.mu.Unlock()
-		return nil
+		return err
 	}
 	p.stopExpected = true
 	p.stopStartupTimerLocked()
@@ -1136,7 +1158,7 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 
 		cmd := exec.Command(systemdPath, sysArgs...)
 		cmd.Dir = p.workingDir
-		return cmd, fmt.Sprintf("Systemd resource limits only (TasksMax=%d; NO filesystem isolation)", tasksMax), nil
+		return cmd, fmt.Sprintf("Systemd resource limits only (%s; NO filesystem isolation)", systemdLimitsLabel(srv, tasksMax)), nil
 	}
 
 	if bwrapErr == nil && bwrapPath != "" && isoEngine != "systemd" {
@@ -1252,7 +1274,7 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 
 			cmd := exec.Command(systemdPath, sysArgs...)
 			cmd.Dir = p.workingDir
-			return cmd, fmt.Sprintf("Bubblewrap filesystem sandbox + Systemd resource limits (TasksMax=%d)", tasksMax), nil
+			return cmd, fmt.Sprintf("Bubblewrap filesystem sandbox + Systemd resource limits (%s)", systemdLimitsLabel(srv, tasksMax)), nil
 		}
 
 		cmd := exec.Command(bwrapPath, bwrapArgs...)

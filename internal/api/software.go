@@ -315,7 +315,7 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 
 func writeServerOperationError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
-	if errors.Is(err, runner.ErrServerOperation) || errors.Is(err, runner.ErrRestoreRecovery) {
+	if errors.Is(err, runner.ErrServerOperation) || errors.Is(err, runner.ErrRestoreRecovery) || errors.Is(err, runner.ErrServerProcessAlive) {
 		status = http.StatusConflict
 	}
 	writeJSON(w, status, map[string]string{"error": err.Error()})

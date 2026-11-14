@@ -154,7 +154,7 @@ function nativeCommandPreview(filename) {
 }
 
 function steelConfigNotice(showLink = true) {
-  return `<div class="card" data-steel-config><h2>Steel native server</h2><p>Steel runs a native executable, not a JVM. Edit <code>config/config.toml</code> in the File Manager; set <code>server_port</code> in the <code>[server]</code> section. Worlds are stored in <code>saves/</code>. Java plugins and mods are incompatible. Memory allocation is a resource limit, not a Java heap setting. Enforcement requires systemd; direct process or bubblewrap execution alone does not enforce this limit.</p>${showLink ? `<button type="button" class="btn" onclick="go('fi')">Open File Manager</button>` : ''}</div>`;
+  return `<div class="card" data-steel-config><h2>Steel native server</h2><p>Steel runs a native executable, not a JVM. Edit <code>config/config.toml</code> in the File Manager; NeoPanel synchronizes <code>server_port</code> in the <code>[server]</code> section with your assigned port on startup. Worlds are stored in <code>saves/</code>. Java plugins and mods are incompatible. Memory allocation is a resource limit, not a Java heap setting. <b>Bubblewrap + Systemd enforces the configured memory limit.</b> Systemd-only launches enforce it too. Without systemd, Steel still runs, but direct process or bubblewrap execution alone does not enforce this limit. Check the console's Isolation line for the launch mode and MemoryMax.</p>${showLink ? `<button type="button" class="btn" onclick="go('fi')">Open File Manager</button>` : ''}</div>`;
 }
 
 function engineFamily(type) {
@@ -3339,6 +3339,20 @@ function getPluginColor(name) {
   return _pluginColorPalette[Math.abs(hash) % _pluginColorPalette.length];
 }
 
+function cleanConsoleOutput(raw, native = false) {
+  // Keep SGR colors; this line-based viewer cannot render terminal cursor/erase/OSC commands.
+  const clean = String(raw).replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[@-Z\\-_])/g,
+    code => /^\x1b\[[0-9;]*m$/.test(code) ? code : '');
+  if (!native) return clean;
+  const parts = clean.split('\r');
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const line = parts[i].trim();
+    const visible = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+    if (visible && visible !== '>') return line;
+  }
+  return '';
+}
+
 function parseAnsi(text) {
   const ansi16 = {
     30: '#4b5563', 31: '#ef4444', 32: '#10b981', 33: '#f59e0b',
@@ -3960,6 +3974,9 @@ function formatLogLine(raw) {
       } catch (e) {}
     }
   }
+
+  raw = cleanConsoleOutput(raw, isSteelEngine(curServer()?.type));
+  if (!raw) return '';
 
   // 2. If already formatted HTML command row, preserve directly
   if (typeof raw === 'string') {
@@ -13459,6 +13476,10 @@ async function executeDeleteServer(srvId, nodeId = 'local') {
   }
 
   try {
+    const result = await api(nodeApiPath(targetNodeId, `/api/servers/${encodeURIComponent(srvId)}`), { method: 'DELETE' });
+    if (result?.deleted !== true || result?.server_id !== srvId) {
+      throw new Error('Deletion completion was not confirmed by the hosting node. Refresh the server list and verify the node is updated before retrying.');
+    }
     if (S.activeServerId === srvId && (S.activeNodeId || 'local') === targetNodeId) {
       clearTimeout(S.wsReconnectTimer);
       S.wsReconnectTimer = null;
@@ -13480,7 +13501,6 @@ async function executeDeleteServer(srvId, nodeId = 'local') {
       }
     }
 
-    await api(nodeApiPath(targetNodeId, `/api/servers/${encodeURIComponent(srvId)}`), { method: 'DELETE' });
     const saved = getSavedActiveServerRef();
     if (saved && saved.id === srvId && (saved.nodeId || 'local') === targetNodeId) {
       try { localStorage.removeItem('neopanel_active_srv'); } catch (e) {}
@@ -13814,7 +13834,7 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
       </div>
 
       <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
-        Configure server tenant ownership, compute resource limits (CPU &amp; RAM), disk storage quotas, and node routing.
+        Configure server tenant ownership, compute resource limits (CPU &amp; RAM), and disk storage quotas. Moving a server between nodes requires a real stop-and-transfer operation, not a settings change.
       </p>
 
       <form onsubmit="submitAdminServerSettings(event, '${esc(targetId)}', '${esc(targetNodeId)}')">
@@ -13835,9 +13855,8 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
         <div class="grid g2" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
             <span>Node</span>
-            <select id="adm-set-node">
-              ${(S.nodes || [{ id: 'local', name: 'Local node' }]).map(n => `<option value="${esc(n.id)}" ${n.id === curNid ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))}</option>`).join('')}
-            </select>
+            <input id="adm-set-node" value="${esc(displayNodeName(curNid))}" disabled aria-label="Hosting node (read-only)">
+            <span class="mu" style="font-size:11.5px;">Hosting node is read-only; changing metadata would not move the running process.</span>
           </label>
           <label class="f" style="margin-bottom:0;">
             <span>Port</span>
@@ -13917,7 +13936,6 @@ async function submitAdminServerSettings(e, srvId, nodeId) {
   }
 
   const ownerId = parseInt($('#adm-set-owner')?.value, 10) || 1;
-  const assignedNodeId = $('#adm-set-node')?.value || targetSrv.node_id || 'local';
   const port = parseInt($('#adm-set-port')?.value, 10) || targetSrv.port;
   const ram = parseInt($('#adm-set-ram')?.value, 10) || getServerMaxRamMB(targetSrv);
   const cpu = parseInt($('#adm-set-cpu')?.value, 10) || 0;
@@ -13936,7 +13954,6 @@ async function submitAdminServerSettings(e, srvId, nodeId) {
     java_args: isSteelEngine(targetSrv.type) ? '' : targetSrv.java_args,
     auto_restart: targetSrv.auto_restart !== false,
     owner_id: ownerId,
-    node_id: assignedNodeId,
     cpu_limit_percent: cpu,
     disk_limit_mb: disk
   };
@@ -13948,7 +13965,6 @@ async function submitAdminServerSettings(e, srvId, nodeId) {
     });
 
     targetSrv.owner_id = ownerId;
-    targetSrv.node_id = assignedNodeId;
     targetSrv.port = port;
     targetSrv.memory_max = ram;
     targetSrv.memory_min = payload.memory_min;

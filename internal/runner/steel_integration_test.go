@@ -33,13 +33,16 @@ func TestSteelSandboxCommand(t *testing.T) {
 	}
 	p := NewProcessInstance(&database.Server{ID: "steel", Type: "steel", MemoryMaxMB: 2048}, dir, time.Second, nil, nil)
 	p.SetIsolationConfig("bwrap", 512)
-	cmd, _, err := p.buildCommand(binary, nil)
+	cmd, label, err := p.buildCommand(binary, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	args := strings.Join(cmd.Args, " ")
 	if !strings.Contains(args, "--property=MemoryMax=2048M") {
 		t.Fatal("missing native memory limit", args)
+	}
+	if !strings.Contains(label, "MemoryMax=2048 MiB enforced by systemd") {
+		t.Fatal("missing active limit in isolation message", label)
 	}
 	for i, arg := range cmd.Args {
 		if arg == "--ro-bind-try" && i+1 < len(cmd.Args) && (cmd.Args[i+1] == dir || cmd.Args[i+1] == filepath.Dir(dir)) {
@@ -48,6 +51,16 @@ func TestSteelSandboxCommand(t *testing.T) {
 	}
 	if cmd.Args[len(cmd.Args)-1] != binary {
 		t.Fatal("unexpected native arguments", args)
+	}
+	p.SetIsolationConfig("systemd", 512)
+	systemdCmd, systemdLabel, err := p.buildCommand(binary, nil)
+	if err != nil || !strings.Contains(strings.Join(systemdCmd.Args, " "), "--property=MemoryMax=2048M") || !strings.Contains(systemdLabel, "MemoryMax=2048 MiB enforced by systemd") {
+		t.Fatal("systemd-only limit or description missing", systemdLabel, err)
+	}
+	p.SetIsolationConfig("process", 512)
+	_, processLabel, err := p.buildCommand(binary, nil)
+	if err != nil || strings.Contains(processLabel, "MemoryMax") {
+		t.Fatal("unrestricted mode must not claim a memory cap", processLabel, err)
 	}
 }
 
@@ -85,6 +98,20 @@ func TestSteelLiveRelease(t *testing.T) {
 	logs := strings.Join(p.logBuffer, "\n")
 	p.mu.RUnlock()
 	t.Log(logs)
+	for _, code := range terminalControlRe.FindAllString(logs, -1) {
+		if !terminalSGRRe.MatchString(code) {
+			t.Fatalf("raw terminal control leaked to logs: %q", code)
+		}
+	}
+	if !strings.Contains(logs, "\x1b[") {
+		t.Fatal("Steel colors were discarded")
+	}
+	for _, line := range strings.Split(logs, "\n") {
+		visible := strings.TrimSpace(ansiEscapeRe.ReplaceAllString(line, ""))
+		if visible == "" || visible == ">" {
+			t.Fatalf("empty prompt leaked to logs: %q", line)
+		}
+	}
 	if p.GetStatus() != "online" {
 		t.Fatalf("Steel did not become online: %s", p.GetStatus())
 	}

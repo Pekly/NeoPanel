@@ -171,8 +171,9 @@ test('Steel settings and plugin entry points avoid Java properties and plugin AP
   assert.match(html, /config\/config\.toml/);
   assert.match(html, /server_port/);
   assert.match(html, /\[server\]/);
-  assert.match(html, /Enforcement requires systemd/);
+  assert.match(html, /Bubblewrap \+ Systemd enforces the configured memory limit/);
   assert.match(html, /direct process or bubblewrap execution alone does not enforce this limit/);
+  assert.match(html, /Without systemd, Steel still runs/);
   assert.ok(!source.includes('config/' + 'server.toml'), 'all Steel guidance uses the upstream config path');
   assert.match(html, /steel.exe/);
   assert.doesNotMatch(html, /id="prop-java"|id="prop-motd"|id="prop-args"|-Xmx|nogui/);

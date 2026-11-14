@@ -326,6 +326,14 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 
 	user := getUserFromContext(r)
 	isAdmin := user != nil && user.Role == "admin"
+	if req.NodeID != "" {
+		currentNode := server.NodeID
+		if currentNode == "" { currentNode = "local" }
+		if req.NodeID != currentNode {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Changing node_id does not migrate a running server and is not supported. Stop and transfer the server to the destination node instead."})
+			return
+		}
+	}
 
 	// Enforce node-level restrictions for normal / subusers
 	if !isAdmin {
@@ -389,9 +397,6 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		if req.DiskLimitMB != nil && *req.DiskLimitMB >= 0 {
 			server.DiskLimitMB = *req.DiskLimitMB
 		}
-		if req.NodeID != "" {
-			server.NodeID = req.NodeID
-		}
 	}
 
 	if err := h.db.UpdateServer(server); err != nil {
@@ -417,6 +422,12 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 	user := getUserFromContext(r)
 	if user != nil && user.Role != "admin" && server.OwnerID != user.ID {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Only administrators or the server owner can delete this server instance"})
+		return
+	}
+	// Master-side remote metadata is not proof of shutdown on its worker.
+	// Never silently erase it using only this host's process manager.
+	if server.NodeID != "" && server.NodeID != "local" && (h.cfg == nil || h.cfg.Server.Role != "node") {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "Deletion refused: this record is assigned to another node. Delete the server on its hosting worker and reconcile this record only after confirming shutdown."})
 		return
 	}
 
@@ -445,7 +456,7 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 
 	logAudit(h.db, r, "server_delete", fmt.Sprintf("Deleted server '%s' (%s)", server.Name, server.ID))
 
-	writeJSON(w, http.StatusOK, map[string]string{"message": "Server deleted successfully"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"message": "Server deleted successfully", "deleted": true, "server_id": serverID})
 }
 
 func (h *ServerHandler) PowerAction(w http.ResponseWriter, r *http.Request) {

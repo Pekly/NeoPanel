@@ -193,14 +193,14 @@ func (m *ServerManager) handleProcessExit(srvID string, unexpected bool, reached
 			m.mu.Unlock()
 
 			inst.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-			inst.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] STARTUP TIMED OUT — %d/%d ATTEMPTS FAILED!\x1b[0m", fails, MaxStartupAttempts))
+			inst.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] %s — %d/%d ATTEMPTS FAILED!\x1b[0m", startupFailureLabel(timedOut), fails, MaxStartupAttempts))
 			inst.broadcast("\x1b[31mThe server failed to finish starting across 2 consecutive attempts.\x1b[0m")
 			inst.broadcast("\x1b[31mAuto-restart has been halted to prevent an infinite crash loop.\x1b[0m")
-			inst.broadcast("\x1b[33;1m👉 Fix the error/Java settings above, then click Start manually to try again.\x1b[0m")
+			inst.broadcast("\x1b[33;1m👉 Fix the reported server error above, then click Start manually to try again.\x1b[0m")
 			inst.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 
 			if m.db != nil {
-				_ = m.db.LogActivity(0, "startup_failed", fmt.Sprintf("Server '%s' (%s) startup timed out after %d failed attempts", latestSrv.Name, srvID, fails), "system")
+				_ = m.db.LogActivity(0, "startup_failed", fmt.Sprintf("Server '%s' (%s): %s after %d failed attempts", latestSrv.Name, srvID, startupFailureLabel(timedOut), fails), "system")
 			}
 			return
 		}
@@ -290,12 +290,12 @@ func (m *ServerManager) waitAndRetryStart(srvID string, attemptNum int, cancelCh
 
 		if fails >= MaxStartupAttempts {
 			inst.broadcast("\x1b[31;1m========================================================================\x1b[0m")
-			inst.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] STARTUP TIMED OUT — %d/%d ATTEMPTS FAILED!\x1b[0m", fails, MaxStartupAttempts))
+			inst.broadcast(fmt.Sprintf("\x1b[31;1m[NeoPanel ERROR] STARTUP FAILED — %d/%d ATTEMPTS FAILED!\x1b[0m", fails, MaxStartupAttempts))
 			inst.broadcast(fmt.Sprintf("\x1b[31mRetry attempt failed to launch (%v). Auto-restart is halted.\x1b[0m", err))
-			inst.broadcast("\x1b[33;1m👉 Fix the error/Java settings above, then click Start manually.\x1b[0m")
+			inst.broadcast("\x1b[33;1m👉 Fix the reported server error above, then click Start manually.\x1b[0m")
 			inst.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 			if m.db != nil {
-				_ = m.db.LogActivity(0, "startup_failed", fmt.Sprintf("Server '%s' (%s) startup timed out after %d failed attempts (%v)", latestSrv.Name, srvID, fails, err), "system")
+				_ = m.db.LogActivity(0, "startup_failed", fmt.Sprintf("Server '%s' (%s) startup failed after %d attempts (%v)", latestSrv.Name, srvID, fails, err), "system")
 			}
 		}
 	}
@@ -368,13 +368,8 @@ func (m *ServerManager) removeInstanceLocked(serverID string) {
 	m.cancelRetryLocked(serverID)
 	delete(m.startupFailures, serverID)
 	delete(m.startupHalted, serverID)
-	inst, ok := m.instances[serverID]
 	delete(m.instances, serverID)
 	m.mu.Unlock()
-
-	if ok && inst != nil {
-		_ = inst.Stop(false)
-	}
 }
 
 func (m *ServerManager) Restart(srv *database.Server) error {
@@ -557,13 +552,13 @@ func (m *ServerManager) ShutdownAll() {
 
 	var wg sync.WaitGroup
 	for _, inst := range instances {
-		if inst.GetStatus() != "offline" {
-			wg.Add(1)
-			go func(i *ProcessInstance) {
-				defer wg.Done()
-				_ = i.Stop(true)
-			}(inst)
-		}
+		wg.Add(1)
+		go func(i *ProcessInstance) {
+			defer wg.Done()
+			if err := i.Stop(true); err != nil {
+				log.Printf("Server process cleanup failed during daemon shutdown: %v", err)
+			}
+		}(inst)
 	}
 	wg.Wait()
 }
@@ -792,4 +787,11 @@ func (m *ServerManager) executeScheduleAction(sched *database.ServerSchedule) (r
 func MatchesCron(expr string, t time.Time) bool {
 	c, err := database.ParseCron(expr)
 	return err == nil && c.Matches(t)
+}
+
+func startupFailureLabel(timedOut bool) string {
+	if timedOut {
+		return "STARTUP TIMED OUT"
+	}
+	return "STARTUP FAILED"
 }
