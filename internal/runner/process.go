@@ -294,12 +294,9 @@ func (p *ProcessInstance) Start() error {
 			return fmt.Errorf("%s", errMsg)
 		}
 
-		args = []string{}
-		if srv.MemoryMinMB > 0 {
-			args = append(args, fmt.Sprintf("-Xms%dM", srv.MemoryMinMB))
-		}
-		if srv.MemoryMaxMB > 0 {
-			args = append(args, fmt.Sprintf("-Xmx%dM", srv.MemoryMaxMB))
+		args, err = javaVMArgs(srv)
+		if err != nil {
+			return err
 		}
 
 		// Force full ANSI terminal color output even when piped in daemons/subprocesses
@@ -310,11 +307,6 @@ func (p *ProcessInstance) Start() error {
 			"-Dlog4j.skipJansi=false",
 		)
 
-		// Add custom JVM flags if provided
-		if strings.TrimSpace(srv.JavaArgs) != "" {
-			customArgs := strings.Fields(srv.JavaArgs)
-			args = append(args, customArgs...)
-		}
 	}
 
 	// Ensure server game port is synchronized to configuration file
@@ -1199,8 +1191,8 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 			"-q",
 			fmt.Sprintf("--property=TasksMax=%d", tasksMax),
 		}
-		if downloader.IsNativeSoftware(srv.Type) && srv.MemoryMaxMB > 0 {
-			sysArgs = append(sysArgs, fmt.Sprintf("--property=MemoryMax=%dM", srv.MemoryMaxMB))
+		if memoryMax := serverMemoryCeilingMB(srv); memoryMax > 0 {
+			sysArgs = append(sysArgs, fmt.Sprintf("--property=MemoryMax=%dM", memoryMax))
 		}
 		if srv.CPULimitPercent > 0 {
 			sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", srv.CPULimitPercent))
@@ -1286,8 +1278,8 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 				"-q",
 				fmt.Sprintf("--property=TasksMax=%d", tasksMax),
 			}
-			if downloader.IsNativeSoftware(srv.Type) && srv.MemoryMaxMB > 0 {
-				sysArgs = append(sysArgs, fmt.Sprintf("--property=MemoryMax=%dM", srv.MemoryMaxMB))
+			if memoryMax := serverMemoryCeilingMB(srv); memoryMax > 0 {
+				sysArgs = append(sysArgs, fmt.Sprintf("--property=MemoryMax=%dM", memoryMax))
 			}
 			if srv.CPULimitPercent > 0 {
 				sysArgs = append(sysArgs, fmt.Sprintf("--property=CPUQuota=%d%%", srv.CPULimitPercent))

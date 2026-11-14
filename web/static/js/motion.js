@@ -82,6 +82,21 @@
           { duration: 300, delay: index * 22 }, 'page'));
     }
   }
+  function layout(root, toggle, from, to) {
+    Array.from(pageAnimations).forEach(cancel);
+    if (!enabled() || !root) return;
+    const indicator = toggle?.querySelector('.vm-indicator');
+    if (indicator) play(indicator,
+      [{ transform: `translateX(${from * 100}%)` }, { transform: `translateX(${to * 100}%)` }],
+      { duration: 300 }, 'page');
+    // Animate only collection surfaces, not the toolbar, editor, or navigation.
+    const selector = '.np-server-grid, .vm-icons-grid, .vm-tiles-grid, table, #store-grid';
+    Array.from(root.querySelectorAll(selector)).slice(0, 24).filter(el =>
+      !el.parentElement?.closest(selector) && visible(el) && !el.querySelector('video, audio, #ed')
+    ).slice(0, 4).forEach(el => play(el,
+      [{ opacity: .45, transform: `translateX(${to > from ? 18 : -18}px)` }, { opacity: 1, transform: 'translateX(0)' }],
+      { duration: 280 }, 'page'));
+  }
   function reveal(element) {
     return play(element, [{ opacity: .35 }, { opacity: 1 }], { duration: 260 });
   }
@@ -124,7 +139,7 @@
   function onPress(event) {
     if (event.type === 'pointerdown' && event.button !== 0) return;
     if (event.type === 'click' && event.detail !== 0) return;
-    const element = event.target?.closest?.('.btn, #nav .nav-item, .tabs button, .atabs button, .cselect-trigger, .view-mode-toggle button');
+    const element = event.target?.closest?.('.btn, #nav .nav-item, .tabs button, .atabs button, .cselect-trigger, .vm-toggle button');
     if (!element || element.closest('[inert], [aria-disabled="true"]')) return;
     ripple(element, event);
   }
@@ -144,6 +159,6 @@
   else if (preference?.addListener) preference.addListener(syncPreference);
   syncPreference();
   syncVisibility();
-  global.NPMotion = Object.freeze({ afterRender, viewKey, reveal, notify, feedback, cancelAll,
+  global.NPMotion = Object.freeze({ afterRender, viewKey, reveal, notify, feedback, layout, cancelAll,
     get reduced() { return reduced(); }, get activeCount() { return active.size; } });
 })(window);

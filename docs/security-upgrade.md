@@ -39,6 +39,17 @@ Merge these entries into the existing sections; preserve secrets and other setti
 - Installer logs/builds use a protected workspace under `/var/lib/neopanel/installer`, not predictable shared `/tmp` files. Update repository/branch inputs are validated and passed as arguments rather than interpolated shell source.
 - Vulnerable SSH/JWT dependencies have been upgraded. Continue running `govulncheck ./...` with a current toolchain as new advisories appear.
 
+## Isolation and interaction follow-up
+
+- Node RAM restrictions now lock changes to custom JVM arguments as well as memory fields. Managed heap flags take precedence at startup; launcher operands and indirect option files are rejected. Convert existing argument-file configurations before restarting.
+- Systemd-backed Java processes now receive a whole-process memory ceiling of **heap + max(512 MiB, 50% of heap)**. Reserve this overhead when sizing nodes. Steel retains its existing exact limit. See [memory and node policy details](../internal/runner/MEMORY_POLICY.md).
+- Port add/delete/set-primary operations honor configured node restrictions. Rename, move, unzip, and extract require both `files.edit` and `files.delete`; frontend controls reflect the same requirements.
+- Remote proxies carry the destination node's policy over the authenticated master-to-worker hop. Workers validate it with the forwarded identity; ordinary users cannot spoof policy headers or JWT fields. Update **both master and workers**. If tenants can contact workers directly, configure their local node policy too.
+- Layout switches are local and burst-coalesced, preserve filters/selection, and use bounded sliding motion. Store searches reject stale responses and have a deadline. Dashboard refresh and power actions reject repeated clicks while in flight; power requests are never automatically retried.
+- These guards are usability protections, not server-side rate limiting or additional authorization. They do not guarantee that networks or game processes cannot time out.
+- **Known residual:** legacy UFW rules lack ownership markers. An authorized allocation deletion can still remove an administrator-created/shared rule. Until rule reconciliation is implemented, leave tenant port changes disabled and review firewall changes administratively.
+- **Linux staging required:** verify namespaces, cgroup OOM behavior, resource budgets, and host firewall rules. Windows tests and Linux cross-compilation cannot prove runtime confinement. Unrestricted/bwrap-only modes have no cgroup memory ceiling.
+
 ## Operational limits
 
 - Use Linux with the supported systemd/bubblewrap isolation and restrictive filesystem ownership for untrusted game workloads. Path confinement does not replace process, mount, resource or network isolation. Do not grant tenant processes authority over panel configuration, database, binaries, host mounts or sibling server directories.
@@ -47,7 +58,7 @@ Merge these entries into the existing sections; preserve secrets and other setti
 - Keep HTTPS enabled, constrain worker network reachability, rotate exposed passwords/API keys/node tokens, and use backups and audit logs. These changes do not establish whether an older deployment was compromised.
 - Windows regression tests and Linux cross-compilation do not substitute for Linux runtime tests. Verify actual systemd/bubblewrap behavior and installer filesystem permissions on a staging Linux host before production rollout.
 
-## Verification for this pass
+## Earlier hardening verification
 
 - Toolchain used: Go 1.27.4 on Windows/amd64 (the declared minimum is Go 1.26).
 - `go test ./... -count=1 -timeout 180s` and `go vet ./...`: passed.
@@ -57,3 +68,12 @@ Merge these entries into the existing sections; preserve secrets and other setti
 - Linux/amd64 panel/node binary built; API, database, rooted filesystem, runner, downloader and SFTP test binaries compiled; Linux-targeted vet passed.
 - Exploit regressions used local temporary fixtures. No live-node exploit tests or deployment were performed.
 - Linux runtime isolation and installer filesystem behavior still require staging-host verification.
+
+## Follow-up verification
+
+- Go 1.27.4: `go test ./...` and `go vet ./...` passed on Windows/amd64.
+- Linux/amd64 panel and `-tags node` binaries built successfully; API/runner regression test binaries also cross-compiled. These are build checks, not Linux execution.
+- Frontend suite: **199 tests passed**, including new interaction, stale-response, permission, timeout, and motion regressions.
+- Fresh `govulncheck ./...` scans for Windows/amd64 and Linux/amd64 reported no vulnerabilities. This remains a point-in-time advisory check.
+- Browser fixture checks: centered announcement icon; 40 rapid mode clicks produced one render and zero API requests; keyboard focus, file selection, and filters preserved. All three dashboard modes fit 375/768/1440 px; dark/light themes inspected. Reduced-motion behavior is covered by automated tests.
+- No production deployment or live-node exploit testing was performed.

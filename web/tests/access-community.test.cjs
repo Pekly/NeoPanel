@@ -111,3 +111,16 @@ test('separate Team permission requests cannot commit after account changes',asy
   const wait=deferred();c.api=()=>wait.promise;const pending=c.loadTeamPage(true);c.S.token='new-login';wait.resolve(perms([],{is_owner:true}));await pending;
   assert.equal(c.S.teamState,undefined);assert.equal(c.S.serverSubusers,undefined);
 });
+
+test('rename, move and extraction require both edit and delete permission', async () => {
+  const { c } = setup(); await c.ensureServerAccess();
+  for (const action of ['rename', 'move', 'unzip', 'extract']) {
+    const endpoint = '/api/servers/a/files/' + action;
+    for (const granted of ['files.edit', 'files.delete']) {
+      c.S.serverAccess.data.permissions = ['files.view', granted];
+      assert.throws(() => c.assertClientRequestAccess(endpoint, { method: 'POST' }), /Access restricted/, action + ':' + granted);
+    }
+    c.S.serverAccess.data.permissions = ['files.view', 'files.edit', 'files.delete'];
+    assert.doesNotThrow(() => c.assertClientRequestAccess(endpoint, { method: 'POST' }));
+  }
+});

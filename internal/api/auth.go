@@ -34,8 +34,23 @@ type JWTClaims struct {
 	AuthVersion int64  `json:"auth_version,omitempty"`
 	APIKey      bool   `json:"-"`
 	// Set only by trusted node-forwarding middleware, never parsed from JWTs.
-	AuthorizedServerCreate bool `json:"-"`
+	AuthorizedServerCreate bool            `json:"-"`
+	ForwardedNodePolicy    *nodeUserPolicy `json:"-"`
 	jwt.RegisteredClaims
+}
+
+// Request-only policy from an authenticated master-to-worker hop, never a JWT grant.
+type nodeUserPolicy struct {
+	AllowUserRAM   bool `json:"allow_user_ram"`
+	AllowUserPorts bool `json:"allow_user_ports"`
+	AllowUserJava  bool `json:"allow_user_java"`
+}
+
+func userPolicyForNode(node *database.ClusterNode) *nodeUserPolicy {
+	if node == nil {
+		return nil
+	}
+	return &nodeUserPolicy{node.AllowUserRAM, node.AllowUserPorts, node.AllowUserJava}
 }
 
 func NewAuthHandler(db *database.DB, cfg *config.Config) *AuthHandler {

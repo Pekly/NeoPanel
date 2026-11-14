@@ -19,8 +19,33 @@ func sandboxResolverArgs(path string) []string {
 
 func systemdLimitsLabel(srv database.Server, tasksMax int) string {
 	label := fmt.Sprintf("TasksMax=%d", tasksMax)
-	if downloader.IsNativeSoftware(srv.Type) && srv.MemoryMaxMB > 0 {
-		label += fmt.Sprintf("; MemoryMax=%d MiB enforced by systemd", srv.MemoryMaxMB)
+	if memoryMax := serverMemoryCeilingMB(srv); memoryMax > 0 {
+		label += fmt.Sprintf("; MemoryMax=%d MiB enforced by systemd", memoryMax)
 	}
 	return label
+}
+
+// MemoryMaxMB is a Java HEAP budget, not the whole process budget. Reserve
+// max(512 MiB, 50% of heap) for metaspace, code cache, thread stacks, direct
+// buffers and other native allocations. This is a bounded allowance, not a
+// guarantee for every plugin/modpack. Native servers retain their exact limit.
+// A systemd cgroup is required; bwrap alone and process/none do not enforce it.
+func serverMemoryCeilingMB(srv database.Server) int64 {
+	if srv.MemoryMaxMB <= 0 {
+		return 0
+	}
+	heap := int64(srv.MemoryMaxMB)
+	if downloader.IsNativeSoftware(srv.Type) {
+		return heap
+	}
+	overhead := heap / 2
+	if overhead < 512 {
+		overhead = 512
+	}
+	// Saturate rather than wrapping a positive configured limit to unlimited.
+	const maxInt64 = int64(1<<63 - 1)
+	if heap > maxInt64-overhead {
+		return maxInt64
+	}
+	return heap + overhead
 }

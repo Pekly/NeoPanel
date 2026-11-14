@@ -183,3 +183,26 @@ test('menu reveal is geometry-safe and reduced motion covers legacy CSS effects'
   assert.match(css, /animation-play-state: paused !important/);
   assert.doesNotMatch(css, /will-change:/);
 });
+
+test('layout indicator slides from previous mode and collection motion stays bounded', () => {
+  const s = setup(), indicator = s.element('indicator');
+  const root = s.page(Array.from({ length: 100 }, (_, i) => s.element('collection' + i)), []);
+  s.motion.layout(root, { querySelector: () => indicator }, 2, 0);
+  assert.equal(s.animations.length, 5);
+  assert.equal(s.animations[0].frames[0].transform, 'translateX(200%)');
+  assert.equal(s.animations[0].frames[1].transform, 'translateX(0%)');
+  assert.equal(s.animations[1].frames[0].transform, 'translateX(-18px)');
+  assert.ok(s.measurements() <= 24);
+  s.motion.layout(root, { querySelector: () => indicator }, 0, 1);
+  assert.ok(s.animations.slice(0, 5).every(a => a.cancelled));
+  assert.equal(s.motion.activeCount, 5);
+});
+
+test('layout motion respects reduced motion and avoids media surfaces', () => {
+  const reduced = setup(true);
+  reduced.motion.layout(reduced.page(), null, 0, 2);
+  assert.equal(reduced.animations.length, 0);
+  const s = setup();
+  s.motion.layout(s.page([s.element('media', { media: true })], []), null, 0, 1);
+  assert.equal(s.animations.length, 0);
+});

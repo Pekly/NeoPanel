@@ -617,7 +617,7 @@ func serverActionPermission(method, suffix string) string {
 		if len(parts) > 1 {
 			switch parts[1] {
 			case "rename", "move", "unzip", "extract":
-				return "files.delete"
+				return "files.edit+files.delete"
 			}
 		}
 		return "files.edit"
@@ -672,13 +672,24 @@ func authorizeServer(db *database.DB, claims *JWTClaims, serverID, permission st
 	if permission == "" {
 		return 0
 	}
-	for _, p := range perms {
-		if p == permission && permission != "owner" {
-			return 0
+	// '+' is an internal conjunction, never a grant: destructive writes need
+	// both capabilities, matching SFTP rename/overwrite authorization.
+	for _, required := range strings.Split(permission, "+") {
+		allowed := false
+		for _, p := range perms {
+			if p == required && required != "owner" {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return http.StatusForbidden
 		}
 	}
-	return http.StatusForbidden
+	return 0
 }
+
+const forwardedNodePolicyHeader = "X-NeoPanel-Node-Policy"
 
 // Nodes already trust their configured node/admin API token and synchronize user
 // IDs from the master. Carry the original caller over that authenticated hop, so
@@ -687,6 +698,9 @@ func authorizeServer(db *database.DB, claims *JWTClaims, serverID, permission st
 func forwardedClaims(db *database.DB, req *http.Request, claims *JWTClaims) (*JWTClaims, error) {
 	id := req.Header.Get("X-NeoPanel-User-ID")
 	if id == "" {
+		if req.Header.Get(forwardedNodePolicyHeader) != "" {
+			return nil, fmt.Errorf("node policy requires a trusted forwarded identity")
+		}
 		return claims, nil
 	}
 	if claims == nil || claims.Role != "admin" {
@@ -705,13 +719,22 @@ func forwardedClaims(db *database.DB, req *http.Request, claims *JWTClaims) (*JW
 		return nil, fmt.Errorf("invalid forwarded role")
 	}
 	allowCreate := req.Method == http.MethodPost && req.URL.Path == "/api/servers" && req.Header.Get("X-NeoPanel-Can-Create-Server") == "true"
-	return &JWTClaims{UserID: user.ID, Username: user.Username, Role: role, AuthorizedServerCreate: allowCreate}, nil
+	forwarded := &JWTClaims{UserID: user.ID, Username: user.Username, Role: role, AuthorizedServerCreate: allowCreate}
+	if raw := req.Header.Get(forwardedNodePolicyHeader); raw != "" {
+		// Only reached after authenticating the privileged hop and validating
+		// the original caller. Handlers must never parse policy headers.
+		if len(raw) > 256 || json.Unmarshal([]byte(raw), &forwarded.ForwardedNodePolicy) != nil || forwarded.ForwardedNodePolicy == nil {
+			return nil, fmt.Errorf("invalid forwarded node policy")
+		}
+	}
+	return forwarded, nil
 }
 
 func setProxyIdentity(header http.Header, claims *JWTClaims, nodeToken string) {
 	header.Del("X-NeoPanel-User-ID")
 	header.Del("X-NeoPanel-User-Role")
 	header.Del("X-NeoPanel-Can-Create-Server")
+	header.Del(forwardedNodePolicyHeader)
 	header.Set("Authorization", "Bearer "+nodeToken)
 	// Native node tokens have user ID zero and are already privileged machine identities.
 	if claims.UserID > 0 && claims.Role != "admin" {
@@ -770,6 +793,10 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	remote.ContentLength = req.ContentLength
 	setProxyIdentity(remote.Header, claims, node.APIToken)
+	if claims.UserID > 0 && claims.Role != "admin" {
+		policy, _ := json.Marshal(userPolicyForNode(node))
+		remote.Header.Set(forwardedNodePolicyHeader, string(policy))
+	}
 	if createAuthorized && claims.UserID > 0 && claims.Role != "admin" {
 		remote.Header.Set("X-NeoPanel-Can-Create-Server", "true")
 	}

@@ -38,6 +38,8 @@ type ServerHandler struct {
 	db         *database.DB
 	manager    *runner.ServerManager
 	httpClient *http.Client
+	allowPort  func(int, string)
+	removePort func(int)
 }
 
 func NewServerHandler(cfg *config.Config, db *database.DB, manager *runner.ServerManager) *ServerHandler {
@@ -46,6 +48,8 @@ func NewServerHandler(cfg *config.Config, db *database.DB, manager *runner.Serve
 		db:         db,
 		manager:    manager,
 		httpClient: &http.Client{Timeout: 6 * time.Second},
+		allowPort:  allowHostPort,
+		removePort: removeHostPort,
 	}
 }
 
@@ -351,10 +355,16 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 
 	// Enforce node-level restrictions for normal / subusers
 	if !isAdmin {
-		node, _ := h.db.GetNode(server.NodeID)
+		node := h.serverUserPolicy(r, server)
 		if node != nil {
 			if !node.AllowUserRAM && ((req.MemoryMaxMB > 0 && req.MemoryMaxMB != server.MemoryMaxMB) || (req.MemoryMinMB > 0 && req.MemoryMinMB != server.MemoryMinMB)) {
 				writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering server memory")
+				return
+			}
+			// JVM options can load other options indirectly; do not attempt a
+			// heap-flag denylist at this policy boundary.
+			if !node.AllowUserRAM && req.JavaArgs != nil && *req.JavaArgs != server.JavaArgs {
+				writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering JVM arguments while memory is locked")
 				return
 			}
 			if !node.AllowUserPorts && (req.Port > 0 && req.Port != server.Port) {
@@ -557,8 +567,43 @@ type AddPortRequest struct {
 	IsPrimary bool   `json:"is_primary"`
 }
 
+// Prefer the policy carried by trusted forwarding middleware: a worker's
+// local/empty node ID need not identify the master's node policy row.
+func (h *ServerHandler) serverUserPolicy(r *http.Request, server *database.Server) *nodeUserPolicy {
+	if claims, _ := r.Context().Value(contextUserKey).(*JWTClaims); claims != nil && claims.ForwardedNodePolicy != nil {
+		return claims.ForwardedNodePolicy
+	}
+	nodeID := server.NodeID
+	if nodeID == "" {
+		nodeID = "local"
+	}
+	node, _ := h.db.GetNode(nodeID)
+	return userPolicyForNode(node)
+}
+
+// Check policy before decoding or performing any database, file or firewall mutation.
+func (h *ServerHandler) requirePortPolicy(w http.ResponseWriter, r *http.Request, serverID string) bool {
+	server, err := h.db.GetServer(serverID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Server not found")
+		return false
+	}
+	if user := getUserFromContext(r); user != nil && user.Role == "admin" {
+		return true
+	}
+	// Match UpdateServer, including trusted master policy on remote workers.
+	if node := h.serverUserPolicy(r, server); node != nil && !node.AllowUserPorts {
+		writeError(w, http.StatusForbidden, "Node policy prohibits non-admin users from altering server network ports")
+		return false
+	}
+	return true
+}
+
 func (h *ServerHandler) AddServerPort(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	if !h.requirePortPolicy(w, r, serverID) {
+		return
+	}
 	var req AddPortRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
@@ -588,7 +633,7 @@ func (h *ServerHandler) AddServerPort(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open port in host Linux firewall if UFW is active
-	allowHostPort(req.Port, req.Protocol)
+	h.allowPort(req.Port, req.Protocol)
 
 	logAudit(h.db, r, "port_add", fmt.Sprintf("Assigned port %d (%s) to %s", req.Port, port.Protocol, auditServerLabel(h.db, serverID)))
 
@@ -597,6 +642,9 @@ func (h *ServerHandler) AddServerPort(w http.ResponseWriter, r *http.Request) {
 
 func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	if !h.requirePortPolicy(w, r, serverID) {
+		return
+	}
 	portIDStr := getURLParam(r, "portId")
 	portID, err := strconv.Atoi(portIDStr)
 	if err != nil || portID <= 0 {
@@ -620,7 +668,7 @@ func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request)
 	}
 
 	if portNum > 0 {
-		removeHostPort(portNum)
+		h.removePort(portNum)
 	}
 
 	logAudit(h.db, r, "port_delete", fmt.Sprintf("Removed port %d allocation (ID %d) from %s", portNum, portID, auditServerLabel(h.db, serverID)))
@@ -630,6 +678,9 @@ func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request)
 
 func (h *ServerHandler) SetPrimaryPort(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	if !h.requirePortPolicy(w, r, serverID) {
+		return
+	}
 	portIDStr := getURLParam(r, "portId")
 	portID, err := strconv.Atoi(portIDStr)
 	if err != nil || portID <= 0 {

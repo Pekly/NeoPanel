@@ -1372,23 +1372,34 @@ function getViewMode(scope, fallback = 'list') {
   return fallback;
 }
 
+let viewModeTimer = null;
 function setViewMode(scope, mode) {
   if (!['list', 'icons', 'tiles'].includes(mode)) return;
-  if (!S.viewModes) S.viewModes = {};
-  S.viewModes[scope] = mode;
-  try { localStorage.setItem(`neopanel_vm_${scope}`, mode); } catch (e) {}
-  R();
-  if (scope === 'plug_store' && S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
-    const grid = $('#store-grid');
-    if (grid) {
-      if (Array.isArray(S.lastModrinthHits)) {
-        grid.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
-        applyPermissionControls(grid);
-      } else {
-        searchModrinth();
-      }
+  const toggle = Array.from(document.querySelectorAll('.vm-toggle')).find(el => el.dataset.scope === scope);
+  if (!toggle) return;
+  const current = getViewMode(scope, toggle.dataset.fallback || 'list');
+  clearTimeout(viewModeTimer);
+  if (current === mode) return;
+  const context = JSON.stringify([S.token, S.view, S.activeNodeId, S.activeServerId, S.ptab, S.plugTab, S.currentDir]);
+  // Coalesce bursts into one local render. Layout changes never fetch data.
+  viewModeTimer = setTimeout(() => {
+    if (context !== JSON.stringify([S.token, S.view, S.activeNodeId, S.activeServerId, S.ptab, S.plugTab, S.currentDir])) return;
+    const focused = document.activeElement?.closest('.vm-toggle') === toggle;
+    const from = ['list', 'icons', 'tiles'].indexOf(current);
+    const to = ['list', 'icons', 'tiles'].indexOf(mode);
+    if (!S.viewModes) S.viewModes = {};
+    S.viewModes[scope] = mode;
+    try { localStorage.setItem(`neopanel_vm_${scope}`, mode); } catch (_) {}
+    const fileFilter = S.view === 'fi' ? $('#fi-filter')?.value : null;
+    R();
+    const next = Array.from(document.querySelectorAll('.vm-toggle')).find(el => el.dataset.scope === scope);
+    if (fileFilter != null && $('#fi-filter')) {
+      $('#fi-filter').value = fileFilter;
+      filterFileList(fileFilter);
     }
-  }
+    if (focused) next?.querySelector('.vm-btn.on')?.focus({ preventScroll: true });
+    window.NPMotion?.layout($('#main'), next, from, to);
+  }, 90);
 }
 
 function renderViewModeToggle(scope, fallback = 'list') {
@@ -1398,7 +1409,8 @@ function renderViewModeToggle(scope, fallback = 'list') {
     ['icons', 'viewIcons', 'Icons'],
     ['tiles', 'viewTiles', 'Tiles']
   ];
-  return `<div class="vm-toggle" role="group" aria-label="View layout">
+  return `<div class="vm-toggle" data-scope="${esc(scope)}" data-fallback="${esc(fallback)}" style="--vm-index:${opts.findIndex(([m]) => m === cur)}" role="group" aria-label="View layout">
+    <span class="vm-indicator" aria-hidden="true"></span>
     ${opts.map(([m, icon, lbl]) => `
       <button type="button" class="vm-btn ${cur === m ? 'on' : ''}" data-scope="${esc(scope)}" onclick="setViewMode(this.dataset.scope, '${m}')" title="${lbl} view" aria-pressed="${cur === m}">
         ${ic(icon, 13)}
@@ -4557,10 +4569,22 @@ setInterval(() => {
 }, 1000);
 
 // --- Power Actions ---
+const powerRequests = new Map();
 async function power(action, skipConfirm = false) {
+  if (!['start', 'stop', 'restart', 'kill'].includes(action)) return;
   if (!hasServerPermission('server.power')) { toast('Access restricted: server.power required', 'bad'); return; }
   const srv = curServer();
   if (!srv) return;
+  const key = `${srv.node_id || 'local'}:${srv.id}`;
+  if (powerRequests.has(key)) return;
+  powerRequests.set(key, true);
+  try { await performPowerAction(action, skipConfirm, srv); }
+  finally { setTimeout(() => powerRequests.delete(key), 1200); }
+}
+
+async function performPowerAction(action, skipConfirm, srv) {
+  const token = S.token;
+  const live = () => token === S.token && sameQolServer(srv, curServer());
 
   if (!skipConfirm && action !== 'start') {
     const confirmMeta = {
@@ -4600,6 +4624,7 @@ async function power(action, skipConfirm = false) {
     }
   }
 
+  if (!live() || !hasServerPermission('server.power')) return;
   if (action === 'start') {
     S.status = 'starting';
     S.startupHalted = false;
@@ -4624,11 +4649,14 @@ async function power(action, skipConfirm = false) {
     addLog('[NeoPanel]: Force kill signal delivered');
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
   try {
     const res = await api(srvApiPath(srv, '/power'), {
       method: 'POST',
-      body: JSON.stringify({ action })
+      body: JSON.stringify({ action }), signal: controller.signal, suppressToast: true
     });
+    if (!live()) return;
     if (res && res.current) {
       applyServerStatsSnapshot(srv, res.current, false);
     } else {
@@ -4640,7 +4668,8 @@ async function power(action, skipConfirm = false) {
     liveCon();
     toast(`Server ${action} command sent`, 'ok');
   } catch (err) {
-    S.status = 'offline';
+    if (!live()) return;
+    // A failed request does not prove the process is offline; reconcile status below.
     updateInputState();
     updateHeaderBadge();
     addLog(`\x1b[31;1m[NeoPanel Error]: ${err.message}\x1b[0m`);
@@ -4685,14 +4714,18 @@ async function power(action, skipConfirm = false) {
       type: 'error'
     });
     refreshServerStatus();
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 async function refreshServerStatus() {
   const srv = curServer();
   if (!srv) return;
+  const token = S.token;
   try {
     const data = await api(srvApiPath(srv, ''));
+    if (token !== S.token || !sameQolServer(srv, curServer())) return;
     applyServerStatsSnapshot(srv, data.stats, false);
     S.ver = data.version || S.ver;
     S.core = (data.type || 'paper').charAt(0).toUpperCase() + (data.type || 'paper').slice(1);
@@ -5854,7 +5887,7 @@ const V = {
       </div>
       <div class="row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
         <div style="position: relative;">
-          <input type="text" id="srv-filter" aria-label="Filter servers" placeholder="Find a server…" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
+          <input type="text" id="srv-filter" aria-label="Filter servers" placeholder="Find a server…" value="${esc(S.serverFilter || '')}" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
         </div>
         ${nodesList.length > 1 ? `
@@ -5947,7 +5980,7 @@ const V = {
                 </div>
               </div>
               <div class="vm-dash-row-actions">
-                <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
+                <span class="srv-card-action-btn" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();this.click();}" onclick="event.preventDefault(); event.stopPropagation(); refreshDashboard();" title="Refresh status" aria-label="Refresh server status">${ic('refresh', 13)}</span>
                 ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
             </a>`;
@@ -5960,9 +5993,10 @@ const V = {
                 <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:6px;">${engBadgeIcon} <span>${esc(coreLabel)}</span></span>
               </div>
               <div class="srv-card-actions">
-                <span class="srv-card-action-btn" onclick="event.preventDefault(); event.stopPropagation(); loadDashboard(); toast('Refreshed server stats');" title="Refresh status">&#x21bb;</span>
+                <span class="srv-card-action-btn" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();this.click();}" onclick="event.preventDefault(); event.stopPropagation(); refreshDashboard();" title="Refresh status" aria-label="Refresh server status">${ic('refresh', 13)}</span>
                 ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
+              <div class="srv-card-identity">${serverRowIconHtml(s)}<span>${esc(s.version || coreLabel)}</span></div>
             </div>
             <div class="srv-card-body">
               <div class="srv-card-title-row">
@@ -6003,6 +6037,7 @@ const V = {
                   <div class="meter-bar"><i data-role="disk-bar" style="width:${Math.min(100, (dVal / 20480) * 100)}%"></i></div>
                 </div>
               </div>
+              <div class="srv-card-foot"><span>${ic('server', 12)} ${esc(nodeName)}</span><span class="srv-card-open">Open console ${ic('terminal', 12)}</span></div>
             </div>
           </a>`;
         }).join('')}
@@ -9317,6 +9352,7 @@ window.R = function() {
     if (typeof restoreFilePreviewMedia === 'function') restoreFilePreviewMedia(retainedPreviewMedia);
     if (S.view === 'set' && !blocked) organizeServerSettings(main);
     applyPermissionControls(main);
+    if (S.view === 'dash') filterServerCards(S.serverFilter || '');
     main.scrollTop = prevMainScroll;
     if (S.view === 'con') {
       paintLog();
@@ -9441,6 +9477,27 @@ function setNodeFilter(nodeId) {
 }
 
 // --- Backend Data Loaders ---
+let dashboardRefreshBusy = false;
+let dashboardRefreshAfter = 0;
+async function refreshDashboard() {
+  if (dashboardRefreshBusy || S.loading?.dash || Date.now() < dashboardRefreshAfter) return;
+  dashboardRefreshBusy = true;
+  const token = S.token;
+  const controls = Array.from(document.querySelectorAll('[aria-label="Refresh server status"]'));
+  controls.forEach(el => { el.setAttribute('aria-disabled', 'true'); el.setAttribute('aria-busy', 'true'); });
+  try {
+    await loadDashboard();
+    if (S.token !== token) return;
+    if (!S.serverCatalog?.clusterComplete) toast('Some server statuses could not be refreshed. Check node connectivity.', 'bad');
+    else toast('Server statuses refreshed', 'ok');
+  } catch (error) {
+    if (S.token === token) toast(error.message || 'Refresh failed', 'bad');
+  } finally {
+    dashboardRefreshBusy = false;
+    dashboardRefreshAfter = Date.now() + 1500;
+    controls.forEach(el => { el.removeAttribute('aria-disabled'); el.removeAttribute('aria-busy'); });
+  }
+}
 let dashboardLoadSequence = 0;
 async function loadDashboard(skipRender = false, preferredRef = null) {
   const sequence = ++dashboardLoadSequence;
@@ -10084,6 +10141,7 @@ function formatNum(n) {
 }
 
 function filterServerCards(q) {
+  S.serverFilter = q || '';
   const cards = $$('.sift-server-card');
   const term = (q || '').toLowerCase();
   cards.forEach(c => {
@@ -11173,39 +11231,48 @@ function renderModrinthHitsHtml(hits) {
   }).join('');
 }
 
+let modrinthSearchSequence = 0;
+let modrinthSearchController = null;
 async function searchModrinth(skipDomWrite = false) {
   const srv = curServer();
   if (isSteelEngine(srv?.type)) return;
+  const sequence = ++modrinthSearchSequence;
+  modrinthSearchController?.abort();
+  const controller = new AbortController();
+  modrinthSearchController = controller;
+  const timer = setTimeout(() => controller.abort(), 20000);
+  const token = S.token;
+  const queryKey = () => JSON.stringify([S.q, S.plugLoader, S.plugVer, S.plugSort]);
+  const key = queryKey();
+  const live = () => sequence === modrinthSearchSequence && token === S.token && sameQolServer(srv, curServer()) && key === queryKey();
   const isMod = isModdedEngine(srv?.type || S.core);
   const engSlug = engineMeta(srv?.type || S.core).key;
-  const grid = $('#store-grid');
-  if (!skipDomWrite && grid) {
-    grid.innerHTML = loaderHtml(`Searching Modrinth ${isMod ? 'mods' : 'plugins'}...`);
-  }
-  const q = S.q || '';
-  const loader = S.plugLoader || (isMod ? (engSlug === 'leaf' ? '' : engSlug) : '');
-  const ver = S.plugVer || '';
-  const sort = S.plugSort || 'relevance';
+  const currentGrid = () => !skipDomWrite && S.view === 'plug' && (S.plugTab || 'browse') === 'browse' ? $('#store-grid') : null;
+  const grid = currentGrid();
+  S.lastModrinthHits = null;
+  if (grid) grid.innerHTML = loaderHtml(`Searching Modrinth ${isMod ? 'mods' : 'plugins'}...`);
   try {
     const params = new URLSearchParams({
-      query: q,
-      type: isMod ? 'mod' : 'plugin',
-      loader,
-      version: ver,
-      sort,
-      limit: '24'
+      query: S.q || '', type: isMod ? 'mod' : 'plugin',
+      loader: S.plugLoader || (isMod ? (engSlug === 'leaf' ? '' : engSlug) : ''),
+      version: S.plugVer || '', sort: S.plugSort || 'relevance', limit: '24'
     });
-    const res = await api(`/api/plugins/search?${params.toString()}`);
-    S.lastModrinthHits = res.hits || [];
-    if (!skipDomWrite && grid) {
-      grid.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
-      applyPermissionControls(grid);
+    const res = await api(`/api/plugins/search?${params.toString()}`, { signal: controller.signal, suppressToast: true });
+    if (!live()) return;
+    S.lastModrinthHits = Array.isArray(res.hits) ? res.hits : [];
+    const target = currentGrid();
+    if (target) {
+      target.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
+      applyPermissionControls(target);
     }
   } catch (e) {
+    if (!live()) return;
     S.lastModrinthHits = [];
-    if (!skipDomWrite && grid) {
-      grid.innerHTML = '<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">Error reaching Modrinth API.</div>';
-    }
+    const target = currentGrid();
+    if (target) target.innerHTML = '<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">Search failed or timed out. Change the search to try again.</div>';
+  } finally {
+    clearTimeout(timer);
+    if (modrinthSearchController === controller) modrinthSearchController = null;
   }
 }
 
@@ -12936,7 +13003,7 @@ const SUBUSER_PERMS = [
   ['server.power', 'Power Controls', 'Start, stop, restart, and kill server'],
   ['files.view', 'Browse Files', 'Browse directories and view file contents'],
   ['files.edit', 'Create & Edit Files', 'Upload, save edits, create files/folders'],
-  ['files.delete', 'Delete Files', 'Delete, rename, move, and extract archives'],
+  ['files.delete', 'Delete Files', 'Delete files; rename, move, and extract also require Edit Files'],
   ['sftp.access', 'SFTP Access', 'Connect with an SFTP client using your account credentials'],
   ['settings.view', 'View Settings', 'Inspect server settings and properties'],
   ['settings.edit', 'Edit Settings', 'Modify MOTD, difficulty, rules & configs'],
@@ -17697,7 +17764,7 @@ function clientRequestPermission(suffix, method = 'GET') {
   if (path === '/permissions') return '';
   if (path.startsWith('/files')) {
     if (read) return 'files.view';
-    if (/delete|rename|move|unzip/.test(path) || method === 'DELETE') return 'files.delete';
+    if (/delete|rename|move|unzip|extract/.test(path) || method === 'DELETE') return 'files.delete';
     return 'files.edit';
   }
   if (path.startsWith('/plugins')) return read ? 'files.view' : method === 'DELETE' ? 'files.delete' : 'files.edit';
@@ -17720,6 +17787,7 @@ function assertClientRequestAccess(endpoint, options = {}) {
   if (!match || match[3] === '/permissions' || S.user?.role === 'admin') return;
   const srv = { id: decodeURIComponent(match[2]), node_id: decodeURIComponent(match[1] || 'local') };
   const permission = clientRequestPermission(match[3], method);
+  if (!['GET', 'HEAD'].includes(method) && /^\/files\/(rename|move|unzip|extract)$/.test(match[3]) && !hasServerPermission('files.edit', srv)) throw Object.assign(new Error('Access restricted: files.edit required'), { status: 403 });
   if ((permission && !hasServerPermission(permission, srv)) || (match[3].startsWith('/files') && !hasServerPermission('files.view', srv))) throw Object.assign(new Error('Access restricted: ' + (permission || 'files.view') + ' required'), { status: 403 });
 }
 function applyPermissionControls(root) {
@@ -17735,6 +17803,7 @@ function applyPermissionControls(root) {
   if (['fi', 'plug'].includes(S.view)) {
     disable('#ed, #editor-save-btn, [onclick*="promptNew"], [onclick*="upload"], input[type="file"], [onclick*="Compress"], [onclick*="installPlugin"], [onchange*="togglePlugin"]', 'files.edit');
     disable('[onclick*="deleteFile"], [onclick*="deleteSelected"], [onclick*="RenameFile"], [onclick*="MoveFiles"], [onclick*="unzipFile"], [onclick*="unzipSelected"], [onclick*="deletePlugin"]', 'files.delete');
+    disable('[onclick*="RenameFile"], [onclick*="MoveFiles"], [onclick*="unzipFile"], [onclick*="unzipSelected"]', 'files.edit');
   }
 }
 V.sftp = () => `${srvh()}<div class="np-section-heading"><div><h2>SFTP</h2><p>One place for external file transfer connections.</p></div></div>${S.sftpLoading ? '<div class="card" role="status">Loading connection details…</div>' : S.sftp ? renderSftpCardHtml(curServer()) : `<div class="card" role="status">${esc(S.sftpError || 'Connection details are not loaded.')} <button class="btn sm" onclick="loadSFTPDetails()">Retry</button></div>`}`;
@@ -17830,7 +17899,7 @@ function renderAnnouncement() {
   const a = S.community?.announcement;
   if (!a?.enabled || !a.text || (a.dismissible && announcementDismissed(a.id))) return '';
   const tone = ['info', 'success', 'warning'].includes(a.tone) ? a.tone : 'info';
-  return `<aside class="np-announcement is-${tone}" aria-label="Panel announcement"><span>${esc(a.text)}</span>${a.dismissible && a.id ? '<button class="btn-ico" aria-label="Dismiss announcement" onclick="dismissAnnouncement()">&times;</button>' : ''}</aside>`;
+  return `<aside class="np-announcement is-${tone}" aria-label="Panel announcement"><span>${esc(a.text)}</span>${a.dismissible && a.id ? '<button type="button" class="btn-ico" aria-label="Dismiss announcement" onclick="dismissAnnouncement()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>' : ''}</aside>`;
 }
 function discordLogo() {
   return '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="currentColor"><path d="M19.7 4.5a18 18 0 0 0-4.5-1.4l-.6 1.2a16 16 0 0 0-5.2 0l-.6-1.2a18 18 0 0 0-4.5 1.4C1.5 8.7.7 12.8 1.1 16.8a18 18 0 0 0 5.5 2.8l1.1-1.8-1.7-.8.4-.3a13 13 0 0 0 11.2 0l.4.3-1.7.8 1.1 1.8a18 18 0 0 0 5.5-2.8c.5-4.7-.8-8.8-3.2-12.3ZM8.4 14.3c-1.1 0-1.9-1-1.9-2.2s.8-2.2 1.9-2.2 1.9 1 1.9 2.2-.8 2.2-1.9 2.2Zm7.2 0c-1.1 0-1.9-1-1.9-2.2s.8-2.2 1.9-2.2 1.9 1 1.9 2.2-.8 2.2-1.9 2.2Z"/></svg>';
