@@ -2,6 +2,7 @@ package runner
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -15,6 +16,22 @@ func sandboxResolverArgs(path string) []string {
 		return nil
 	}
 	return []string{"--ro-bind-try", resolved, "/etc/resolv.conf"}
+}
+
+// OSHI and other runtime libraries expect /etc/os-release, which may be a
+// symlink to /usr/lib/os-release. Expose only this public regular file.
+func sandboxOSReleaseArgs(candidates ...string) []string {
+	for _, candidate := range candidates {
+		resolved, err := filepath.EvalSymlinks(candidate)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(resolved)
+		if err == nil && info.Mode().IsRegular() {
+			return []string{"--ro-bind-try", resolved, "/etc/os-release"}
+		}
+	}
+	return nil
 }
 
 func systemdLimitsLabel(srv database.Server, tasksMax int) string {

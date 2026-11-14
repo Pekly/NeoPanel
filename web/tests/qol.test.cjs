@@ -195,6 +195,8 @@ function bulkDeleteSetup(paths) {
   c.S.selectedFiles = new Set(paths);
   c.syncFileSelectionUI = () => {};
   c.uiAlert = async () => {};
+  c.confirmFileDeletion = async options => await c.uiConfirm(options) ? { permanent: false } : null;
+  c.assertTrashAvailable = async () => {};
   return state;
 }
 test('bulk deletion uses one request for 100 files instead of a rate-limit burst', async () => {
@@ -207,6 +209,7 @@ test('bulk deletion uses one request for 100 files instead of a rate-limit burst
   assert.equal(requests[0].url, '/nodes/local/servers/a/files/delete-bulk');
   assert.equal(requests[0].options.method, 'POST');
   assert.equal(c.S.selectedFiles.size, 0);
+  assert.equal(JSON.parse(requests[0].options.body).permanent, false);
   assert.equal(c.qol.bulkDelete, null);
 });
 test('bulk delete preserves failed files and reports partial completion', async () => {

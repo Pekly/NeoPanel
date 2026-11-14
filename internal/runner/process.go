@@ -1239,6 +1239,7 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 		// Bind the resolved DNS file directly at /etc/resolv.conf. Binding its
 		// parent would expose all /etc on hosts using a regular resolver file.
 		bwrapArgs = append(bwrapArgs, sandboxResolverArgs("/etc/resolv.conf")...)
+		bwrapArgs = append(bwrapArgs, sandboxOSReleaseArgs("/etc/os-release", "/usr/lib/os-release")...)
 
 		// Security mask: hide sensitive host credentials from the jail
 		for _, maskPath := range []string{"/etc/shadow", "/etc/gshadow", "/etc/sudoers"} {

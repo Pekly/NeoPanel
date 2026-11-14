@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -80,5 +81,10 @@ func (m *ServerManager) DeleteServer(ctx context.Context, id string, cleanup fun
 		return err
 	}
 	m.removeInstanceLocked(id)
+	if m.trash != nil {
+		if err := m.trash.DeleteServer(id); err != nil {
+			log.Printf("Trash cleanup for deleted server %s: %v", id, err)
+		}
+	}
 	return nil
 }

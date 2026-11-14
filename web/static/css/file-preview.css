@@ -14,8 +14,11 @@
 .file-preview-message { background: var(--card-inner); border: 1px solid var(--border); border-radius: 10px; }
 .file-preview-message h3 { color: var(--tx); margin-bottom: 8px; font-size: 15px; }
 .file-preview-archive-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; justify-content: space-between; min-width: 0; }
-.file-preview-breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-.file-preview-breadcrumbs .btn { white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.file-preview-breadcrumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; color: var(--tx-muted); font-size: 12px; }
+.file-preview-breadcrumbs [aria-current] { color: var(--tx); overflow-wrap: anywhere; }
+.file-preview-crumb { appearance: none; padding: 4px 2px; border: 0; background: transparent; color: var(--ac); font: inherit; cursor: pointer; overflow-wrap: anywhere; }
+.file-preview-crumb:hover { text-decoration: underline; }
+.file-preview-crumb:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: 3px; }
 #zip-preview-search { width: min(100%, 260px); min-width: 0; }
 .file-preview-archive-table { border: 1px solid var(--border); border-radius: 10px; max-height: 420px; overflow: auto; min-width: 0; }
 .file-preview-archive-table table { width: 100%; border-collapse: collapse; text-align: left; }

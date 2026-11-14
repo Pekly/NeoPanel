@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/Pekly/NeoPanel/internal/database"
+	"github.com/Pekly/NeoPanel/internal/trash"
 )
 
 type ServerManager struct {
 	mu              sync.RWMutex
 	baseDir         string
 	backupDir       string
+	trash           *trash.Store
 	db              *database.DB
 	instances       map[string]*ProcessInstance
 	startupFailures map[string]int
@@ -36,6 +38,7 @@ func NewServerManager(baseDir string, db *database.DB) *ServerManager {
 	mgr := &ServerManager{
 		baseDir:         baseDir,
 		backupDir:       filepath.Join(filepath.Dir(baseDir), "backups"),
+		trash:           trash.New(filepath.Clean(baseDir) + "-trash"),
 		db:              db,
 		instances:       make(map[string]*ProcessInstance),
 		startupFailures: make(map[string]int),
@@ -43,6 +46,9 @@ func NewServerManager(baseDir string, db *database.DB) *ServerManager {
 		retryCancels:    make(map[string]chan struct{}),
 		startupTimeout:  DefaultStartupTimeout,
 		shutdownCh:      make(chan struct{}),
+	}
+	if err := mgr.trash.Sweep(1024); err != nil {
+		log.Printf("Trash startup cleanup: %v", err)
 	}
 	mgr.startIdleWatchdog()
 	mgr.startScheduleRunner()
@@ -80,6 +86,8 @@ func (m *ServerManager) cancelRetryLocked(srvID string) {
 func (m *ServerManager) GetWorkingDir(serverID string) string {
 	return filepath.Join(m.baseDir, serverID)
 }
+
+func (m *ServerManager) Trash() *trash.Store { return m.trash }
 
 func (m *ServerManager) GetInstance(serverID string) (*ProcessInstance, bool) {
 	m.mu.RLock()
@@ -538,6 +546,9 @@ func (m *ServerManager) GetStatsByID(serverID string) (database.ServerStats, boo
 func (m *ServerManager) ShutdownAll() {
 	m.shutdownOnce.Do(func() {
 		close(m.shutdownCh)
+		if m.trash != nil {
+			m.trash.Close()
+		}
 	})
 
 	m.mu.Lock()
@@ -573,6 +584,11 @@ func (m *ServerManager) startIdleWatchdog() {
 				return
 			case <-ticker.C:
 				m.checkIdleTimeouts()
+				if m.trash != nil {
+					if err := m.trash.Sweep(128); err != nil {
+						log.Printf("Trash cleanup: %v", err)
+					}
+				}
 			}
 		}
 	}()

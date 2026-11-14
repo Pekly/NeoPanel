@@ -52,8 +52,8 @@ h2 { letter-spacing: -.02em; font-size: 16px; }
 .btn.sm { min-height: 30px; }
 .btn:not(.pr):not(.stop):not(.dg):hover { background: var(--card-hover); color: var(--tx); }
 .btn:active:not(:disabled), .create-server-dashed-card:active { transform: translateY(1px); }
-.btn.dg { background: transparent; border-color: transparent; }
-.btn.dg:hover { border-color: var(--er-glow); }
+.btn.dg { background: color-mix(in srgb, var(--er) 16%, var(--card-bg-solid)); border-color: color-mix(in srgb, var(--er) 45%, var(--border)); color: var(--er); }
+.btn.dg:hover:not(:disabled) { background: color-mix(in srgb, var(--er) 25%, var(--card-bg-solid)); border-color: var(--er); color: var(--er); }
 .btn:disabled { opacity: .42; }
 .btn svg { flex-shrink: 0; }
 .badge { border-radius: 5px; font-size: 11px; font-weight: 500; gap: 6px; }
@@ -551,3 +551,15 @@ html[data-theme="light"] .steel-info-badge { color: #92400e; }
   .vm-dash-row-meters { width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .vm-dash-row-actions { margin-left: auto; }
 }
+
+/* Selection is state, not a hover effect. Keep it visible in every file layout. */
+input[type="checkbox"]:not(.no-ccheck):is(:checked, :indeterminate):hover:not(:disabled) { background: var(--ac); border-color: var(--ac); box-shadow: 0 0 0 3px var(--ac-subtle); }
+.file-table tr.row-selected > td, .file-table tr.row-selected:hover > td { background: var(--ac-subtle); }
+.file-table tr.row-selected > td:first-child { box-shadow: inset 3px 0 var(--ac); }
+.vm-file-card.selected, .vm-file-card.selected:hover { background: var(--ac-subtle); border-color: var(--ac); box-shadow: inset 0 0 0 1px var(--ac); }
+.file-trash-list { display: grid; gap: 10px; }
+.file-trash-item { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--card-inner); }
+.file-trash-item > div:first-child { min-width: 0; flex: 1 1 220px; overflow-wrap: anywhere; }
+.file-trash-item .row { gap: 8px; flex-wrap: wrap; }
+.file-delete-choice { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.file-delete-choice:has(input:checked) { background: color-mix(in srgb, var(--er) 12%, var(--card-bg-solid)); border-color: var(--er); }

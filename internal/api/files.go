@@ -292,7 +292,7 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := root.RemoveAll(fullPath); err != nil {
+	if err := h.deleteFile(serverID, root, fullPath, r.URL.Query().Get("permanent") == "true"); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to delete file/folder"})
 		return
 	}
@@ -312,8 +312,8 @@ type bulkDeleteFailure struct {
 	Error string `json:"error"`
 }
 
-// DeleteBulk validates the whole batch before removing anything. RemoveAll is
-// idempotent, so duplicates, missing paths and overlapping directories are safe.
+// DeleteBulk validates the whole batch before removing anything. Missing paths,
+// duplicates and overlapping directories remain idempotent in either mode.
 func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
@@ -323,7 +323,8 @@ func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	defer root.Close()
 	var req struct {
-		Paths []string `json:"paths"`
+		Paths     []string `json:"paths"`
+		Permanent bool     `json:"permanent"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBulkDeleteBody)
 	decoder := json.NewDecoder(r.Body)
@@ -374,7 +375,7 @@ func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 		Failed  []bulkDeleteFailure `json:"failed"`
 	}{Deleted: make([]string, 0, len(req.Paths)), Failed: make([]bulkDeleteFailure, 0)}
 	for i, fullPath := range fullPaths {
-		if err := root.RemoveAll(fullPath); err != nil {
+		if err := h.deleteFile(serverID, root, fullPath, req.Permanent); err != nil {
 			result.Failed = append(result.Failed, bulkDeleteFailure{Path: req.Paths[i], Error: err.Error()})
 			continue
 		}

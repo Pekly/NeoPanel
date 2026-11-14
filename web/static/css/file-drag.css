@@ -1,0 +1,46 @@
+/* No full-screen hit-test surface: folders remain reachable during native drag. */
+.np-files-workspace [data-file-drag][draggable="true"] { cursor: grab; }
+.np-files-workspace .np-file-dragging { opacity: .45; }
+.np-file-drop-target {
+  outline: 2px solid var(--ac, #6b9cff);
+  outline-offset: -2px;
+  background-color: color-mix(in srgb, var(--ac, #6b9cff) 12%, var(--card-bg-solid, #18202e));
+  border-radius: 6px;
+}
+.np-files-workspace.np-file-drop-target { outline-style: dashed; }
+#dropzone-overlay.np-file-drop-hint {
+  position: fixed;
+  inset: auto 24px 24px auto;
+  width: auto;
+  height: auto;
+  max-width: min(520px, calc(100vw - 48px));
+  box-sizing: border-box;
+  padding: 12px 16px;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  flex-direction: row;
+  background: var(--card-bg-solid, #18202e);
+  color: var(--tx, #eef3ff);
+  border: 1px solid var(--ac, #6b9cff);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px #0003;
+  font-size: 13px;
+  line-height: 1.5;
+  pointer-events: none !important;
+  backdrop-filter: none;
+  z-index: 100;
+}
+#dropzone-overlay.np-file-drop-hint * { pointer-events: none !important; }
+.np-file-drop-hint svg { width: 22px; height: 22px; flex: 0 0 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.np-file-drop-label { min-width: 0; overflow-wrap: anywhere; }
+.np-file-drag-pending .np-files-workspace [data-file-drag] { cursor: progress; }
+/* Do not use display:none, visibility:hidden, or detach the native drag source. */
+.np-file-drag-parking { position: fixed; left: -10000px; top: 0; width: 300px; opacity: .01; pointer-events: none; }
+@media (max-width: 640px) {
+  #dropzone-overlay.np-file-drop-hint { inset: auto 12px 12px 12px; max-width: none; padding: 10px 12px; font-size: 12px; }
+}
+@media (forced-colors: active) {
+  .np-file-drop-target { outline-color: Highlight; }
+  #dropzone-overlay.np-file-drop-hint { border-color: Highlight; }
+}

@@ -43,13 +43,14 @@ function setup(mode = 'list') {
   const c = vm.createContext({
     S: { fileList: [], files: {}, selectedFiles: new Set(), players: [], wl: [], bans: [], bk: [] },
     ic: () => '', head: () => '', srvh: () => '', getViewMode: () => mode,
+    hasServerPermission: () => true,
     renderViewModeToggle: () => '', renderRestoreNotice: () => '', renderFileBulkBarHtml: () => '',
     sortFileItems: list => list, fileListIconHtml: () => '', getFileExtension: () => 'txt',
     formatFileSize: () => '1 B', formatFileDate: () => 'Today', formatBytes: () => '1 B',
     event: { key: 'Enter', stopPropagation() {}, preventDefault() {} }, calls: []
   });
   vm.runInContext(section('const esc =', 'const DEFAULT_USER_AVATAR_URL') + `\nthis.views = ({${section('\n  pl() {', '\n  plug() {')}${section('\n  bk() {', '\n  sc() {')}});`, c);
-  for (const name of ['openFile', 'browseFolder', 'toggleFileSelect', 'downloadFileItem', 'playerAction', 'downloadBackup', 'deleteBackup', 'restoreBackup']) {
+  for (const name of ['openFile', 'browseFolder', 'loadFileList', 'toggleFileSelect', 'downloadFileItem', 'playerAction', 'downloadBackup', 'deleteBackup', 'restoreBackup']) {
     c[name] = (...args) => c.calls.push([name, ...args]);
   }
   return c;
@@ -69,7 +70,7 @@ for (const mode of ['list', 'icons', 'tiles']) {
       const checks = rendered.filter(el => el.attrs.onchange?.startsWith('toggleFileSelect('));
       assert.equal(checks.length, 2);
       for (const el of checks) { invoke(c, el, 'onchange'); assert.deepEqual(c.calls.at(-1).slice(1), [`${c.S.currentDir}/${payload}`, true]); }
-      const crumbs = rendered.filter(el => el.attrs.onclick === 'browseFolder(this.dataset.path)');
+      const crumbs = rendered.filter(el => el.attrs.onclick === 'loadFileList(this.dataset.path)');
       for (const el of crumbs) { invoke(c, el); assert.equal(c.calls.at(-1)[1], el.dataset.path); }
       assert.equal(crumbs.at(-1).dataset.path, c.S.currentDir.split('/').filter(Boolean).join('/'));
       c.S.editingFile = payload;

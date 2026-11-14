@@ -195,11 +195,11 @@ function renderUploadQueue() {
     </div>`).join('')}</div>
     <div class="row" style="gap:8px;margin-top:10px">${c.failed ? '<button class="btn sm" onclick="retryFailedUploads()">Retry failed</button>' : ''}${c.queued + c.uploading ? '<button class="btn sm dg" onclick="cancelAllUploads()">Cancel pending</button>' : ''}</div>`;
 }
-function enqueueUploads(files) {
+function enqueueUploads(files, destination = S.currentDir || '') {
   if (typeof hasServerPermission === 'function' && (!hasServerPermission('files.view') || !hasServerPermission('files.edit'))) { toast('Access restricted: files.view and files.edit required', 'bad'); return; }
   const srv = curServer();
   if (!srv || !files?.length) return;
-  const dir = S.currentDir || '';
+  const dir = destination;
   for (const file of files) QOL.uploads.push({ id: ++QOL.uploadID, file, dir, server: { ...srv }, user: S.user?.id || S.user?.username, status: 'queued', progress: 0, error: '' });
   renderUploadQueue();
   return processUploadQueue();

@@ -235,6 +235,9 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/create", r.requireAuth(r.files.Create))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files", r.requireAuth(r.files.Delete))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/delete-bulk", r.requireAuth(r.files.DeleteBulk))
+	r.mux.HandleFunc("GET /api/servers/{id}/files/trash", r.requireAuth(r.files.ListTrash))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/trash/{trashId}/restore", r.requireAuth(r.files.RestoreTrash))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/files/trash/{trashId}", r.requireAuth(r.files.PurgeTrash))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload", r.requireAuth(r.files.Upload))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/download", r.requireAuth(r.files.Download))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/rename", r.requireAuth(r.files.Rename))
@@ -605,6 +608,18 @@ func serverActionPermission(method, suffix string) string {
 	case "power":
 		return "server.power"
 	case "files":
+		if len(parts) > 1 && parts[1] == "trash" {
+			if read {
+				return "files.view+files.delete"
+			}
+			if method == http.MethodPost {
+				return "files.view+files.edit+files.delete"
+			}
+			if method == http.MethodDelete {
+				return "files.delete"
+			}
+			return "owner"
+		}
 		if method == http.MethodPost && suffix == "files/delete-bulk" {
 			return "files.delete"
 		}

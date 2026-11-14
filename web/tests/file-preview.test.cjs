@@ -198,3 +198,14 @@ test('rerenders retain the original video element and playback state', async () 
   assert.equal(video.paused, false); assert.equal(elements['#file-preview-loading'].hidden, true);
   assert.equal(c.preview.retainedMedia, null);
 });
+
+test('archive breadcrumbs do not inherit sidebar nav styling and current folder is not a button', async () => {
+  const { c } = setup('zip');
+  await c.openQolFile('map.zip');
+  assert.match(c.lastHTML, /<div role="navigation" aria-label="ZIP folders"/);
+  assert.doesNotMatch(c.lastHTML, /<nav/);
+  assert.match(c.lastHTML, /<span aria-current="location">Archive root<\/span>/);
+  c.browseZipPreview('config/');
+  assert.match(c.lastHTML, /class="file-preview-crumb" data-path=""/);
+  assert.match(c.lastHTML, /<span aria-current="location">config<\/span>/);
+});

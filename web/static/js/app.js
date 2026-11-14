@@ -6297,6 +6297,7 @@ const V = {
   },
 
   fi() {
+    if (S.fileTrashOpen) return `${srvh()}${renderFileTrash()}`;
     const preview = typeof renderFilePreview === 'function' ? renderFilePreview() : '';
     if (preview) return `${srvh()}${preview}`;
     const f = S.editingFile || S.ftab;
@@ -6357,7 +6358,7 @@ const V = {
           </thead>
           <tbody>
             ${isSubdir ? `
-              <tr onclick="browseFolder('..')">
+              <tr data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <td class="file-select-cell"></td>
                 <td class="file-icon-cell"><span class="fi-badge up" title="Parent folder">${ic('folderUp', 15)}</span></td>
                 <td class="file-name-cell" colspan="5" style="font-weight: 600; color: var(--tx);">.. (Parent folder)</td>
@@ -6373,7 +6374,7 @@ const V = {
               const isSelected = S.selectedFiles.has(itemPath);
 
               return `
-              <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
+              <tr class="file-row ${isSelected ? 'row-selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}" data-file-drag data-is-dir="${isDir}" ${isDir ? `data-drop-path="${esc(itemPath)}"` : ''}
                   onclick="${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}"
                   oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <td class="file-select-cell" onclick="event.stopPropagation();">
@@ -6410,7 +6411,7 @@ const V = {
           ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
           : `<div class="vm-icons-grid">
             ${isSubdir ? `
-              <div class="vm-icon-card vm-file-card" onclick="browseFolder('..')">
+              <div class="vm-icon-card vm-file-card" data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <div class="vm-file-head"><span></span><span></span></div>
                 <div class="vm-file-center">
                   <span class="fi-badge up lg" title="Parent folder">${ic('folderUp', 24)}</span>
@@ -6424,7 +6425,7 @@ const V = {
               const itemPath = item.path || item.name;
               const isSelected = S.selectedFiles.has(itemPath);
               return `
-              <div class="vm-icon-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
+              <div class="vm-icon-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}" data-file-drag data-is-dir="${isDir}" ${isDir ? `data-drop-path="${esc(itemPath)}"` : ''}
                    onclick="${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}"
                    oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <div class="vm-file-head" onclick="event.stopPropagation();">
@@ -6459,7 +6460,7 @@ const V = {
           ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
           : `<div class="vm-tiles-grid">
             ${isSubdir ? `
-              <div class="vm-tile-card vm-file-card" onclick="browseFolder('..')">
+              <div class="vm-tile-card vm-file-card" data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <div class="vm-tile-file-row">
                   <span class="fi-badge up md" title="Parent folder">${ic('folderUp', 18)}</span>
                   <div class="vm-tile-file-info">
@@ -6475,7 +6476,7 @@ const V = {
               const itemPath = item.path || item.name;
               const isSelected = S.selectedFiles.has(itemPath);
               return `
-              <div class="vm-tile-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}"
+              <div class="vm-tile-card vm-file-card file-row ${isSelected ? 'selected' : ''}" data-name="${esc(item.name)}" data-path="${esc(itemPath)}" data-file-drag data-is-dir="${isDir}" ${isDir ? `data-drop-path="${esc(itemPath)}"` : ''}
                    onclick="${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}"
                    oncontextmenu="handleFileContextMenu(event, ${idx}); return false;">
                 <div class="vm-tile-file-row">
@@ -6506,11 +6507,11 @@ const V = {
       <div class="row sb np-files-toolbar">
         <!-- Breadcrumb Navigation -->
         <div class="breadcrumb" style="font-size: 13.5px; font-weight: 500; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
-          <span onclick="browseFolder('')" style="color: var(--tx-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">${ic('folder', 15)} / home / container /</span>
+          <span data-drop-path="" onclick="loadFileList('')" style="color: var(--tx-muted); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">${ic('folder', 15)} / home / container /</span>
           ${pathParts.map((part, idx) => {
             const sub = pathParts.slice(0, idx + 1).join('/');
             const isLast = idx === pathParts.length - 1;
-            return `<span data-path="${esc(sub)}" onclick="browseFolder(this.dataset.path)" style="cursor: pointer; color: ${isLast ? 'var(--tx)' : 'var(--tx-muted)'};">${esc(part)} /</span>`;
+            return `<span data-path="${esc(sub)}" data-drop-path="${esc(sub)}" onclick="loadFileList(this.dataset.path)" style="cursor: pointer; color: ${isLast ? 'var(--tx)' : 'var(--tx-muted)'};">${esc(part)} /</span>`;
           }).join('')}
         </div>
 
@@ -6530,6 +6531,7 @@ const V = {
             <button type="button" class="btn sm" onclick="setFileSort(S.fileSort?.by || 'name', S.fileSort?.dir === 'desc' ? 'asc' : 'desc')" style="height: 36px; padding: 0 11px;" title="Toggle ascending / descending order (folders always stay first)">${sortDir === 'asc' ? '&uarr; Asc' : '&darr; Desc'}</button>
           </div>
           ${renderViewModeToggle('files', 'list')}
+          <button class="btn" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}>${ic('trash', 14)} Trash</button>
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
           <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
           <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
@@ -9374,6 +9376,7 @@ window.R = function() {
     window.NP._emit('render', { view: S.view, server: curServer() });
   }
   window.NPFind?.refresh();
+  window.NPFileDrag?.afterRender($('#main'));
 };
 
 function bindConsoleInput() {
@@ -10071,34 +10074,51 @@ function addWhitelistPlayer() {
 }
 
 // --- File Manager Operations ---
-async function loadFileList(path = '', skipRender = false) {
+let fileListSequence = 0;
+let fileListController = null;
+async function loadFileList(path = '', skipRender = false, options = {}) {
   const srv = curServer();
-  if (!srv) return;
+  if (!srv || (options.isCurrent && !options.isCurrent())) return false;
+  const sequence = ++fileListSequence, token = S.token;
+  fileListController?.abort();
+  const controller = new AbortController();
+  fileListController = controller;
+  const timer = setTimeout(() => controller.abort(), 20000);
+  const ownsRequest = () => sequence === fileListSequence && token === S.token && sameQolServer(srv, curServer());
+  const live = () => ownsRequest() && (!options.isCurrent || options.isCurrent());
   if (!S.loading) S.loading = {};
   const dirChanged = path !== S.currentDir;
   if (dirChanged) {
     ++QOL.openSequence;
     if (typeof disposeFilePreview === 'function') disposeFilePreview();
   }
-  if (dirChanged && S.selectedFiles) {
-    S.selectedFiles.clear();
-  }
   if (dirChanged || !S.fileList || S.fileList.length === 0) {
     S.loading.files = true;
     if (!skipRender && S.view === 'fi') R();
   }
   try {
-    const data = await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`));
-    if (!sameQolServer(srv, curServer())) return;
-    S.fileList = data || [];
+    const data = await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`), { signal: controller.signal, suppressToast: true });
+    if (!live()) return false;
+    if (!Array.isArray(data)) throw Error('Invalid directory response');
+    if (dirChanged) S.selectedFiles?.clear();
+    S.fileList = data;
     S.currentDir = path;
-  } catch (e) {} finally {
-    S.loading.files = false;
-    if (!skipRender && S.view === 'fi') R();
+    return true;
+  } catch (error) {
+    if (live()) toast(error.name === 'AbortError' ? 'Folder request timed out' : error.message || 'Could not open folder', 'bad');
+    return false;
+  } finally {
+    clearTimeout(timer);
+    if (ownsRequest()) {
+      fileListController = null;
+      S.loading.files = false;
+      if (!skipRender && S.view === 'fi') R();
+    }
   }
 }
 
 function browseFolder(dirName) {
+  if (dirName === '') { loadFileList(''); return; }
   if (dirName === '..') {
     const parts = S.currentDir.split('/').filter(Boolean);
     parts.pop();
@@ -10645,30 +10665,22 @@ async function promptRenameFile(oldPath) {
 }
 
 async function deleteFileItem(path) {
+  const srv = curServer(), token = S.token, directory = S.currentDir;
+  if (!srv || QOL.singleDelete || QOL.bulkDelete) return;
+  QOL.singleDelete = true;
   const baseName = path.split('/').pop();
-  const ok = await uiConfirm({
-    title: 'Delete Item',
-    message: `Are you sure you want to permanently delete <b>${esc(baseName)}</b>? This action cannot be undone.`,
-    confirmText: 'Delete',
-    cancelText: 'Cancel',
-    isDanger: true
-  });
-  if (!ok) return;
-
-  const srv = curServer();
-  if (!srv) return;
   try {
-    await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}`), { method: 'DELETE' });
-    toast(`Deleted ${baseName}`, 'ok');
-    loadFileList(S.currentDir);
-  } catch (e) {
-    toast(`Delete failed: ${e.message}`, 'bad');
-    uiAlert({
-      title: 'Delete Failed',
-      message: `Could not delete <b>${esc(baseName)}</b>: ${esc(e.message || 'Permission denied or file in use.')}`,
-      type: 'error'
-    });
-  }
+    const choice = await confirmFileDeletion({ title: 'Delete item?', description: `<p>Remove <b>${esc(baseName)}</b> from this folder?</p>` });
+    if (!choice || token !== S.token || !sameQolServer(srv, curServer())) return;
+    if (!choice.permanent) await assertTrashAvailable(srv);
+    if (token !== S.token || !sameQolServer(srv, curServer())) return;
+    await api(srvApiPath(srv, `/files?path=${encodeURIComponent(path)}&permanent=${choice.permanent}`), { method: 'DELETE' });
+    if (token !== S.token || !sameQolServer(srv, curServer())) return;
+    toast(choice.permanent ? `Permanently deleted ${baseName}` : `Moved ${baseName} to Trash`, 'ok');
+    if (S.currentDir === directory && S.view === 'fi') await loadFileList(directory);
+  } catch (error) {
+    if (token === S.token && sameQolServer(srv, curServer())) toast(`Delete failed: ${error.message}`, 'bad');
+  } finally { QOL.singleDelete = false; }
 }
 
 async function promptNewFile() {
@@ -10814,27 +10826,27 @@ async function deleteSelectedFiles() {
   const selection = S.selectedFiles;
   const paths = Array.from(selection || []);
   const directory = S.currentDir;
-  if (!srv || !paths.length || QOL.bulkDelete) return;
+  const token = S.token;
+  if (!srv || !paths.length || QOL.bulkDelete || QOL.singleDelete) return;
   QOL.bulkDelete = { server: srv };
   let deleted = 0;
   const failures = [];
   try {
-    const ok = await uiConfirm({
-      title: 'Delete Selected Items',
-      message: `Permanently delete <b>${paths.length}</b> selected item${paths.length > 1 ? 's' : ''} from <b>${esc(srv.name)}</b>? This action cannot be undone.`,
-      confirmText: `Delete ${paths.length} Item${paths.length > 1 ? 's' : ''}`,
-      cancelText: 'Cancel', isDanger: true
-    });
-    if (!ok || !sameQolServer(srv, curServer())) return;
+    const choice = await confirmFileDeletion({ title: 'Delete selected items?', description: `<p>Remove <b>${paths.length}</b> selected item${paths.length > 1 ? 's' : ''} from <b>${esc(srv.name)}</b>?</p>` });
+    if (!choice || token !== S.token || !sameQolServer(srv, curServer())) return;
+    try { if (!choice.permanent) await assertTrashAvailable(srv); }
+    catch (error) { toast(error.message || 'Could not confirm Trash support', 'bad'); return; }
+    if (token !== S.token || !sameQolServer(srv, curServer())) return;
     syncFileSelectionUI();
     toast(`Deleting ${paths.length} items…`);
     // A bulk request costs one rate-limit token, rather than one per file.
     // Pace unusually large selections so chunks don't create another burst.
     for (let offset = 0; offset < paths.length; offset += 1000) {
+      if (token !== S.token || !sameQolServer(srv, curServer())) break;
       const chunk = paths.slice(offset, offset + 1000);
       try {
         const result = await api(srvApiPath(srv, '/files/delete-bulk'), {
-          method: 'POST', body: JSON.stringify({ paths: chunk }), suppressToast: true
+          method: 'POST', body: JSON.stringify({ paths: chunk, permanent: choice.permanent }), suppressToast: true
         });
         if (!Array.isArray(result.deleted) || !Array.isArray(result.failed)) throw new Error('Invalid bulk-delete response. Update the panel and worker node together.');
         const completed = new Set(result.deleted);
@@ -10855,7 +10867,7 @@ async function deleteSelectedFiles() {
         title: 'Bulk Delete Incomplete', type: 'error',
         message: `<p>${remaining} item(s) remain selected for retry.</p><ul>${failures.slice(0, 8).map(item => `<li>${item.path ? `<b>${esc(item.path)}</b>: ` : ''}${esc(item.error)}</li>`).join('')}</ul>`
       });
-    } else toast(`Deleted ${deleted} items`, 'ok');
+    } else toast(choice.permanent ? `Permanently deleted ${deleted} items` : `Moved ${deleted} items to Trash`, 'ok');
     if (sameQolServer(srv, curServer()) && S.currentDir === directory) await loadFileList(directory);
   } finally {
     QOL.bulkDelete = null;
@@ -11028,43 +11040,7 @@ function uploadFileDialog() {
 
 async function uploadFilesWithProgress(files) { return enqueueUploads(files); }
 
-function initDragAndDrop() {
-  let dragCounter = 0;
-  const overlay = $('#dropzone-overlay');
-
-  window.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-    if (S.view !== 'fi') return;
-    dragCounter++;
-    if (overlay) overlay.style.display = 'flex';
-  });
-
-  window.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    if (S.view !== 'fi') return;
-  });
-
-  window.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    if (S.view !== 'fi') return;
-    dragCounter--;
-    if (dragCounter <= 0) {
-      dragCounter = 0;
-      if (overlay) overlay.style.display = 'none';
-    }
-  });
-
-  window.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dragCounter = 0;
-    if (overlay) overlay.style.display = 'none';
-    if (S.view !== 'fi') return;
-
-    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      uploadFilesWithProgress(Array.from(e.dataTransfer.files));
-    }
-  });
-}
+function initDragAndDrop() { window.NPFileDrag?.init(); }
 
 // --- Plugins & Modrinth Store ---
 async function loadPluginsList(skipRender = false) {
@@ -17013,6 +16989,7 @@ async function logout() {
   });
   if (!ok) return;
   window.NPFind?.close();
+  window.NPFileDrag?.cancel();
   window.NPMotion?.resetSession();
   cancelAllUploads();
   QOL.uploads = [];
@@ -17694,6 +17671,8 @@ function accessIdentity(srv = curServer()) {
   return JSON.stringify([S.token, S.user?.id, S.user?.role, srv?.node_id || 'local', srv?.id]);
 }
 function resetServerAccess() {
+  if (typeof resetFileTrash === 'function') resetFileTrash();
+  window.NPFileDrag?.cancel();
   S.serverAccess?.controller?.abort();
   S.serverAccess = null;
   clearTimeout(S.wsReconnectTimer);
@@ -17767,6 +17746,7 @@ function clientRequestPermission(suffix, method = 'GET') {
   const path = suffix.split('?')[0];
   if (path === '/permissions') return '';
   if (path.startsWith('/files')) {
+    if (path === '/files/trash' || path.startsWith('/files/trash/')) return 'files.delete';
     if (read) return 'files.view';
     if (/delete|rename|move|unzip|extract/.test(path) || method === 'DELETE') return 'files.delete';
     return 'files.edit';
@@ -17791,7 +17771,7 @@ function assertClientRequestAccess(endpoint, options = {}) {
   if (!match || match[3] === '/permissions' || S.user?.role === 'admin') return;
   const srv = { id: decodeURIComponent(match[2]), node_id: decodeURIComponent(match[1] || 'local') };
   const permission = clientRequestPermission(match[3], method);
-  if (!['GET', 'HEAD'].includes(method) && /^\/files\/(rename|move|unzip|extract)$/.test(match[3]) && !hasServerPermission('files.edit', srv)) throw Object.assign(new Error('Access restricted: files.edit required'), { status: 403 });
+  if (!['GET', 'HEAD'].includes(method) && (/^\/files\/(rename|move|unzip|extract)$/.test(match[3]) || /^\/files\/trash\/[^/]+\/restore$/.test(match[3])) && !hasServerPermission('files.edit', srv)) throw Object.assign(new Error('Access restricted: files.edit required'), { status: 403 });
   if ((permission && !hasServerPermission(permission, srv)) || (match[3].startsWith('/files') && !hasServerPermission('files.view', srv))) throw Object.assign(new Error('Access restricted: ' + (permission || 'files.view') + ' required'), { status: 403 });
 }
 function applyPermissionControls(root) {

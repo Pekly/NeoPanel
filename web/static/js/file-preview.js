@@ -169,7 +169,7 @@ function archivePreviewHtml(preview) {
   for (const name of preview.folder.split('/').filter(Boolean)) { prefix += name + '/'; crumbs.push({ name, path: prefix }); }
   const entry = preview.entry;
   return `<p class="mu">Browse this archive without extracting it. Text entries can be previewed read-only; binary entries cannot be edited here.</p>
-    <div class="file-preview-archive-tools"><nav aria-label="ZIP folders" class="file-preview-breadcrumbs">${crumbs.map(crumb => `<button type="button" class="btn sm" data-path="${esc(crumb.path)}" onclick="browseZipPreview(this.dataset.path)">${esc(crumb.name)}</button>`).join('<span aria-hidden="true">/</span>')}</nav>
+    <div class="file-preview-archive-tools"><div role="navigation" aria-label="ZIP folders" class="file-preview-breadcrumbs">${ic('archive', 15)} ${crumbs.map((crumb, i) => i === crumbs.length - 1 ? `<span aria-current="location">${esc(crumb.name)}</span>` : `<button type="button" class="file-preview-crumb" data-path="${esc(crumb.path)}" onclick="browseZipPreview(this.dataset.path)">${esc(crumb.name)}</button>`).join('<span class="mu" aria-hidden="true">/</span>')}</div>
     <input id="zip-preview-search" type="search" value="${esc(preview.query)}" aria-label="Search ZIP folder" placeholder="Search this folder…" oninput="filterZipPreview(this.value)"></div>
     <div class="file-preview-archive-table"><table><thead><tr><th>Name</th><th>Uncompressed size</th><th>Action</th></tr></thead><tbody id="zip-preview-rows">${archiveRowsHtml(preview)}</tbody></table></div>
     <p class="mu">${preview.entries.length} entries · Nothing has been extracted or changed.</p>
