@@ -13172,15 +13172,16 @@ async function submitSubuserModal(e, subuserId = '') {
 
 async function deleteServerSubuser(subuserId) {
   const srv = curServer();
+  const token = S.token;
   if (!srv) return;
   const ok = await uiConfirm({
     title: 'Remove team access',
-    message: 'Are you sure you want to revoke this user\'s access to the server?',
+    message: '<p>Remove this user’s access to the server?</p><p class="mu">On local-only installations, an account created through an invitation is also deleted if it has no other server access or protected role. Existing independent accounts are kept. Shared/exported accounts are retained for safe review.</p>',
     confirmText: 'Revoke Access',
     isDanger: true,
     icon: 'trash'
   });
-  if (!ok) return;
+  if (!ok || token !== S.token || !sameQolServer(srv, curServer())) return;
 
   try {
     await api(srvApiPath(srv, `/subusers/${encodeURIComponent(subuserId)}`), { method: 'DELETE' });
@@ -13610,6 +13611,7 @@ function openDeleteServerModal(srvId, srvName, nodeId = null) {
 
       <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:13px; color:#fca5a5; line-height:1.5;">
         <b>Warning:</b> This process is completely irreversible. All world data, player inventories, plugin configs, and assigned port allocations will be wiped immediately.
+        <p style="margin:10px 0 0;">Eligible invitation-created accounts with no remaining server access are also removed on local-only installations. Independent, privileged, and shared/exported accounts are preserved.</p>
       </div>
 
       <label class="f" style="margin-bottom:20px;">
@@ -14961,229 +14963,7 @@ async function sendAdminTestEmail(btn) {
   }
 }
 
-function openResetPasswordModal() {
-  openModal({
-    title: 'Reset Account Password',
-    body: `
-      <div style="font-size: 13.5px; line-height: 1.6; color: var(--tx-secondary);">
-        <p style="margin-top: 0; margin-bottom: 12px;">
-          Enter your registered username or email address below. We'll send you a password reset verification link and code.
-        </p>
-        <div style="margin-bottom: 14px;">
-          <label class="lbl" style="font-size: 12px; margin-bottom: 6px;">Username or Email Address</label>
-          <input type="text" id="reset-identity" class="inp" placeholder="e.g. admin or user@example.com" autocomplete="username" autofocus onkeydown="if(event.key==='Enter')submitResetPasswordRequest()">
-        </div>
-        ${S.turnstileEnabled ? '<div id="turnstile-reset" class="turnstile-wrap" style="margin-bottom:12px;"></div>' : ''}
-        <div class="lerr" id="reset-err" role="alert" style="margin-bottom: 10px; color:#ef4444; font-size:12.5px;"></div>
-        <div class="row" style="margin-top: 6px;">
-          <a href="javascript:void(0)" onclick="openSetNewPasswordModal()" style="font-size: 12px; color: var(--ac); text-decoration: none;">
-            Already have a reset code? Enter it here &rarr;
-          </a>
-        </div>
-      </div>
-    `,
-    buttons: [
-      { label: 'Cancel', class: 'btn', onClick: () => closeModal() },
-      {
-        label: 'Send Reset Link',
-        class: 'btn pr',
-        onClick: () => submitResetPasswordRequest()
-      }
-    ]
-  });
-
-  if (S.turnstileEnabled) {
-    mountTurnstileWidget('#turnstile-reset');
-  }
-  setTimeout(() => $('#reset-identity')?.focus(), 150);
-}
-
-async function submitResetPasswordRequest() {
-  const identity = $('#reset-identity')?.value.trim();
-  const err = $('#reset-err');
-  if (!identity) {
-    if (err) err.textContent = 'Please enter your username or email address.';
-    return;
-  }
-
-  if (S.turnstileEnabled && !S.turnstileToken) {
-    if (err) err.textContent = 'Please complete the Cloudflare Turnstile security check.';
-    return;
-  }
-
-  const btn = $('#modal-container .btn.pr');
-  setBtnLoading(btn, true, 'Sending...');
-
-  try {
-    const res = await (await fetch('/api/auth/password-reset/request', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        identity,
-        'cf-turnstile-response': S.turnstileToken
-      })
-    })).json();
-
-    setBtnLoading(btn, false);
-    resetTurnstileWidget();
-
-    if (res.error) {
-      if (err) err.textContent = res.error;
-      return;
-    }
-
-    closeModal();
-    if (res.token) {
-      uiAlert({
-        title: 'Password Reset Code Generated',
-        message: `
-          <div style="font-size:13.5px; line-height:1.6;">
-            <p style="margin-top:0;">${esc(res.message || 'A reset verification code was generated.')}</p>
-            <div style="background:rgba(255,255,255,0.05); border:1px solid var(--border); border-radius:8px; padding:12px; margin:14px 0;">
-              <span class="mu" style="font-size:11.5px; display:block; margin-bottom:4px;">Your Reset Code:</span>
-              <code class="mono" style="font-size:14px; color:#38bdf8; font-weight:bold; user-select:all;">${esc(res.token)}</code>
-            </div>
-            <p class="mu" style="font-size:12px; margin-bottom:0;">Click the button below to set your new password now using this code.</p>
-          </div>
-        `,
-        type: 'info',
-        confirmText: 'Set New Password Now',
-        onConfirm: () => openSetNewPasswordModal(res.token)
-      });
-    } else {
-      uiAlert({
-        title: 'Reset Instructions Sent',
-        message: `
-          <div style="font-size:13.5px; line-height:1.6;">
-            <p style="margin-top:0;">${esc(res.message || 'If an account exists with that address, instructions and a verification code have been sent.')}</p>
-            <p class="mu" style="font-size:12.5px;">Please check your email inbox (and spam folder) for the password reset link or code.</p>
-          </div>
-        `,
-        type: 'info',
-        confirmText: 'Enter Reset Code',
-        onConfirm: () => openSetNewPasswordModal()
-      });
-    }
-  } catch (e) {
-    setBtnLoading(btn, false);
-    resetTurnstileWidget();
-    if (err) err.textContent = 'Connection error: ' + (e.message || e);
-  }
-}
-
-function openSetNewPasswordModal(presetToken = '') {
-  openModal({
-    title: 'Choose a New Password',
-    body: `
-      <div style="font-size: 13.5px; line-height: 1.6; color: var(--tx-secondary);">
-        <p style="margin-top: 0; margin-bottom: 12px;">
-          Enter the verification code from your email (or provided by the system) along with your new password.
-        </p>
-        <div style="margin-bottom: 12px;">
-          <label class="lbl" style="font-size: 12px; margin-bottom: 5px;">Reset Code / Token</label>
-          <input type="text" id="reset-token-input" class="inp mono" value="${esc(presetToken)}" placeholder="Paste your 32-character reset code" autocomplete="off">
-        </div>
-        <div style="margin-bottom: 12px;">
-          <label class="lbl" style="font-size: 12px; margin-bottom: 5px;">New Password</label>
-          <div class="row" style="position:relative;">
-            <input type="password" id="reset-new-password" class="inp" placeholder="At least 6 characters" autocomplete="new-password" style="padding-right:36px;">
-            <button type="button" class="eye" onclick="const p=$('#reset-new-password'); p.type=p.type==='password'?'text':'password';" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--tx-muted); cursor:pointer;">${ic('eye', 14)}</button>
-          </div>
-        </div>
-        <div style="margin-bottom: 14px;">
-          <label class="lbl" style="font-size: 12px; margin-bottom: 5px;">Confirm New Password</label>
-          <div class="row" style="position:relative;">
-            <input type="password" id="reset-new-password-confirm" class="inp" placeholder="Repeat new password" autocomplete="new-password" style="padding-right:36px;" onkeydown="if(event.key==='Enter')submitSetNewPassword()">
-            <button type="button" class="eye" onclick="const p=$('#reset-new-password-confirm'); p.type=p.type==='password'?'text':'password';" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--tx-muted); cursor:pointer;">${ic('eye', 14)}</button>
-          </div>
-        </div>
-        <div class="lerr" id="set-pw-err" role="alert" style="margin-bottom: 10px; color:#ef4444; font-size:12.5px;"></div>
-      </div>
-    `,
-    buttons: [
-      { label: 'Cancel', class: 'btn', onClick: () => closeModal() },
-      {
-        label: 'Update Password',
-        class: 'btn pr',
-        onClick: () => submitSetNewPassword()
-      }
-    ]
-  });
-
-  setTimeout(() => {
-    if (presetToken) {
-      $('#reset-new-password')?.focus();
-    } else {
-      $('#reset-token-input')?.focus();
-    }
-  }, 150);
-}
-
-async function submitSetNewPassword() {
-  const token = $('#reset-token-input')?.value.trim();
-  const p1 = $('#reset-new-password')?.value;
-  const p2 = $('#reset-new-password-confirm')?.value;
-  const err = $('#set-pw-err');
-
-  if (!token) {
-    if (err) err.textContent = 'Please enter your reset code / token.';
-    return;
-  }
-  if (!p1 || p1.length < 6) {
-    if (err) err.textContent = 'New password must be at least 6 characters.';
-    return;
-  }
-  if (p1 !== p2) {
-    if (err) err.textContent = 'Passwords do not match. Please re-enter.';
-    return;
-  }
-
-  const btn = $('#modal-container .btn.pr');
-  setBtnLoading(btn, true, 'Updating...');
-
-  try {
-    const res = await (await fetch('/api/auth/password-reset/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        token,
-        new_password: p1
-      })
-    })).json();
-
-    setBtnLoading(btn, false);
-
-    if (res.error) {
-      if (err) err.textContent = res.error;
-      return;
-    }
-
-    closeModal();
-    toast('Password reset successful! You can now log in.', 'ok');
-    if (window.location.hash.includes('reset-token=')) {
-      window.location.hash = '';
-    }
-    $('#login')?.remove();
-    showLoginScreen();
-    if (res.username) {
-      const uInp = $('#lu');
-      if (uInp) uInp.value = res.username;
-      $('#lp')?.focus();
-    }
-  } catch (e) {
-    setBtnLoading(btn, false);
-    if (err) err.textContent = 'Connection error: ' + (e.message || e);
-  }
-}
-
-function checkUrlResetToken() {
-  if (window.location.hash && window.location.hash.includes('reset-token=')) {
-    const m = /reset-token=([^&]+)/i.exec(window.location.hash);
-    if (m && m[1]) {
-      setTimeout(() => openSetNewPasswordModal(decodeURIComponent(m[1])), 200);
-    }
-  }
-}
+// Password recovery is implemented in password-reset.js using the current modal system.
 
 function selectBrandPreset(presetId) {
   const p = BRAND_PRESETS.find(x => x.id === presetId);
@@ -16884,7 +16664,7 @@ function showLoginScreen() {
   applyLoginOverlayBackground(d);
   document.body.appendChild(d);
   if (S.turnstileEnabled) mountTurnstileWidget('#turnstile-login');
-  $('#lu')?.focus();
+  if (!$('#password-reset-form')) $('#lu')?.focus();
 }
 
 async function submitLogin() {

@@ -920,11 +920,12 @@ type SyncAuthRequest struct {
 }
 
 type SyncedUser struct {
-	ID           int    `json:"id"`
-	Username     string `json:"username"`
-	Email        string `json:"email"`
-	PasswordHash string `json:"password_hash"`
-	Role         string `json:"role"`
+	ID                int    `json:"id"`
+	Username          string `json:"username"`
+	Email             string `json:"email"`
+	PasswordHash      string `json:"password_hash"`
+	Role              string `json:"role"`
+	InvitationCreated bool   `json:"invitation_created,omitempty"`
 }
 
 type SyncedKey struct {
@@ -950,7 +951,7 @@ func (h *NodeHandler) SyncAuthHandler(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, "Invalid invitation account")
 			return
 		}
-		if err := h.db.ProvisionInvitationUser(&database.User{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Role: u.Role}); err != nil {
+		if err := h.db.ProvisionInvitationUser(&database.User{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Role: u.Role, InvitationCreated: u.InvitationCreated}); err != nil {
 			invitationError(w, err)
 			return
 		}
@@ -984,6 +985,9 @@ func (h *NodeHandler) SyncAuthToNode(ctx context.Context, baseURL, apiToken stri
 	}
 	var syncUsers []SyncedUser
 	for _, u := range users {
+		if err := h.db.PinExportedIdentity(u.ID); err != nil {
+			return err
+		}
 		syncUsers = append(syncUsers, SyncedUser{
 			ID:           u.ID,
 			Username:     u.Username,

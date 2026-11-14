@@ -206,14 +206,14 @@ func invitationPermission(tx *sql.Tx, server string, id int, role string) error 
 }
 func invitationAccount(tx *sql.Tx, i *Invitation, sessionID int, passwordHash string) (*User, error) {
 	u := &User{}
-	rows, err := tx.Query(`SELECT id,username,email,password_hash,role FROM users WHERE lower(username)=lower(?) OR lower(email)=?`, i.Username, i.Email)
+	rows, err := tx.Query(`SELECT id,username,email,password_hash,role,invitation_created FROM users WHERE lower(username)=lower(?) OR lower(email)=?`, i.Username, i.Email)
 	if err != nil {
 		return nil, err
 	}
 	count := 0
 	for rows.Next() {
 		count++
-		err = rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role)
+		err = rows.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.Role, &u.InvitationCreated)
 		if err != nil {
 			rows.Close()
 			return nil, err
@@ -242,7 +242,7 @@ func invitationAccount(tx *sql.Tx, i *Invitation, sessionID int, passwordHash st
 	if passwordHash == "" {
 		return nil, ErrInvitationIdentity
 	}
-	res, err := tx.Exec(`INSERT INTO users(username,email,password_hash,role,created_at) VALUES(?,?,?,'user',?)`, i.Username, i.Email, passwordHash, time.Now().UTC())
+	res, err := tx.Exec(`INSERT INTO users(username,email,password_hash,role,created_at,invitation_created) VALUES(?,?,?,'user',?,1)`, i.Username, i.Email, passwordHash, time.Now().UTC())
 	if err != nil {
 		return nil, ErrInvitationConflict
 	}
@@ -255,7 +255,7 @@ func invitationAccount(tx *sql.Tx, i *Invitation, sessionID int, passwordHash st
 	if err != nil {
 		return nil, err
 	}
-	return &User{ID: int(id), Username: i.Username, Email: i.Email, PasswordHash: passwordHash, Role: "user"}, nil
+	return &User{ID: int(id), Username: i.Username, Email: i.Email, PasswordHash: passwordHash, Role: "user", InvitationCreated: true}, nil
 }
 
 // Remote account creation is durable before the network hop. Only this invite may
@@ -279,7 +279,11 @@ func (db *DB) ReserveInvitationAccount(id, hash string, sessionID int, passwordH
 	if _, err = invitationInviter(tx, i, false); err != nil {
 		return err
 	}
-	if _, err = invitationAccount(tx, i, sessionID, passwordHash); err != nil {
+	u, err := invitationAccount(tx, i, sessionID, passwordHash)
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`UPDATE users SET identity_exported=1 WHERE id=?`, u.ID); err != nil {
 		return err
 	}
 	_, err = tx.Exec(`UPDATE team_invitations SET status='granting' WHERE id=?`, id)
@@ -450,7 +454,7 @@ func (db *DB) ProvisionInvitationUser(u *User) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = tx.Exec(`UPDATE users SET id=id WHERE id=?`, u.ID); err != nil {
+	if _, err = tx.Exec(`UPDATE users SET identity_exported=1 WHERE id=?`, u.ID); err != nil {
 		return err
 	}
 	var id int
@@ -479,7 +483,7 @@ func (db *DB) ProvisionInvitationUser(u *User) error {
 		}
 		return tx.Commit()
 	}
-	_, err = tx.Exec(`INSERT INTO users(id,username,email,password_hash,role,created_at) VALUES(?,?,?,?,?,?)`, u.ID, u.Username, u.Email, u.PasswordHash, u.Role, time.Now().UTC())
+	_, err = tx.Exec(`INSERT INTO users(id,username,email,password_hash,role,created_at,invitation_created,identity_exported) VALUES(?,?,?,?,?,?,?,1)`, u.ID, u.Username, u.Email, u.PasswordHash, u.Role, time.Now().UTC(), u.InvitationCreated)
 	if err != nil {
 		return err
 	}

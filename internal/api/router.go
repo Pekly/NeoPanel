@@ -400,6 +400,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// Multi-node cluster & proxy routes
 	r.mux.HandleFunc("GET /api/cluster/servers", r.requireAuth(r.listClusterServers))
+	r.mux.HandleFunc("GET /api/cluster/invitation-removals", r.requireAdmin(r.invitationRemovalReceipts))
+	r.mux.HandleFunc("POST /api/nodes/{id}/invitation-removals/reconcile", r.requireAdmin(r.reconcileInvitationRemovals))
 	r.mux.HandleFunc("GET /api/nodes", r.requireAuth(r.nodes.ListNodes))
 	r.mux.HandleFunc("POST /api/nodes", r.requireAdmin(r.nodes.CreateNode))
 	r.mux.HandleFunc("POST /api/nodes/test", r.requireAdmin(r.nodes.TestNodePayload))
@@ -821,6 +823,15 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+	if server := removedRemoteServer(req.Method, rest); server != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := r.reconcileRemoteInvitationRemovals(req, node, server); err != nil {
+			// Remote removal already succeeded. Never turn uncertainty into deletion,
+			// or report that the original membership removal failed.
+			w.Header().Set("X-NeoPanel-Invitation-Cleanup", "pending")
+		} else {
+			w.Header().Set("X-NeoPanel-Invitation-Cleanup", "reconciled")
+		}
+	}
 	for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Cache-Control", "Content-Range", "Accept-Ranges", "Last-Modified", "X-Content-Type-Options", "Content-Security-Policy"} {
 		if v := resp.Header.Get(key); v != "" {
 			w.Header().Set(key, v)

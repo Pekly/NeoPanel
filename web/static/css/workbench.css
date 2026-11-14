@@ -568,3 +568,14 @@ input[type="checkbox"]:not(.no-ccheck):is(:checked, :indeterminate):hover:not(:d
 .np-empty-icon svg { display: block; stroke-width: 1.6; }
 .np-empty-title { margin: 0 0 6px; color: var(--tx); font-size: 15px; font-weight: 700; }
 #file-reload-btn[aria-busy="true"] { cursor: progress; }
+
+.np-password-reset-backdrop { z-index: 10020; }
+.np-password-reset { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.np-password-reset > p { font-size: 13px; line-height: 1.65; }
+.np-password-reset h2 { display: flex; align-items: center; gap: 8px; }
+.np-password-reset .f { display: grid; gap: 6px; margin-top: 14px; color: var(--tx); font-size: 12px; }
+.np-password-reset .f input { width: 100%; min-width: 0; }
+.np-password-reset .np-reset-notice { padding: 12px; background: var(--ac-subtle); border: 1px solid var(--border-accent); border-radius: 8px; }
+.np-reset-switch { display: block; margin-top: 18px; padding: 0; border: 0; background: transparent; color: var(--ac); font: inherit; font-size: 12px; cursor: pointer; }
+.np-reset-switch:hover { text-decoration: underline; }
+.np-reset-switch:focus-visible { outline: 2px solid var(--ac); outline-offset: 4px; }

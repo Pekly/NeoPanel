@@ -54,6 +54,10 @@ func InitDB(dbPath string) (*DB, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("panel role migration failed: %w", err)
 	}
+	if err := db.migrateInvitationLifecycle(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("invitation lifecycle migration failed: %w", err)
+	}
 	return db, nil
 }
 
@@ -272,10 +276,10 @@ func (db *DB) GetUserCount() (int, error) {
 }
 
 func (db *DB) GetUserByUsername(username string) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version FROM users WHERE username = ?", username)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version, invitation_created FROM users WHERE username = ?", username)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion, &user.InvitationCreated)
 	if err != nil {
 		return nil, err
 	}
@@ -284,10 +288,10 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 }
 
 func (db *DB) GetUserByID(id int) (*User, error) {
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version FROM users WHERE id = ?", id)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version, invitation_created FROM users WHERE id = ?", id)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion, &user.InvitationCreated)
 	if err != nil {
 		return nil, err
 	}
@@ -297,10 +301,10 @@ func (db *DB) GetUserByID(id int) (*User, error) {
 
 func (db *DB) GetUserByEmailOrUsername(lookup string) (*User, error) {
 	lookup = strings.TrimSpace(lookup)
-	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version FROM users WHERE username = ? OR (email != '' AND LOWER(email) = LOWER(?))", lookup, lookup)
+	row := db.conn.QueryRow("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version, invitation_created FROM users WHERE username = ? OR (email != '' AND LOWER(email) = LOWER(?))", lookup, lookup)
 	user := &User{}
 	var tfa int
-	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion)
+	err := row.Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion, &user.InvitationCreated)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +405,7 @@ func (db *DB) UpdateUserRole(id int, role string) error {
 }
 
 func (db *DB) ListUsers() ([]*User, error) {
-	rows, err := db.conn.Query("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), created_at, auth_version FROM users ORDER BY created_at ASC")
+	rows, err := db.conn.Query("SELECT id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), created_at, auth_version, invitation_created FROM users ORDER BY created_at ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +415,7 @@ func (db *DB) ListUsers() ([]*User, error) {
 	for rows.Next() {
 		u := &User{}
 		var tfa int
-		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.AvatarURL, &tfa, &u.CreatedAt, &u.AuthVersion); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Email, &u.Role, &u.AvatarURL, &tfa, &u.CreatedAt, &u.AuthVersion, &u.InvitationCreated); err != nil {
 			return nil, err
 		}
 		u.TwoFactorEnabled = tfa == 1
@@ -577,8 +581,7 @@ func (db *DB) UpdateServerIcon(id string, iconURL string) error {
 }
 
 func (db *DB) DeleteServer(id string) error {
-	_, err := db.conn.Exec("DELETE FROM servers WHERE id = ?", id)
-	return err
+	return db.deleteInvitationServer(id)
 }
 
 func (db *DB) UpdateUserPassword(userID int, newHash string) error {
@@ -709,10 +712,10 @@ func (db *DB) UpsertSyncedUser(id int, username, email, passwordHash, role strin
 	var existingID int
 	err := db.conn.QueryRow("SELECT id FROM users WHERE username = ? OR id = ?", username, id).Scan(&existingID)
 	if err == nil {
-		_, err = db.conn.Exec("UPDATE users SET username=?, email=?, auth_version=auth_version + CASE WHEN password_hash != ? THEN 1 ELSE 0 END, password_hash=?, role=? WHERE id=?", username, email, passwordHash, passwordHash, role, existingID)
-		return err
+		res, updateErr := db.conn.Exec("UPDATE users SET identity_exported=1, username=?, email=?, auth_version=auth_version + CASE WHEN password_hash != ? THEN 1 ELSE 0 END, password_hash=?, role=? WHERE id=? AND NOT EXISTS (SELECT 1 FROM deleted_invitation_users WHERE id=?)", username, email, passwordHash, passwordHash, role, existingID, id)
+		return affectedRow(res, updateErr)
 	}
-	_, err = db.conn.Exec("INSERT INTO users (id, username, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)", id, username, email, passwordHash, role, now)
+	_, err = db.conn.Exec("INSERT INTO users (id, username, email, password_hash, role, created_at, identity_exported) VALUES (?, ?, ?, ?, ?, ?, 1)", id, username, email, passwordHash, role, now)
 	return err
 }
 
@@ -1270,8 +1273,7 @@ func (db *DB) UpdateServerSubuser(serverID string, id int, permissions []string)
 }
 
 func (db *DB) DeleteServerSubuser(serverID string, id int) error {
-	res, err := db.conn.Exec(`DELETE FROM server_subusers WHERE server_id = ? AND id = ?`, serverID, id)
-	return affectedRow(res, err)
+	return db.deleteInvitationSubuser(serverID, id)
 }
 
 func (db *DB) GetUserServerPermissions(serverID string, userID int) ([]string, error) {

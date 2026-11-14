@@ -613,7 +613,7 @@ func (h *InvitationHandler) Accept(w http.ResponseWriter, r *http.Request) {
 		remote = func(current *database.Invitation, u, inviter *database.User) error {
 			c := &JWTClaims{UserID: inviter.ID, Username: inviter.Username, Role: inviter.Role}
 			// Single-user, non-overwriting mode of the existing cluster auth sync interface.
-			payload := SyncAuthRequest{Users: []SyncedUser{{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Role: u.Role}}}
+			payload := SyncAuthRequest{Users: []SyncedUser{{ID: u.ID, Username: u.Username, Email: u.Email, PasswordHash: u.PasswordHash, Role: u.Role, InvitationCreated: u.InvitationCreated}}}
 			resp, err := h.remote(r, n, c, "POST", "/api/cluster/sync-auth", payload, true)
 			if err != nil {
 				return err

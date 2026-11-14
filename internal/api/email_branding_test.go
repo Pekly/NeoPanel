@@ -41,7 +41,7 @@ func TestEmailLogoURL(t *testing.T) {
 func TestEmailBrandHeaderEscapingAndFallback(t *testing.T) {
 	brand := PanelBrandingConfig{BrandName: `Acme "<img src=x onerror=alert(1)>`, LogoURL: `https://cdn.example/logo.png?q=" onerror="alert(1)`, AccentColor: "red;display:none"}
 	output := renderEmailBrand(emailBrand(brand, "https://panel.example"))
-	if strings.Count(output, "<img ") != 1 || strings.Contains(output, `onerror="`) || strings.Contains(output, "<img src=x") || strings.Contains(output, "ZgotmplZ") || !strings.Contains(output, "&lt;img") || !strings.Contains(output, "#387aff") {
+	if strings.Count(output, "<img ") != 1 || strings.Contains(output, `onerror="`) || strings.Contains(output, "<img src=x") || strings.Contains(output, "ZgotmplZ") || !strings.Contains(output, "&lt;img") || !strings.Contains(output, `width="24" height="24"`) || !strings.Contains(output, "font-size:18px") {
 		t.Fatal("unsafe or missing logo markup", output)
 	}
 	for _, logo := range []string{"", "javascript:alert(1)", "data:image/png;base64,bad"} {

@@ -326,7 +326,7 @@ func TestInvitationStyledEmailMIME(t *testing.T) {
 	// Defense in depth: template rendering escapes even names not admitted by the API.
 	i.Username = `<script>alert(1)</script>`
 	html, _, err = invitationEmail(PanelBrandingConfig{BrandName: brand, AccentColor: `red; background:url(https://attacker.test)`}, &i, server, link)
-	if err != nil || strings.Contains(html, "<script>") || strings.Contains(html, "attacker.test") || !strings.Contains(html, "#387aff") {
+	if err != nil || strings.Contains(html, "<script>") || strings.Contains(html, "attacker.test") || !strings.Contains(html, "#2f6feb") {
 		t.Fatalf("unsafe template rendering: %v", err)
 	}
 }

@@ -2,8 +2,11 @@ package api
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
+	"math"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -39,22 +42,73 @@ func emailLogoURL(raw, panelURL string) string {
 }
 
 type emailBranding struct {
-	Name, Accent, LogoURL string
+	Name, Accent, LogoURL                                                      string
+	Background, Surface, Header, Text, Muted, Border, Inner, ButtonText, Theme string
+	Radius                                                                     int
+}
+
+func emailColor(value, fallback string) string {
+	if hexColorRe.MatchString(value) {
+		return strings.ToLower(value)
+	}
+	return fallback
+}
+func emailRGB(value string) [3]float64 {
+	n, _ := strconv.ParseUint(strings.TrimPrefix(value, "#"), 16, 32)
+	return [3]float64{float64(n >> 16 & 255), float64(n >> 8 & 255), float64(n & 255)}
+}
+func emailMix(a, b string, weight float64) string {
+	x, y := emailRGB(a), emailRGB(b)
+	return fmt.Sprintf("#%02x%02x%02x", int(math.Round(x[0]*weight+y[0]*(1-weight))), int(math.Round(x[1]*weight+y[1]*(1-weight))), int(math.Round(x[2]*weight+y[2]*(1-weight))))
+}
+func emailButtonText(color string) string {
+	rgb := emailRGB(color)
+	for i, channel := range rgb {
+		channel /= 255
+		if channel <= .04045 {
+			rgb[i] = channel / 12.92
+		} else {
+			rgb[i] = math.Pow((channel+.055)/1.055, 2.4)
+		}
+	}
+	luminance := .2126*rgb[0] + .7152*rgb[1] + .0722*rgb[2]
+	if (luminance+.05)/.05 > 1.05/(luminance+.05) {
+		return "#000000"
+	}
+	return "#ffffff"
 }
 
 func emailBrand(brand PanelBrandingConfig, panelURL string) emailBranding {
-	name := strings.TrimSpace(brand.BrandName)
+	name := strings.Join(strings.Fields(brand.BrandName), " ")
 	if name == "" {
 		name = "NeoPanel"
 	}
-	accent := brand.AccentColor
-	if !hexColorRe.MatchString(accent) {
-		accent = "#387aff"
+	b := emailBranding{Name: name, Accent: "#2f6feb", Background: "#101318", Surface: "#181d25", Header: "#13171e", Text: "#e9edf4", Inner: "#131820", Theme: "dark", Radius: 14}
+	switch strings.ToLower(brand.DefaultTheme) {
+	case "light":
+		b.Accent, b.Background, b.Surface, b.Header, b.Text, b.Inner, b.Theme = "#2563eb", "#f5f6f8", "#ffffff", "#ffffff", "#0f172a", "#f1f5f9", "light"
+	case "oled":
+		b.Background, b.Surface, b.Header, b.Inner = "#000000", "#07090d", "#07090d", "#05070a"
 	}
-	return emailBranding{Name: name, Accent: accent, LogoURL: emailLogoURL(brand.LogoURL, panelURL)}
+	// Mirrors applyBranding: the default obsidian accent uses the theme's base color.
+	if !((brand.Preset == "" || brand.Preset == "obsidian") && strings.EqualFold(brand.AccentColor, "#387aff")) {
+		b.Accent = emailColor(brand.AccentColor, b.Accent)
+	}
+	b.Background = emailColor(brand.BgDeep, b.Background)
+	b.Surface = emailColor(brand.CardBg, b.Surface)
+	b.Header = emailColor(brand.NavBg, b.Header)
+	b.Inner = emailColor(brand.BgCanvas, b.Inner)
+	b.Text = emailColor(brand.TextColor, b.Text)
+	b.Muted, b.Border = emailMix(b.Text, b.Surface, .72), emailMix(b.Text, b.Surface, .16)
+	b.ButtonText = emailButtonText(b.Accent)
+	b.LogoURL = emailLogoURL(brand.LogoURL, panelURL)
+	if brand.BorderRadiusPx >= 0 && brand.BorderRadiusPx <= 28 {
+		b.Radius = brand.BorderRadiusPx
+	}
+	return b
 }
 
-const emailBrandHeaderTemplate = `{{define "emailBrand"}}{{if .LogoURL}}<img src="{{.LogoURL}}" alt="{{.Name}} logo" width="64" style="display:block;width:64px;height:auto;max-width:100%;border:0;margin:0 auto 12px;">{{end}}<div style="color:{{.Accent}};font-size:24px;font-weight:bold;line-height:1.3;text-align:center;">{{.Name}}</div>{{end}}`
+const emailBrandHeaderTemplate = `{{define "emailBrand"}}<table role="presentation" cellspacing="0" cellpadding="0" class="np-email-brand"><tr>{{if .LogoURL}}<td width="24" style="width:24px;padding:0 10px 0 0;vertical-align:middle;"><img src="{{.LogoURL}}" alt="{{.Name}} logo" width="24" height="24" style="display:block;width:24px;height:24px;object-fit:contain;border:0;"></td>{{end}}<td style="padding:0;vertical-align:middle;color:{{.Text}};font-size:18px;font-weight:bold;line-height:24px;word-break:break-word;overflow-wrap:anywhere;">{{.Name}}</td></tr></table>{{end}}`
 
 var emailBrandHeader = template.Must(template.New("branding").Parse(emailBrandHeaderTemplate))
 

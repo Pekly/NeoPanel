@@ -126,14 +126,20 @@ func TestInvitationStaleInviterAndDeletedServerRollback(t *testing.T) {
 				}
 				db.DeleteServerSubuser(i.ServerID, su.ID)
 			}
-			if _, e := db.AcceptInvitation(i.ID, i.TokenHash, 0, "hash", nil); !errors.Is(e, ErrInvitationForbidden) {
+			wantErr := ErrInvitationForbidden
+			wantStatus := "pending"
+			if kind == "deleted" {
+				wantErr = ErrInvitationGone
+				wantStatus = "revoked"
+			}
+			if _, e := db.AcceptInvitation(i.ID, i.TokenHash, 0, "hash", nil); !errors.Is(e, wantErr) {
 				t.Fatal(e)
 			}
 			if u, _ := db.GetUserByUsername(i.Username); u != nil {
 				t.Fatal("account leaked from failed local transaction")
 			}
 			stored, _ := db.GetInvitation(i.ID)
-			if stored.Status != "pending" {
+			if stored.Status != wantStatus {
 				t.Fatal(stored.Status)
 			}
 		})
