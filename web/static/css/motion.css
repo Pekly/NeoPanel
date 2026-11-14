@@ -77,13 +77,8 @@ html[data-panel-motion="full"] .np-role-row {
   html:not([data-panel-motion="reduced"]) .create-icon-bubble {
     transition: transform var(--np-motion-medium) var(--np-motion-spring);
   }
-  html:not([data-panel-motion="reduced"]) #nav .nav-item.on > svg {
-    animation: np-motion-icon var(--np-motion-enter) var(--np-motion-spring);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.tabs, .atabs) button:is(.on, .active)::after {
-    transform-origin: left center;
-    animation: np-motion-underline var(--np-motion-enter) var(--np-motion-out);
-  }
+  /* Route/tab entrance is owned by motion.js and its session visit history.
+     CSS-only selected-state animations would replay whenever R replaces DOM. */
 
   /* Focus rings stay immediate and visible; only the surrounding surface settles. */
   html:not([data-panel-motion="reduced"]) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea, .cselect-trigger, .lf) {

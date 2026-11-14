@@ -10,9 +10,26 @@
   const notifications = new WeakMap();
   const ease = 'cubic-bezier(.2,.8,.2,1)';
   const panelSelector = '.np-page-heading, .srvh, .card, .sift-server-card, .plugin-card, .vm-tile-card, .vm-icon-card, .np-access-state, .np-empty-state';
-  let lastKey = null;
-  let wasLoading = false;
-  let enteredNav = false;
+  const visitStorageKey = 'neopanel_motion_visits_v1';
+  const visited = new Set();
+  try {
+    const saved = JSON.parse(global.sessionStorage?.getItem(visitStorageKey) || '[]');
+    if (Array.isArray(saved)) saved.slice(0, 1024).forEach(key => {
+      if (typeof key === 'string' && key.length <= 4096) visited.add(key);
+    });
+  } catch (_) {}
+  function firstVisit(key) {
+    // Stop adding effects at the cap rather than evicting and replaying old pages.
+    if (typeof key !== 'string' || key.length > 4096 || visited.has(key) || visited.size >= 1024) return false;
+    visited.add(key);
+    try { global.sessionStorage?.setItem(visitStorageKey, JSON.stringify([...visited])); } catch (_) {}
+    return true;
+  }
+  function resetSession() {
+    cancelAll();
+    visited.clear();
+    try { global.sessionStorage?.removeItem(visitStorageKey); } catch (_) {}
+  }
 
   function reduced() { return Boolean(preference?.matches); }
   function enabled() { return !reduced() && !doc.hidden; }
@@ -45,23 +62,24 @@
   function viewKey(state, preview = null) {
     const view = state.view || '';
     let pane = '';
-    if (view === 'admin') pane = state.adminTab;
-    else if (view === 'acc') pane = [state.acct?.tab, state.appearanceSection];
-    else if (view === 'pl') pane = state.ptab;
-    else if (view === 'plug') pane = state.plugTab;
+    if (view === 'admin') pane = [state.adminTab || 0, state.adminTab === 4 ? state.appearanceSection || 0 : ''];
+    else if (view === 'acc') pane = state.acct?.tab || 0;
+    else if (view === 'set') pane = state.serverSettingsSection || 0;
+    else if (view === 'pl') pane = state.ptab || 'online';
+    else if (view === 'plug') pane = state.plugTab || 'browse';
     else if (view === 'ver') pane = state.sel;
+    else if (view === 'mod') pane = state.modPageId;
     else if (view === 'fi') pane = [state.currentDir, state.editingFile, preview?.path, preview?.folder];
-    return JSON.stringify([view, state.activeNodeId || 'local', state.activeServerId || '', pane]);
+    const globalPage = ['dash', 'admin', 'acc', 'client', 'mod', 'maintenance', 'notfound'].includes(view) ||
+      (view === 'act' && !(global.location?.pathname || '').startsWith('/server/'));
+    return JSON.stringify([state.user?.id || '', view, globalPage ? '' : state.activeNodeId || 'local', globalPage ? '' : state.activeServerId || '', pane]);
   }
   function afterRender(root, key) {
     // Any previous render's elements have been replaced: release their animations immediately.
     Array.from(pageAnimations).forEach(cancel);
     if (!root) return;
     const loading = Boolean(root.querySelector('.np-skeleton, .np-page-loader, .np-loader-box'));
-    const changed = key !== lastKey || (wasLoading && !loading);
-    lastKey = key;
-    wasLoading = loading;
-    if (!changed || !enabled() || root.querySelector('#ed')) return;
+    if (loading || doc.hidden || !firstVisit('page:' + key) || !enabled() || root.querySelector('#ed')) return;
 
     const panels = Array.from(root.querySelectorAll(panelSelector)).slice(0, 64).filter(element => {
       const parent = element.parentElement?.closest(panelSelector);
@@ -75,8 +93,7 @@
       .forEach((element, index) => play(element, [{ opacity: 0 }, { opacity: 1 }],
         { duration: 240, delay: Math.min(70 + index * 18, 230) }, 'page'));
 
-    if (!enteredNav) {
-      enteredNav = true;
+    if (firstVisit('navigation')) {
       Array.from(doc.querySelectorAll('#nav .nav-item, #nav .brand')).slice(0, 8)
         .forEach((element, index) => play(element, [{ opacity: 0 }, { opacity: 1 }],
           { duration: 300, delay: index * 22 }, 'page'));
@@ -96,6 +113,11 @@
     ).slice(0, 4).forEach(el => play(el,
       [{ opacity: .45, transform: `translateX(${to > from ? 18 : -18}px)` }, { opacity: 1, transform: 'translateX(0)' }],
       { duration: 280 }, 'page'));
+  }
+  function revealOnce(element, key) {
+    if (!element || doc.hidden || !firstVisit('page:' + key)) return null;
+    Array.from(pageAnimations).forEach(cancel);
+    return play(element, [{ opacity: .35 }, { opacity: 1 }], { duration: 260 }, 'page');
   }
   function reveal(element) {
     return play(element, [{ opacity: .35 }, { opacity: 1 }], { duration: 260 });
@@ -146,7 +168,7 @@
   function syncPreference() {
     doc.documentElement.dataset.panelMotion = reduced() ? 'reduced' : 'full';
     if (reduced()) cancelAll();
-    lastKey = null;
+    // Preference changes never reset which pages this session has visited.
   }
   function syncVisibility() {
     doc.documentElement.toggleAttribute('data-panel-motion-paused', Boolean(doc.hidden));
@@ -159,6 +181,6 @@
   else if (preference?.addListener) preference.addListener(syncPreference);
   syncPreference();
   syncVisibility();
-  global.NPMotion = Object.freeze({ afterRender, viewKey, reveal, notify, feedback, layout, cancelAll,
+  global.NPMotion = Object.freeze({ afterRender, viewKey, reveal, revealOnce, resetSession, notify, feedback, layout, cancelAll,
     get reduced() { return reduced(); }, get activeCount() { return active.size; } });
 })(window);

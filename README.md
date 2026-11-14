@@ -121,6 +121,8 @@ neopanel -config /etc/neopanel/config.yaml -role node   # or just: -node
 
 In the web UI, `Ctrl + K` opens the command palette and `Ctrl + \`` toggles the console drawer.
 
+`Ctrl/Cmd + F` opens the built-in workspace find bar. Use Enter / Shift+Enter (or F3 / Shift+F3) to move between matches and Escape to close it. Search stays local to the current page and supports the file editor. Page and subtab entrance animations play only on the first visit in a browser-tab session (including across reloads); signing out clears that history. Layout-switch and action-feedback animations remain responsive, with reduced-motion preferences respected.
+
 ## Configuration
 
 The config lives at `/etc/neopanel/config.yaml`:

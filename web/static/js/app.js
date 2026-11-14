@@ -9321,6 +9321,7 @@ window.R = function() {
       main.innerHTML = V.maintenance();
       main.scrollTop = 0;
       window.NPMotion?.afterRender(main, 'maintenance');
+      window.NPFind?.refresh();
     }
     const fly = $('#fly-console-root');
     if (fly) {
@@ -9372,6 +9373,7 @@ window.R = function() {
   if (window.NP && typeof window.NP._emit === 'function') {
     window.NP._emit('render', { view: S.view, server: curServer() });
   }
+  window.NPFind?.refresh();
 };
 
 function bindConsoleInput() {
@@ -17010,6 +17012,8 @@ async function logout() {
     icon: 'lock'
   });
   if (!ok) return;
+  window.NPFind?.close();
+  window.NPMotion?.resetSession();
   cancelAllUploads();
   QOL.uploads = [];
   renderUploadQueue();
@@ -18007,10 +18011,12 @@ function organizeServerSettings(root) {
   groups.forEach(([label], i) => {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.dataset.settingsSection = String(i); button.className = i === selected ? 'on' : ''; button.setAttribute('aria-pressed', String(i === selected));
     button.onclick = () => {
+      if ((S.serverSettingsSection || 0) === i) return;
       S.serverSettingsSection = i;
       root.querySelectorAll('[data-settings-panel]').forEach(panel => { panel.hidden = Number(panel.dataset.settingsPanel) !== i; });
       nav.querySelectorAll('button').forEach((b, j) => { b.classList.toggle('on', i === j); b.setAttribute('aria-pressed', String(i === j)); });
-      window.NPMotion?.reveal(root.querySelector(`[data-settings-panel="${i}"]`));
+      window.NPMotion?.revealOnce(root.querySelector(`[data-settings-panel="${i}"]`), window.NPMotion.viewKey(S));
+      window.NPFind?.refresh();
     };
     nav.append(button);
   });

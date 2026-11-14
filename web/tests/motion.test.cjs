@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/js/motion.js'), 'utf8');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-function setup(reduced = false) {
+function setup(reduced = false, storage = new Map()) {
   const listeners = {}, animations = [], created = [];
   let measurements = 0;
   function element(id, opts = {}) {
@@ -39,6 +39,7 @@ function setup(reduced = false) {
     createElement(tag) { const el = element(tag + created.length); created.push(el); return el; }
   };
   const c = vm.createContext({ document: doc, innerHeight: 800, matchMedia: () => preference,
+    sessionStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     getComputedStyle: () => ({ borderRadius: '8px', color: 'rgb(255, 255, 255)' }) });
   c.window = c;
   vm.runInContext(source, c);
@@ -52,7 +53,7 @@ function setup(reduced = false) {
   return { c, motion: c.NPMotion, preference, doc, root, body, listeners, animations, element, page, created, measurements: () => measurements };
 }
 
-test('page/card entrances stagger once per navigation, not on routine rerenders', () => {
+test('page/card entrances stagger only on first visit, never when navigating back', () => {
   const s = setup(), page = s.page();
   s.motion.afterRender(page, 'dashboard');
   assert.equal(s.animations.length, 3);
@@ -63,12 +64,16 @@ test('page/card entrances stagger once per navigation, not on routine rerenders'
   assert.ok(first.every(a => a.cancelled));
   s.motion.afterRender(page, 'files');
   assert.equal(s.animations.length, 6);
+  s.motion.afterRender(page, 'dashboard');
+  s.motion.afterRender(page, 'files');
+  assert.equal(s.animations.length, 6);
 });
 
 test('loaded content gets an entrance after a loading placeholder settles', () => {
   const s = setup(), page = s.page(); page.loading = true;
   s.motion.afterRender(page, 'dashboard');
   const before = s.animations.length;
+  assert.equal(before, 0, 'loading placeholders must not spend the first entrance');
   page.loading = false;
   s.motion.afterRender(page, 'dashboard');
   assert.ok(s.animations.length > before);
@@ -205,4 +210,80 @@ test('layout motion respects reduced motion and avoids media surfaces', () => {
   const s = setup();
   s.motion.layout(s.page([s.element('media', { media: true })], []), null, 0, 1);
   assert.equal(s.animations.length, 0);
+});
+
+test('visited pages survive reload in the same tab and reset for a new session', () => {
+  const storage = new Map();
+  const first = setup(false, storage);
+  first.motion.afterRender(first.page(), 'dashboard');
+  const reload = setup(false, storage);
+  reload.motion.afterRender(reload.page(), 'dashboard');
+  assert.equal(reload.animations.length, 0);
+  reload.motion.afterRender(reload.page(), 'new-page');
+  assert.equal(reload.animations.length, 3);
+  reload.motion.resetSession();
+  assert.equal(reload.motion.activeCount, 0);
+  reload.motion.afterRender(reload.page(), 'dashboard');
+  assert.equal(reload.animations.length, 6);
+  const newTab = setup();
+  newTab.motion.afterRender(newTab.page(), 'dashboard');
+  assert.equal(newTab.animations.length, 3);
+});
+
+test('in-place settings reveals share first-visit tracking with full page renders', () => {
+  const s = setup(), page = s.page();
+  s.motion.afterRender(page, 'settings-general');
+  s.motion.revealOnce(s.element('startup'), 'settings-startup');
+  assert.equal(s.animations.length, 4);
+  s.motion.revealOnce(s.element('general'), 'settings-general');
+  s.motion.revealOnce(s.element('startup'), 'settings-startup');
+  s.motion.afterRender(page, 'settings-startup');
+  assert.equal(s.animations.length, 4);
+});
+
+test('reduced-motion visits stay visited after changing preferences', () => {
+  const s = setup(true);
+  s.motion.afterRender(s.page(), 'dashboard');
+  s.preference.matches = false; s.listeners['preference:change']();
+  s.motion.afterRender(s.page(), 'dashboard');
+  assert.equal(s.animations.length, 0);
+  s.motion.afterRender(s.page(), 'files');
+  assert.equal(s.animations.length, 3);
+});
+
+test('background preloads do not consume the visible first visit', () => {
+  const s = setup(); s.doc.hidden = true;
+  s.motion.afterRender(s.page(), 'files');
+  s.doc.hidden = false;
+  s.motion.afterRender(s.page(), 'files');
+  assert.equal(s.animations.length, 3);
+});
+
+test('page keys distinguish users and subtabs but ignore server selection for global pages', () => {
+  const { motion } = setup();
+  const state = { view: 'dash', user: { id: 1 }, activeServerId: 'a' };
+  assert.equal(motion.viewKey(state), motion.viewKey({ ...state, activeServerId: 'b' }));
+  assert.notEqual(motion.viewKey(state), motion.viewKey({ ...state, user: { id: 2 } }));
+  for (const [view, field] of [['admin', 'appearanceSection'], ['set', 'serverSettingsSection'], ['mod', 'modPageId']]) {
+    const base = { ...state, view, adminTab: 4 };
+    assert.notEqual(motion.viewKey(base), motion.viewKey({ ...base, [field]: 2 }));
+  }
+});
+
+test('bad or blocked session storage does not break motion', () => {
+  const bad = new Map([['neopanel_motion_visits_v1', '{not-json']]);
+  const blocked = { get() { throw Error('blocked'); }, set() { throw Error('blocked'); }, delete() { throw Error('blocked'); } };
+  for (const storage of [bad, blocked]) {
+    const s = setup(false, storage);
+    assert.doesNotThrow(() => { s.motion.afterRender(s.page(), 'one'); s.motion.resetSession(); });
+  }
+});
+
+test('global activity is one page; server activity has separate visit identities', () => {
+  const { c, motion } = setup();
+  const a = { view: 'act', activeServerId: 'a' }, b = { view: 'act', activeServerId: 'b' };
+  c.location = { pathname: '/activity' };
+  assert.equal(motion.viewKey(a), motion.viewKey(b));
+  c.location.pathname = '/server/a/activity';
+  assert.notEqual(motion.viewKey(a), motion.viewKey(b));
 });

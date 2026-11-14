@@ -1,0 +1,65 @@
+/* Nonmodal workspace find; theme variables follow NeoPanel's light/dark branding. */
+#np-find {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: calc(100vw - 24px);
+  padding: 8px;
+  border: 1px solid var(--border-light, #536176);
+  border-radius: 10px;
+  background: var(--card-bg-solid, #181d25);
+  color: var(--tx, #e9edf4);
+  box-shadow: 0 8px 28px #0004;
+  font: 13px/1.4 var(--font-sans, sans-serif);
+}
+#np-find input {
+  width: clamp(120px, 22vw, 260px);
+  min-width: 0;
+  height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-light, #536176);
+  border-radius: 6px;
+  background: var(--card-inner, #131820);
+  color: var(--tx, #e9edf4);
+  font: inherit;
+}
+#np-find input::placeholder { color: var(--tx-muted, #a0adbf); }
+#np-find-count {
+  min-width: 62px;
+  max-width: 126px;
+  color: var(--tx-muted, #a0adbf);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+#np-find button {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: 20px/1 sans-serif;
+  cursor: pointer;
+}
+#np-find button:hover:not(:disabled) { background: var(--card-hover, #202733); }
+#np-find button:disabled { opacity: .4; cursor: default; }
+#np-find :focus-visible { outline: 2px solid var(--ac, #2f6feb); outline-offset: 2px; }
+::highlight(np-find-results) { background-color: #ead16b; color: #161a20; }
+::highlight(np-find-active) { background-color: #ed8a32; color: #161a20; text-decoration: underline; }
+@media (max-width: 480px) {
+  #np-find { right: 12px; left: 12px; flex-wrap: wrap; }
+  #np-find input { flex: 1 1 120px; }
+  #np-find-count { font-size: 12px; }
+}
+@media (forced-colors: active) {
+  #np-find { border-color: CanvasText; }
+  ::highlight(np-find-results) { background-color: Mark; color: MarkText; }
+  ::highlight(np-find-active) { background-color: Highlight; color: HighlightText; }
+}
