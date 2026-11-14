@@ -142,3 +142,26 @@ test('recoverable delete fails closed against a worker without Trash support', a
   assert.equal(requests.length, 1); assert.equal(requests[0].url, '/api/servers/a/files/trash');
   assert.match(messages[0][0], /does not support Trash/);
 });
+
+test('folder reload is single-flight and preserves filter and selection', async () => {
+  const { c } = setup(), wait = deferred(); let loads = 0, filtered;
+  const input = { value: 'config' }, button = { disabled: false, setAttribute() {} };
+  c.$ = selector => selector === '#fi-filter' ? input : selector === '#file-reload-btn' ? button : null;
+  c.S.currentDir = 'plugins'; c.S.selectedFiles.add('plugins/config.yml');
+  c.filterFileList = value => { filtered = value; };
+  c.loadFileList = async path => { assert.equal(path, 'plugins'); loads++; await wait.promise; input.value = ''; };
+  vm.runInContext(section('async function reloadFileList(', 'let fileListSequence'), c);
+  const first = c.reloadFileList(); await c.reloadFileList();
+  assert.equal(loads, 1); assert.equal(button.disabled, true);
+  wait.resolve(); await first;
+  assert.equal(input.value, 'config'); assert.equal(filtered, 'config');
+  assert.equal(c.S.selectedFiles.has('plugins/config.yml'), true); assert.equal(button.disabled, false);
+});
+
+test('reload never replaces an open text editor or bypasses file-view permission', async () => {
+  const { c } = setup(); let loads = 0; c.loadFileList = async () => { loads++; };
+  vm.runInContext(section('async function reloadFileList(', 'let fileListSequence'), c);
+  c.S.editingFile = 'config.yml'; await c.reloadFileList();
+  c.S.editingFile = null; c.grants = []; await c.reloadFileList();
+  assert.equal(loads, 0);
+});

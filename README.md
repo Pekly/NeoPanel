@@ -122,7 +122,11 @@ neopanel -config /etc/neopanel/config.yaml -role node   # or just: -node
 
 In the web UI, `Ctrl + K` opens the command palette and `Ctrl + \`` toggles the console drawer.
 
-`Ctrl/Cmd + F` opens the built-in workspace find bar. Use Enter / Shift+Enter (or F3 / Shift+F3) to move between matches and Escape to close it. Search stays local to the current page and supports the file editor. Page and subtab entrance animations play only on the first visit in a browser-tab session (including across reloads); signing out clears that history. Layout-switch and action-feedback animations remain responsive, with reduced-motion preferences respected.
+`Ctrl/Cmd + F` (or the editor's **Find** button) opens find **only inside an open text file**. Use Enter / Shift+Enter (or F3 / Shift+F3) to move between matches and Escape to close it. Search runs locally in a worker, scans up to the editor's 5 MiB text limit, and caches up to 1,000 matches. If workers are unavailable, a labelled fallback searches the first 128 Ki characters. Outside the editor, the browser's own find shortcut is untouched. **Files → Reload** refreshes the current folder without discarding its filter/selection.
+
+Text-editor syntax colors are chosen by extension: JSON/JSONC/`.mcmeta`, YAML, TOML, INI/config, Properties/`.lang`, JavaScript/TypeScript, Java, Python, shell/PowerShell, SQL, XML/HTML, CSS, Markdown, Go, Rust, Lua, and Dockerfile. Pinned local Prism assets run only in a worker; text, caret, undo, save, and draft behavior remain native. Files above 200,000 characters, unsupported formats, or coloring timeouts remain editable as plain text with a status explanation.
+
+Page and subtab entrances play only on the first visit in a browser-tab session (including across reloads); signing out clears that history. Browsing folders or returning from the editor does not replay the Files page entrance. Layout-switch and action feedback remain responsive, with reduced-motion preferences respected.
 
 ## Configuration
 

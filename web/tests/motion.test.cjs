@@ -88,8 +88,8 @@ test('route keys include server and active pane but exclude CPU/memory updates',
   const key = motion.viewKey(state);
   assert.equal(motion.viewKey({ ...state, cpu: 90, memory: 2048 }), key);
   assert.notEqual(motion.viewKey({ ...state, activeNodeId: 'west' }), key);
-  assert.notEqual(motion.viewKey({ ...state, currentDir: 'world' }), key);
-  assert.notEqual(motion.viewKey(state, { path: 'world.zip', folder: 'region/' }), motion.viewKey(state, { path: 'world.zip', folder: '' }));
+  assert.equal(motion.viewKey({ ...state, currentDir: 'world' }), key);
+  assert.equal(motion.viewKey(state, { path: 'world.zip', folder: 'region/' }), motion.viewKey(state, { path: 'world.zip', folder: '' }));
 });
 
 test('editors, media panels, hidden panels and offscreen panels stay still', () => {
@@ -286,4 +286,16 @@ test('global activity is one page; server activity has separate visit identities
   assert.equal(motion.viewKey(a), motion.viewKey(b));
   c.location.pathname = '/server/a/activity';
   assert.notEqual(motion.viewKey(a), motion.viewKey(b));
+});
+
+test('folder browsing and editor return do not replay the Files page entrance', () => {
+  const s = setup(), page = s.page();
+  const state = { view: 'fi', activeServerId: 'one', currentDir: '' };
+  s.motion.afterRender(page, s.motion.viewKey(state));
+  const first = s.animations.length;
+  for (const currentDir of ['world', 'world/region', 'config', '']) s.motion.afterRender(page, s.motion.viewKey({ ...state, currentDir }));
+  s.motion.afterRender(page, s.motion.viewKey({ ...state, editingFile: 'server.properties' }));
+  s.motion.afterRender(page, s.motion.viewKey(state));
+  assert.equal(s.animations.length, first);
+  assert.notEqual(s.motion.viewKey(state), s.motion.viewKey({ ...state, fileTrashOpen: true }));
 });

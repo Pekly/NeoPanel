@@ -77,9 +77,12 @@ function bindQolEditor() {
       event.preventDefault();
       ed.setRangeText('  ', ed.selectionStart, ed.selectionEnd, 'end');
       captureEditor(); updateEditorStatus();
+      window.NPEditorSyntax?.refresh();
+      window.NPFind?.refresh();
     }
   });
   updateEditorStatus();
+  window.NPEditorSyntax?.bind(ed, e.path);
 }
 function editorLeaveChoice() {
   return new Promise(resolve => {

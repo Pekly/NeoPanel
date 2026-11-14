@@ -69,7 +69,8 @@
     else if (view === 'plug') pane = state.plugTab || 'browse';
     else if (view === 'ver') pane = state.sel;
     else if (view === 'mod') pane = state.modPageId;
-    else if (view === 'fi') pane = [state.currentDir, state.editingFile, preview?.path, preview?.folder, Boolean(state.fileTrashOpen)];
+    // Browsing folders/archives is an in-page action, not a new tab entrance.
+    else if (view === 'fi') pane = state.fileTrashOpen ? 'trash' : 'files';
     const globalPage = ['dash', 'admin', 'acc', 'client', 'mod', 'maintenance', 'notfound'].includes(view) ||
       (view === 'act' && !(global.location?.pathname || '').startsWith('/server/'));
     return JSON.stringify([state.user?.id || '', view, globalPage ? '' : state.activeNodeId || 'local', globalPage ? '' : state.activeServerId || '', pane]);

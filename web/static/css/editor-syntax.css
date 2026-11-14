@@ -1,0 +1,143 @@
+/* Geometry is deliberately shared: token styles must NEVER change font metrics. */
+.np-syntax-editor {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  isolation: isolate;
+  background: var(--syntax-bg);
+  border-radius: var(--np-radius, 10px);
+  --syntax-bg: #131820;
+  --syntax-text: #dce4ef;
+  --syntax-comment: #9aabc0;
+  --syntax-string: #a5d6a7;
+  --syntax-number: #edc084;
+  --syntax-keyword: #c7a7ef;
+  --syntax-property: #91c9f3;
+  --syntax-tag: #f0a4ad;
+  --syntax-function: #e5d595;
+  --syntax-operator: #b7d9ec;
+  --syntax-variable: #b9c8fc;
+}
+html[data-theme="light"] .np-syntax-editor {
+  --syntax-bg: #f8fafc;
+  --syntax-text: #273449;
+  --syntax-comment: #58697c;
+  --syntax-string: #276139;
+  --syntax-number: #8b4d12;
+  --syntax-keyword: #7241a0;
+  --syntax-property: #195b91;
+  --syntax-tag: #a53149;
+  --syntax-function: #76560c;
+  --syntax-operator: #305b74;
+  --syntax-variable: #514b9f;
+}
+#ed.np-syntax-input,
+.np-syntax-editor > .np-syntax-mirror {
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  border: 0 !important;
+  padding: 16px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+  font-size: 13.5px !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  line-height: 1.7 !important;
+  letter-spacing: 0 !important;
+  word-spacing: 0 !important;
+  font-variant: normal !important;
+  font-kerning: none !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings: "liga" 0, "calt" 0 !important;
+  tab-size: 2 !important;
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+  text-indent: 0 !important;
+  text-align: left !important;
+  text-transform: none !important;
+  text-shadow: none !important;
+  direction: ltr !important;
+  unicode-bidi: normal !important;
+  transition: none !important;
+  animation: none !important;
+}
+#ed.np-syntax-input {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: auto !important;
+  resize: vertical;
+  background: transparent !important;
+  color: var(--syntax-text) !important;
+  -webkit-text-fill-color: var(--syntax-text) !important;
+  caret-color: var(--syntax-text) !important;
+}
+.np-syntax-editor > .np-syntax-mirror {
+  --np-syntax-ready: 1;
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: var(--syntax-text);
+  background: transparent;
+  border-radius: inherit;
+}
+.np-syntax-colored > .np-syntax-mirror { visibility: visible; }
+.np-syntax-colored > #ed.np-syntax-input {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  background: transparent !important;
+}
+#ed.np-syntax-input::selection {
+  color: #fff !important;
+  -webkit-text-fill-color: #fff !important;
+  background: #2459a6 !important;
+}
+.np-syntax-mirror span { font: inherit; letter-spacing: inherit; text-decoration: none; }
+.np-syntax-comment { color: var(--syntax-comment); }
+.np-syntax-string { color: var(--syntax-string); }
+.np-syntax-number { color: var(--syntax-number); }
+.np-syntax-keyword { color: var(--syntax-keyword); }
+.np-syntax-property { color: var(--syntax-property); }
+.np-syntax-tag { color: var(--syntax-tag); }
+.np-syntax-function { color: var(--syntax-function); }
+.np-syntax-operator, .np-syntax-punctuation { color: var(--syntax-operator); }
+.np-syntax-variable { color: var(--syntax-variable); }
+.np-syntax-status {
+  flex: none;
+  padding: 6px 16px;
+  color: var(--tx-muted, #9aabc0);
+  font-size: 11px;
+  line-height: 1.5;
+  border-top: 1px solid var(--border-light, #ffffff12);
+}
+@media (forced-colors: active) {
+  .np-syntax-editor > .np-syntax-mirror { visibility: hidden !important; }
+  .np-syntax-editor > #ed.np-syntax-input {
+    color: CanvasText !important;
+    -webkit-text-fill-color: CanvasText !important;
+    caret-color: CanvasText !important;
+    background: Canvas !important;
+    forced-color-adjust: auto;
+  }
+  #ed.np-syntax-input::selection {
+    color: HighlightText !important;
+    -webkit-text-fill-color: HighlightText !important;
+    background: Highlight !important;
+  }
+}
+@media print {
+  .np-syntax-editor > .np-syntax-mirror, .np-syntax-status { display: none !important; }
+  .np-syntax-editor > #ed.np-syntax-input { color: #000 !important; -webkit-text-fill-color: #000 !important; }
+}

@@ -1,0 +1,94 @@
+﻿{
+    "version":  "1.30.0",
+    "sources":  [
+                    {
+                        "sha256":  "6fe39cc3a95b3da596218fbca3acf03f1208bc936f9fb84d08a2b4a61e2b9af7",
+                        "path":  "components/prism-core.js"
+                    },
+                    {
+                        "sha256":  "981ea1865e1dbe304b661196fac6a6103b4ab19080c58c5b5d8ef2767e905df4",
+                        "path":  "components/prism-markup.js"
+                    },
+                    {
+                        "sha256":  "f802a0b3827470dadbbf2841cabd6832fc2d28124ded564d9a590285c627d65d",
+                        "path":  "components/prism-css.js"
+                    },
+                    {
+                        "sha256":  "6a7e077bbcb4a2259bc3152e55681f804ec8a3c2b969f234bb220df0f2d79654",
+                        "path":  "components/prism-clike.js"
+                    },
+                    {
+                        "sha256":  "7be3e7caf699bfddcd6d94d01e9df233257477f7f521e6c6765f03bd936a2d3e",
+                        "path":  "components/prism-javascript.js"
+                    },
+                    {
+                        "sha256":  "9a5181760da3863cb8d414bc756f48853320df224c16bf9f5af2541131bc9412",
+                        "path":  "components/prism-typescript.js"
+                    },
+                    {
+                        "sha256":  "835c44857c3f295f2c5bd70316006e455779da76287b0e14d93bbc995f658e4b",
+                        "path":  "components/prism-json.js"
+                    },
+                    {
+                        "sha256":  "907706b6b1ca4790755c50ca60f82f0273da640f8dacee5666099ba0bf91b038",
+                        "path":  "components/prism-yaml.js"
+                    },
+                    {
+                        "sha256":  "f61c3b348ad4a00b335540c0f83803416d802f1bf83fade8cfa8061407e3baf8",
+                        "path":  "components/prism-toml.js"
+                    },
+                    {
+                        "sha256":  "7263c742494b9e9640eadd22c8712fe15e83a98a8e44f44a75f72107085fd4f9",
+                        "path":  "components/prism-ini.js"
+                    },
+                    {
+                        "sha256":  "2ca00134c266c9a6853bc9ddb14836f2b99163faec96866489ec5fb32a4eb69a",
+                        "path":  "components/prism-properties.js"
+                    },
+                    {
+                        "sha256":  "b0cba68acd21aef9605a8ca71bf2fa4579b3b9db63af436ee659f0c727717a8e",
+                        "path":  "components/prism-java.js"
+                    },
+                    {
+                        "sha256":  "fd84d8bedf516b82f1b212fc059d280f8f2ca7230bef6408bea6b5ce4e8e68f4",
+                        "path":  "components/prism-python.js"
+                    },
+                    {
+                        "sha256":  "6c67db1a4c86269dc754b588d0ad3a0cdb295044fd466ea6f66bbf01dec306bd",
+                        "path":  "components/prism-bash.js"
+                    },
+                    {
+                        "sha256":  "dd20d617bd4a01c5a51f0956714f8e5311920dcfcff05e4205c991374316fc30",
+                        "path":  "components/prism-powershell.js"
+                    },
+                    {
+                        "sha256":  "c208fdd212ff69c123c252290d5c325375bfefb0f6c26523b463909606cf3567",
+                        "path":  "components/prism-sql.js"
+                    },
+                    {
+                        "sha256":  "c73ae303135279e08c57759cf85cfefe0961e8faca5b23795dd6e2e60d42d05b",
+                        "path":  "components/prism-markdown.js"
+                    },
+                    {
+                        "sha256":  "a3fcbec67973ab43a7a7ec3cd8e447f254bc0213eed9e6842067da5082bcf60e",
+                        "path":  "components/prism-go.js"
+                    },
+                    {
+                        "sha256":  "5033845938d1a958bb2a663baa116cecfea679faee91f48c4b9bf0fbdd5b0ae3",
+                        "path":  "components/prism-rust.js"
+                    },
+                    {
+                        "sha256":  "708066fde1a411d7affd4d623ccfb7a91c7b1ac85d00f9bf4bc9e87342992e85",
+                        "path":  "components/prism-lua.js"
+                    },
+                    {
+                        "sha256":  "1fe0dfd5fde97986bd7ea2676d5137a6ce2db215aee40810cb897b833d19f235",
+                        "path":  "components/prism-docker.js"
+                    }
+                ],
+    "license":  "MIT",
+    "note":  "Official unmodified components concatenated in dependency order with comment separators. No plugins or autoloader; loaded only by editor-syntax-worker.js.",
+    "bundleSHA256":  "a29beede04bec97b93462391a736a9844cd54ec1ff1d0e7f29905f8f2e896586",
+    "licenseSHA256":  "2b947f0901a7ffcf08a89957da9783c0e9c6e72cb6ce8e959f501ab5409e4d2b",
+    "upstream":  "https://github.com/PrismJS/prism/tree/v1.30.0"
+}

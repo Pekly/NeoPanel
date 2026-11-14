@@ -114,3 +114,11 @@ test('late content growth remains inside the space below and right of the menu',
   state.menu.naturalHeight = 1200;
   assertWithin(state, { left: 0, top: 0, width: 800, height: 600 });
 });
+
+test('Team, Database and Backups empty states use consistent SVG icons instead of emoji', () => {
+  for (const icon of ['users', 'database', 'archive']) assert.ok(source.includes(`class="np-empty-icon" aria-hidden="true">\${ic('${icon}', 30)}`), icon);
+  assert.doesNotMatch(section('function renderSubusersListHtml(', '\n  return `<div class="tw">'), /👥/);
+  const c = vm.createContext({});
+  vm.runInContext(section('function ic(', 'function fileListIconHtml('), c);
+  for (const name of ['users', 'database', 'archive']) assert.match(c.ic(name, 30), /<svg[^>]*aria-hidden="true"/);
+});

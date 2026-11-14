@@ -6311,6 +6311,7 @@ const V = {
             <span id="editor-save-status" class="mu" role="status" style="font-size:12px;"></span>
           </div>
           <div class="row" style="gap: 8px;">
+            <button type="button" class="btn sm" onclick="window.NPFind?.open()" title="Find in file (Ctrl/Cmd + F)">${ic('search', 14)} Find</button>
             <button class="btn sm" data-path="${esc(S.editingFile)}" onclick="downloadFileItem(this.dataset.path)">${ic('download', 14)} Download</button>
             <button id="editor-save-btn" class="btn sm pr" onclick="saveActiveFile()" title="Ctrl/Cmd + S">${ic('download', 14)} Save File</button>
           </div>
@@ -6531,6 +6532,7 @@ const V = {
             <button type="button" class="btn sm" onclick="setFileSort(S.fileSort?.by || 'name', S.fileSort?.dir === 'desc' ? 'asc' : 'desc')" style="height: 36px; padding: 0 11px;" title="Toggle ascending / descending order (folders always stay first)">${sortDir === 'asc' ? '&uarr; Asc' : '&darr; Desc'}</button>
           </div>
           ${renderViewModeToggle('files', 'list')}
+          <button type="button" id="file-reload-btn" class="btn" onclick="reloadFileList()" ${S.loading?.files || S.fileReloading ? 'disabled' : ''} aria-busy="${Boolean(S.fileReloading)}" title="Reload this folder">${ic('refresh', 14)} Reload</button>
           <button class="btn" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}>${ic('trash', 14)} Trash</button>
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
           <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
@@ -6825,7 +6827,7 @@ const V = {
     if (S.loading?.backups) {
       body = `<div class="card">${loaderHtml('Loading server backups...')}</div>`;
     } else if (!S.bk.length) {
-      body = `<div class="card mu" style="text-align:center;padding:24px;">No backups yet. Create your first archive to protect your world!</div>`;
+      body = `<div class="card mu" style="text-align:center;padding:28px;"><div class="np-empty-icon" aria-hidden="true">${ic('archive', 30)}</div><h3 class="np-empty-title">No backups yet</h3><p>Create your first archive to protect your world.</p></div>`;
     } else if (vm === 'icons' || vm === 'tiles') {
       body = `<div class="${vm === 'icons' ? 'vm-icons-grid wide' : 'vm-tiles-grid'}">
         ${S.bk.map(b => {
@@ -7075,6 +7077,7 @@ const V = {
 
     const emptyHtml = `<div class="card" style="text-align: center; padding: 36px 20px;">
       <div style="max-width: 440px; margin: 0 auto;">
+        <div class="np-empty-icon" aria-hidden="true">${ic('database', 30)}</div>
         <div style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 6px;">No databases provisioned for ${esc(srv?.name || 'this server')}</div>
         <div class="mu" style="font-size: 13px; margin-bottom: 16px;">Create an isolated SQLite database for LuckPerms, CoreProtect, Economy plugins, or custom data — inspect schemas and run live SQL queries right in the browser.</div>
         <button type="button" class="btn pr" onclick="openCreateDatabaseModal()">${ic('plus', 14)} Create First Database</button>
@@ -9304,6 +9307,7 @@ window.addEventListener('hashchange', () => {
 // --- Main Render Function (R) ---
 window.R = function() {
   captureEditor();
+  window.NPEditorSyntax?.dispose();
   if (typeof filePreviewActive === 'function' && !filePreviewActive()) disposeFilePreview();
   closeAllCustomSelects();
   closeFloatingCtx();
@@ -10074,6 +10078,27 @@ function addWhitelistPlayer() {
 }
 
 // --- File Manager Operations ---
+async function reloadFileList() {
+  if (S.fileReloading || S.loading?.files || S.view !== 'fi' || S.editingFile || S.fileTrashOpen || !hasServerPermission('files.view')) return;
+  const server = curServer(), token = S.token, directory = S.currentDir || '';
+  if (!server) return;
+  const filter = $('#fi-filter')?.value || '';
+  S.fileReloading = true;
+  const button = $('#file-reload-btn');
+  if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+  try {
+    await loadFileList(directory);
+    if (token === S.token && sameQolServer(server, curServer()) && S.view === 'fi' && S.currentDir === directory && $('#fi-filter')) {
+      $('#fi-filter').value = filter;
+      filterFileList(filter);
+    }
+  } finally {
+    S.fileReloading = false;
+    const current = $('#file-reload-btn');
+    if (current) { current.disabled = Boolean(S.loading?.files); current.setAttribute('aria-busy', 'false'); }
+  }
+}
+
 let fileListSequence = 0;
 let fileListController = null;
 async function loadFileList(path = '', skipRender = false, options = {}) {
@@ -13000,7 +13025,7 @@ function renderSubusersListHtml(srv) {
   const subusers = Array.isArray(S.serverSubusers) ? S.serverSubusers : [];
   if (!subusers.length) {
     return `<div class="card mu" style="text-align: center; padding: 24px 16px; background: rgba(255,255,255,0.01);">
-      <div style="font-size: 26px; margin-bottom: 6px;">👥</div>
+      <div class="np-empty-icon" aria-hidden="true">${ic('users', 30)}</div>
       <b style="color: var(--tx); display: block; margin-bottom: 4px;">No team members yet</b>
       <span style="font-size: 12.5px;">Add teammates and choose what they can access without sharing your password.</span>
     </div>`;

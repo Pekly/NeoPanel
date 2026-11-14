@@ -1,4 +1,4 @@
-/* Nonmodal workspace find; theme variables follow NeoPanel's light/dark branding. */
+/* Text-file find only; matches use the editor's native selection. */
 #np-find {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
@@ -51,8 +51,6 @@
 #np-find button:hover:not(:disabled) { background: var(--card-hover, #202733); }
 #np-find button:disabled { opacity: .4; cursor: default; }
 #np-find :focus-visible { outline: 2px solid var(--ac, #2f6feb); outline-offset: 2px; }
-::highlight(np-find-results) { background-color: #ead16b; color: #161a20; }
-::highlight(np-find-active) { background-color: #ed8a32; color: #161a20; text-decoration: underline; }
 @media (max-width: 480px) {
   #np-find { right: 12px; left: 12px; flex-wrap: wrap; }
   #np-find input { flex: 1 1 120px; }
@@ -60,6 +58,4 @@
 }
 @media (forced-colors: active) {
   #np-find { border-color: CanvasText; }
-  ::highlight(np-find-results) { background-color: Mark; color: MarkText; }
-  ::highlight(np-find-active) { background-color: Highlight; color: HighlightText; }
 }

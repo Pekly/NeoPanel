@@ -563,3 +563,8 @@ input[type="checkbox"]:not(.no-ccheck):is(:checked, :indeterminate):hover:not(:d
 .file-trash-item .row { gap: 8px; flex-wrap: wrap; }
 .file-delete-choice { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
 .file-delete-choice:has(input:checked) { background: color-mix(in srgb, var(--er) 12%, var(--card-bg-solid)); border-color: var(--er); }
+
+.np-empty-icon { display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto 14px; border: 1px solid var(--border-accent, var(--border)); border-radius: 15px; background: var(--ac-subtle); color: var(--ac); }
+.np-empty-icon svg { display: block; stroke-width: 1.6; }
+.np-empty-title { margin: 0 0 6px; color: var(--tx); font-size: 15px; font-weight: 700; }
+#file-reload-btn[aria-busy="true"] { cursor: progress; }
