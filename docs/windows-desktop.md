@@ -1,23 +1,30 @@
 # NeoPanel Desktop for Windows
 
-**Linux is NeoPanel’s main focus.** Windows desktop is a secondary project and
-receives updates occasionally, rather than alongside every Linux change.
-Development continues on `windows-desktop-release`; `main` stays the Linux/headless line.
-The published portable beta is `v1.0.0-windows-beta.1` and may lag behind this branch.
+## Get started
 
-A fresh desktop workspace opens as **Guest**, with a skippable
-**Getting started** tutorial. Reopen it with the dashboard button; progress is
-saved per account in the local browser profile, not synchronized across devices.
-The tutorial only explains and opens controls—it never starts a server or accepts an EULA.
+1. Open **NeoPanel-Desktop.exe**. New installs sign in as Guest automatically.
+2. Click **Create server**, choose **Local**, and pick your Minecraft version.
+3. Install Java if prompted, review the EULA, then click **Start**.
 
-Double-click **NeoPanel-Desktop.exe** to open the app's own window and local Go
-backend. This is the Windows panel edition: no separate console/browser package
-or startup script is needed. The familiar panel interface is embedded using Wails
-and Microsoft Edge WebView2.
+Minimize the app to keep servers running. To quit, close it and choose to save
+and stop your servers. Only run servers and plugins you trust.
 
-The same app is the head/master, can host trusted Minecraft servers locally, and
-can manage separate web-less Linux or Windows nodes. Players still connect directly
-to each game server's host/port; the head does not tunnel game traffic.
+Already have an account? Sign in as usual. Want a password for Guest?
+Set one in **Admin → Users** to turn off automatic sign-in.
+
+## Start fresh
+
+Close the app, then rename `%LOCALAPPDATA%\NeoPanel-Desktop` to
+`NeoPanel-Desktop-backup`. Open the EXE again for a fresh start.
+Your old worlds and settings stay in the backup folder. If you chose a custom
+data folder, rename that folder instead.
+
+Windows gets occasional updates; Linux remains the main focus. The published
+beta may be older than this branch.
+
+<details>
+<summary>Advanced: building, storage, and security</summary>
+
 
 ## Build and run
 
@@ -164,3 +171,5 @@ can interrupt hosting; this app is not an always-on Windows service.
   shared Windows build-tag code. Linux builds do not install Wails, GTK, or WebKit.
 - Read the [security upgrade notes](https://github.com/Pekly/NeoPanel/blob/main/docs/security-upgrade.md)
   before upgrading an existing panel or workers.
+
+</details>

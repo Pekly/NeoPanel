@@ -99,6 +99,9 @@ test('desktop Guest gets honest local-account guidance and can dismiss it', () =
   assert.match(g.render(), /Your local Guest workspace/);
   assert.match(g.root.innerHTML, /Admin → Users/);
   assert.match(g.root.innerHTML, /permanently turns off Guest auto-login/);
+  assert.match(g.root.innerHTML, /data-guide-action="create"/);
+  assert.doesNotMatch(g.root.innerHTML, /HTTP API|authentication|sandbox/);
+  g.click('create'); assert.deepEqual(g.calls, [['create']]);
   g.click('pause');
   const resumed = guide(g.storage, false, true);
   assert.doesNotMatch(resumed.render(), /np-guide-detail/);

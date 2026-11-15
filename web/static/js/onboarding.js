@@ -3,9 +3,9 @@
   const cache = new Map();
   let context = null;
   const guestStep = { label: 'Your account', icon: 'shield', title: 'Your local Guest workspace',
-    text: 'Guest is the administrator of this desktop workspace. No login is needed in this app, but its HTTP API still requires authentication.',
-    items: ['Anyone who can open this Windows profile can use Guest and manage its local servers and connected nodes.', 'To require login, edit Guest in Admin → Users and set a password. This permanently turns off Guest auto-login. Then use Account → Security for two-factor authentication or passkeys.', 'Signing out lasts until the app is restarted. Keep this local workspace on a trusted machine; it is not a public hosting sandbox.'],
-    action: 'Review administration', target: 'nodes', note: 'No password is needed to get started with local hosting.' };
+    text: 'You’re signed in as Guest. Let’s create your first server.',
+    items: ['Choose Local to run it on this PC.', 'Anyone using this Windows profile can manage your servers.', 'Want a password? Set one for Guest in Admin → Users. This permanently turns off Guest auto-login.'],
+    action: 'Create a server', target: 'create', note: 'Signing out lasts until you restart the app.' };
   const steps = [
     { label: 'Your account', icon: 'shield', title: 'Make this account yours',
       text: 'Your account manages your servers and team.',
