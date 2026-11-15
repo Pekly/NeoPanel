@@ -46,6 +46,17 @@ Before upgrading an existing installation, read the [security upgrade notes](doc
 
 Linux installer tested on Ubuntu 24.04 LTS. Windows can also run the master panel and trusted local servers.
 
+### Standalone Windows desktop app
+
+On the `windows-desktop` branch, build a native Windows window with its own managed backend:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-windows-desktop.ps1
+.\dist\windows-desktop-amd64\NeoPanel-Desktop.exe
+```
+
+No console or browser tab is needed. It hosts local servers, manages web-less workers, remembers window settings, and offers safe shutdown when local servers are active. Requires WebView2; desktop data defaults to `%LOCALAPPDATA%\NeoPanel-Desktop`, separate from the console panel. See the [desktop setup guide](docs/windows-desktop.md), including optional per-user installer packaging.
+
 ### Windows master + local hosting
 
 Use the browser UI on Windows, host servers directly on that PC, and add web-less Linux/Windows workers. No native desktop wrapper is needed.

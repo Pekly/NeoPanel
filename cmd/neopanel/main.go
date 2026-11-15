@@ -6,22 +6,16 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/Pekly/NeoPanel/internal/api"
 	"github.com/Pekly/NeoPanel/internal/config"
-	"github.com/Pekly/NeoPanel/internal/database"
-	"github.com/Pekly/NeoPanel/internal/runner"
-	"github.com/Pekly/NeoPanel/internal/sftp"
+	"github.com/Pekly/NeoPanel/internal/daemon"
 	"github.com/Pekly/NeoPanel/web"
 )
 
@@ -124,104 +118,31 @@ func main() {
 		log.Printf("[INFO] Configuration: %s", cfg.FilePath)
 	}
 
-	// 1. Initialize SQLite Database
-	log.Printf("[INFO] Connecting to SQLite database at: %s", cfg.Paths.DBPath)
-	db, err := database.InitDB(cfg.Paths.DBPath)
-	if err != nil {
-		log.Fatalf("[FATAL] Database initialization failed: %v", err)
-	}
-	defer db.Close()
+	// The CLI owns signals; daemon owns the reusable backend lifecycle.
+	shutdownCh := make(chan os.Signal, 1)
+	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(shutdownCh)
 
-	// 2. Initialize Process / Server Manager
-	log.Printf("[INFO] Initializing server manager with data directory: %s", cfg.Paths.ServersDir)
-	manager := runner.NewServerManager(cfg.Paths.ServersDir, db)
-	if cfg.Server.StartupTimeoutSec > 0 {
-		manager.SetStartupTimeout(time.Duration(cfg.Server.StartupTimeoutSec) * time.Second)
-	}
-
-	// 3. Mount Router (cluster node daemons expose daemon & control APIs only)
 	var staticFS fs.FS
 	if !cfg.IsNode() {
 		staticFS = web.GetFS()
 	}
-	router := api.NewRouter(cfg, db, manager, staticFS)
-
-	// 4. Initialize & Start Built-in SFTP Server (Port 2022)
-	var sftpServer *sftp.SFTPServer
-	if cfg.SFTP.Enabled {
-		var err error
-		sftpServer, err = sftp.NewSFTPServer(cfg, db)
-		if err != nil {
-			log.Printf("[WARN] Failed to configure SFTP server: %v", err)
-		} else {
-			if err := sftpServer.Start(); err != nil {
-				log.Printf("[WARN] Failed to start SFTP server: %v", err)
-			}
-		}
-	}
-
-	addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
-	listener, err := net.Listen("tcp", addr)
+	service, err := daemon.Start(cfg, staticFS)
 	if err != nil {
-		if sftpServer != nil {
-			sftpServer.Stop()
-		}
-		manager.ShutdownAll()
-		log.Fatalf("[FATAL] Could not listen on %s: %v", addr, err)
+		log.Fatalf("[FATAL] %v", err)
 	}
-	addr = listener.Addr().String()
-
-	// 5. Graceful Shutdown listener
-	shutdownCh := make(chan os.Signal, 1)
-	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(shutdownCh)
-	shutdownDone := make(chan struct{})
-
-	go func() {
-		sig := <-shutdownCh
+	select {
+	case sig := <-shutdownCh:
 		log.Printf("[INFO] Received signal %v. Gracefully shutting down NeoPanel...", sig)
-
-		// Create timeout context for HTTP shutdown
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
-		if sftpServer != nil {
-			sftpServer.Stop()
-		}
-
-		if err := srv.Shutdown(ctx); err != nil {
-			log.Printf("[WARN] HTTP server shutdown error: %v", err)
-			_ = srv.Close()
-		}
-
-		log.Printf("[INFO] Stopping running Minecraft servers...")
-		manager.ShutdownAll()
-
-		log.Printf("[INFO] Shutdown complete. Goodbye!")
-		close(shutdownDone)
-	}()
-
-	// 6. Start HTTP Server
-	if cfg.IsNode() || staticFS == nil {
-		log.Printf("[SUCCESS] NeoPanel Cluster Node Daemon running at: http://%s", addr)
-	} else {
-		log.Printf("[SUCCESS] NeoPanel Master Panel running at: http://%s", addr)
+	case <-service.Done():
 	}
-	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
-		if sftpServer != nil {
-			sftpServer.Stop()
-		}
-		manager.ShutdownAll()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := service.Shutdown(ctx); err != nil {
+		log.Printf("[WARN] Backend shutdown error: %v", err)
+	}
+	if err := service.Err(); err != nil {
 		log.Fatalf("[FATAL] Server terminated unexpectedly: %v", err)
 	}
-	// Serve returns as soon as the listener closes, before game shutdown finishes.
-	// Keep the process alive until the graceful shutdown goroutine has completed.
-	<-shutdownDone
+	log.Printf("[INFO] Shutdown complete. Goodbye!")
 }
