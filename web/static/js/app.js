@@ -3356,6 +3356,7 @@ async function api(endpoint, options = {}) {
   if (!headers['Content-Type'] && !(fetchOpts.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
   }
+  const finishProgress = window.NPProgress?.startRequest(endpoint, options) || (() => {});
 
   try {
     const res = await fetch(endpoint, { ...fetchOpts, headers });
@@ -3377,6 +3378,8 @@ async function api(endpoint, options = {}) {
       toast(err.message, 'error');
     }
     throw err;
+  } finally {
+    finishProgress();
   }
 }
 
@@ -10632,13 +10635,9 @@ async function submitCompressFilesModal(e) {
   const format = $('#comp-format')?.value || 'zip';
 
   try {
-    assertClientRequestAccess(srvApiPath(srv, '/files/compress'), { method: 'POST' });
-    const res = await fetch(srvApiPath(srv, '/files/compress'), {
+    const data = await api(srvApiPath(srv, '/files/compress'), {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(S.token ? { 'Authorization': `Bearer ${S.token}` } : {})
-      },
+      suppressToast: true,
       body: JSON.stringify({
         paths: state.paths,
         destination: state.dir || '',
@@ -10646,10 +10645,6 @@ async function submitCompressFilesModal(e) {
         format
       })
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || `HTTP ${res.status}`);
-    }
 
     S.compressModalState = null;
     if (S.selectedFiles) S.selectedFiles.clear();
@@ -13875,6 +13870,7 @@ function openReinstallModal(srvId, nodeId = null) {
           </label>
         </div>
 
+        <div data-operation-progress></div>
         <div class="row" style="justify-content:flex-end; gap:10px;">
           <button type="button" class="btn" onclick="closeModal()">Cancel</button>
           <button type="submit" id="reinst-submit-btn" class="btn pr">
@@ -13893,11 +13889,16 @@ function openReinstallModal(srvId, nodeId = null) {
 async function submitReinstall(e, srvId, nodeId = 'local') {
   e.preventDefault();
   const targetNodeId = nodeId || 'local';
-  const btn = $('#reinst-submit-btn');
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `${ic('refresh', 14)} Reinstalling...`;
+  const operationKey = `${targetNodeId}:${srvId}`;
+  if (!S.reinstallingServers) S.reinstallingServers = new Set();
+  if (S.reinstallingServers.has(operationKey)) {
+    toast('Reinstallation is already running for this server.');
+    return;
   }
+  S.reinstallingServers.add(operationKey);
+  const btn = $('#reinst-submit-btn');
+  const form = $('#reinstall-form');
+  setBtnLoading(btn, true, 'Reinstalling...');
 
   const software = $('#reinst-software')?.value || 'paper';
   const version = $('#reinst-version')?.value.trim() || 'latest';
@@ -13952,7 +13953,7 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
       }
     }
 
-    closeModal();
+    if ($('#reinstall-form') === form) closeModal();
     toast(`Server reinstalled successfully (${software} ${version})!`, 'ok');
 
     const cur = curServer();
@@ -13965,11 +13966,7 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
     R();
   } catch (err) {
     toast(err.message || 'Server reinstallation failed', 'bad');
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = `${ic('refresh', 14)} Start Reinstallation`;
-    }
-    uiAlert({
+    if ($('#reinstall-form') === form) uiAlert({
       title: 'Server Reinstallation Failed',
       message: `Failed to download or reinstall <b>${esc(software)} ${esc(version)}</b>:<br><br>
         <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; color:#fca5a5;">
@@ -13978,6 +13975,9 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
         Please verify the release tag and software engine, or check connectivity to the upstream release provider.`,
       type: 'error'
     });
+  } finally {
+    S.reinstallingServers.delete(operationKey);
+    setBtnLoading(btn, false);
   }
 }
 
@@ -16806,6 +16806,7 @@ async function logout() {
   window.NPFind?.close();
   window.NPFileDrag?.cancel();
   window.NPMotion?.resetSession();
+  window.NPProgress?.clear();
   cancelAllUploads();
   QOL.uploads = [];
   renderUploadQueue();
