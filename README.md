@@ -1,39 +1,40 @@
 # NeoPanel
 
-A lightweight Minecraft server panel: one Go binary, an embedded SQLite database, and no Docker stack to maintain. It runs Java servers and proxies, plus the native [Steel](https://steelmc.dev/) server. On my setup the panel idles at roughly 15–25 MB, leaving the memory for Minecraft.
+[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
+[![Linux first](https://img.shields.io/badge/focus-Linux-FCC624?logo=linux&logoColor=black)](#install-on-linux)
+[![Windows beta](https://img.shields.io/badge/Windows-beta-0078D4)](https://github.com/Pekly/NeoPanel/tree/windows-desktop-release)
 
-## What's included
+NeoPanel is a Minecraft server panel written in Go. It ships as one binary with an embedded web interface and SQLite database, so there’s no PHP runtime or Docker stack to set up for the panel.
 
-- Live console, resource charts, file editor, SFTP, and recoverable file-manager Trash.
-- Paper, Purpur, LeafMC, Folia, Vanilla, Fabric, Forge, NeoForge, Velocity, Waterfall, BungeeCord, and Steel.
-- Java management, Modrinth plugins/mods, backups and restore, schedules, and player management.
-- Team permissions and email invitations, passkeys and 2FA, API keys, and audit logs.
-- Remote worker nodes, themes and branding, and JavaScript extensions.
+Run servers on the panel’s machine, or connect workers on other hosts. You get a live console, file editor, Java management, plugins and mods, backups, schedules, and team access. It supports the usual Java servers and proxies, including Paper, Fabric, Forge, and Velocity, as well as [Steel](https://steelmc.dev/).
 
-NeoPanel is for Minecraft, not arbitrary game-server eggs. It doesn't host MySQL/MariaDB or process payments. Only install extensions you trust: they run with panel-origin access.
+**Linux is the main focus.** The [Windows desktop branch](https://github.com/Pekly/NeoPanel/tree/windows-desktop-release) is a secondary project and will receive updates occasionally. Don’t expect every Linux update to get an immediate Windows build.
 
-## Linux setup
+## Install on Linux
 
-The installer is tested on Ubuntu 24.04 LTS:
+Ubuntu 24.04 LTS is the tested installer target. On a machine you control:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash
 ```
 
-For a non-interactive panel install:
+The installer builds NeoPanel, installs the required Go/Java tools, configures a systemd service and firewall rules, and can set up Caddy for HTTPS. Review [install.sh](install.sh) before running it as root if you want to see exactly what it changes.
+
+For an unattended install:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- \
   --install --domain panel.example.com --email you@example.com -y
 ```
 
-It installs Go and Java as needed, builds NeoPanel, configures a systemd service and firewall rules, and optionally sets up Caddy HTTPS. Configuration is in `/etc/neopanel/config.yaml`; data and worlds are under `/var/lib/neopanel`.
+Open the address printed by the installer. The first page creates your administrator account; the **Getting started** guide then walks through account security, choosing a host, creating a server, and console/backups. You can skip it and reopen it from the dashboard. Guide progress is saved for your account in that browser, not shared across devices.
 
-Installs and updates require a successful Bubblewrap preflight. If it fails, check `/var/lib/neopanel/installer/install.log` and resolve the host's namespace/package restrictions; the installer does not silently disable isolation. Select **Bubblewrap (`bwrap`)** on the node to require filesystem isolation. Systemd alone provides resource limits, not a filesystem sandbox.
+The panel’s web address and the Minecraft address are different. Players connect to the **game host and port** shown on the server card.
 
-### Add a worker
+### Add another host
 
-Create an administrator API key on the master under **Account → API Keys**, then run on the worker:
+Create an administrator API key under **Account → API Keys**, then run this on the worker machine:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- \
@@ -41,73 +42,58 @@ curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sud
   --api-key neo_your_admin_api_key_here --name eu-node-01 --location "Frankfurt, DE"
 ```
 
-Workers have no web UI. Protect their APIs with HTTPS or a trusted private/VPN network; players connect directly to each game server's host and port.
+Workers don’t serve a web interface. Keep their APIs behind HTTPS or a trusted private/VPN network. You don’t need a worker just to host on the panel’s own machine—choose **Local**.
 
-### Updates and logs
+### Updates and troubleshooting
 
 ```bash
 sudo neopanel-update
-sudo neopanel-installer          # installer menu
+sudo neopanel-installer          # reopen the installer menu
 systemctl status neopanel
 journalctl -u neopanel -f
 ```
 
-Before upgrading, back up the database, configuration, and worlds, and read the [security upgrade notes](docs/security-upgrade.md). Update the panel **and all workers** together. Configure the public panel URL and trusted proxies explicitly; don't expose the backend behind an unrestricted proxy trust setting.
+Configuration lives in `/etc/neopanel/config.yaml`; data and worlds are under `/var/lib/neopanel`. Installer logs are in `/var/lib/neopanel/installer/install.log`.
 
-## Windows desktop (beta)
+Back up your database, configuration, and worlds before upgrading. Update the panel and workers together, and read the [security upgrade notes](docs/security-upgrade.md) when updating an older installation.
 
-The desktop release line is `windows-desktop-release`, with Windows-only prerelease `v1.0.0-windows-beta.1`. It does not change `main` or the Linux release path.
+## Windows desktop
 
-[Download the Windows beta](https://github.com/Pekly/NeoPanel/releases/tag/v1.0.0-windows-beta.1), extract the ZIP, and run `NeoPanel-Desktop.exe`. Or build it from that branch:
+[Download the portable beta](https://github.com/Pekly/NeoPanel/releases/tag/v1.0.0-windows-beta.1), extract the ZIP, and run `NeoPanel-Desktop.exe`. It opens its own window and needs Microsoft Edge WebView2 Runtime. No Go installation is needed to run the download.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-windows-desktop.ps1
-.\dist\windows-desktop-amd64\NeoPanel-Desktop.exe
-```
+Desktop development stays on **`windows-desktop-release`**. It is not the primary focus and gets occasional updates; the published beta may lag behind branch changes. See the [desktop guide on that branch](https://github.com/Pekly/NeoPanel/blob/windows-desktop-release/docs/windows-desktop.md) for building, storage, and safe shutdown. For the Windows browser/CLI version, use the [Windows setup guide](docs/windows.md).
 
-The app opens its own window and backend—no console or browser tab needed. It can host trusted local servers and manage remote workers. This beta uses a portable EXE, requires WebView2, and stores data in `%LOCALAPPDATA%\NeoPanel-Desktop`. See the [desktop guide](docs/windows-desktop.md) for requirements, storage, and safe shutdown.
+Minimize the desktop app to keep local servers running. Closing with active local servers asks whether to save/stop them or keep running. Windows local hosting is **trusted-only**: Job Objects manage processes and memory, not filesystem or network isolation.
 
-Prefer the browser UI on Windows? Use `build-windows.ps1` and `start-windows.cmd`; see the [Windows setup guide](docs/windows.md). Windows local workloads are **trusted-only**, not filesystem-isolated. Neither launcher automatically elevates privileges or opens the firewall.
+## Before inviting players
 
-## Before hosting real worlds
+- Use configured Linux isolation for untrusted workloads. The installer requires a successful Bubblewrap preflight; it won’t quietly bypass a failed check. Select **Bubblewrap (`bwrap`)** on the node to require filesystem isolation. Systemd resource limits alone are not a filesystem sandbox.
+- Stop a server before taking a consistent world backup. Restore replaces active files, so keep a separate backup too.
+- Don’t run two panels against the same database or server folders, or remove ownership locks to bypass a running instance.
+- Configure SMTP and the public panel URL before relying on invitation or password-reset emails. Use HTTPS and configure trusted proxies explicitly.
+- Give teammates their own accounts and only the permissions they need. Extensions run with panel-origin access; install only ones you trust.
 
-- Stop a server before taking a backup when you need a consistent world snapshot. Restore replaces the active files; keep independent backups.
-- Never run two panel instances against the same database or server directories, or delete world/ownership locks to bypass a running instance.
-- Use Linux with properly configured isolation for untrusted workloads. Windows Job Objects manage processes and memory, not filesystem or network access.
-- Configure SMTP and the browser-facing panel address before using invitations, password resets, or passkeys. Keep the hostname stable once passkeys are registered.
-- SFTP team access is opt-in. Grant `sftp.access` and the appropriate file permissions; use the server-specific login shown in the panel.
+More details: [invited accounts](docs/invitation-account-lifecycle.md), [file-manager Trash](internal/trash/README.md), [server deletion](docs/server-deletion.md), [file previews](docs/file-previews.md), and [memory limits](internal/runner/MEMORY_POLICY.md).
 
-More detail: [security and deployment](docs/security-upgrade.md) · [invited-account lifecycle](docs/invitation-account-lifecycle.md) · [Trash](internal/trash/README.md) · [server deletion](docs/server-deletion.md) · [file previews](docs/file-previews.md) · [memory limits](internal/runner/MEMORY_POLICY.md).
+## Working on the code
 
-## Build from source
-
-Use Go 1.26 or newer with current security patches. The web interface is embedded; no Node.js build step or bundler is needed.
+Use Go 1.26 or newer with current security patches. The web UI doesn’t need a bundler or npm install.
 
 ```bash
 git clone https://github.com/Pekly/NeoPanel.git
 cd NeoPanel
-make build         # ./bin/neopanel
-make build-linux   # Linux amd64 and arm64
-make run           # development mode
-```
-
-The Windows desktop has its own module at `desktop/go.mod`. Linux installs and updates exclude desktop source, packaging, and Windows launchers/docs from their checkout, and build only `cmd/neopanel` (with `-tags node` for workers). They do not install Wails, WebView2, GTK, or WebKit. A local source install leaves your checkout untouched.
-
-Regression checks:
-
-```bash
+make build                       # bin/neopanel
 go test ./...
 go vet ./...
 node --test web/tests/*.test.cjs
-bash -n install.sh
 bash tests/install-isolation.test.sh
 bash tests/install-build.test.sh
 ```
 
-Linux isolation/process tests need a Linux host; cross-compilation isn't a runtime sandbox test. Desktop builds and tests are separate from the root module; see the [desktop guide](docs/windows-desktop.md).
+`main` is the Linux/headless line. The desktop branch keeps Wails in a separate `desktop/go.mod`; Linux install/update checkouts exclude desktop-only files and build the root module. Linux isolation tests need a Linux host—cross-compiling is not a sandbox test.
+
+Found a problem? [Open an issue](https://github.com/Pekly/NeoPanel/issues) with your OS, branch/version, steps to reproduce, and relevant logs. Remove tokens, passwords, and personal data first.
 
 ## License
 
-MIT. Made for Minecraft admins who would rather spend their RAM on players than on PHP workers.
-
-Steel logo supplied by [SteelMC](https://steelmc.dev/), credited upstream to colonthreeing.
+[MIT](https://opensource.org/license/mit). The Steel logo is supplied by [SteelMC](https://steelmc.dev/), credited upstream to colonthreeing.
