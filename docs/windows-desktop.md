@@ -1,7 +1,15 @@
 # NeoPanel Desktop for Windows
 
-The `windows-desktop-release` branch contains the Windows-only prerelease
-`v1.0.0-windows-beta.1`; `main` and the Linux release path remain unchanged.
+**Linux is NeoPanel’s main focus.** Windows desktop is a secondary project and
+receives updates occasionally, rather than alongside every Linux change.
+Development continues on `windows-desktop-release`; `main` stays the Linux/headless line.
+The published portable beta is `v1.0.0-windows-beta.1` and may lag behind this branch.
+
+After creating the first administrator, the dashboard offers a skippable
+**Getting started** tutorial. Reopen it with the dashboard button; progress is
+saved per account in the local browser profile, not synchronized across devices.
+The tutorial only explains and opens controls—it never starts a server or accepts an EULA.
+
 Double-click **NeoPanel-Desktop.exe** to open the app's own window and local Go
 backend. No console launcher or browser tab is needed. The familiar panel interface
 is embedded using Wails and Microsoft Edge WebView2.
