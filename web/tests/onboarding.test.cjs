@@ -58,7 +58,7 @@ test('guide actions navigate only; tutorial completion does not configure a serv
   const g=guide(); g.api.begin(admin); g.render(); g.click('security'); g.click('nodes'); g.click('create');
   assert.equal(JSON.stringify(g.calls),JSON.stringify([['acc',{acctTab:1}],['admin',{adminTab:1}],['create']]));
   assert.doesNotMatch(source,/\bfetch\s*\(/);
-  g.click(null,'3'); assert.match(g.root.innerHTML,/does not certify/);
+  g.click(null,'3'); assert.match(g.root.innerHTML,/restoring replaces current files/);
 });
 function setupForm() {
   const fields = {'#su-name':{value:'alex'}, '#su-email':{value:'alex@example.com'}, '#su-pw':{value:'strong-password'}, '#su-confirm':{value:'strong-password',focus(){}}, '#setup-form':{reportValidity:()=>true}, '#lerr':{textContent:''}, '#login .lbtn':{}, '#login':{remove(){}}};

@@ -52,12 +52,12 @@ func requireBulkDeleted(t *testing.T, body []byte, paths []string) {
 	}
 }
 
-func TestBulkDeleteExceedsBurstInOneRequest(t *testing.T) {
+func TestBulkDeleteCostsOneRequest(t *testing.T) {
 	f := newReliabilityFixture(t)
 	// Restore the production limiter disabled by the shared fixture.
 	f.router.globalLimiter = NewRouter(f.cfg, f.db, f.manager, nil).globalLimiter
 	lim := f.router.globalLimiter
-	if lim.ratePerSec != 1 || lim.burstCapacity != 20 {
+	if lim.ratePerSec != 10 || lim.burstCapacity != 200 {
 		t.Fatalf("production limiter changed: rate=%v burst=%v", lim.ratePerSec, lim.burstCapacity)
 	}
 	root := f.manager.GetWorkingDir("alpha")
@@ -89,7 +89,7 @@ func TestBulkDeleteExceedsBurstInOneRequest(t *testing.T) {
 		t.Fatal("bulk request bypassed global limiter")
 	}
 	for _, bucket := range lim.buckets {
-		if bucket.tokens != 19 {
+		if bucket.tokens != lim.burstCapacity-1 {
 			lim.mu.Unlock()
 			t.Fatalf("bulk request consumed more than one token: %v", bucket.tokens)
 		}
