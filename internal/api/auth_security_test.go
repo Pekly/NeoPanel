@@ -78,7 +78,7 @@ func TestSecurityResetResponseNeverDisclosesCredential(t *testing.T) {
 			if mode == "success" {
 				select {
 				case message := <-smtp.messages:
-					match := regexp.MustCompile(`#reset-token=([a-f0-9]{64})`).FindStringSubmatch(message)
+					match := regexp.MustCompile(`#reset-token=([a-f0-9]{64})`).FindStringSubmatch(decodedEmailParts(t, message)["text/plain"])
 					if len(match) != 2 {
 						t.Fatal("missing email credential")
 					}

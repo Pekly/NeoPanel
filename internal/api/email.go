@@ -135,17 +135,17 @@ func (h *EmailHandler) SendEmail(cfg *database.SMTPSettings, toEmail, toName, su
 			return fmt.Errorf("invalid email address")
 		}
 	}
+	bodyHTML, logo := h.prepareEmailLogo(bodyHTML)
+	contentType, body, err := emailMIME(bodyHTML, bodyPlain, logo)
+	if err != nil {
+		return fmt.Errorf("could not encode email: %w", err)
+	}
 	var msg bytes.Buffer
 	msg.WriteString("From: " + (&mail.Address{Name: fromName, Address: from}).String() + "\r\n")
 	msg.WriteString("To: " + (&mail.Address{Name: toName, Address: toEmail}).String() + "\r\n")
 	msg.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\nMIME-Version: 1.0\r\n")
-	boundary := fmt.Sprintf("np_boundary_%d", time.Now().UnixNano())
-	msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary))
-	msg.WriteString("--" + boundary + "\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + bodyPlain + "\r\n\r\n")
-	if bodyHTML != "" {
-		msg.WriteString("--" + boundary + "\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + bodyHTML + "\r\n\r\n")
-	}
-	msg.WriteString("--" + boundary + "--\r\n")
+	msg.WriteString("Content-Type: " + contentType + "\r\n\r\n")
+	msg.Write(body)
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)), 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("SMTP connection failed: %w", err)
