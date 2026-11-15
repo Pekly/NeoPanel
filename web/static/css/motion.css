@@ -17,8 +17,7 @@
 }
 
 /* Do not replay workspace entrances whenever telemetry rebuilds card markup. */
-html[data-panel-motion="full"] .np-server-grid > .sift-server-card,
-html[data-panel-motion="full"] .np-role-row {
+html[data-panel-motion="full"] .np-server-grid > .sift-server-card {
   animation: none;
 }
 

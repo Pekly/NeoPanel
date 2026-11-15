@@ -34,9 +34,9 @@ test('late server and account permission responses cannot unlock current workspa
   c.S.user={id:2,role:'user'};c.S.token='token-b';second.resolve(perms([],{is_admin:true}));await b;
   assert.equal(c.canServerPage('fi'),false);assert.equal(c.S.serverAccess.status,'loading');
 });
-test('confirmed owner and admin bypass while custom panel role never grants server access',async()=>{
+test('confirmed owner and admin bypass while legacy panel fields grant no access',async()=>{
   for(const flag of ['is_admin','is_owner']){const {c}=setup();c.api=async()=>perms([],{[flag]:true});await c.ensureServerAccess();assert.equal(c.canServerPage('team'),true);assert.equal(c.canServerPage('sftp'),true);}
-  const {c}=setup();c.S.user.panel_permissions=['servers.create'];await c.ensureServerAccess();assert.equal(c.canCreateServers(),true);assert.equal(c.canServerPage('team'),false);
+  const {c}=setup();c.S.user.panel_permissions=['servers.create'];await c.ensureServerAccess();assert.equal(c.canCreateServers(),false);assert.equal(c.canServerPage('team'),false);
 });
 test('page permission mappings include SFTP separately from settings and files',()=>{
   const {c}=setup();for(const [page,p] of Object.entries({con:'console.view',pl:'console.view',fi:'files.view',plug:'files.view',bk:'backup.manage',db:'database.manage',sc:'schedules.manage',team:'subusers.manage',set:'settings.view',net:'settings.view',ver:'settings.view',sub:'settings.view',sftp:'sftp.access'}))assert.equal(c.serverPagePermission(page),p);
@@ -56,24 +56,17 @@ test('file operations require view and the appropriate write permission, includi
   c.S.serverAccess.data.permissions=['files.view','files.edit'];assert.doesNotThrow(()=>c.assertClientRequestAccess('/api/servers/a/files/copy',{method:'POST'}));assert.throws(()=>c.assertClientRequestAccess('/api/servers/a/files/move',{method:'POST'}));
   c.S.serverAccess.data.permissions=['files.edit'];assert.throws(()=>c.assertClientRequestAccess('/api/servers/a/files/copy',{method:'POST'}));
 });
-test('server creation guards ordinary members and honors only admin or explicit panel permission',()=>{
+test('server creation is admin-only even with stale custom-role fields',()=>{
   const {c}=setup();assert.equal(c.canCreateServers(),false);assert.match(c.V.create(),/Access restricted/);assert.throws(()=>c.assertClientRequestAccess('/api/servers',{method:'POST'}));
   c.S.user.panel_role_name='Administrator';assert.equal(c.canCreateServers(),false);
-  c.S.user.panel_permissions=['servers.create'];assert.equal(c.canCreateServers(),true);c.S.user={role:'admin'};assert.equal(c.canCreateServers(),true);
+  c.S.user.panel_permissions=['servers.create'];assert.equal(c.canCreateServers(),false);assert.throws(()=>c.assertClientRequestAccess('/api/servers',{method:'POST'}));c.S.user={role:'admin'};assert.equal(c.canCreateServers(),true);
   assert.match(source,/function openCreateServerModal\(\) \{\s+if \(!canCreateServers\(\)\)/);
   assert.match(source,/async function handleCreateServer\(e\) \{\s+if \(!canCreateServers\(\)\)/);
 });
-test('role catalog loads only for built-in admins and assignment sends separate panel-role payload',async()=>{
-  const {c,calls}=setup();await c.loadPanelRoles();assert.equal(calls.length,0);
-  c.S.user.role='admin';c.api=async(url,opt)=>{calls.push([url,opt]);return {roles:[{id:'r1',name:'Builder',permissions:['servers.create']}],permissions:[{id:'servers.create',label:'Create servers'}]};};
-  await c.loadPanelRoles(true);assert.equal(c.S.panelRoles[0].id,'r1');c.S.adminUsers=[{id:2,role:'user'}];
-  await c.assignUserPanelRole({disabled:false,value:'r1',dataset:{user:'2',previous:''}});
-  assert.equal(calls[1][0],'/api/admin/users/2/panel-role');assert.deepEqual(JSON.parse(calls[1][1].body),{role_id:'r1'});assert.equal(c.S.adminUsers[0].role,'user');
-});
-test('role assignment errors roll selection back and deletion reports assigned-role conflict',async()=>{
-  const {c}=setup();c.S.user.role='admin';c.api=async()=>{throw Error('Role is assigned to users');};let message='';c.toast=m=>message=m;
-  const select={disabled:false,value:'r1',dataset:{user:'2',previous:'old'}};await c.assignUserPanelRole(select);assert.equal(select.value,'old');assert.equal(select.disabled,false);
-  await c.deletePanelRole('r1',{disabled:false,isConnected:true});assert.match(message,/assigned/);
+test('custom panel role pages, assignment controls and requests are removed',()=>{
+  assert.doesNotMatch(source,/loadPanelRoles|renderPanelRoles|renderUserPanelRole|assignUserPanelRole|\/api\/admin\/roles|\/panel-role/);
+  const users=source.slice(source.indexOf('Panel accounts'),source.indexOf('} else if (t === 4)'));
+  assert.match(users,/Admin/);assert.match(users,/User/);
 });
 test('community serializes exact nested API fields and renders text safely',()=>{
   const {c}=setup();const value=v=>({value:v}),check=v=>({checked:v});const payload=c.communityPayload({elements:{discord_enabled:check(true),guild_id:value(' 12345 '),discord_title:value(' Community '),announcement_enabled:check(true),announcement_text:value('<img onerror=x>'),tone:value('warning'),dismissible:check(true)}});

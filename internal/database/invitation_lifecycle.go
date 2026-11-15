@@ -61,7 +61,6 @@ func cleanupInvitationUser(tx *sql.Tx, id int) error {
  AND NOT EXISTS (SELECT 1 FROM nodes WHERE id<>'local')
  AND NOT EXISTS (SELECT 1 FROM servers WHERE owner_id=u.id)
  AND NOT EXISTS (SELECT 1 FROM server_subusers WHERE user_id=u.id)
- AND NOT EXISTS (SELECT 1 FROM panel_user_roles WHERE user_id=u.id)
  AND NOT EXISTS (SELECT 1 FROM invitation_grants WHERE user_id=u.id AND status<>'revoked')
  AND NOT EXISTS (SELECT 1 FROM team_invitations i WHERE
  (i.account_id=u.id OR (lower(i.username)=lower(u.username) OR lower(i.email)=lower(u.email)))

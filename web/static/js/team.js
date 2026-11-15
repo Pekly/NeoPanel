@@ -43,16 +43,16 @@ async function loadTeamPage(skipRender = false) {
 }
 function renderTeamPage() {
   const srv = curServer(), state = S.teamState;
-  const header = `${srvh()}<div class="np-section-heading"><div><h2>Team</h2><p>Manage server access and invite teammates without sharing your account.</p></div><button class="btn sm" onclick="loadTeamPage()">${ic('refresh', 13)} Refresh</button></div>`;
+  const header = `${srvh()}<div class="np-section-heading"><div><h2>Team</h2><p>Invite teammates and manage their server access.</p></div><button class="btn sm" onclick="loadTeamPage()">${ic('refresh', 13)} Refresh</button></div>`;
   if (S.teamLoading || !state) return header + `<div class="card">${loaderHtml('Loading team access…')}</div>`;
   if (state.error) return header + `<div class="card" role="alert"><b>Could not load team access</b><p class="mu">${esc(state.error)}</p><button class="btn sm" onclick="loadTeamPage()">Retry</button></div>`;
-  if (!canManageTeam()) return header + `<div class="card"><h3>Team management is restricted</h3><p class="mu">You need the Manage Team permission to add members or send invitations. Your other server permissions are unchanged.</p></div>`;
+  if (!canManageTeam()) return header + `<div class="card"><h3>Team management is restricted</h3><p class="mu">You need Manage Team permission to add members or send invitations.</p></div>`;
   const invitations = state.invitations || [];
   return header + `<div class="np-team-stack">
-    <section class="card"><div class="np-team-heading"><div><h3>Members</h3><p class="mu">${S.serverSubusers?.length || 0} team member${S.serverSubusers?.length === 1 ? '' : 's'} · Owners and panel administrators keep their existing access.</p></div><div class="row"><button class="btn sm" onclick="openSubuserModal()">${ic('user', 13)} Add existing user</button><button class="btn sm pr" id="team-invite-btn" onclick="openTeamInviteModal()">${ic('mail', 13)} Invite by email</button></div></div><div id="subusers-list-wrap">${renderSubusersListHtml(srv)}</div></section>
-    <section class="card"><div class="np-team-heading"><div><h3>Email invitations</h3><p class="mu">Recipients register through a single-use link. Pending invitations do not grant server access.</p></div></div>
-    ${!state.smtp_configured ? '<p class="np-team-notice" role="status">Email invitations require SMTP to be enabled in Admin → Email &amp; SMTP. Existing users can still be added directly.</p>' : ''}
-    ${!invitations.length ? '<div class="np-empty-state"><b>No invitations yet</b><p class="mu">Enter a username and email to invite a new teammate.</p></div>' : `<div class="np-table-scroll"><table class="np-team-invitations"><thead><tr><th>Recipient</th><th>Permissions</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead><tbody>${invitations.map(invite => {
+    <section class="card"><div class="np-team-heading"><div><h3>Members</h3><p class="mu">${S.serverSubusers?.length || 0} team member${S.serverSubusers?.length === 1 ? '' : 's'} · Owner and administrator access stays unchanged.</p></div><div class="row"><button class="btn sm" onclick="openSubuserModal()">${ic('user', 13)} Add existing user</button><button class="btn sm pr" id="team-invite-btn" onclick="openTeamInviteModal()">${ic('mail', 13)} Invite by email</button></div></div><div id="subusers-list-wrap">${renderSubusersListHtml(srv)}</div></section>
+    <section class="card"><div class="np-team-heading"><div><h3>Email invitations</h3><p class="mu">Send a single-use link. No server access until accepted.</p></div></div>
+    ${!state.smtp_configured ? '<p class="np-team-notice" role="status">Enable SMTP in Admin → Email &amp; SMTP to send invitations. You can still add existing users directly.</p>' : ''}
+    ${!invitations.length ? '<div class="np-empty-state"><b>No invitations yet</b><p class="mu">Invite a teammate by username and email.</p></div>' : `<div class="np-table-scroll"><table class="np-team-invitations"><thead><tr><th>Recipient</th><th>Permissions</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead><tbody>${invitations.map(invite => {
       const terminal = ['accepted', 'revoked'].includes(invite.status);
       const id = esc(String(invite.id));
       return `<tr><td><b>${esc(invite.username)}</b><div class="mu pv">${esc(invite.email)}</div></td><td>${invite.permissions?.length || 0} permission${invite.permissions?.length === 1 ? '' : 's'}</td><td><span class="chip">${esc(invitationStatusLabel(invite))}</span></td><td class="mu">${esc(formatInvitationExpiry(invite.expires_at))}</td><td><div class="row">${terminal ? '—' : `<button class="btn sm" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'resend')" ${TeamUI.inviteAction ? 'disabled' : ''}>Resend</button><button class="btn sm dg" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'revoke')" ${TeamUI.inviteAction ? 'disabled' : ''}>Revoke</button>`}</div></td></tr>`;
@@ -71,11 +71,11 @@ function teamPermissionChecklist(selected = ['console.view']) {
 }
 function openTeamInviteModal() {
   if (!canManageTeam()) return;
-  if (!S.teamState.smtp_configured) { uiAlert({ title: 'Email is not configured', message: 'Ask a panel administrator to enable SMTP under Admin → Email &amp; SMTP, then refresh this page.' }); return; }
+  if (!S.teamState.smtp_configured) { uiAlert({ title: 'Email is not configured', message: 'Ask an administrator to enable SMTP in Admin → Email &amp; SMTP, then refresh.' }); return; }
   TeamUI.inviteServer = { ...curServer() };
   const container = document.querySelector('#modal-container');
-  container.innerHTML = `<div class="pal" onclick="if(event.target===this&&!TeamUI.sending)closeModal()"><div class="card pbox np-team-modal" role="dialog" aria-modal="true" aria-labelledby="team-invite-title"><div class="np-team-heading"><h2 id="team-invite-title">Invite a teammate</h2><button class="btn sm" onclick="closeModal()" aria-label="Close invitation">×</button></div><p class="mu">Invite someone to <b>${esc(TeamUI.inviteServer.name)}</b>. New users register through the email link; existing users sign in with their current account. Use the existing account’s username and email if they already have one. People who already have server access cannot be invited again.</p>
-    <form id="team-invite-form" onsubmit="submitTeamInvitation(event)"><div class="grid g2"><label class="f"><span>Requested username</span><input id="team-invite-username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{2,31}" autocomplete="off" placeholder="teammate"></label><label class="f"><span>Email address</span><input id="team-invite-email" type="email" required maxlength="254" autocomplete="off" placeholder="teammate@example.com"></label></div><h3>Server permissions</h3><p class="mu">Grant only what this person needs. Permissions apply after acceptance.</p>${teamPermissionChecklist()}<p id="team-invite-error" class="upload-error" role="alert"></p><div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn" type="button" onclick="closeModal()">Cancel</button><button id="team-invite-submit" class="btn pr" type="submit">Send invitation</button></div></form></div></div>`;
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this&&!TeamUI.sending)closeModal()"><div class="card pbox np-team-modal" role="dialog" aria-modal="true" aria-labelledby="team-invite-title"><div class="np-team-heading"><h2 id="team-invite-title">Invite a teammate</h2><button class="btn sm" onclick="closeModal()" aria-label="Close invitation">×</button></div><p class="mu">Invite someone to <b>${esc(TeamUI.inviteServer.name)}</b>. New users register; existing users sign in. Use their current username and email if registered. Existing members cannot be invited again.</p>
+    <form id="team-invite-form" onsubmit="submitTeamInvitation(event)"><div class="grid g2"><label class="f"><span>Requested username</span><input id="team-invite-username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{2,31}" autocomplete="off" placeholder="teammate"></label><label class="f"><span>Email address</span><input id="team-invite-email" type="email" required maxlength="254" autocomplete="off" placeholder="teammate@example.com"></label></div><h3>Server permissions</h3><p class="mu">Choose only needed permissions. No access until accepted.</p>${teamPermissionChecklist()}<p id="team-invite-error" class="upload-error" role="alert"></p><div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn" type="button" onclick="closeModal()">Cancel</button><button id="team-invite-submit" class="btn pr" type="submit">Send invitation</button></div></form></div></div>`;
   document.querySelector('#team-invite-username').focus();
 }
 async function submitTeamInvitation(event) {
@@ -101,12 +101,12 @@ async function submitTeamInvitation(event) {
 async function changeTeamInvitation(id, action) {
   const srv = curServer();
   if (!srv || !canManageTeam() || TeamUI.inviteAction) return;
-  if (action === 'revoke' && !await uiConfirm({ title: 'Revoke invitation?', message: 'The registration link will stop working. Existing accounts and other server access will not be deleted.', confirmText: 'Revoke invitation', isDanger: true })) return;
+  if (action === 'revoke' && !await uiConfirm({ title: 'Revoke invitation?', message: 'Disable this invitation link. Existing accounts and server access stay unchanged.', confirmText: 'Revoke invitation', isDanger: true })) return;
   TeamUI.inviteAction = id;
   try {
     const url = `/api/team/invitations/${encodeURIComponent(id)}` + (action === 'resend' ? '/resend' : '');
     const result = await api(url, { method: action === 'resend' ? 'POST' : 'DELETE', suppressToast: true });
-    toast(result.message || (action === 'resend' ? 'A new invitation email was sent. The old link is invalid.' : 'Invitation revoked.'), 'ok');
+    toast(result.message || (action === 'resend' ? 'Invitation resent. The old link no longer works.' : 'Invitation revoked.'), 'ok');
   } catch (err) { toast(err.message, 'bad'); }
   finally { TeamUI.inviteAction = null; if (sameQolServer(srv, curServer())) await loadTeamPage(); }
 }
@@ -132,7 +132,7 @@ async function invitationRequest(action, body) {
 }
 async function initializeInvitationAuth() {
   const response = await fetch('/api/auth/status', { cache: 'no-store' });
-  if (!response.ok) throw new Error('Could not load sign-in settings. Refresh and try the invitation again.');
+  if (!response.ok) throw new Error('Could not load sign-in settings. Refresh to retry.');
   const status = await response.json();
   S.turnstileEnabled = Boolean(status.turnstile_enabled && status.turnstile_site_key);
   S.turnstileSiteKey = S.turnstileEnabled ? status.turnstile_site_key : '';
@@ -165,13 +165,13 @@ function renderInvitationScreen() {
   const matchingAccount = Boolean(S.user && info?.email && String(S.user.email || '').toLowerCase() === info.email.toLowerCase());
   let content;
   if (InvitationUI.accepted) {
-    content = `<h1>You’re ready to join</h1><p class="mu">Your invitation to <b>${esc(info?.server_name || 'the server')}</b> was accepted. Sign in with your account to continue.</p><button class="btn pr" onclick="invitationSignIn()">Continue to sign in</button>`;
+    content = `<h1>Invitation accepted</h1><p class="mu">Sign in to access <b>${esc(info?.server_name || 'the server')}</b>.</p><button class="btn pr" onclick="invitationSignIn()">Continue to sign in</button>`;
   } else if (!info) {
-    content = `<h1>Invitation unavailable</h1><p class="upload-error" role="alert">${esc(InvitationUI.error || 'This invitation could not be loaded.')}</p><p class="mu">Ask the server owner for a new invitation if the link has expired or been revoked.</p><button class="btn" onclick="dismissInvitation()">Back to panel</button>`;
+    content = `<h1>Invitation unavailable</h1><p class="upload-error" role="alert">${esc(InvitationUI.error || 'Could not load this invitation.')}</p><p class="mu">Link expired or revoked? Ask the server owner for a new invitation.</p><button class="btn" onclick="dismissInvitation()">Back to panel</button>`;
   } else {
     content = `<div class="np-eyebrow">Server invitation</div><h1>Join ${esc(info.server_name)}</h1><p class="mu">This invitation is for <b>${esc(info.email)}</b>. Expires ${esc(formatInvitationExpiry(info.expires_at))}.</p><details class="np-invite-permissions"><summary>${info.permissions?.length || 0} server permission${info.permissions?.length === 1 ? '' : 's'}</summary><ul>${(info.permissions || []).map(key => `<li>${esc(SUBUSER_PERMS.find(p => p[0] === key)?.[1] || key)}</li>`).join('')}</ul></details>
-      ${info.account_exists && !matchingAccount ? `<p class="np-team-notice">An account already exists for this email. Sign in to accept; this link cannot change its password.${S.user ? ` You are currently signed in as ${esc(S.user.username)}.` : ''}</p><button class="btn pr" onclick="invitationSignIn()">Sign in to accept</button>` : `<form id="invite-accept-form" onsubmit="acceptTeamInvitation(event)">
-        ${!info.account_exists && !info.account_reserved ? `<label class="f"><span>Invited username</span><input id="invite-register-username" readonly autocomplete="username" value="${esc(info.username || '')}"></label><label class="f"><span>Email</span><input type="email" value="${esc(info.email)}" readonly autocomplete="email"></label><label class="f"><span>Password (at least 10 characters)</span><input id="invite-register-password" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label><label class="f"><span>Confirm password</span><input id="invite-register-confirm" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>` : `<p class="np-team-notice">${info.account_reserved ? 'Your account was created during an earlier attempt. Retry granting server access; your original password will not change.' : `Accept as <b>${esc(S.user.username)}</b>. Your password and account security settings will not change.`}</p>`}
+      ${info.account_exists && !matchingAccount ? `<p class="np-team-notice">Sign in to the account for this email to accept. Your password stays unchanged.${S.user ? ` Signed in as ${esc(S.user.username)}.` : ''}</p><button class="btn pr" onclick="invitationSignIn()">Sign in to accept</button>` : `<form id="invite-accept-form" onsubmit="acceptTeamInvitation(event)">
+        ${!info.account_exists && !info.account_reserved ? `<label class="f"><span>Invited username</span><input id="invite-register-username" readonly autocomplete="username" value="${esc(info.username || '')}"></label><label class="f"><span>Email</span><input type="email" value="${esc(info.email)}" readonly autocomplete="email"></label><label class="f"><span>Password (at least 10 characters)</span><input id="invite-register-password" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label><label class="f"><span>Confirm password</span><input id="invite-register-confirm" type="password" required minlength="10" maxlength="72" autocomplete="new-password"></label>` : `<p class="np-team-notice">${info.account_reserved ? 'Account created. Retry server access; your original password stays unchanged.' : `Accept as <b>${esc(S.user.username)}</b>. Your password and security settings stay unchanged.`}</p>`}
         <p id="invite-accept-error" class="upload-error" role="alert">${esc(InvitationUI.error)}</p><button class="btn pr" id="invite-accept-submit" type="submit">${info.account_reserved ? 'Retry server access' : info.account_exists ? 'Accept invitation' : 'Create account & accept'}</button></form>`}<button class="btn sm" style="margin-top:16px" onclick="dismissInvitation()">Not now</button>`;
   }
   root.innerHTML = `<main class="card np-invitation-card" aria-label="Server invitation"><div class="brand">${brandLogoHtml(false)}</div>${content}</main>`;
@@ -189,7 +189,7 @@ async function acceptTeamInvitation(event) {
     body.password = document.querySelector('#invite-register-password').value;
     if (body.password !== document.querySelector('#invite-register-confirm').value) { error.textContent = 'Passwords do not match.'; return; }
     const bytes = new TextEncoder().encode(body.password).length;
-    if (bytes < 10 || bytes > 72) { error.textContent = 'Password must be 10–72 UTF-8 bytes. Shorten it if it contains many Unicode characters.'; return; }
+    if (bytes < 10 || bytes > 72) { error.textContent = 'Use 10–72 UTF-8 bytes; some characters use more than one byte.'; return; }
   }
   InvitationUI.busy = true;
   const button = document.querySelector('#invite-accept-submit'); setBtnLoading(button, true, 'Accepting…');
@@ -236,12 +236,12 @@ function teamInvitationConflict(username, email, server = curServer()) {
   const name = String(username || '').trim().toLowerCase();
   const address = String(email || '').trim().toLowerCase();
   const matches = account => (name && String(account.username || '').toLowerCase() === name) || (address && String(account.email || '').toLowerCase() === address);
-  if ((S.serverSubusers || []).some(matches)) return 'This person already has access to this server. Edit their member permissions instead.';
-  if (S.user && (S.user.role === 'admin' || server?.owner_id === S.user.id) && matches(S.user)) return 'This account already has access as a server owner or panel administrator.';
+  if ((S.serverSubusers || []).some(matches)) return 'Already a member. Edit their permissions instead.';
+  if (S.user && (S.user.role === 'admin' || server?.owner_id === S.user.id) && matches(S.user)) return 'This owner or administrator already has server access.';
   const pending = (S.teamState?.invitations || []).some(invite => {
     if (!matches(invite)) return false;
     if (invite.status === 'granting') return true;
     return invite.status === 'pending' && (!invite.expires_at || new Date(invite.expires_at).getTime() > Date.now());
   });
-  return pending ? 'An invitation already exists for this person. Use Resend or Revoke in the invitations list.' : '';
+  return pending ? 'Already invited. Use Resend or Revoke in the invitations list.' : '';
 }

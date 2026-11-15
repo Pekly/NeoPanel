@@ -6,7 +6,7 @@ function scheduleTasksFor(schedule) {
   return tasks.map(task => ({ action: task.action, payload: task.payload || '', time_offset: Number(task.time_offset || 0), continue_on_failure: Boolean(task.continue_on_failure) }));
 }
 function validateScheduleTasks(tasks) {
-  if (!Array.isArray(tasks) || tasks.length < 1 || tasks.length > 20) throw new Error('A schedule must contain between 1 and 20 steps.');
+  if (!Array.isArray(tasks) || tasks.length < 1 || tasks.length > 20) throw new Error('Add 1–20 steps.');
   return tasks.map((task, index) => {
     if (!SCHEDULE_ACTIONS.some(([action]) => action === task.action)) throw new Error(`Step ${index + 1}: choose a supported action.`);
     const offset = Number(task.time_offset);
@@ -49,7 +49,7 @@ function renderScheduleTaskRows() {
   root.innerHTML = AutomationUI.tasks.map((task, index) => `<div class="np-schedule-step" data-step="${index}"><div class="np-team-heading"><b>Step ${index + 1}</b><div class="row"><button type="button" class="btn sm" ${index === 0 ? 'disabled' : ''} onclick="moveScheduleTask(${index}, -1)" aria-label="Move step ${index + 1} up">↑</button><button type="button" class="btn sm" ${index === AutomationUI.tasks.length - 1 ? 'disabled' : ''} onclick="moveScheduleTask(${index}, 1)" aria-label="Move step ${index + 1} down">↓</button><button type="button" class="btn sm dg" ${AutomationUI.tasks.length < 2 ? 'disabled' : ''} onclick="removeScheduleTask(${index})">Remove</button></div></div>
     <div class="grid g2"><label class="f"><span>Action</span><select onchange="updateScheduleTask(${index}, 'action', this.value)">${SCHEDULE_ACTIONS.map(([action, label]) => `<option value="${action}" ${task.action === action ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="f"><span>Delay before step (seconds)</span><input type="number" min="0" max="3600" step="1" required value="${task.time_offset}" oninput="updateScheduleTask(${index}, 'time_offset', this.value)"></label></div>
     ${task.action === 'command' ? `<label class="f"><span>Command</span><input required maxlength="4096" class="mono" value="${esc(task.payload)}" placeholder="say Server restarting in 5 minutes!" oninput="updateScheduleTask(${index}, 'payload', this.value)"></label>` : ''}
-    <label class="row np-continue-step"><input type="checkbox" ${task.continue_on_failure ? 'checked' : ''} onchange="updateScheduleTask(${index}, 'continue_on_failure', this.checked)"><span>Continue to the next step if this one fails</span></label></div>`).join('');
+    <label class="row np-continue-step"><input type="checkbox" ${task.continue_on_failure ? 'checked' : ''} onchange="updateScheduleTask(${index}, 'continue_on_failure', this.checked)"><span>Continue if this step fails</span></label></div>`).join('');
   const add = document.querySelector('#schedule-add-step'); if (add) add.disabled = AutomationUI.tasks.length >= 20;
   const count = document.querySelector('#schedule-step-count'); if (count) count.textContent = `${AutomationUI.tasks.length} / 20 steps`;
   enhanceSelects(root);
@@ -58,7 +58,7 @@ function openScheduleChainModal(scheduleID = null) {
   const srv = curServer(); if (!srv) return;
   const existing = S.serverSchedules?.find(s => String(s.id) === String(scheduleID));
   AutomationUI.server = { ...srv }; AutomationUI.scheduleID = existing?.id || ''; AutomationUI.tasks = scheduleTasksFor(existing);
-  document.querySelector('#modal-container').innerHTML = `<div class="pal" onclick="if(event.target===this&&!AutomationUI.saving)closeModal()"><div class="card pbox np-schedule-modal" role="dialog" aria-modal="true" aria-labelledby="schedule-chain-title"><div class="np-team-heading"><h2 id="schedule-chain-title">${existing ? 'Edit schedule' : 'Create schedule'}</h2><button class="btn sm" onclick="closeModal()" aria-label="Close schedule">×</button></div><p class="mu">Run ordered steps on <b>${esc(srv.name)}</b>. Times are UTC. Delays occur before each step; failed runs remain visible even when later steps continue.</p>
+  document.querySelector('#modal-container').innerHTML = `<div class="pal" onclick="if(event.target===this&&!AutomationUI.saving)closeModal()"><div class="card pbox np-schedule-modal" role="dialog" aria-modal="true" aria-labelledby="schedule-chain-title"><div class="np-team-heading"><h2 id="schedule-chain-title">${existing ? 'Edit schedule' : 'Create schedule'}</h2><button class="btn sm" onclick="closeModal()" aria-label="Close schedule">×</button></div><p class="mu">Run steps in order on <b>${esc(srv.name)}</b>. Times use UTC; delays apply before each step. Failures stay visible even if later steps run.</p>
     <form id="schedule-chain-form" data-id="${esc(String(AutomationUI.scheduleID))}" onsubmit="submitScheduleModal(event, this.dataset.id)"><label class="f"><span>Schedule name</span><input id="sch-name" required maxlength="120" value="${esc(existing?.name || '')}" placeholder="Nightly maintenance"></label>
     <div class="grid g2"><label class="f"><span>Frequency</span><select id="sch-frequency" onchange="applyScheduleTimePicker()"><option value="custom">Custom cron</option><option value="daily">Daily</option><option value="hourly">Hourly (minute from time)</option><option value="weekly">Weekly</option></select></label><label class="f"><span>Time (UTC)</span><input id="sch-time" type="time" value="04:00" onchange="applyScheduleTimePicker()"></label><label class="f"><span>Weekly day</span><select id="sch-weekday" onchange="applyScheduleTimePicker()">${['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((day, index) => `<option value="${index}">${day}</option>`).join('')}</select></label></div>
     <label class="f"><span>Cron expression</span><input id="sch-cron" required class="mono" value="${esc(existing?.cron_expr || '0 4 * * *')}" oninput="document.querySelector('#sch-frequency').value='custom';updateSchedulePreview()"></label><p id="sch-preview" class="mu" role="status"></p>
@@ -93,9 +93,9 @@ async function restoreBackup(name, button) {
     const snapshot = await api(srvApiPath(srv, ''), { suppressToast: true });
     const status = String(snapshot.stats?.status || snapshot.status || '').toLowerCase();
     if (!['offline', 'stopped'].includes(status)) {
-      await uiAlert({ title: 'Stop the server first', message: 'A backup can only be restored while the server is fully stopped. Stop it from the console, then retry.' }); return;
+      await uiAlert({ title: 'Stop the server first', message: 'Stop the server from the console, then retry. Restore requires a fully stopped server.' }); return;
     }
-    const confirmed = await uiConfirm({ title: 'Restore server backup?', message: `<p>Restore <b>${esc(name)}</b> on <b>${esc(srv.name)}</b>?</p><p>This replaces the current server files, including worlds, plugins, and configuration. Files absent from the backup will be removed. The archive is checked before replacement; the server must remain stopped.</p>`, confirmText: 'Replace files & restore', isDanger: true });
+    const confirmed = await uiConfirm({ title: 'Restore server backup?', message: `<p>Restore <b>${esc(name)}</b> on <b>${esc(srv.name)}</b>?</p><p>This replaces current server files and removes files absent from the backup. Keep the server stopped. The archive is checked first; a safety copy of current files uses disk space.</p>`, confirmText: 'Replace files & restore', isDanger: true });
     if (!confirmed || !sameQolServer(srv, curServer())) return;
     if (button) setBtnLoading(button, true, 'Restoring…');
     const result = await api(srvApiPath(srv, '/backups/restore'), { method: 'POST', body: JSON.stringify({ name, confirm: true }), suppressToast: true });
@@ -109,5 +109,5 @@ async function restoreBackup(name, button) {
 function renderRestoreNotice() {
   const restore = AutomationUI.lastRestore;
   if (!restore?.safetyCopy || !sameQolServer(restore.server, curServer())) return '';
-  return `<div class="card np-restore-notice" role="status"><b>Backup restored — previous files retained</b><p class="mu">Safety copy, relative to the host’s servers directory: <code>${esc(restore.safetyCopy)}</code>. Verify the restored server before removing that copy manually. It continues to use disk space.</p></div>`;
+  return `<div class="card np-restore-notice" role="status"><b>Backup restored — previous files saved</b><p class="mu">Safety copy in the host’s servers directory: <code>${esc(restore.safetyCopy)}</code>. It uses disk space. Check the restored server before deleting the copy manually.</p></div>`;
 }

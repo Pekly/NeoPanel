@@ -83,7 +83,7 @@ test('link tokens are consumed once, removed from history, and malformed encodin
   for(const raw of [token,'%E0%A4%A','']) {
     const {c,nodes,html}=setup();c.location.hash='#reset-token='+raw;c.checkUrlResetToken();
     assert.equal(c.replacedURL,'/?safe=1');assert.equal(c.location.hash,'');
-    assert.equal(nodes['reset-token-input'].value,raw===token?token:'');if(raw!==token)assert.match(html(),/reset link is invalid/);
+    assert.equal(nodes['reset-token-input'].value,raw===token?token:'');if(raw!==token)assert.match(html(),/Invalid reset link/);
     const generation=c.state.generation;c.checkUrlResetToken();assert.equal(c.state.generation,generation);
   }
 });

@@ -408,18 +408,10 @@ html body .login .lf input:focus-visible { outline: none !important; outline-off
 .np-discord-card { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 20px 24px; margin-top: 24px; }
 .np-discord-card > svg { color: #808aff; flex-shrink: 0; }
 .np-discord-card > div { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
-.np-discord-card h2, .np-role-row h3 { margin: 0 0 4px; }
+.np-discord-card h2 { margin: 0 0 4px; }
 .np-discord-card p { font-size: 12px; margin: 0; }
-.np-role-list, .np-community-form { display: grid; gap: 16px; }
-.np-role-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 24px; padding: 24px; }
-.np-role-row > div { min-width: 0; overflow-wrap: anywhere; }
-.np-role-row p { margin: 8px 0 12px; line-height: 1.6; }
-.np-role-row .row, .np-community-form .row { flex-wrap: wrap; gap: 8px; }
-.np-role-hint { display: block; margin-top: 8px; }
-.np-user-role { display: grid; gap: 4px; margin-top: 8px; min-width: 144px; font-size: 11px; }
-.np-user-role select { max-width: 240px; }
-.np-permission-fields { border: 1px solid var(--border-light); border-radius: 8px; padding: 16px; margin: 16px 0; }
-.np-permission-fields legend { padding: 0 8px; color: var(--tx-muted); font-size: 12px; }
+.np-community-form { display: grid; gap: 16px; }
+.np-community-form .row { flex-wrap: wrap; gap: 8px; }
 .np-permission-choice { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; line-height: 1.5; cursor: pointer; }
 .np-permission-choice input { margin-top: 4px; flex-shrink: 0; }
 .np-permission-choice small { display: block; color: var(--tx-muted); margin-top: 4px; }
@@ -446,14 +438,13 @@ html body #pal .pit:focus-visible { outline-offset: -2px; }
 @media (max-width: 640px) {
   .np-access-state { padding: 24px; margin: 16px 0; }
   .np-access-state h1 { font-size: 24px; }
-  .np-role-row { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .np-discord-card, .np-community-form .card { padding: 16px; }
   .np-community-form .g2 { grid-template-columns: minmax(0, 1fr); }
   .np-settings-tabs { gap: 4px; }
   .np-settings-tabs button { padding: 10px; font-size: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .np-role-row, .np-announcement, #pal .pbox { animation: none; transition: none; }
+  .np-announcement, #pal .pbox { animation: none; transition: none; }
 }
 .np-server-settings-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .np-server-settings-group[hidden] { display: none; }
@@ -466,11 +457,6 @@ html body #pal .pit:focus-visible { outline-offset: -2px; }
 .np-community-fields:disabled { opacity: .7; }
 .cgrid #stc .srow > div { min-width: 0; }
 .floating-ctx-menu button:disabled { color: var(--tx-dim); opacity: .5; cursor: not-allowed; }
-.np-role-row { animation: np-access-enter 220ms cubic-bezier(.2,.8,.2,1) both; }
-.np-role-row:nth-child(2) { animation-delay: 24ms; }
-.np-role-row:nth-child(3) { animation-delay: 48ms; }
-@keyframes np-access-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .np-role-row { animation: none; } }
 
 /* Steel is a separate informational card, not an extension of the server hero. */
 .srvh + .steel-info { margin-top: 20px; }

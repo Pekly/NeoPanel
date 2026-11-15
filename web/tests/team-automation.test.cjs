@@ -67,7 +67,7 @@ test('public invite failures are surfaced rather than treated as registration su
 });
 test('reserved-account retry screen cannot suggest setting a new password',()=>{
   const {c,elements}=setup();c.invite.info={email:'new@example.test',username:'newuser',server_name:'Server',permissions:[],account_exists:false,account_reserved:true};
-  c.renderInvitationScreen();assert.match(elements['#invite-screen'].innerHTML,/original password will not change/);assert.doesNotMatch(elements['#invite-screen'].innerHTML,/invite-register-password/);
+  c.renderInvitationScreen();assert.match(elements['#invite-screen'].innerHTML,/original password stays unchanged/);assert.doesNotMatch(elements['#invite-screen'].innerHTML,/invite-register-password/);
 });
 test('reserved-account acceptance sends only the invite token',async()=>{
   const {c,elements,storage}=setup();c.invite.token='secret';c.invite.info={account_reserved:true,account_exists:false};storage.set('neopanel_pending_invite','secret');elements['#invite-accept-form']={reportValidity:()=>true};elements['#invite-accept-error']={};c.renderInvitationScreen=()=>{};let request;
@@ -109,8 +109,8 @@ test('future invitation expiry is an explicit date, not a past-file relative lab
 
 test('team invitation preflight rejects existing members case-insensitively',()=>{
   const {c}=setup();c.S.serverSubusers=[{username:'Member',email:'member@example.test'}];
-  assert.match(c.teamInvitationConflict('MEMBER','other@example.test'),/already has access/);
-  assert.match(c.teamInvitationConflict('other','MEMBER@example.test'),/already has access/);
+  assert.match(c.teamInvitationConflict('MEMBER','other@example.test'),/Already a member/);
+  assert.match(c.teamInvitationConflict('other','MEMBER@example.test'),/Already a member/);
   assert.equal(c.teamInvitationConflict('newuser','new@example.test'),'');
 });
 test('pending invitation duplicates use resend while expired invites can be replaced',()=>{
@@ -120,5 +120,5 @@ test('pending invitation duplicates use resend while expired invites can be repl
 });
 test('an unresolved granting invitation cannot be duplicated even after its expiry',()=>{
   const {c}=setup();c.S.teamState={invitations:[{username:'invitee',email:'invitee@example.test',status:'granting',expires_at:'2000-01-01'}]};
-  assert.match(c.teamInvitationConflict('invitee','invitee@example.test'),/invitation already exists/);
+  assert.match(c.teamInvitationConflict('invitee','invitee@example.test'),/Already invited/);
 });

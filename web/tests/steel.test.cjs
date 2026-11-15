@@ -185,8 +185,8 @@ test('Steel settings and plugin entry points avoid Java properties and plugin AP
   assert.match(html, /config\/config\.toml/);
   assert.match(html, /server_port/);
   assert.match(html, /\[server\]/);
-  assert.match(html, /including Bubblewrap \+ Systemd launches/);
-  assert.match(html, /Without systemd, Steel can still run, but no hard RAM cap is applied/);
+  assert.match(html, /including Bubblewrap \+ Systemd/);
+  assert.match(html, /Without it, no hard RAM cap is applied/);
   assert.match(html, /<summary>Configuration &amp; resource limits in NeoPanel<\/summary>/);
   assert.ok(!source.includes('config/' + 'server.toml'), 'all Steel guidance uses the upstream config path');
   assert.match(html, /steel.exe/);
@@ -210,10 +210,10 @@ test('Steel explanation uses its real name, Rust implementation and pre-alpha st
   const { c } = setup();
   const html = c.steelConfigNotice();
   assert.match(html, /<h2>Steel<\/h2>/);
-  assert.match(html, /Minecraft Java Edition server implementation written in Rust/);
+  assert.match(html, /Written in Rust/); assert.match(html, /Minecraft Java Edition servers without Java/);
   assert.match(html, /Experimental · Pre-alpha/);
-  assert.match(html, /Gameplay features are incomplete and save formats may change/);
-  assert.match(html, /Not a Paper or Fabric fork/);
+  assert.match(html, /Features and save formats may change/); assert.match(html, /test world and keep backups/);
+  assert.match(html, /Bukkit\/Spigot plugins and Forge\/Fabric mods are not compatible/);
   assert.match(html, /https:\/\/steelmc.dev\/getting-started\/introduction\//);
   assert.match(html, /<details class="steel-info-details">/);
   assert.doesNotMatch(html, /<details[^>]*\bopen\b|Steel native server/);
