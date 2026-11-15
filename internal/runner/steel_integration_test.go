@@ -15,6 +15,9 @@ import (
 )
 
 func TestSteelSandboxCommand(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux isolation command construction")
+	}
 	binDir := t.TempDir()
 	suffix := ""
 	if runtime.GOOS == "windows" {

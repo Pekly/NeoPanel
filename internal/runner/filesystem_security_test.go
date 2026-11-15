@@ -12,6 +12,9 @@ import (
 )
 
 func TestCustomJavaDoesNotExposeAncestorMounts(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux filesystem sandbox command construction")
+	}
 	base := t.TempDir()
 	a := filepath.Join(base, "A")
 	b := filepath.Join(base, "B")

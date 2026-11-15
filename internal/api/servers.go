@@ -219,6 +219,9 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if !downloader.IsNativeSoftware(req.Type) && strings.TrimSpace(req.JavaPath) == "" && h.cfg != nil {
+		req.JavaPath = h.cfg.Java.DefaultPath
+	}
 
 	// Generate clean unique server ID (e.g. srv-3f8a1e)
 	idBytes := make([]byte, 3)

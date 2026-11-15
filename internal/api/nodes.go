@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -131,6 +132,9 @@ func (h *NodeHandler) buildLocalNodeView(reqHost string) NodeStatusView {
 	allowPorts := true
 	allowJava := true
 	isoEngine := "Bubblewrap + Systemd Slices"
+	if runtime.GOOS == "windows" {
+		isoEngine = "auto"
+	}
 	if localNode != nil {
 		isFree = localNode.IsFree
 		idleMin = localNode.IdleTimeoutMin

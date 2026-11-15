@@ -44,9 +44,22 @@ I built it because running Pterodactyl for a Minecraft-only setup meant PHP, Ngi
 
 Before upgrading an existing installation, read the [security upgrade notes](docs/security-upgrade.md), especially public URL and trusted-proxy configuration. Rebuild and update both the panel and workers.
 
-Tested on Ubuntu 24.04 LTS.
+Linux installer tested on Ubuntu 24.04 LTS. Windows can also run the master panel and trusted local servers.
 
-### Master panel
+### Windows master + local hosting
+
+Use the browser UI on Windows, host servers directly on that PC, and add web-less Linux/Windows workers. No native desktop wrapper is needed.
+
+```powershell
+.\build-windows.ps1
+.\start-windows.cmd
+```
+
+Building requires Go 1.26+; packaged EXEs do not. Open `http://127.0.0.1:8080` after starting. Windows defaults are per-user and loopback-only, with no automatic elevation or firewall changes. Local workloads are trusted-only, not filesystem-isolated.
+
+See the [Windows setup guide](docs/windows.md) for packaging, Java, local servers, node pairing, networking, and operational limits.
+
+### Linux master panel
 
 ```
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash

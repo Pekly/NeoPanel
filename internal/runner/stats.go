@@ -16,20 +16,23 @@ type StatsSnapshot struct {
 	MemoryMB   int64
 	NetInKiB   float64
 	NetOutKiB  float64
+	// NetworkSupported is false on Windows; zero counters are not measurements.
+	NetworkSupported bool
 }
 
 type ProcessMetrics struct {
-	mu           sync.Mutex
-	PID          int
-	CPUPercent   float64
-	MemoryMB     int64
-	NetInKiB     float64
-	NetOutKiB    float64
-	lastCPUTime  int64
-	lastReadTime time.Time
-	lastNetRx    uint64
-	lastNetTx    uint64
-	lastNetTime  time.Time
+	mu             sync.Mutex
+	PID            int
+	CPUPercent     float64
+	MemoryMB       int64
+	NetInKiB       float64
+	NetOutKiB      float64
+	lastCPUTime    int64
+	lastReadTime   time.Time
+	lastNetRx      uint64
+	lastNetTx      uint64
+	lastNetTime    time.Time
+	processCreated uint64 // Windows PID-reuse guard (creation FILETIME).
 }
 
 func NewProcessMetrics(pid int) *ProcessMetrics {
@@ -37,9 +40,8 @@ func NewProcessMetrics(pid int) *ProcessMetrics {
 		PID:          pid,
 		lastReadTime: time.Now(),
 	}
-	if runtime.GOOS == "linux" && pid > 0 {
-		// Seed initial CPU & Net baselines immediately
-		_, _ = pm.readLinuxStatsLocked()
+	if pid > 0 {
+		_, _ = pm.readPlatformStatsLocked()
 	}
 	return pm
 }
@@ -53,25 +55,16 @@ func (pm *ProcessMetrics) ReadStats() (StatsSnapshot, error) {
 		return StatsSnapshot{}, nil
 	}
 
-	if runtime.GOOS == "linux" {
-		return pm.readLinuxStatsLocked()
-	}
-
-	// Non-linux fallback (e.g. dev mode on Windows/macOS)
-	return StatsSnapshot{
-		CPUPercent: 0.5,
-		MemoryMB:   256,
-		NetInKiB:   1.2,
-		NetOutKiB:  2.4,
-	}, nil
+	return pm.readPlatformStatsLocked()
 }
 
 func (pm *ProcessMetrics) readLinuxStatsLocked() (StatsSnapshot, error) {
 	snap := StatsSnapshot{
-		CPUPercent: pm.CPUPercent,
-		MemoryMB:   pm.MemoryMB,
-		NetInKiB:   pm.NetInKiB,
-		NetOutKiB:  pm.NetOutKiB,
+		CPUPercent:       pm.CPUPercent,
+		MemoryMB:         pm.MemoryMB,
+		NetInKiB:         pm.NetInKiB,
+		NetOutKiB:        pm.NetOutKiB,
+		NetworkSupported: true,
 	}
 
 	// 1. Read Memory from /proc/<pid>/status

@@ -2348,6 +2348,7 @@ function applyServerStatsSnapshot(srv, stats, pushSeries = false) {
       uptime_sec: S.uptimeSec,
       net_in_kib: netIn,
       net_out_kib: netOut,
+      network_supported: stats.network_supported,
       startup_failures: S.startupFailures,
       startup_halted: S.startupHalted
     };
@@ -2425,6 +2426,7 @@ function chartPointCoords(data, max) {
 }
 
 function buildChartSeriesInnerSvg(kind) {
+  if (kind === 'net' && curServer()?.stats?.network_supported === false) return '';
   const spec = chartSeriesSpec(kind);
   if (kind === 'net') {
     const pIn = chartPointCoords(spec.ni, spec.max).map(([x, y]) => `${x},${y}`).join(' ');
@@ -2439,6 +2441,11 @@ function buildChartSeriesInnerSvg(kind) {
 }
 
 function updateChartHoverDom(kind) {
+  if (kind === 'net' && curServer()?.stats?.network_supported === false) {
+    const tip = $('#ch-tip-net'); if (tip) tip.style.display = 'none';
+    const hover = $('#ch-hover-svg-net'); if (hover) hover.innerHTML = '';
+    return;
+  }
   const hoverSvg = document.getElementById(`ch-hover-svg-${kind}`);
   const tip = document.getElementById(`ch-tip-${kind}`);
   if (!hoverSvg || !tip) return;
@@ -5251,8 +5258,8 @@ function statsHtml() {
     row(ic('cpu', 16), 'CPU load', `${c.toFixed(1)}%`, '/ 100%') +
     row(ic('layers', 16), 'Memory', `${m.toFixed(0)} MiB`, `/ ${(maxRamMB / 1024).toFixed(1)} GiB`) +
     row(ic('database', 16), 'Disk', formatDiskMB(S.diskMB)) +
-    row('↓', 'Network (inbound)', `${netIn.toFixed(1)} KiB/s`) +
-    row('↑', 'Network (outbound)', `${netOut.toFixed(1)} KiB/s`);
+    row('↓', 'Network (inbound)', srv?.stats?.network_supported === false ? 'Unavailable' : `${netIn.toFixed(1)} KiB/s`) +
+    row('↑', 'Network (outbound)', srv?.stats?.network_supported === false ? 'Unavailable' : `${netOut.toFixed(1)} KiB/s`);
 }
 
 function chartsHtml() {
@@ -5280,7 +5287,7 @@ function chartsHtml() {
 
   return renderCard('cpu', 'CPU load', cpuStr) +
     renderCard('mem', 'Memory', memStr) +
-    renderCard('net', 'Network I/O', '<span style="color:var(--ac)">in</span> <span style="color:#f0b429">out</span>');
+    renderCard('net', 'Network I/O', srv?.stats?.network_supported === false ? 'Unavailable on this host' : '<span style="color:var(--ac)">in</span> <span style="color:#f0b429">out</span>');
 }
 
 function liveCon() {
@@ -5306,6 +5313,8 @@ function liveCon() {
       const memValEl = $('#ch-val-mem');
       if (cpuValEl) cpuValEl.textContent = active ? `${c.toFixed(1)}%` : '0.0%';
       if (memValEl) memValEl.textContent = active ? `${m.toFixed(0)} MiB / ${maxRamGB} GiB` : `0 MiB / ${maxRamGB} GiB`;
+      const netValEl = $('#ch-val-net');
+      if (netValEl) netValEl.innerHTML = srv?.stats?.network_supported === false ? 'Unavailable on this host' : '<span style="color:var(--ac)">in</span> <span style="color:#f0b429">out</span>';
       cpuSeriesEl.innerHTML = buildChartSeriesInnerSvg('cpu');
       memSeriesEl.innerHTML = buildChartSeriesInnerSvg('mem');
       netSeriesEl.innerHTML = buildChartSeriesInnerSvg('net');
@@ -9801,8 +9810,9 @@ function openNodeModal(nodeId = null) {
           <label class="f" style="margin-bottom: 0;">
             <span>Process Isolation Engine</span>
             <select id="nm-isolation">
+              <option value="auto" ${existing?.isolation_engine === 'auto' ? 'selected' : ''}>Automatic (Windows: Job Object, no filesystem jail)</option>
               <option value="bubblewrap" ${(existing?.isolation_engine || 'bubblewrap') === 'bubblewrap' ? 'selected' : ''}>Bubblewrap (bwrap jailed filesystem + systemd slice)</option>
-              <option value="none" ${existing?.isolation_engine === 'none' ? 'selected' : ''}>Host Direct (No filesystem jail)</option>
+              <option value="none" ${['none', 'process'].includes(existing?.isolation_engine) ? 'selected' : ''}>Host Direct (No filesystem jail; Windows Job Object)</option>
             </select>
           </label>
         </div>

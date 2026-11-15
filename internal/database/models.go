@@ -45,17 +45,18 @@ type Server struct {
 }
 
 type ServerStats struct {
-	ServerID        string  `json:"server_id"`
-	Status          string  `json:"status"` // "offline", "starting", "online", "stopping"
-	CPUUsage        float64 `json:"cpu_usage"`
-	MemoryMB        int64   `json:"memory_mb"`
-	MemoryMaxMB     int     `json:"memory_max_mb"`
-	DiskMB          int64   `json:"disk_mb"`
-	UptimeSec       int64   `json:"uptime_sec"`
-	NetInKiB        float64 `json:"net_in_kib"`
-	NetOutKiB       float64 `json:"net_out_kib"`
-	StartupFailures int     `json:"startup_failures"`
-	StartupHalted   bool    `json:"startup_halted"`
+	ServerID         string  `json:"server_id"`
+	Status           string  `json:"status"` // "offline", "starting", "online", "stopping"
+	CPUUsage         float64 `json:"cpu_usage"`
+	MemoryMB         int64   `json:"memory_mb"`
+	MemoryMaxMB      int     `json:"memory_max_mb"`
+	DiskMB           int64   `json:"disk_mb"`
+	UptimeSec        int64   `json:"uptime_sec"`
+	NetInKiB         float64 `json:"net_in_kib"`
+	NetOutKiB        float64 `json:"net_out_kib"`
+	NetworkSupported *bool   `json:"network_supported,omitempty"`
+	StartupFailures  int     `json:"startup_failures"`
+	StartupHalted    bool    `json:"startup_halted"`
 }
 
 type SSHKey struct {

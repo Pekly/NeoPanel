@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -62,20 +63,38 @@ type JavaConfig struct {
 	DefaultPath string `yaml:"default_path"`
 }
 
-func DefaultConfig() *Config {
-	dataDir := "./data"
-	if os.Getenv("NEOPANEL_DATA_DIR") != "" {
-		dataDir = os.Getenv("NEOPANEL_DATA_DIR")
-	}
+func DefaultConfig() *Config { return DefaultConfigForRole("panel") }
 
+// Windows defaults are per-user and local-only. A headless node gets a separate
+// data root so starting both binaries on one PC never shares their database.
+func DefaultConfigForRole(role string) *Config {
+	if role != "node" {
+		role = "panel"
+	}
+	dataDir, host, mode, sftpEnabled := "./data", "0.0.0.0", "behind_proxy", true
+	if runtime.GOOS == "windows" {
+		base, err := os.UserCacheDir()
+		if err != nil || base == "" {
+			base, _ = os.UserHomeDir()
+		}
+		name := "NeoPanel"
+		if role == "node" {
+			name = "NeoPanel-node"
+		}
+		dataDir = filepath.Join(base, name)
+		host, mode, sftpEnabled = "127.0.0.1", "standalone", false
+	}
+	if value := strings.TrimSpace(os.Getenv("NEOPANEL_DATA_DIR")); value != "" {
+		dataDir = value
+	}
 	secret := generateRandomKey(32)
 
 	return &Config{
 		Server: ServerConfig{
-			Host:              "0.0.0.0",
+			Host:              host,
 			Port:              8080,
-			Mode:              "behind_proxy",
-			Role:              "panel",
+			Mode:              mode,
+			Role:              role,
 			StartupTimeoutSec: 180,
 		},
 		Paths: PathsConfig{
@@ -91,73 +110,123 @@ func DefaultConfig() *Config {
 			DefaultPath: "java",
 		},
 		SFTP: SFTPConfig{
-			Enabled: true,
+			Enabled: sftpEnabled,
 			Port:    2022,
 			KeyPath: filepath.Join(dataDir, "sftp_host_key"),
 		},
 	}
 }
 
-func LoadConfig(path string) (*Config, error) {
-	cfg := DefaultConfig()
-	cfg.FilePath = path
+func LoadConfig(path string) (*Config, error) { return LoadConfigForRole(path, "") }
 
-	// If file doesn't exist, try to save default config
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		// Ensure directory exists
-		dir := filepath.Dir(path)
-		if dir != "." && dir != "" {
-			_ = os.MkdirAll(dir, 0755)
-		}
-		if err := SaveConfig(path, cfg); err != nil {
-			return nil, fmt.Errorf("failed to write initial config: %w", err)
-		}
-		return cfg, nil
-	}
-
-	data, err := os.ReadFile(path)
+// An explicit CLI/build role wins over YAML/environment. Paths remain operator
+// configuration; relative Windows paths are anchored to the configuration file.
+func LoadConfigForRole(path, role string) (*Config, error) {
+	cfg := DefaultConfigForRole(role)
+	absPath, err := filepath.Abs(path)
 	if err != nil {
+		return nil, fmt.Errorf("invalid configuration path: %w", err)
+	}
+	cfg.FilePath = absPath
+	data, err := os.ReadFile(absPath)
+	created := os.IsNotExist(err)
+	if err != nil && !created {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	var present struct {
+		Paths struct {
+			DataDir    *string `yaml:"data_dir"`
+			ServersDir *string `yaml:"servers_dir"`
+			DBPath     *string `yaml:"db_path"`
+		} `yaml:"paths"`
+		Security struct {
+			JWTSecret *string `yaml:"jwt_secret"`
+		} `yaml:"security"`
+		SFTP struct {
+			KeyPath *string `yaml:"key_path"`
+		} `yaml:"sftp"`
 	}
-
-	// Optional environment variable overrides for Role, NodeToken, and Turnstile
+	if !created {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse config file: %w", err)
+		}
+		if err := yaml.Unmarshal(data, &present); err != nil {
+			return nil, fmt.Errorf("failed to parse config fields: %w", err)
+		}
+	}
 	if envRole := strings.ToLower(strings.TrimSpace(os.Getenv("NEOPANEL_ROLE"))); envRole == "node" || envRole == "panel" {
 		cfg.Server.Role = envRole
 	}
-	if strings.TrimSpace(cfg.Server.Role) == "" {
-		cfg.Server.Role = "panel"
-	} else {
-		cfg.Server.Role = strings.ToLower(strings.TrimSpace(cfg.Server.Role))
+	if role == "node" || role == "panel" {
+		cfg.Server.Role = role
 	}
-	if envNodeToken := strings.TrimSpace(os.Getenv("NEOPANEL_NODE_TOKEN")); envNodeToken != "" {
-		cfg.Security.NodeToken = envNodeToken
+	cfg.Server.Role = strings.ToLower(strings.TrimSpace(cfg.Server.Role))
+	if cfg.Server.Role == "" {
+		cfg.Server.Role = "panel"
+	}
+	if cfg.Server.Role != "panel" && cfg.Server.Role != "node" {
+		return nil, fmt.Errorf("invalid server role %q", cfg.Server.Role)
+	}
+	defaults := DefaultConfigForRole(cfg.Server.Role)
+	if present.Paths.DataDir == nil {
+		cfg.Paths.DataDir = defaults.Paths.DataDir
+	}
+	if present.Paths.ServersDir == nil {
+		cfg.Paths.ServersDir = filepath.Join(cfg.Paths.DataDir, "servers")
+	}
+	if present.Paths.DBPath == nil {
+		cfg.Paths.DBPath = filepath.Join(cfg.Paths.DataDir, "neopanel.db")
+	}
+	if present.SFTP.KeyPath == nil {
+		cfg.SFTP.KeyPath = filepath.Join(cfg.Paths.DataDir, "sftp_host_key")
+	}
+	if runtime.GOOS == "windows" {
+		for _, value := range []*string{&cfg.Paths.DataDir, &cfg.Paths.ServersDir, &cfg.Paths.DBPath, &cfg.SFTP.KeyPath} {
+			if *value != "" && !filepath.IsAbs(*value) {
+				*value = filepath.Join(filepath.Dir(absPath), *value)
+			}
+		}
+	}
+	if cfg.Paths.DataDir == "" || cfg.Paths.ServersDir == "" || cfg.Paths.DBPath == "" {
+		return nil, fmt.Errorf("data, servers, and database paths must not be empty")
+	}
+	if cfg.Server.Port < 0 || cfg.Server.Port > 65535 {
+		return nil, fmt.Errorf("invalid HTTP port %d", cfg.Server.Port)
+	}
+	if envToken := strings.TrimSpace(os.Getenv("NEOPANEL_NODE_TOKEN")); envToken != "" {
+		cfg.Security.NodeToken = envToken
+	}
+	persist := created
+	if present.Security.JWTSecret == nil || strings.TrimSpace(cfg.Security.JWTSecret) == "" {
+		cfg.Security.JWTSecret = generateRandomKey(32)
+		persist = true
 	}
 	if cfg.IsNode() && strings.TrimSpace(cfg.Security.NodeToken) == "" {
 		cfg.Security.NodeToken = GenerateNodeToken()
-		if path != "" {
-			_ = SaveConfig(path, cfg)
+		persist = true
+	}
+	if value := os.Getenv("NEOPANEL_TURNSTILE_ENABLED"); value != "" {
+		cfg.Security.Turnstile.Enabled = value == "true" || value == "1"
+	}
+	if value := os.Getenv("NEOPANEL_TURNSTILE_SITE_KEY"); value != "" {
+		cfg.Security.Turnstile.SiteKey = value
+	}
+	if value := os.Getenv("NEOPANEL_TURNSTILE_SECRET_KEY"); value != "" {
+		cfg.Security.Turnstile.SecretKey = value
+	}
+	for _, dir := range []string{cfg.Paths.DataDir, cfg.Paths.ServersDir, filepath.Dir(cfg.Paths.DBPath)} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("cannot create data directory %q: %w", dir, err)
 		}
 	}
-
-	// Optional environment variable overrides for Turnstile
-	if envEnabled := os.Getenv("NEOPANEL_TURNSTILE_ENABLED"); envEnabled != "" {
-		cfg.Security.Turnstile.Enabled = envEnabled == "true" || envEnabled == "1"
+	if persist {
+		if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
+			return nil, err
+		}
+		if err := SaveConfig(absPath, cfg); err != nil {
+			return nil, fmt.Errorf("failed to save initial configuration: %w", err)
+		}
 	}
-	if envSiteKey := os.Getenv("NEOPANEL_TURNSTILE_SITE_KEY"); envSiteKey != "" {
-		cfg.Security.Turnstile.SiteKey = envSiteKey
-	}
-	if envSecretKey := os.Getenv("NEOPANEL_TURNSTILE_SECRET_KEY"); envSecretKey != "" {
-		cfg.Security.Turnstile.SecretKey = envSecretKey
-	}
-
-	// Ensure directories exist
-	_ = os.MkdirAll(cfg.Paths.DataDir, 0755)
-	_ = os.MkdirAll(cfg.Paths.ServersDir, 0755)
-
 	return cfg, nil
 }
 

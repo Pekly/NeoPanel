@@ -7,6 +7,8 @@ import (
 	"io/fs"
 )
 
+const NodeOnlyBuild = false
+
 //go:embed static
 var staticFS embed.FS
 

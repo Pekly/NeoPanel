@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -142,14 +143,12 @@ func (m *ServerManager) getOrCreateInstance(srv *database.Server) *ProcessInstan
 	)
 
 	if m.db != nil {
-		if srv.NodeID != "" {
-			if n, err := m.db.GetNode(srv.NodeID); err == nil && n != nil {
-				inst.SetIsolationConfig(n.IsolationEngine, n.TasksMax)
-			}
-		} else {
-			if nodes, err := m.db.ListNodes(); err == nil && len(nodes) > 0 {
-				inst.SetIsolationConfig(nodes[0].IsolationEngine, nodes[0].TasksMax)
-			}
+		nodeID := srv.NodeID
+		if nodeID == "" {
+			nodeID = "local"
+		}
+		if n, err := m.db.GetNode(nodeID); err == nil && n != nil {
+			inst.SetIsolationConfig(n.IsolationEngine, n.TasksMax)
 		}
 	}
 
@@ -495,16 +494,18 @@ func (m *ServerManager) GetStats(srv *database.Server) database.ServerStats {
 
 	if !ok {
 		workingDir := filepath.Join(m.baseDir, srv.ID)
+		networkSupported := runtime.GOOS == "linux"
 		return database.ServerStats{
-			ServerID:        srv.ID,
-			Status:          "offline",
-			CPUUsage:        0,
-			MemoryMB:        0,
-			MemoryMaxMB:     srv.MemoryMaxMB,
-			DiskMB:          calculateDirSizeMB(workingDir),
-			UptimeSec:       0,
-			StartupFailures: fails,
-			StartupHalted:   halted,
+			ServerID:         srv.ID,
+			Status:           "offline",
+			CPUUsage:         0,
+			MemoryMB:         0,
+			MemoryMaxMB:      srv.MemoryMaxMB,
+			DiskMB:           calculateDirSizeMB(workingDir),
+			UptimeSec:        0,
+			StartupFailures:  fails,
+			StartupHalted:    halted,
+			NetworkSupported: &networkSupported,
 		}
 	}
 

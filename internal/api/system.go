@@ -34,8 +34,6 @@ func collectSystemInfo() SystemInfo {
 		OS:          runtime.GOOS,
 		Arch:        runtime.GOARCH,
 		CPUs:        runtime.NumCPU(),
-		TotalRAMMB:  4096, // default fallback
-		FreeRAMMB:   2048,
 		UptimeHours: int64(time.Since(startTime).Hours()),
 		Version:     "1.0.0",
 		GoVersion:   runtime.Version(),
@@ -44,6 +42,8 @@ func collectSystemInfo() SystemInfo {
 
 	if runtime.GOOS == "linux" {
 		readLinuxMemInfo(&info)
+	} else {
+		readPlatformMemInfo(&info)
 	}
 	return info
 }
@@ -62,7 +62,7 @@ func HandleGetJavaRuntimes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"installed":        runner.DetectInstalledJavas(),
 			"premade":          runner.GetPremadeJavaStatuses(),
-			"can_auto_install": runtime.GOOS == "linux",
+			"can_auto_install": runner.CanAutoInstallJava(),
 		})
 		return
 	}
@@ -99,7 +99,7 @@ func HandleInstallJavaRuntime(db *database.DB) http.HandlerFunc {
 			"runtime":          info,
 			"installed":        runner.DetectInstalledJavas(),
 			"premade":          runner.GetPremadeJavaStatuses(),
-			"can_auto_install": runtime.GOOS == "linux",
+			"can_auto_install": runner.CanAutoInstallJava(),
 		})
 	}
 }

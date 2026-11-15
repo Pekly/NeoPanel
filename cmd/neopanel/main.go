@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,8 +37,19 @@ const banner = `
 `
 
 func resolveConfigPath(flagVal string) string {
+	role := "panel"
+	if web.NodeOnlyBuild {
+		role = "node"
+	}
+	return resolveConfigPathForRole(flagVal, role)
+}
+
+func resolveConfigPathForRole(flagVal, role string) string {
 	if strings.TrimSpace(flagVal) != "" {
 		return strings.TrimSpace(flagVal)
+	}
+	if runtime.GOOS == "windows" {
+		return filepath.Join(config.DefaultConfigForRole(role).Paths.DataDir, "config.yaml")
 	}
 	if _, err := os.Stat("/etc/neopanel/config.yaml"); err == nil {
 		return "/etc/neopanel/config.yaml"
@@ -49,6 +64,7 @@ func main() {
 	roleFlag := flag.String("role", "", "Override server role ('panel' or 'node')")
 	nodeOnlyFlag := flag.Bool("node", false, "Run as a NeoPanel Cluster Node Daemon")
 	showVersion := flag.Bool("version", false, "Show version and exit")
+	initOnly := flag.Bool("init", false, "Create/validate configuration and exit without starting servers")
 	flag.Parse()
 
 	if *showVersion {
@@ -56,16 +72,33 @@ func main() {
 		return
 	}
 
-	targetConfig := resolveConfigPath(*configPath)
+	requestedRole := strings.ToLower(strings.TrimSpace(*roleFlag))
+	if requestedRole != "" && requestedRole != "panel" && requestedRole != "node" {
+		log.Fatalf("Invalid role %q", requestedRole)
+	}
+	if web.NodeOnlyBuild && requestedRole == "panel" {
+		log.Fatal("This is a node-only build; use the panel binary to host the web UI")
+	}
+	if *nodeOnlyFlag || web.NodeOnlyBuild {
+		requestedRole = "node"
+	}
+	pathRole := requestedRole
+	if pathRole == "" {
+		pathRole = strings.ToLower(strings.TrimSpace(os.Getenv("NEOPANEL_ROLE")))
+	}
+	targetConfig := resolveConfigPathForRole(*configPath, pathRole)
 
 	// Handle CLI subcommands (e.g. `neopanel node-token`, `neopanel api-key`, `neopanel node`)
 	if args := flag.Args(); len(args) > 0 {
+		// CLI helpers use LoadConfig; preserve explicit flag/build role precedence.
+		if requestedRole != "" {
+			_ = os.Setenv("NEOPANEL_ROLE", requestedRole)
+		}
 		os.Exit(runCLI(targetConfig, args))
 	}
-
 	fmt.Printf(banner, Version)
 
-	cfg, err := config.LoadConfig(targetConfig)
+	cfg, err := config.LoadConfigForRole(targetConfig, requestedRole)
 	if err != nil {
 		log.Fatalf("[FATAL] Failed to load configuration: %v", err)
 	}
@@ -76,16 +109,19 @@ func main() {
 	if *hostFlag != "" {
 		cfg.Server.Host = *hostFlag
 	}
-	if *nodeOnlyFlag {
-		cfg.Server.Role = "node"
-	} else if r := strings.ToLower(strings.TrimSpace(*roleFlag)); r == "node" || r == "panel" {
-		cfg.Server.Role = r
+	if *portFlag < 0 || *portFlag > 65535 {
+		log.Fatal("HTTP port must be between 1 and 65535")
 	}
-	if cfg.IsNode() && strings.TrimSpace(cfg.Security.NodeToken) == "" {
-		cfg.Security.NodeToken = config.GenerateNodeToken()
-		if cfg.FilePath != "" {
-			_ = config.SaveConfig(cfg.FilePath, cfg)
+	if *initOnly {
+		if err := config.SaveConfig(cfg.FilePath, cfg); err != nil {
+			log.Fatalf("Could not save configuration: %v", err)
 		}
+		fmt.Printf("Configuration ready: %s\nRole: %s\nData: %s\n", cfg.FilePath, cfg.Server.Role, cfg.Paths.DataDir)
+		return
+	}
+	if runtime.GOOS == "windows" {
+		log.Printf("[INFO] Windows %s: local workloads run without filesystem/network sandboxing; use isolated Linux nodes for untrusted workloads.", runtime.GOARCH)
+		log.Printf("[INFO] Configuration: %s", cfg.FilePath)
 	}
 
 	// 1. Initialize SQLite Database
@@ -124,7 +160,7 @@ func main() {
 		}
 	}
 
-	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      router,
@@ -132,10 +168,21 @@ func main() {
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		if sftpServer != nil {
+			sftpServer.Stop()
+		}
+		manager.ShutdownAll()
+		log.Fatalf("[FATAL] Could not listen on %s: %v", addr, err)
+	}
+	addr = listener.Addr().String()
 
 	// 5. Graceful Shutdown listener
 	shutdownCh := make(chan os.Signal, 1)
 	signal.Notify(shutdownCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(shutdownCh)
+	shutdownDone := make(chan struct{})
 
 	go func() {
 		sig := <-shutdownCh
@@ -151,13 +198,14 @@ func main() {
 
 		if err := srv.Shutdown(ctx); err != nil {
 			log.Printf("[WARN] HTTP server shutdown error: %v", err)
+			_ = srv.Close()
 		}
 
 		log.Printf("[INFO] Stopping running Minecraft servers...")
 		manager.ShutdownAll()
 
 		log.Printf("[INFO] Shutdown complete. Goodbye!")
-		os.Exit(0)
+		close(shutdownDone)
 	}()
 
 	// 6. Start HTTP Server
@@ -166,7 +214,14 @@ func main() {
 	} else {
 		log.Printf("[SUCCESS] NeoPanel Master Panel running at: http://%s", addr)
 	}
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if sftpServer != nil {
+			sftpServer.Stop()
+		}
+		manager.ShutdownAll()
 		log.Fatalf("[FATAL] Server terminated unexpectedly: %v", err)
 	}
+	// Serve returns as soon as the listener closes, before game shutdown finishes.
+	// Keep the process alive until the graceful shutdown goroutine has completed.
+	<-shutdownDone
 }

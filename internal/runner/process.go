@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -140,12 +141,14 @@ func (p *ProcessInstance) GetStats() database.ServerStats {
 	needsDiskScan := !p.diskScanning && (p.lastDiskCheck.IsZero() || time.Since(p.lastDiskCheck) > 20*time.Second)
 	workDir := p.workingDir
 	p.mu.RUnlock()
+	networkSupported := runtime.GOOS == "linux"
 
 	stats := database.ServerStats{
-		ServerID:    srvID,
-		Status:      status,
-		MemoryMaxMB: memMax,
-		DiskMB:      diskMB,
+		ServerID:         srvID,
+		Status:           status,
+		MemoryMaxMB:      memMax,
+		DiskMB:           diskMB,
+		NetworkSupported: &networkSupported,
 	}
 
 	if (status == "online" || status == "starting") && !startedAt.IsZero() {
@@ -156,6 +159,7 @@ func (p *ProcessInstance) GetStats() database.ServerStats {
 				stats.MemoryMB = snap.MemoryMB
 				stats.NetInKiB = snap.NetInKiB
 				stats.NetOutKiB = snap.NetOutKiB
+				networkSupported = snap.NetworkSupported
 			}
 		}
 	}
@@ -340,8 +344,7 @@ func (p *ProcessInstance) Start() error {
 		p.broadcast("[NeoPanel] Isolation unavailable: " + err.Error())
 		return err
 	}
-	configureProcessOwnership(cmd, runLock)
-	p.broadcast(fmt.Sprintf("\x1b[35m[NeoPanel Security] Isolation: %s\x1b[0m", isolationMode))
+	p.broadcast(fmt.Sprintf("\x1b[35m[NeoPanel] Process management: %s\x1b[0m", isolationMode))
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -375,7 +378,8 @@ func (p *ProcessInstance) Start() error {
 	}
 
 	cmd.Stdout, cmd.Stderr = stdoutWriter, stderrWriter
-	if err := cmd.Start(); err != nil {
+	owned, err := startOwnedCommand(cmd, runLock, serverMemoryCeilingMB(srv))
+	if err != nil {
 		stdin.Close()
 		stdout.Close()
 		stderr.Close()
@@ -383,6 +387,15 @@ func (p *ProcessInstance) Start() error {
 		stderrWriter.Close()
 		p.mu.Lock()
 		p.status = "offline"
+		if owned != nil {
+			// Launch rollback could not certify cleanup. Keep ownership and
+			// refuse restart/maintenance until Stop reconciles this exact job.
+			launched = true
+			p.cmd, p.owned, p.runLock = cmd, owned, runLock
+			p.status, p.cleanupErr = "stopping", err
+			p.runDone = make(chan struct{})
+			close(p.runDone)
+		}
 		p.mu.Unlock()
 
 		p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
@@ -402,8 +415,7 @@ func (p *ProcessInstance) Start() error {
 	p.mu.Lock()
 	p.cmd = cmd
 	p.runDone = done
-	p.owned = &ownedCommand{cmd: cmd}
-	owned := p.owned
+	p.owned = owned
 	p.runLock = runLock
 	p.cleanupErr = nil
 	p.stdin = stdin
@@ -1154,6 +1166,18 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 	p.mu.RUnlock()
 	if isoEngine == "" {
 		isoEngine = "auto"
+	}
+	if runtime.GOOS == "windows" {
+		if isoEngine != "auto" && isoEngine != "process" && isoEngine != "none" {
+			return nil, "", fmt.Errorf("isolation engine %q is unavailable on Windows; use auto/process (Job Object management, no filesystem isolation)", isoEngine)
+		}
+		cmd := exec.Command(javaBinary, args...)
+		cmd.Dir = p.workingDir
+		memory := "memory unlimited"
+		if ceiling := serverMemoryCeilingMB(srv); ceiling > 0 {
+			memory = fmt.Sprintf("job committed-memory ceiling=%d MiB", ceiling)
+		}
+		return cmd, "Windows Job Object (" + memory + "; CPU/task limits unsupported; NO filesystem isolation)", nil
 	}
 	if tasksMax <= 0 {
 		tasksMax = 512

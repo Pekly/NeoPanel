@@ -18,6 +18,14 @@ type ownedCommand struct {
 	cmd    *exec.Cmd
 	reaped bool
 	err    error
+	owner  commandOwner
+}
+
+// A handle-based platform owner pins the exact run, never a recycled PID.
+type commandOwner interface {
+	waitExit() error
+	terminate() error
+	close() error
 }
 
 func (c *ownedCommand) stop(final bool) error {
@@ -29,6 +37,9 @@ func (c *ownedCommand) stop(final bool) error {
 	if c.reaped {
 		return c.err
 	}
+	if c.owner != nil {
+		return c.owner.terminate()
+	}
 	err := terminateOwnedCommand(c.cmd, final)
 	return err
 }
@@ -37,11 +48,18 @@ func (c *ownedCommand) stop(final bool) error {
 // and process-group identity until cleanup finishes under the same mutex used
 // by Stop. Never send a group signal after cmd.Wait releases that identity.
 func (c *ownedCommand) wait() (error, error) {
-	observeErr := waitForOwnedExit(c.cmd)
+	var observeErr error
+	if c.owner != nil {
+		observeErr = c.owner.waitExit()
+	} else {
+		observeErr = waitForOwnedExit(c.cmd)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var cleanupErr error
-	if observeErr == nil {
+	if c.owner != nil {
+		cleanupErr = c.owner.terminate()
+	} else if observeErr == nil {
 		cleanupErr = terminateOwnedCommand(c.cmd, true)
 	} else {
 		cleanupErr = fmt.Errorf("cannot safely observe server exit: %w", observeErr)
@@ -50,6 +68,12 @@ func (c *ownedCommand) wait() (error, error) {
 		_ = c.cmd.Process.Kill()
 	}
 	waitErr := c.cmd.Wait()
+	if c.owner != nil && cleanupErr == nil {
+		cleanupErr = c.owner.close()
+	}
+	if observeErr != nil && waitErr == nil {
+		waitErr = observeErr
+	}
 	c.reaped, c.err = true, cleanupErr
 	return waitErr, cleanupErr
 }
@@ -62,6 +86,19 @@ func (c *ownedCommand) reconcile(dir string) error {
 	defer c.mu.Unlock()
 	if !c.reaped {
 		return fmt.Errorf("server process has not been reaped")
+	}
+	if c.owner != nil {
+		if err := c.owner.terminate(); err != nil {
+			return err
+		}
+		if err := c.owner.close(); err != nil {
+			return err
+		}
+		if err := ensureServerProcessesStopped(dir); err != nil {
+			return err
+		}
+		c.err = nil
+		return nil
 	}
 	// Only the unique scope may be stopped after reap. Numeric process groups
 	// are inspected, never signalled here, since their IDs can now be reused.
@@ -80,7 +117,7 @@ func (c *ownedCommand) reconcile(dir string) error {
 
 // Each launch has a unique scope name, so cleanup can only address this run.
 func stopOwnedScope(cmd *exec.Cmd) error {
-	if cmd == nil || filepath.Base(cmd.Path) != "systemd-run" {
+	if runtime.GOOS != "linux" || cmd == nil || filepath.Base(cmd.Path) != "systemd-run" {
 		return nil
 	}
 	for _, arg := range cmd.Args[1:] {

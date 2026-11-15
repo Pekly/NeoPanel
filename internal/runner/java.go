@@ -108,6 +108,9 @@ func containsBoundedToken(s, token string) bool {
 }
 
 func detectJavaBinaryMajor(binPath string) string {
+	if runtime.GOOS == "windows" {
+		return detectWindowsJavaMajor(binPath)
+	}
 	if !isExecutableBinary(binPath) {
 		return ""
 	}
@@ -157,6 +160,9 @@ func trimNonDigits(s string) string {
 // into a validated executable path on the host system.
 func ResolveJavaBinary(versionOrPath string) (binaryPath string, displayLabel string) {
 	v := strings.TrimSpace(versionOrPath)
+	if runtime.GOOS == "windows" {
+		v = strings.Trim(v, `"`)
+	}
 
 	// 1. Direct path check (user provided full binary path)
 	if v != "" && !strings.EqualFold(v, "default") && !strings.EqualFold(v, "java") {
@@ -173,6 +179,12 @@ func ResolveJavaBinary(versionOrPath string) (binaryPath string, displayLabel st
 
 	// If explicit default requested, return system "java"
 	if targetTag == "default" {
+		if runtime.GOOS == "windows" {
+			if bin := windowsDefaultJava(); bin != "" {
+				return bin, "System Default (OpenJDK " + detectJavaBinaryMajor(bin) + ")"
+			}
+			return "", "System Default Java (Not Installed)"
+		}
 		if lp, err := exec.LookPath("java"); err == nil {
 			if maj := detectJavaBinaryMajor(lp); maj != "" {
 				return lp, "System Default (OpenJDK " + maj + ")"
@@ -197,16 +209,19 @@ func ResolveJavaBinary(versionOrPath string) (binaryPath string, displayLabel st
 		}
 	}
 
-	// 4. Windows fallback paths for local development
+	// 4. Windows: validate JAVA_HOME, managed, per-user, vendor and PATH runtimes.
 	if runtime.GOOS == "windows" {
 		candidates := getWindowsJavaCandidates(targetTag)
 		for _, cand := range candidates {
 			if isExecutableBinary(cand) {
-				if maj := detectJavaBinaryMajor(cand); maj == "" || maj == targetTag {
+				if maj := detectJavaBinaryMajor(cand); maj == targetTag {
 					return cand, "Java " + targetTag
 				}
 			}
 		}
+		// An empty path fails Start's executable check without allowing a
+		// similarly named but unverified executable on PATH to be launched.
+		return "", "Java " + targetTag + " (Not Installed)"
 	}
 
 	// 5. Check system PATH "java" only if its major version matches the requested target
@@ -338,36 +353,8 @@ func getLinuxJavaCandidates(tag string) []string {
 }
 
 func getWindowsJavaCandidates(tag string) []string {
-	programFiles := os.Getenv("ProgramFiles")
-	if programFiles == "" {
-		programFiles = `C:\Program Files`
-	}
-
-	cands := []string{
-		filepath.Join(programFiles, "Eclipse Adoptium", "jdk-"+tag, "bin", "java.exe"),
-		filepath.Join(programFiles, "Eclipse Adoptium", "jre-"+tag, "bin", "java.exe"),
-		filepath.Join(programFiles, "Java", "jdk-"+tag, "bin", "java.exe"),
-		filepath.Join(programFiles, "Java", "jre-"+tag, "bin", "java.exe"),
-		filepath.Join(programFiles, "Microsoft", "jdk-"+tag, "bin", "java.exe"),
-	}
-
-	for _, dir := range []string{
-		filepath.Join(programFiles, "Eclipse Adoptium"),
-		filepath.Join(programFiles, "Java"),
-		filepath.Join(programFiles, "Microsoft"),
-	} {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			if e.IsDir() && matchJavaMajorInString(e.Name()) == tag {
-				cands = append(cands, filepath.Join(dir, e.Name(), "bin", "java.exe"))
-			}
-		}
-	}
-
-	return cands
+	// Directory names are only discovery hints, never version evidence.
+	return windowsJavaCandidates()
 }
 
 // DetectInstalledJavas returns a list of installed Java runtimes found on the machine.
@@ -377,7 +364,7 @@ func DetectInstalledJavas() []JavaRuntimeInfo {
 	seenPaths := make(map[string]bool)
 
 	record := func(ver, name, path string, isDefault bool) {
-		if path == "" || seenPaths[path] {
+		if path == "" || (seenPaths[path] && !(runtime.GOOS == "windows" && isDefault)) {
 			return
 		}
 		if !isExecutableBinary(path) {
@@ -448,18 +435,24 @@ func DetectInstalledJavas() []JavaRuntimeInfo {
 			}
 		}
 	} else if runtime.GOOS == "windows" {
-		for _, def := range canonicalPremadeJavas {
-			for _, cand := range getWindowsJavaCandidates(def.Version) {
-				if isExecutableBinary(cand) {
-					record(def.Version, def.Name, cand, false)
-					break
-				}
+		for _, cand := range windowsJavaCandidates() {
+			if maj := detectJavaBinaryMajor(cand); maj != "" {
+				record(maj, premadeDisplayName(maj), cand, false)
 			}
 		}
 	}
 
 	// 2. Default system Java (and also backfill major version if e.g. system java was installed outside /usr/lib/jvm)
-	if lp, err := exec.LookPath("java"); err == nil {
+	lp, lookupErr := exec.LookPath("java")
+	if runtime.GOOS == "windows" {
+		lp = windowsDefaultJava()
+		if lp == "" {
+			lookupErr = fmt.Errorf("no working Java runtime")
+		} else {
+			lookupErr = nil
+		}
+	}
+	if lookupErr == nil {
 		resolvedLP, errReal := filepath.EvalSymlinks(lp)
 		if errReal == nil && isExecutableBinary(resolvedLP) {
 			lp = resolvedLP
@@ -538,14 +531,14 @@ func GetPremadeJavaStatuses() []JavaRuntimeInfo {
 }
 
 // InstallJavaRuntime downloads and installs an official Eclipse Temurin Java runtime (25, 21, 17, or 8)
-// into /usr/lib/jvm/java-<ver>-temurin on Linux hosts.
+// into /usr/lib/jvm on Linux or the per-user managed runtime directory on Windows.
 func InstallJavaRuntime(version string) (JavaRuntimeInfo, error) {
 	ver := strings.TrimSpace(version)
 	if !javaSupported[ver] {
 		return JavaRuntimeInfo{}, fmt.Errorf("unsupported Java version '%s' (supported: 25, 21, 17, 8)", version)
 	}
-	if runtime.GOOS != "linux" {
-		return JavaRuntimeInfo{}, fmt.Errorf("automatic runtime installation is only supported on Linux hosts")
+	if !CanAutoInstallJava() {
+		return JavaRuntimeInfo{}, fmt.Errorf("automatic runtime installation is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
 	javaInstallMu.Lock()
@@ -555,6 +548,13 @@ func InstallJavaRuntime(version string) (JavaRuntimeInfo, error) {
 		if st.Version == ver && st.Installed {
 			return st, nil
 		}
+	}
+	if runtime.GOOS == "windows" {
+		root, err := windowsJavaInstallRoot()
+		if err != nil {
+			return JavaRuntimeInfo{}, err
+		}
+		return installWindowsJava(ver, runtime.GOARCH, root, defaultWindowsJavaInstaller())
 	}
 
 	arch := "x64"

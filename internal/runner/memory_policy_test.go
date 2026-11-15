@@ -64,6 +64,9 @@ func TestServerMemoryCeiling(t *testing.T) {
 
 // Exercise both command builders without starting any host isolation command.
 func TestSystemdCommandsIncludeJavaMemoryCeiling(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux isolation command construction")
+	}
 	bin := t.TempDir()
 	ext := ""
 	if runtime.GOOS == "windows" {

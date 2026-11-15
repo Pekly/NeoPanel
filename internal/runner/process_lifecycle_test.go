@@ -199,6 +199,9 @@ func TestExplicitIsolationNeverSilentlyDowngrades(t *testing.T) {
 	}
 }
 func TestSandboxAndScopeCommandConstruction(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux isolation command construction")
+	}
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
 	for _, name := range []string{"bwrap", "systemd-run"} {
