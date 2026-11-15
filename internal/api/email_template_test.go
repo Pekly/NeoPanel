@@ -118,3 +118,37 @@ func TestPasswordResetRejectsBcryptOversizedPassword(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
+func TestPanelEmailNonInvitationLayoutUnchanged(t *testing.T) {
+	link := "https://panel.example.test/#reset-token=" + strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		name    string
+		message panelEmail
+	}{
+		{"reset", panelEmail{Title: "Password reset", ActionText: "Reset Password", ActionURL: link, Code: strings.Repeat("c", 64)}},
+		{"smtp", panelEmail{Title: "SMTP delivery test", Details: []emailDetail{{"SMTP host", "smtp.example.test:587"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.message.Branding = emailBrand(PanelBrandingConfig{}, link)
+			output, plain, err := renderPanelEmail(tc.message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{"padding:32px 12px;", "padding:22px 28px;", "padding:28px;font-size:15px;line-height:1.65;", "padding:18px 28px;"} {
+				if !strings.Contains(output, want) {
+					t.Errorf("shared layout lost %q", want)
+				}
+			}
+			if strings.Contains(output, "np-invitation-details") || strings.Contains(output, "table-layout:fixed") || strings.Contains(output, "Open invitation link") {
+				t.Fatal("invitation-only compaction leaked into shared email")
+			}
+			if tc.name == "reset" {
+				if !strings.Contains(output, ">"+link+"</a>") || !strings.Contains(output, "Or enter this reset code") || !strings.Contains(plain, "Reset Code: "+tc.message.Code) || !strings.Contains(plain, link) {
+					t.Fatal("reset fallback/code changed")
+				}
+			} else if !strings.Contains(output, "white-space:nowrap") || !strings.Contains(output, "<strong>smtp.example.test:587</strong>") || !strings.Contains(plain, "SMTP host: smtp.example.test:587") {
+				t.Fatal("SMTP details changed")
+			}
+		})
+	}
+}

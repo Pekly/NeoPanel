@@ -30,11 +30,11 @@ func invitationEmail(brand PanelBrandingConfig, i *database.Invitation, serverNa
 	}
 	return renderPanelEmail(panelEmail{
 		Branding: branding, Title: "Team invitation", Heading: "You're invited to the team",
-		Intro:      fmt.Sprintf("You have been invited to collaborate on %s through %s.", serverName, branding.Name),
-		Details:    []emailDetail{{"Requested username", i.Username}, {"Permissions", permissions}},
-		Paragraphs: []string{"Already have an account? Sign in with the account matching this invitation. New here? Register using the requested username and invited email. This invitation does not change an existing password."},
+		Intro:      fmt.Sprintf("You've been invited to collaborate on %s.", serverName),
+		Invitation: &emailInvitationDetails{Username: i.Username, Permissions: permissions},
+		Paragraphs: []string{"Sign in with the account matching this invitation. New here? Register using the requested username and invited email. Existing passwords stay unchanged."},
 		ActionText: "Accept invitation", ActionURL: link,
-		Notice: "Expires: " + i.ExpiresAt.UTC().Format("02 Jan 2006 at 15:04 UTC") + ". This invitation link is single-use. Do not share it.",
-		Footer: "If you were not expecting this invitation, you can safely ignore this email. No access is granted until you accept.",
+		Notice: "Expires: " + i.ExpiresAt.UTC().Format("02 Jan 2006 at 15:04 UTC") + ". Single-use link; do not share it.",
+		Footer: "Unexpected invitation? You can ignore this email. No access is granted until you accept.",
 	})
 }
