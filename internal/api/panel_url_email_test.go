@@ -1,11 +1,7 @@
 package api
 
 import (
-	"io"
-	"mime"
-	"mime/multipart"
 	"net/http/httptest"
-	"net/mail"
 	"strings"
 	"testing"
 	"time"
@@ -32,35 +28,15 @@ func TestPanelURLPasswordResetEmail(t *testing.T) {
 	}
 	select {
 	case raw := <-smtp.messages:
-		message, err := mail.ReadMessage(strings.NewReader(raw))
-		if err != nil {
-			t.Fatal(err)
+		parts := decodedEmailParts(t, raw)
+		for _, kind := range []string{"text/plain", "text/html"} {
+			body := parts[kind]
+			if !strings.Contains(body, "https://reset.example:8443/#reset-token=") || strings.Contains(body, "untrusted.example") || strings.Contains(body, "spoof.example") {
+				t.Fatal("reset link did not use saved origin", body)
+			}
 		}
-		_, params, err := mime.ParseMediaType(message.Header.Get("Content-Type"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		parts := multipart.NewReader(message.Body, params["boundary"])
-		count := 0
-		for {
-			part, err := parts.NextPart()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			body, err := io.ReadAll(part)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(string(body), "https://reset.example:8443/#reset-token=") || strings.Contains(string(body), "untrusted.example") || strings.Contains(string(body), "spoof.example") {
-				t.Fatal("reset link did not use saved origin", string(body))
-			}
-			count++
-		}
-		if count != 2 {
-			t.Fatal("expected HTML and plain-text email", count)
+		if parts["image/png"] == "" {
+			t.Fatal("sidebar fallback image missing")
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("reset email not received")

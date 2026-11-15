@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
-	"html"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -16,8 +15,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,10 +26,11 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-const emailLogoMaxBytes = 2 << 20
+const emailLogoMaxBytes = 12 << 20 // Matches uploaded branding assets.
+const remoteEmailLogoMaxBytes = 2 << 20
 const emailLogoCID = "neopanel-logo"
 
-var emailLogoCell = regexp.MustCompile(`<td data-neopanel-logo="true"[^>]*><img src="([^"]+)"[^>]*></td>`)
+var emailLogoCell = regexp.MustCompile(`<td data-neopanel-logo="true" data-logo-source="([^"]*)" data-logo-accent="([^"]*)"[^>]*><img src="([^"]+)"[^>]*></td>`)
 var errEmailLogo = errors.New("email logo unavailable")
 
 var emailSVGTransform = regexp.MustCompile(`(?i)\b(?:transform|gradientTransform)\s*=\s*(?:"[^"]*"|'[^']*')`)
@@ -47,70 +45,7 @@ func normalizeEmailSVGScale(data []byte) []byte {
 	})
 }
 
-// Only the fixed template's marked brand image is replaced. Invalid or missing
-// assets leave the visible brand name, not a broken-image placeholder.
-func (h *EmailHandler) prepareEmailLogo(body string) (string, []byte) {
-	match := emailLogoCell.FindStringSubmatch(body)
-	if match == nil {
-		return body, nil
-	}
-	data, err := h.loadEmailLogo(html.UnescapeString(match[1]))
-	if err != nil {
-		return strings.Replace(body, match[0], "", 1), nil
-	}
-	cell := strings.Replace(match[0], `src="`+match[1]+`"`, `src="cid:`+emailLogoCID+`"`, 1)
-	cell = strings.Replace(cell, ` data-neopanel-logo="true"`, "", 1)
-	return strings.Replace(body, match[0], cell, 1), data
-}
-
-func (h *EmailHandler) loadEmailLogo(raw string) ([]byte, error) {
-	u, err := url.Parse(emailLogoURL(raw, ""))
-	if err != nil || u.Hostname() == "" {
-		return nil, errEmailLogo
-	}
-	origin := ""
-	if h.auth != nil {
-		if settings, e := h.auth.panelURL(); e == nil {
-			origin = settings.PublicURL
-		}
-	} else if h.cfg != nil {
-		origin = h.cfg.Server.PublicURL
-	}
-	base, _ := url.Parse(origin)
-	var data []byte
-	if base != nil && strings.EqualFold(u.Scheme, base.Scheme) && strings.EqualFold(u.Host, base.Host) && strings.HasPrefix(u.Path, "/branding/") {
-		name := strings.TrimPrefix(u.Path, "/branding/")
-		if !safeAssetRe.MatchString(name) || strings.ContainsAny(name, `/\`) {
-			return nil, errEmailLogo
-		}
-		dir := (&BrandingHandler{cfg: h.cfg}).brandingDir()
-		root, e := os.OpenRoot(dir)
-		if e != nil {
-			return nil, errEmailLogo
-		}
-		defer root.Close()
-		file, e := root.Open(name)
-		if e != nil {
-			return nil, errEmailLogo
-		}
-		defer file.Close()
-		info, e := file.Stat()
-		if e != nil || !info.Mode().IsRegular() || info.Size() > emailLogoMaxBytes {
-			return nil, errEmailLogo
-		}
-		data, err = io.ReadAll(io.LimitReader(file, emailLogoMaxBytes+1))
-	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		data, err = fetchEmailLogo(ctx, u)
-	}
-	if err != nil || len(data) == 0 || len(data) > emailLogoMaxBytes {
-		return nil, errEmailLogo
-	}
-	return emailLogoPNG(data, strings.EqualFold(filepath.Ext(u.Path), ".svg"))
-}
-
-// Never use environment proxies, credentials, redirects, or private/link-local
+// Never use environment proxies, credentials, or private/link-local
 // addresses for administrator-selected remote logos. Dial the checked IP itself
 // to prevent DNS rebinding between validation and connection.
 func publicEmailLogoIP(ip netip.Addr) bool {
@@ -126,7 +61,7 @@ func publicEmailLogoIP(ip netip.Addr) bool {
 	return true
 }
 func fetchEmailLogo(ctx context.Context, u *url.URL) ([]byte, error) {
-	if u.Scheme != "https" || u.User != nil || u.Hostname() == "" || (u.Port() != "" && u.Port() != "443") {
+	if !validEmailLogoRemoteURL(u) {
 		return nil, errEmailLogo
 	}
 	transport := &http.Transport{TLSHandshakeTimeout: 2 * time.Second, MaxResponseHeaderBytes: 32 << 10, DisableKeepAlives: true,
@@ -148,7 +83,7 @@ func fetchEmailLogo(ctx context.Context, u *url.URL) ([]byte, error) {
 		},
 	}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errEmailLogo }}
+	client := emailLogoHTTPClient(transport)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, errEmailLogo
@@ -159,14 +94,23 @@ func fetchEmailLogo(ctx context.Context, u *url.URL) ([]byte, error) {
 		return nil, errEmailLogo
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK || response.ContentLength > emailLogoMaxBytes {
+	if response.StatusCode != http.StatusOK || response.ContentLength > remoteEmailLogoMaxBytes {
 		return nil, errEmailLogo
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, emailLogoMaxBytes+1))
-	if err != nil || len(data) > emailLogoMaxBytes {
+	data, err := io.ReadAll(io.LimitReader(response.Body, remoteEmailLogoMaxBytes+1))
+	if err != nil || len(data) > remoteEmailLogoMaxBytes {
 		return nil, errEmailLogo
 	}
 	return data, nil
+}
+
+func emailLogoHTTPClient(transport http.RoundTripper) *http.Client {
+	return &http.Client{Transport: transport, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) == 0 || len(via) > 3 || !validEmailLogoRemoteURL(req.URL) || (via[0].URL.Scheme == "https" && req.URL.Scheme != "https") {
+			return errEmailLogo
+		}
+		return nil // Production transport also validates and pins every DNS result.
+	}}
 }
 
 // Rasterize to a small square PNG: email clients need neither SVG/WebP support
@@ -180,6 +124,13 @@ func emailLogoPNG(data []byte, svg bool) (out []byte, err error) {
 	}()
 	if len(data) == 0 || len(data) > emailLogoMaxBytes {
 		return nil, errEmailLogo
+	}
+	if len(data) >= 6 && bytes.Equal(data[:4], []byte{0, 0, 1, 0}) {
+		data, err = emailICOToPNG(data)
+		if err != nil {
+			return nil, err
+		}
+		svg = false
 	}
 	const size = 128
 	dst := image.NewRGBA(image.Rect(0, 0, size, size))
@@ -234,7 +185,8 @@ func safeEmailSVG(data []byte) bool {
 		return false
 	}
 	decoder := xml.NewDecoder(bytes.NewReader(data))
-	count, depth := 0, 0
+	count, depth, styleDepth, cssCost := 0, 0, 0, 0
+	var css strings.Builder
 	for {
 		token, err := decoder.Token()
 		if err == io.EOF {
@@ -247,16 +199,20 @@ func safeEmailSVG(data []byte) bool {
 		case xml.Directive:
 			return false
 		case xml.StartElement:
+			if styleDepth != 0 {
+				return false
+			}
 			count++
 			depth++
 			if count > 512 || depth > 32 {
 				return false
 			}
 			switch strings.ToLower(value.Name.Local) {
-			// CSS selector lists expand multiplicatively in oksvg; disallow style
-			// elements before parsing rather than relying on post-parse limits.
-			case "style", "use", "image", "script", "foreignobject", "filter", "pattern":
+			case "use", "image", "script", "foreignobject", "filter", "pattern":
 				return false
+			case "style":
+				styleDepth = depth
+				css.Reset()
 			}
 			for _, attr := range value.Attr {
 				if len(attr.Value) > 64<<10 {
@@ -265,22 +221,96 @@ func safeEmailSVG(data []byte) bool {
 				if strings.EqualFold(attr.Name.Local, "href") && !strings.HasPrefix(attr.Value, "#") {
 					return false
 				}
-				switch strings.ToLower(attr.Name.Local) {
-				case "d", "points", "transform", "gradienttransform", "viewbox", "cx", "cy", "r", "rx", "ry", "x", "y", "x1", "x2", "y1", "y2", "width", "height", "stroke-width":
-					lower := strings.ToLower(attr.Value)
-					if strings.Contains(lower, "nan") || strings.Contains(lower, "inf") {
+				if strings.EqualFold(attr.Name.Local, "style") {
+					cost, ok := emailSVGStyleCost(".inline{" + attr.Value + "}")
+					if !ok {
 						return false
 					}
-					for _, number := range emailSVGNumber.FindAllString(attr.Value, -1) {
-						value, err := strconv.ParseFloat(number, 64)
-						if err != nil || math.Abs(value) > 1e6 {
-							return false
-						}
+					cssCost += cost
+				}
+				switch strings.ToLower(attr.Name.Local) {
+				case "d", "points", "transform", "gradienttransform", "viewbox", "cx", "cy", "r", "rx", "ry", "x", "y", "x1", "x2", "y1", "y2", "width", "height", "stroke-width":
+					if !boundedSVGNumbers(attr.Value) {
+						return false
 					}
 				}
 			}
+		case xml.CharData:
+			if styleDepth != 0 {
+				if css.Len()+len(value) > 8192 {
+					return false
+				}
+				css.Write(value)
+			}
 		case xml.EndElement:
+			if depth == styleDepth {
+				cost, ok := emailSVGStyleCost(css.String())
+				if !ok {
+					return false
+				}
+				cssCost += cost
+				styleDepth = 0
+			}
 			depth--
 		}
+		if cssCost > 4096 {
+			return false
+		}
 	}
+}
+
+func boundedSVGNumbers(text string) bool {
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "nan") || strings.Contains(lower, "inf") {
+		return false
+	}
+	for _, number := range emailSVGNumber.FindAllString(text, -1) {
+		value, err := strconv.ParseFloat(number, 64)
+		if err != nil || math.Abs(value) > 1e6 {
+			return false
+		}
+	}
+	return true
+}
+
+// Bound selector × declaration expansion before handing CSS to oksvg.
+func emailSVGStyleCost(css string) (int, bool) {
+	if len(css) > 8192 || strings.Contains(css, "@") {
+		return 0, false
+	}
+	cost := 0
+	for _, rule := range strings.Split(css, "}") {
+		if strings.TrimSpace(rule) == "" {
+			continue
+		}
+		selectors, declarations, ok := strings.Cut(rule, "{")
+		if !ok {
+			return 0, false
+		}
+		n, m := strings.Count(selectors, ",")+1, strings.Count(declarations, ";")+1
+		if n > 64 || m > 64 {
+			return 0, false
+		}
+		cost += n * m
+		for _, declaration := range strings.Split(declarations, ";") {
+			key, value, _ := strings.Cut(declaration, ":")
+			switch strings.TrimSpace(strings.ToLower(key)) {
+			case "stroke-width", "stroke-miterlimit", "stroke-dasharray", "stroke-dashoffset", "opacity", "fill-opacity", "stroke-opacity":
+				if !boundedSVGNumbers(value) {
+					return 0, false
+				}
+			}
+		}
+	}
+	return cost, cost <= 4096
+}
+
+func validEmailLogoRemoteURL(u *url.URL) bool {
+	if u == nil || u.User != nil || u.Hostname() == "" || u.Opaque != "" {
+		return false
+	}
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && !publicEmailLogoIP(ip) {
+		return false
+	}
+	return (u.Scheme == "https" && (u.Port() == "" || u.Port() == "443")) || (u.Scheme == "http" && (u.Port() == "" || u.Port() == "80"))
 }

@@ -2,15 +2,21 @@
 
 ## Email delivery
 
-Each invitation can be resent once every **2 hours**, including after a failed
-delivery attempt. The Team page shows when Resend becomes available. Resending
-creates a new link; the previous link stops working.
+Invitation emails share a rolling **2-hour** limit: **5 per sending account**,
+**10 per server**, and **1 per recipient** across the panel. Initial sends,
+resends, and failed delivery attempts count. Revoking invitations, changing
+recipients, deleting records, or restarting the panel does not reset the ledger.
+The Team page shows when sending becomes available. Resending invalidates the old link.
 
-Emails show the full invitation URL and include a small PNG copy of the logo.
-Uploaded logos are read locally; external logos must use public HTTPS. Missing,
-unsupported, or oversized images fall back to the panel name. PNG/JPEG/GIF/WebP
-and basic SVG logos up to 2 MiB are supported; SVGs must be under 128 KiB and use
-supported vector shapes without style blocks, scripts, linked images, or filters.
+Emails use the saved **Sidebar Logo**, not the favicon, and include the full
+invitation URL. Local uploads and bundled assets are read locally; inline image
+data and public HTTP(S) images are supported. Images become a small inline PNG.
+The sidebar's cube is used when no custom logo is set or loading fails. **Send test
+email** reports a logo warning instead of silently treating that fallback as success.
+
+Uploaded logos are bounded to 12 MiB, remote images to 2 MiB, and decoded rasters
+to 16 megapixels. Basic SVG styles and common ICO images are supported; SVGs stay
+bounded and cannot load external resources. Private network image requests remain blocked.
 
 ## Local account cleanup
 

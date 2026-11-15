@@ -3370,6 +3370,7 @@ async function api(endpoint, options = {}) {
     if (!res.ok) {
       const error = new Error(data.error || `HTTP ${res.status}`);
       error.status = res.status;
+      error.data = data; // Preserve safe retry metadata for invitation controls.
       throw error;
     }
     return data;
@@ -14956,11 +14957,11 @@ async function sendAdminTestEmail(btn) {
       body: JSON.stringify({ to_email })
     });
     setBtnLoading(btn, false);
-    toast(res.message || 'Test email sent successfully!', 'ok');
+    toast(res.message || 'Test email sent.', 'ok');
     uiAlert({
-      title: 'Email Delivery Successful',
-      message: `Diagnostic test email was successfully dispatched to <b>${esc(to_email)}</b> via your configured SMTP mail server!`,
-      type: 'success'
+      title: res.logo_warning ? 'Email sent — check the logo' : 'Test email sent',
+      message: `Sent to <b>${esc(to_email)}</b>.${res.logo_warning ? `<p>${esc(res.logo_warning)}</p>` : ''}`,
+      type: res.logo_warning ? 'warning' : 'success'
     });
   } catch (e) {
     setBtnLoading(btn, false);

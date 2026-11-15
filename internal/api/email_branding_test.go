@@ -53,8 +53,9 @@ func TestEmailBrandHeaderEscapingAndFallback(t *testing.T) {
 	}
 	for _, logo := range []string{"", "javascript:alert(1)", "data:image/png;base64,bad"} {
 		output := renderEmailBrand(emailBrand(PanelBrandingConfig{LogoURL: logo}, "https://panel.example"))
-		if strings.Contains(output, "<img") || !strings.Contains(output, "NeoPanel") {
-			t.Fatal("fallback must show brand without a broken image", output)
+		output, image := (&EmailHandler{}).prepareEmailLogo(output)
+		if !strings.Contains(output, `src="cid:neopanel-logo"`) || len(image) == 0 || !strings.Contains(output, "NeoPanel") {
+			t.Fatal("fallback must show the sidebar cube and brand", output)
 		}
 	}
 }
@@ -174,9 +175,10 @@ func TestPanelLogoInEveryEmailType(t *testing.T) {
 	}
 }
 
-func TestSMTPTestLogoWithoutPublicURLFallsBackSafely(t *testing.T) {
+func TestSMTPUploadedLogoWorksWithoutPublicURL(t *testing.T) {
 	smtp := newInvitationSMTP(t)
 	h := newInvitationHarness(t, smtp)
+	writeEmailLogoFixture(t, h.router.cfg.Paths.DataDir, "logo.png", color.RGBA{R: 255, A: 255})
 	if err := h.db.SetPanelSetting("panel_public_url", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -190,8 +192,8 @@ func TestSMTPTestLogoWithoutPublicURLFallsBackSafely(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	parts := brandedEmailParts(t, smtp)
-	if strings.Contains(parts["text/html"], "<img") || !strings.Contains(parts["text/html"], "My panel") {
-		t.Fatal("unsafe missing-origin fallback", parts["text/html"])
+	if !strings.Contains(parts["text/html"], `src="cid:neopanel-logo"`) || parts["image/png"] == "" || !strings.Contains(parts["text/html"], "My panel") || strings.Contains(parts["text/html"], "untrusted.example") {
+		t.Fatal("uploaded logo not embedded without an origin", parts["text/html"])
 	}
 }
 
