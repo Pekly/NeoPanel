@@ -134,7 +134,10 @@ func emailLogoPNG(data []byte, svg bool) (out []byte, err error) {
 	}
 	const size = 128
 	dst := image.NewRGBA(image.Rect(0, 0, size, size))
-	if svg || bytes.Contains(bytes.TrimSpace(data[:min(len(data), 512)]), []byte("<svg")) {
+	// PNG/JPEG metadata can contain SVG thumbnails (for example C2PA data).
+	// A recognized raster must win over filename hints or embedded text.
+	info, _, rasterErr := image.DecodeConfig(bytes.NewReader(data))
+	if rasterErr != nil && (svg || bytes.Contains(bytes.TrimSpace(data[:min(len(data), 512)]), []byte("<svg"))) {
 		if !safeEmailSVG(data) {
 			return nil, errEmailLogo
 		}
@@ -150,8 +153,7 @@ func emailLogoPNG(data []byte, svg bool) (out []byte, err error) {
 		icon.SetTarget((size-w*scale)/2, (size-h*scale)/2, w*scale, h*scale)
 		icon.Draw(rasterx.NewDasher(size, size, rasterx.NewScannerGV(size, size, dst, dst.Bounds())), 1)
 	} else {
-		info, _, e := image.DecodeConfig(bytes.NewReader(data))
-		if e != nil || info.Width <= 0 || info.Height <= 0 || info.Width > 8192 || info.Height > 8192 || int64(info.Width)*int64(info.Height) > 16<<20 {
+		if rasterErr != nil || info.Width <= 0 || info.Height <= 0 || info.Width > 8192 || info.Height > 8192 || int64(info.Width)*int64(info.Height) > 16<<20 {
 			return nil, errEmailLogo
 		}
 		src, _, e := image.Decode(bytes.NewReader(data))
