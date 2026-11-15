@@ -540,6 +540,12 @@ go_compiler_supported() {
 
 step_go_compiler() {
   if go_compiler_supported; then return 0; fi
+  # run_step executes in a subshell, so a previous step's PATH export is lost.
+  # Reuse its verified fallback compiler instead of reinstalling or using old distro Go.
+  if PATH="/usr/local/go/bin:$PATH" go_compiler_supported; then
+    export PATH="/usr/local/go/bin:$PATH"
+    return 0
+  fi
   detect_os_pkg_manager
   case "$PKG_MGR" in
     apt) apt-get update -y -q; apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" golang-go || true ;;
@@ -616,7 +622,26 @@ EOF
   mv -f "$INSTALL_DIR/neopanel-installer.tmp" "$INSTALL_DIR/neopanel-installer"
 }
 
+# Fetch only the headless source tree. Keep shared Windows build-tag files: Go
+# still needs the complete root module, but the desktop is a separate module.
+clone_headless_source() {
+  git clone --depth 1 --filter=blob:none --no-checkout --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$BUILD_DIR" || return 1
+  git -C "$BUILD_DIR" sparse-checkout set --no-cone --stdin <<'EOF' || return 1
+/*
+!/desktop/
+!/cmd/neopanel-desktop/
+!/internal/desktop/
+!/build/windows-desktop/
+!/build-windows*.ps1
+!/start-windows.ps1
+!/start-windows.cmd
+!/docs/windows*.md
+EOF
+  git -C "$BUILD_DIR" checkout || return 1
+}
+
 step_build_neopanel() {
+  step_go_compiler || return 1
   mkdir -p "$CONFIG_DIR"
   mkdir -p "$DATA_DIR/servers"
   mkdir -p "$DATA_DIR/backups"
@@ -633,18 +658,17 @@ step_build_neopanel() {
       echo "$git_commit" > "$CONFIG_DIR/current_commit"
       echo "$git_commit" > "$DATA_DIR/current_commit"
     fi
-    go mod tidy
-    go build "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
+    GOWORK=off go build -mod=readonly "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel
   else
     rm -rf "$BUILD_DIR"
-    git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$BUILD_DIR"
+    clone_headless_source
     if [ -f "$BUILD_DIR/cmd/neopanel/main.go" ]; then
       git_commit="$(cd "$BUILD_DIR" && git rev-parse HEAD 2>/dev/null || true)"
       if [ -n "$git_commit" ]; then
         echo "$git_commit" > "$CONFIG_DIR/current_commit"
         echo "$git_commit" > "$DATA_DIR/current_commit"
       fi
-      (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
+      (cd "$BUILD_DIR" && GOWORK=off go build -mod=readonly "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$INSTALL_DIR/$BINARY_NAME" ./cmd/neopanel)
       rm -rf "$BUILD_DIR"
     else
       echo "Failed to clone repository or main.go missing." >&2
@@ -1305,7 +1329,7 @@ step_update_fetch() {
   fi
 
   rm -rf "$BUILD_DIR"
-  git clone --depth 1 --branch "$GIT_BRANCH" "$GIT_REPO_URL" "$BUILD_DIR"
+  clone_headless_source
 }
 
 step_update_compile() {
@@ -1316,7 +1340,7 @@ step_update_compile() {
   fi
   local git_commit=""
   git_commit="$(cd "$BUILD_DIR" && git rev-parse HEAD 2>/dev/null || true)"
-  (cd "$BUILD_DIR" && go mod tidy && go build "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$BUILD_DIR/neopanel_new" ./cmd/neopanel)
+  (cd "$BUILD_DIR" && GOWORK=off go build -mod=readonly "${go_tags[@]}" -ldflags="-s -w -X 'github.com/Pekly/NeoPanel/internal/api.BuildCommit=${git_commit}'" -o "$BUILD_DIR/neopanel_new" ./cmd/neopanel)
 }
 
 step_update_swap() {
