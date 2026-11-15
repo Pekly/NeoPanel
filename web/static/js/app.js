@@ -160,18 +160,18 @@ function steelConfigNotice(showLink = true) {
       <div><h2>Steel</h2><span class="steel-info-subtitle">Written in Rust · Minecraft Java Edition</span></div>
       <span class="steel-info-badge">Experimental · Pre-alpha</span>
     </div>
-    <p class="steel-info-intro">Steel is an alternative Minecraft Java Edition server implementation written in Rust. It is designed for performance, memory safety, and efficient resource use, and runs without a Java runtime.</p>
-    <div class="steel-info-warning"><strong>Still under active development.</strong> Gameplay features are incomplete and save formats may change. Use a separate test world and keep backups before updating or switching server software.</div>
+    <p class="steel-info-intro">Steel runs Minecraft Java Edition servers without Java.</p>
+    <div class="steel-info-warning"><strong>Still under active development.</strong> Features and save formats may change. Use a test world and keep backups.</div>
     <div class="steel-info-grid">
-      <div><h3>Java Edition clients</h3><p>Players connect using a compatible Minecraft Java Edition client. The supported Minecraft version depends on the Steel release you install.</p></div>
-      <div><h3>Not a Paper or Fabric fork</h3><p>Steel is a separate server implementation. Bukkit/Spigot plugins and Forge/Fabric mods are not compatible.</p></div>
+      <div><h3>Java Edition clients</h3><p>Use the Minecraft version supported by your Steel release.</p></div>
+      <div><h3>Plugins and mods</h3><p>Bukkit/Spigot plugins and Forge/Fabric mods are not compatible.</p></div>
     </div>
     <details class="steel-info-details">
       <summary>Configuration &amp; resource limits in NeoPanel</summary>
       <dl>
         <div><dt>Configuration</dt><dd>Edit <code>config/config.toml</code> in the File Manager. Steel does not use Java <code>server.properties</code>.</dd></div>
         <div><dt>Port &amp; saves</dt><dd>NeoPanel applies your assigned port to <code>server_port</code> in the <code>[server]</code> section on startup. Worlds are stored in <code>saves/</code>.</dd></div>
-        <div><dt>Memory limit</dt><dd>When launched with systemd, NeoPanel enforces the configured memory limit, including Bubblewrap + Systemd launches. Without systemd, Steel can still run, but no hard RAM cap is applied. Check the console's Isolation line for the launch mode and MemoryMax.</dd></div>
+        <div><dt>Memory limit</dt><dd>Hard RAM caps require systemd, including Bubblewrap + Systemd. Without it, no hard RAM cap is applied. Check the console's Isolation line.</dd></div>
       </dl>
     </details>
     <div class="steel-info-actions">
@@ -1456,7 +1456,7 @@ SLUG_TO_VIEW.stp = 'set';
 SLUG_TO_VIEW.servers = 'dash';
 SLUG_TO_VIEW.subusers = 'team';
 
-const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email', 'roles'];
+const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email'];
 const ADMIN_SECTIONS = [
   { label: 'Overview', icon: 'activity', description: 'Panel health, resource usage, and updates.' },
   { label: 'Nodes', icon: 'network', description: 'Connect and manage the machines that run your servers.' },
@@ -1465,8 +1465,7 @@ const ADMIN_SECTIONS = [
   { label: 'Appearance', icon: 'layers', description: 'Customize your branding, theme, and panel defaults.' },
   { label: 'Audit logs', icon: 'clock', description: 'Review activity and changes across your panel.' },
   { label: 'Extensions', icon: 'package', description: 'Add and manage panel extensions.' },
-  { label: 'Email & SMTP', icon: 'mail', description: 'Set up email for invitations and password resets.' },
-  { label: 'Roles', icon: 'shield', description: 'Named panel permissions, separate from Administrator access.' }
+  { label: 'Email & SMTP', icon: 'mail', description: 'Send invitations and password resets.' }
 ];
 let adminStatusRefreshing = false;
 async function refreshAdminStatus(button) {
@@ -1680,6 +1679,7 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
     const parts = cleanPath.split('/').filter(Boolean);
     if (parts.length > 2) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
     const sub = parts[1] || 'health';
+    if (sub === 'roles') return { view: 'admin', adminTab: 3, safeMode };
     const idx = ADMIN_TAB_SLUGS.indexOf(sub);
     if (idx < 0) return { view: 'notfound', notFoundPath: cleanPath, safeMode };
     return { view: 'admin', adminTab: idx, safeMode };
@@ -5564,7 +5564,7 @@ function renderDashRecentActivityHtml() {
   }
   if (rows.length === 0) {
     return `<div class="mu" style="font-size: 12.5px; line-height: 1.5; padding: 6px 0;">
-      No activity events recorded yet. Actions like starting servers, sending commands, editing files, and installing plugins will appear here.
+      No activity yet. Server actions will appear here.
     </div>`;
   }
   return `<div class="act-dash-list">
@@ -6997,7 +6997,7 @@ const V = {
         <div class="row sb" style="margin-bottom: 16px; align-items: flex-start; flex-wrap: wrap; gap: 12px;">
           <div>
             <h2 style="margin: 0; font-size: 18px; color: #fff;">Network Allocations</h2>
-            <p class="mu" style="font-size: 13px; margin: 4px 0 0;">Manage inbound port bindings for game traffic, voice chat, web maps, crossplay, and queries.</p>
+            <p class="mu" style="font-size: 13px; margin: 4px 0 0;">Manage ports for your game server and plugins.</p>
           </div>
           <button class="btn pr sm" onclick="openAddPortModal()" style="height: 36px; padding: 0 16px;">
             ${ic('plus', 14)} Assign Port
@@ -7093,7 +7093,7 @@ const V = {
       <div style="max-width: 440px; margin: 0 auto;">
         <div class="np-empty-icon" aria-hidden="true">${ic('database', 30)}</div>
         <div style="font-size: 15px; font-weight: 700; color: var(--tx); margin-bottom: 6px;">No databases provisioned for ${esc(srv?.name || 'this server')}</div>
-        <div class="mu" style="font-size: 13px; margin-bottom: 16px;">Create an isolated SQLite database for LuckPerms, CoreProtect, Economy plugins, or custom data — inspect schemas and run live SQL queries right in the browser.</div>
+        <div class="mu" style="font-size: 13px; margin-bottom: 16px;">Create SQLite databases for plugins. Browse tables and run queries here.</div>
         <button type="button" class="btn pr" onclick="openCreateDatabaseModal()">${ic('plus', 14)} Create First Database</button>
       </div>
     </div>`;
@@ -7332,7 +7332,7 @@ const V = {
         <div class="row sb" style="margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
           <div>
             <h2 style="margin: 0 0 3px; font-size: 16px; color: var(--tx);">Required DNS &amp; SRV Records</h2>
-            <div class="mu" style="font-size: 12.5px;">Add these records at your DNS registrar (Cloudflare, Namecheap, Route53, Porkbun) so players connect without typing port <code class="mono">:${port}</code>.</div>
+            <div class="mu" style="font-size: 12.5px;">Add these DNS records so players can join without typing <code class="mono">:${port}</code>.</div>
           </div>
         </div>
         <table>
@@ -7487,7 +7487,7 @@ const V = {
     const busy = S.serverRoutePending?.busy;
     return `<div class="np-status-shell"><div class="card np-status-card" role="status">
       <h1>${busy ? 'Loading server…' : 'Server temporarily unavailable'}</h1>
-      <p class="mu">The server list could not be fully loaded. The panel or a node may be offline. This does not mean the server was deleted.</p>
+      <p class="mu">Could not load every server. A node may be offline; your servers have not been deleted.</p>
       <div class="row" style="justify-content:center; gap:10px; margin-top:20px;">
         <button type="button" class="btn pr" onclick="retryServerRoute()" ${busy ? 'disabled' : ''}>${busy ? 'Loading…' : 'Retry'}</button>
         <a href="/" onclick="return handleNavClick(event, 'dash')" class="btn">Back to Servers</a>
@@ -7801,7 +7801,7 @@ const V = {
       </div>` : ''}
 
 
-      <p class="mu">Networking and file transfer have dedicated Network and SFTP sections in the sidebar.</p>
+      <p class="mu">Use Network for ports and SFTP for file-transfer access.</p>
 
       ${(isAdmin || isOwner) ? `
       <!-- Reinstall Server Section -->
@@ -7850,7 +7850,7 @@ const V = {
       ${renderActivityLogSection({
         scope: 'all',
         title: 'Server & Panel Activity',
-        subtitle: 'Real-time audit trail of power actions, console commands, files, plugins, backups & logins',
+        subtitle: 'Recent server and account activity.',
         showActor: true
       })}
     </div>`;
@@ -7921,7 +7921,7 @@ const V = {
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx);">Panel memory</h2>
-              <span class="mu" style="font-size:13px;">Clean up unused panel memory and view system details. This does not change Minecraft-server memory.</span>
+              <span class="mu" style="font-size:13px;">Free unused panel memory. Minecraft memory is unchanged.</span>
             </div>
             <button class="btn pr" onclick="triggerAdminGC()">${ic('refresh', 14)} Clean up unused memory</button>
           </div>
@@ -7992,7 +7992,7 @@ const V = {
 
           <div style="background:rgba(255,255,255,0.015); border:1px solid var(--border); border-radius:8px; padding:16px;">
             <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx);">Update source</h3>
-            <p class="mu" style="font-size:12px; margin:0 0 12px;">Point NeoPanel to your own GitHub fork or a custom development branch for automated builds.</p>
+            <p class="mu" style="font-size:12px; margin:0 0 12px;">Choose the GitHub repository and branch used for updates.</p>
             <div class="grid g2" style="gap:12px; margin-bottom:12px;">
               <div>
                 <label class="lbl" style="font-size:12px;">Git Repository URL</label>
@@ -8014,7 +8014,7 @@ const V = {
           <div class="row sb" style="margin-bottom:10px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx);">Java versions (25, 21, 17 &amp; 8)</h2>
-              <span class="mu" style="font-size:13px;">Monitor detected OpenJDK / Eclipse Temurin runtimes on the master host and install missing premade versions.</span>
+              <span class="mu" style="font-size:13px;">View and install Java versions on this host.</span>
             </div>
             <button class="btn sm" onclick="loadJavaRuntimes(true, 'local')">${ic('refresh', 13)} Refresh</button>
           </div>
@@ -8278,7 +8278,7 @@ const V = {
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
               <h2 style="margin:0 0 4px; color:var(--tx);">Panel accounts</h2>
-              <span class="mu" style="font-size:13px;">Manage operators, administrators, and client user accounts with independent roles and avatars.</span>
+              <span class="mu" style="font-size:13px;">Manage accounts. Admins manage the panel; users access their own or shared servers.</span>
             </div>
             <button class="btn pr" onclick="openAddUserModal()">+ Create User</button>
           </div>
@@ -8304,7 +8304,7 @@ const V = {
                       ${esc(u.email || '—')}
                     </span>
                   </td>
-                  <td><span class="badge ${u.role === 'admin' ? 'online' : ''}">${esc(u.role)}</span>${renderUserPanelRole(u)}</td>
+                  <td><span class="badge ${u.role === 'admin' ? 'online' : ''}">${u.role === 'admin' ? 'Admin' : 'User'}</span></td>
                   <td>
                     ${u.two_factor_enabled
                       ? '<span class="badge online"><i class="dot"></i>2FA Enabled</span>'
@@ -8564,7 +8564,7 @@ const V = {
               <label class="row sb" style="cursor:pointer;">
                 <div>
                   <b style="color:var(--tx); display:block;">Auto-Restart Policy</b>
-                  <span class="mu" style="font-size:12.5px;">Automatically restart crashed server processes (times out after 2 consecutive startup failures)</span>
+                  <span class="mu" style="font-size:12.5px;">Restart after a crash. Stops after two failed starts.</span>
                 </div>
                 <span class="sw">
                   <input type="checkbox" id="adm-autorestart" ${daemonDraft.auto_restart_policy ? 'checked' : ''} onchange="onDaemonInputChange('auto_restart_policy', this.checked)">
@@ -8740,15 +8740,13 @@ const V = {
       content = renderActivityLogSection({
         scope: 'all',
         title: 'Audit logs',
-        subtitle: 'Cluster-wide security, node connections, databases, user management, power, console, file & software audit events',
+        subtitle: 'Changes made across your panel.',
         showActor: true
       });
     } else if (t === 6) {
       content = renderAdminModsTabHtml();
     } else if (t === 7) {
       content = renderAdminEmailTabHtml();
-    } else if (t === 8) {
-      content = renderPanelRoles();
     }
     if (t === 4) content = organizeAppearance(content);
 
@@ -8913,7 +8911,7 @@ const V = {
       tabContent = renderActivityLogSection({
         scope: S.user?.role === 'admin' ? 'all' : 'mine',
         title: 'Account & Security Activity',
-        subtitle: 'Sign-ins, password changes, SSH & API keys, and recent panel operations',
+        subtitle: 'Your sign-ins and account changes.',
         showActor: true
       });
     }
@@ -9358,7 +9356,7 @@ window.R = function() {
   if (main) {
     const maintBannerHtml = (isMaintEnabled && isAdmin)
       ? `<div class="np-maint-banner">
-          <span><b>Maintenance Mode Active:</b> Standard users &amp; visitors see the maintenance lockout screen. Administrators retain full panel access.</span>
+          <span><b>Maintenance mode:</b> Only admins can access the panel.</span>
           <div class="row" style="gap: 8px;">
             <button type="button" class="btn sm" onclick="toggleMaintPreview(true)">${ic('eye', 13)} Preview Screen</button>
             <a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn sm pr" style="text-decoration:none;">Manage</a>
@@ -9661,7 +9659,7 @@ function selectAccountTab(idx) {
 
 async function loadAdminData(skipRender = false) {
   if (S.user?.role !== 'admin') return;
-  await Promise.all([loadPanelRoles(true), loadCommunitySettings(true)]);
+  await loadCommunitySettings(true);
   const [sysRes, usersRes, tsRes, nodesRes, brandRes, actRes, modsRes, upRes, smtpRes] = await Promise.all([
     api('/api/system').catch(() => null),
     api('/api/admin/users').catch(() => null),
@@ -9768,7 +9766,7 @@ function openNodeModal(nodeId = null) {
           <label class="row sb" style="cursor: pointer; margin-bottom: 8px;">
             <div>
               <b style="color: var(--tx); display: block;">Free Node (Idle Player Auto-Shutdown)</b>
-              <span class="mu" style="font-size: 12px;">Automatically stops running servers when 0 players are connected for the configured duration</span>
+              <span class="mu" style="font-size: 12px;">Stop the server after it has been empty for this long.</span>
             </div>
             <span class="sw">
               <input type="checkbox" id="nm-free" ${existing?.is_free ? 'checked' : ''} onchange="$('#nm-timeout-wrap').style.display = this.checked ? 'block' : 'none'">
@@ -11437,8 +11435,8 @@ function askInstallSoftwareModal(srv, software, version) {
           </div>
           <div class="ui-modal-body" style="line-height: 1.55;">
             Download and install <b>${esc(software)} ${esc(version)}</b> onto <b>${esc(srv.name)}</b>? This will replace your current server executable and restart the instance.
-            ${isSteelEngine(software) ? '<p>Steel is an experimental Minecraft Java Edition server written in Rust; it does not require Java. Edit <code>config/config.toml</code> in File Manager; worlds use <code>saves/</code>.</p>' : ''}
-            ${incompatibleEngineChange(srv.type, software) ? '<p class="banner warn"><b>Incompatible engine change:</b> worlds/data, plugins/mods and configuration may be incompatible and are not converted. Java plugins/mods cannot run on Steel. Back up first; use Reinstall for a clean installation.</p>' : ''}
+            ${isSteelEngine(software) ? '<p>Steel needs no Java. Settings: <code>config/config.toml</code>. Worlds: <code>saves/</code>.</p>' : ''}
+            ${incompatibleEngineChange(srv.type, software) ? '<p class="banner warn"><b>Incompatible engine change:</b> Worlds and settings are not converted. Java plugins/mods cannot run on Steel. Back up first, then use Reinstall for a clean installation.</p>' : ''}
             <div style="margin-top: 14px; padding: 12px 14px; background: rgba(56, 122, 255, 0.08); border: 1px solid rgba(56, 122, 255, 0.25); border-radius: 10px;">
               <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
                 <input type="checkbox" id="confirm-bkf" checked style="margin-top: 2px;">
@@ -13183,7 +13181,7 @@ async function deleteServerSubuser(subuserId) {
   if (!srv) return;
   const ok = await uiConfirm({
     title: 'Remove team access',
-    message: '<p>Remove this user’s access to the server?</p><p class="mu">On local-only installations, an account created through an invitation is also deleted if it has no other server access or protected role. Existing independent accounts are kept. Shared/exported accounts are retained for safe review.</p>',
+    message: '<p>Remove this user’s server access?</p><p class="mu">On local-only installs, unused invitation-only accounts may also be deleted. Independent, admin, and shared/exported accounts are kept.</p>',
     confirmText: 'Revoke Access',
     isDanger: true,
     icon: 'trash'
@@ -13618,7 +13616,7 @@ function openDeleteServerModal(srvId, srvName, nodeId = null) {
 
       <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:13px; color:#fca5a5; line-height:1.5;">
         <b>Warning:</b> This process is completely irreversible. All world data, player inventories, plugin configs, and assigned port allocations will be wiped immediately.
-        <p style="margin:10px 0 0;">Eligible invitation-created accounts with no remaining server access are also removed on local-only installations. Independent, privileged, and shared/exported accounts are preserved.</p>
+        <p style="margin:10px 0 0;">Unused invitation-only accounts may also be deleted on local-only installs. Independent, admin, and shared/exported accounts are kept.</p>
       </div>
 
       <label class="f" style="margin-bottom:20px;">
@@ -13772,8 +13770,8 @@ function onReinstallEngineChange(sw) {
       <div>
         <b style="color:#f87171;">Incompatible engine change detected</b>
         <p style="margin:4px 0 0;font-size:12.5px;color:var(--text-muted);line-height:1.5;">
-          You are switching from <b>${esc(origType)}</b> to <b>${esc(sw)}</b>. Worlds/data, plugins/mods and configuration may be incompatible and are not converted. Steel uses <code>saves/</code> and <code>config/config.toml</code>; Java plugins/mods cannot run on Steel.<br>
-          <b style="color:#fbbf24;">Back up first. Recommended: wipe all server files before reinstalling; do not preserve incompatible data.</b>
+          Switch from <b>${esc(origType)}</b> to <b>${esc(sw)}</b>? Worlds and settings are not converted. Java plugins/mods cannot run on Steel. Steel uses <code>saves/</code> and <code>config/config.toml</code>.<br>
+          <b style="color:#fbbf24;">Back up first. A clean reinstall removes incompatible files.</b>
         </p>
         <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12.5px;cursor:pointer;">
           <input type="checkbox" id="reinst-wipe-files" style="accent-color:#ef4444;width:14px;height:14px;">
@@ -13867,7 +13865,7 @@ function openReinstallModal(srvId, nodeId = null) {
             <input type="checkbox" id="reinst-sync-java" checked style="margin-top:2px;">
             <div>
               <b style="color: var(--tx); display: block;">Sync Java Runtime (<span id="reinst-java-rec">Java ${esc(recJava)}</span>)</b>
-              <span class="mu" style="font-size:12px;">Automatically switches server Java Runtime among Java 25, 21, 17, or 8 for the chosen release.</span>
+              <span class="mu" style="font-size:12px;">Choose the Java version this release needs automatically.</span>
             </div>
           </label>
         </div>
@@ -14263,8 +14261,8 @@ function openAddUserModal() {
         <label class="f" style="margin-bottom:12px;">
           <span>Role</span>
           <select id="nu-role" style="height:38px;">
-            <option value="user" selected>Standard User (Access assigned servers)</option>
-            <option value="admin">Administrator (Full cluster management)</option>
+            <option value="user" selected>User</option>
+            <option value="admin">Admin</option>
           </select>
         </label>
 
@@ -14393,8 +14391,8 @@ function openEditUserModal(userId) {
         <label class="f" style="margin-bottom:20px;">
           <span>Role</span>
           <select id="eu-role" style="height:38px;" ${isMe ? 'disabled title="You cannot change your own role"' : ''}>
-            <option value="user" ${u.role !== 'admin' ? 'selected' : ''}>Standard User (Access assigned servers)</option>
-            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Administrator (Full cluster management)</option>
+            <option value="user" ${u.role !== 'admin' ? 'selected' : ''}>User</option>
+            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>Admin</option>
           </select>
         </label>
 
@@ -14781,7 +14779,7 @@ function renderAdminEmailTabHtml() {
           <h2 style="margin:0 0 4px; color:var(--tx); display:flex; align-items:center; gap:8px;">
             ${ic('mail', 18)} Email delivery
           </h2>
-          <span class="mu" style="font-size:13px;">Configure outgoing SMTP mail server credentials to send password reset links, notification alerts, and subuser invitations.</span>
+          <span class="mu" style="font-size:13px;">Set up email for invitations and password resets.</span>
         </div>
         <div class="row" style="gap:8px;">
           <button type="button" class="btn sm" onclick="loadAdminSmtp()">${ic('refresh', 13)} Refresh</button>
@@ -14804,7 +14802,7 @@ function renderAdminEmailTabHtml() {
             </select>
           </div>
         </div>
-        <p class="mu" style="font-size:12px; margin:0;">Selecting a provider preset automatically populates optimal host, port, and TLS encryption modes.</p>
+        <p class="mu" style="font-size:12px; margin:0;">Choose a provider to fill in its connection settings.</p>
       </div>
 
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:18px;">
@@ -14856,7 +14854,7 @@ function renderAdminEmailTabHtml() {
         <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx); display:flex; align-items:center; gap:6px;">
           ${ic('mail', 14)} Test Email Delivery
         </h3>
-        <p class="mu" style="font-size:12px; margin:0 0 12px;">Send an immediate diagnostic email to confirm your SMTP host connection, TLS certificate validation, and authentication.</p>
+        <p class="mu" style="font-size:12px; margin:0 0 12px;">Send a test email to check your settings.</p>
         <div class="row" style="gap:10px; flex-wrap:wrap;">
           <input type="email" id="admin-smtp-test-email" class="inp mono" style="flex:1 1 260px;" placeholder="Recipient email (e.g. your personal email)" value="${esc(S.user?.email || '')}">
           <button type="button" class="btn" onclick="sendAdminTestEmail(this)">${ic('mail', 13)} Send Test Email</button>
@@ -15343,7 +15341,7 @@ function mountTurnstileWidget(selector) {
     } else if (++attempts < 100) {
       setTimeout(tryRender, 100);
     } else {
-      el.innerHTML = '<div class="turnstile-loading">Unable to load Cloudflare Turnstile. Please check your network or disable adblockers.</div>';
+      el.innerHTML = '<div class="turnstile-loading">Security check unavailable. Check your connection or ad blocker.</div>';
     }
   };
   tryRender();
@@ -16533,7 +16531,7 @@ function showSetupScreen() {
     <div class="llogo">${brandLogoHtml(true)}</div>
     <div class="lg">Welcome · First-time setup</div>
     <h1 class="lt">Your panel starts here.</h1>
-    <p class="np-setup-lead">Create your administrator account. Then we’ll walk through choosing a host and setting up your first server.</p>
+    <p class="np-setup-lead">Create your admin account to get started.</p>
     <label class="np-setup-label" for="su-name">Admin username</label>
     <div class="lf">${ic('user', 16)}<input id="su-name" type="text" placeholder="e.g. alex" autocomplete="username" required minlength="3"></div>
     <label class="np-setup-label" for="su-email">Email address</label>
@@ -17538,7 +17536,7 @@ function canServerPage(view) {
   return !permission || hasServerPermission(permission);
 }
 function canCreateServers() {
-  return Boolean(S.user && (S.user.role === 'admin' || S.user.panel_permissions?.includes('servers.create')));
+  return Boolean(S.user && S.user.role === 'admin');
 }
 async function ensureServerAccess(force = false) {
   const srv = curServer();
@@ -17631,71 +17629,6 @@ function applyPermissionControls(root) {
 V.sftp = () => `${srvh()}<div class="np-section-heading"><div><h2>SFTP</h2><p>One place for external file transfer connections.</p></div></div>${S.sftpLoading ? '<div class="card" role="status">Loading connection details…</div>' : S.sftp ? renderSftpCardHtml(curServer()) : `<div class="card" role="status">${esc(S.sftpError || 'Connection details are not loaded.')} <button class="btn sm" onclick="loadSFTPDetails()">Retry</button></div>`}`;
 V.create = () => canCreateServers() ? '<section class="card"><h1>Create server</h1><p class="mu">Choose a node and configure your Minecraft server.</p><button class="btn pr" onclick="openCreateServerModal()">Configure server</button></section>' : renderAccessRestricted(false);
 
-// Custom panel roles never imply built-in admin or server team privileges.
-async function loadPanelRoles(skipRender = false) {
-  if (S.user?.role !== 'admin') return;
-  const key = accessIdentity();
-  S.rolesLoading = true;
-  try {
-    const result = await api('/api/admin/roles', { suppressToast: true });
-    if (key !== accessIdentity()) return;
-    if (!Array.isArray(result.roles) || !Array.isArray(result.permissions)) throw new Error('Invalid roles response');
-    S.panelRoles = result.roles.filter(role => !role.builtin); S.panelRoleCatalog = result.permissions; S.rolesError = '';
-  } catch (error) { if (key === accessIdentity()) S.rolesError = error.message; }
-  finally { if (key === accessIdentity()) { S.rolesLoading = false; if (!skipRender && S.view === 'admin') R(); } }
-}
-function renderPanelRoles() {
-  if (S.user?.role !== 'admin') return renderAccessRestricted(false);
-  if (S.rolesLoading) return '<div class="card" role="status">Loading panel roles…</div>';
-  if (S.rolesError || !S.panelRoles) return `<div class="card" role="alert"><h2>Could not load roles</h2><p>${esc(S.rolesError || 'Roles have not loaded.')}</p><button class="btn" onclick="loadPanelRoles()">Retry</button></div>`;
-  return `<div class="np-section-heading"><div><h2>Custom panel roles</h2><p>Grant specific panel actions without making someone an Administrator. Server Team access is managed separately.</p></div><button class="btn pr" onclick="openPanelRoleEditor()">${ic('plus', 14)} Create role</button></div><div class="np-role-list">${S.panelRoles.length ? S.panelRoles.map(role => `<section class="card np-role-row"><div><h3>${esc(role.name)}</h3><p class="mu">${esc(role.description || 'No description')}</p><div class="row">${role.permissions.map(p => `<span class="chip">${esc(S.panelRoleCatalog.find(x => x.id === p)?.label || p)}</span>`).join('') || '<span class="mu">No extra panel permissions</span>'}</div></div><div class="row"><button class="btn sm" data-role="${esc(role.id)}" onclick="openPanelRoleEditor(this.dataset.role)">Edit</button><button class="btn sm dg" data-role="${esc(role.id)}" onclick="deletePanelRole(this.dataset.role, this)">Delete</button></div></section>`).join('') : '<div class="card np-empty-state"><h3>No custom roles yet</h3><p class="mu">Create a role to allow trusted members to create servers.</p></div>'}</div>`;
-}
-function openPanelRoleEditor(id = '') {
-  if (S.user?.role !== 'admin' || !S.panelRoleCatalog) return;
-  const role = S.panelRoles.find(x => String(x.id) === String(id));
-  const container = $('#modal-container');
-  container.innerHTML = `<div class="pal"><form class="pbox ui-modal-box" role="dialog" aria-modal="true" aria-labelledby="role-title" onsubmit="savePanelRole(event)" data-role="${esc(id)}"><h2 id="role-title">${role ? 'Edit' : 'Create'} panel role</h2><p class="mu">This role does not grant administrator or server team access.</p><label class="f">Name<input name="name" required maxlength="64" value="${esc(role?.name || '')}"></label><label class="f">Description<textarea name="description" rows="2" maxlength="500">${esc(role?.description || '')}</textarea></label><fieldset class="np-permission-fields"><legend>Panel permissions</legend>${S.panelRoleCatalog.map(p => `<label class="np-permission-choice"><input type="checkbox" name="permissions" value="${esc(p.id)}" ${role?.permissions.includes(p.id) ? 'checked' : ''}><span><b>${esc(p.label)}</b><small>${esc(p.description)}</small></span></label>`).join('')}</fieldset><p class="np-form-error" role="alert"></p><div class="row"><button type="button" class="btn" onclick="closeModal()">Cancel</button><button class="btn pr" type="submit">Save role</button></div></form></div>`;
-  container.querySelector('[name=name]')?.focus();
-}
-async function savePanelRole(event) {
-  event.preventDefault();
-  if (S.user?.role !== 'admin') return;
-  const form = event.currentTarget, button = form.querySelector('[type=submit]');
-  if (button.disabled) return;
-  const payload = { name: form.elements.name.value.trim(), description: form.elements.description.value.trim(), permissions: [...form.querySelectorAll('[name=permissions]:checked')].map(x => x.value) };
-  if (!payload.name) return;
-  setBtnLoading(button, true, 'Saving…');
-  try {
-    await api('/api/admin/roles' + (form.dataset.role ? '/' + encodeURIComponent(form.dataset.role) : ''), { method: form.dataset.role ? 'PUT' : 'POST', body: JSON.stringify(payload), suppressToast: true });
-    closeModal(); toast('Panel role saved', 'ok'); await loadPanelRoles();
-  } catch (error) { form.querySelector('[role=alert]').textContent = error.message; }
-  finally { if (button.isConnected) setBtnLoading(button, false); }
-}
-async function deletePanelRole(id, button) {
-  if (S.user?.role !== 'admin' || button.disabled) return;
-  if (!await uiConfirm({ title: 'Delete panel role?', message: 'Assigned roles cannot be deleted. Reassign their users first.', confirmText: 'Delete role', danger: true })) return;
-  setBtnLoading(button, true, 'Deleting…');
-  try { await api('/api/admin/roles/' + encodeURIComponent(id), { method: 'DELETE', suppressToast: true }); toast('Role deleted', 'ok'); await loadPanelRoles(); }
-  catch (error) { toast(error.message, 'bad'); }
-  finally { if (button.isConnected) setBtnLoading(button, false); }
-}
-function renderUserPanelRole(user) {
-  if (S.user?.role !== 'admin') return '';
-  if (user.role === 'admin') return '<small class="mu np-role-hint">All panel permissions · built-in</small>';
-  if (!S.panelRoles || S.rolesError) return `<small class="mu np-role-hint">${esc(user.panel_role_name || 'No custom role')} · roles unavailable</small>`;
-  return `<label class="np-user-role"><span class="mu">Panel role</span><select aria-label="Panel role for ${esc(user.username)}" data-user="${esc(user.id)}" data-previous="${esc(user.panel_role_id || '')}" onchange="assignUserPanelRole(this)"><option value="">No custom role</option>${S.panelRoles.map(role => `<option value="${esc(role.id)}" ${String(user.panel_role_id) === String(role.id) ? 'selected' : ''}>${esc(role.name)}</option>`).join('')}</select></label>`;
-}
-async function assignUserPanelRole(select) {
-  if (S.user?.role !== 'admin') return;
-  select.disabled = true;
-  try {
-    await api('/api/admin/users/' + encodeURIComponent(select.dataset.user) + '/panel-role', { method: 'PUT', body: JSON.stringify({ role_id: select.value }), suppressToast: true });
-    const user = S.adminUsers.find(x => String(x.id) === select.dataset.user);
-    if (user) { user.panel_role_id = select.value; user.panel_role_name = S.panelRoles.find(x => String(x.id) === select.value)?.name || ''; }
-    select.dataset.previous = select.value; toast('Panel role assigned', 'ok');
-  } catch (error) { select.value = select.dataset.previous; toast(error.message, 'bad'); }
-  finally { select.disabled = false; R(); }
-}
 
 // Public community content is plain text. Only a validated Discord invite becomes a link.
 function safeDiscordInvite(value) {
@@ -17765,7 +17698,7 @@ function renderCommunitySettings() {
           <label class="f">Discord server ID<input name="guild_id" inputmode="numeric" pattern="[0-9]*" value="${esc(d.guild_id)}" aria-describedby="discord-help"></label>
           <label class="f">Card title<input name="discord_title" maxlength="80" value="${esc(d.title)}" placeholder="Join our Discord"></label>
         </div>
-        <p id="discord-help" class="mu">In Discord, enable <b>Server Settings → Widget → Enable Server Widget</b>, choose an invite channel, then copy the server ID. An ID is not a join URL. NeoPanel resolves the public widget invite safely; no link is shown when it is unavailable.</p>
+        <p id="discord-help" class="mu">In Discord, open <b>Server Settings → Widget</b>, enable it, and choose an invite channel. Paste the server ID below.</p>
         <p class="np-community-diagnostic" role="status">Public status: ${esc(S.community?.discord?.status || 'not loaded')}${S.community?.discord?.status === 'unavailable' ? ' — check the server ID, public widget setting, and invite channel.' : ''}</p>
       </section>
       <section class="card">
@@ -17776,7 +17709,7 @@ function renderCommunitySettings() {
           <label class="f">Tone<select name="tone">${['info', 'success', 'warning'].map(t => `<option value="${t}" ${a.tone === t ? 'selected' : ''}>${t[0].toUpperCase() + t.slice(1)}</option>`).join('')}</select></label>
           <label class="np-permission-choice"><input type="checkbox" name="dismissible" ${a.dismissible ? 'checked' : ''}> Allow dismissal</label>
         </div>
-        <p class="mu">An updated announcement ID lets members see a new announcement after dismissing an old one.</p>
+        <p class="mu">Editing the announcement shows it again to people who dismissed it.</p>
       </section>
       <p class="np-form-error" role="alert">${esc(S.communitySaveError || '')}</p>
       <div class="row"><button type="submit" class="btn pr">${S.communitySaving ? 'Saving…' : 'Save community settings'}</button><button type="button" class="btn" onclick="loadPublicCommunity()">Refresh public status</button></div>

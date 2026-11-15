@@ -34,8 +34,7 @@ type JWTClaims struct {
 	AuthVersion int64  `json:"auth_version,omitempty"`
 	APIKey      bool   `json:"-"`
 	// Set only by trusted node-forwarding middleware, never parsed from JWTs.
-	AuthorizedServerCreate bool            `json:"-"`
-	ForwardedNodePolicy    *nodeUserPolicy `json:"-"`
+	ForwardedNodePolicy *nodeUserPolicy `json:"-"`
 	jwt.RegisteredClaims
 }
 
@@ -471,7 +470,7 @@ func (h *AuthHandler) Login2FA(w http.ResponseWriter, r *http.Request) {
 // --- Admin User Management Endpoints ---
 
 func (h *AuthHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	if !h.requirePanelRoleAdmin(w, r) {
+	if !h.requireCurrentAdmin(w, r) {
 		return
 	}
 	users, err := h.db.ListUsers()
@@ -652,9 +651,6 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 			"last_name":          dbUser.LastName,
 			"email":              dbUser.Email,
 			"role":               dbUser.Role,
-			"panel_role_id":      dbUser.PanelRoleID,
-			"panel_role_name":    dbUser.PanelRoleName,
-			"panel_permissions":  dbUser.PanelPermissions,
 			"avatar_url":         dbUser.AvatarURL,
 			"two_factor_enabled": dbUser.TwoFactorEnabled,
 		})
@@ -663,7 +659,6 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	if claims.UserID == 0 && claims.Role == "admin" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"id": 0, "user_id": 0, "username": claims.Username, "role": claims.Role,
-			"panel_role_id": "", "panel_role_name": "", "panel_permissions": []string{database.PermissionServersCreate},
 		})
 		return
 	}

@@ -25,7 +25,7 @@ function mountPasswordResetCaptcha(generation) {
           'error-callback': () => { if (generation === PASSWORD_RESET.generation) PASSWORD_RESET.captcha = ''; }
         });
       } catch (_) {
-        box.textContent = 'Security check unavailable. Reopen password reset or contact the panel administrator.';
+        box.textContent = 'Security check unavailable. Reopen password reset or contact an administrator.';
       }
     } else if (++attempts < 100) {
       box.textContent = 'Loading security check…'; PASSWORD_RESET.timer = setTimeout(mount, 100);
@@ -44,14 +44,14 @@ function showPasswordResetForm(mode, presetToken = '', notice = '') {
   container.innerHTML = `<div class="pal np-password-reset-backdrop" onclick="if(event.target===this)closeModal()">
     <section class="pbox ui-modal-box np-password-reset" role="dialog" aria-modal="true" aria-labelledby="password-reset-title">
       <div class="row sb" style="gap:12px;margin-bottom:16px"><h2 id="password-reset-title" style="margin:0;font-size:19px">${ic('lock', 19)} ${confirming ? 'Choose a new password' : 'Reset your password'}</h2><button type="button" class="btn-ico" aria-label="Close password reset" onclick="closeModal()">×</button></div>
-      <p class="mu">${confirming ? 'Paste the 64-character code from your email, then choose your new password.' : 'Enter your username or email. If a matching account exists, we’ll email a reset link and code valid for one hour.'}</p>
+      <p class="mu">${confirming ? 'Paste your emailed 64-character code and choose a new password.' : 'Enter your username or email. If the account exists, we’ll email a reset link and code. Both expire in one hour.'}</p>
       ${notice ? `<p class="np-reset-notice" role="status">${esc(notice)}</p>` : ''}
       <form id="password-reset-form" data-mode="${mode}" onsubmit="event.preventDefault(); ${confirming ? 'submitSetNewPassword()' : 'submitResetPasswordRequest()'}">
         ${confirming ? `<label class="f" for="reset-token-input">Reset code<input id="reset-token-input" class="mono" type="text" value="${esc(token)}" maxlength="64" autocomplete="one-time-code" autocapitalize="none" spellcheck="false" placeholder="64-character code" required></label>
           <label class="f" for="reset-new-password">New password<input id="reset-new-password" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" required></label>
           <label class="f" for="reset-new-password-confirm">Confirm new password<input id="reset-new-password-confirm" type="password" autocomplete="new-password" minlength="6" placeholder="Repeat new password" required></label>` : `<label class="f" for="reset-identity">Username or email<input id="reset-identity" type="text" maxlength="254" autocomplete="username" placeholder="Username or user@example.com" required></label>
           ${S.turnstileEnabled ? '<div id="turnstile-reset" class="turnstile-wrap"></div>' : ''}`}
-        <p id="password-reset-error" class="np-form-error" role="alert">${invalidLink ? 'This reset link is invalid. Paste the full code from your email or request a new one.' : ''}</p>
+        <p id="password-reset-error" class="np-form-error" role="alert">${invalidLink ? 'Invalid reset link. Paste the full emailed code or request a new one.' : ''}</p>
         <div class="row" style="justify-content:flex-end;gap:10px;margin-top:18px"><button type="button" class="btn" onclick="closeModal()">Cancel</button><button type="submit" id="password-reset-submit" class="btn pr">${confirming ? 'Update password' : 'Send reset link'}</button></div>
       </form>
       <button type="button" class="np-reset-switch" onclick="${confirming ? 'openResetPasswordModal()' : 'openSetNewPasswordModal()'}">${confirming ? 'Request a new reset code' : 'Already have a reset code?'}</button>
@@ -83,7 +83,7 @@ async function sendPasswordReset(mode, payload) {
     const result = await response.json();
     if (!live()) return;
     if (!response.ok || result.error) throw Error(result.error || `Password reset failed (HTTP ${response.status}).`);
-    if (typeof result.message !== 'string') throw Error('Invalid response from the panel. Please try again.');
+    if (typeof result.message !== 'string') throw Error('Invalid panel response. Try again.');
     if (mode === 'request') {
       // Never use a token from this public endpoint. Recovery credentials are email-only.
       openSetNewPasswordModal('', result.message);
@@ -96,7 +96,7 @@ async function sendPasswordReset(mode, payload) {
       $('#lp')?.focus(); toast('Password updated. Sign in with your new password.', 'ok');
     }
   } catch (error) {
-    if (live() && errorBox) errorBox.textContent = error.name === 'AbortError' ? 'The request timed out. Please try again.' : error.message || 'Could not reach the panel.';
+    if (live() && errorBox) errorBox.textContent = error.name === 'AbortError' ? 'Request timed out. Try again.' : error.message || 'Could not reach the panel.';
   } finally {
     clearTimeout(timer);
     if (live()) {
@@ -112,7 +112,7 @@ async function sendPasswordReset(mode, payload) {
 }
 async function submitResetPasswordRequest() {
   const identity = $('#reset-identity')?.value.trim(), errorBox = $('#password-reset-error');
-  if (!identity) { if (errorBox) errorBox.textContent = 'Enter your username or email address.'; return; }
+  if (!identity) { if (errorBox) errorBox.textContent = 'Enter your username or email.'; return; }
   if (S.turnstileEnabled && !PASSWORD_RESET.captcha) { if (errorBox) errorBox.textContent = 'Complete the security check first.'; return; }
   return sendPasswordReset('request', { identity, 'cf-turnstile-response': PASSWORD_RESET.captcha });
 }
@@ -121,10 +121,10 @@ async function submitSetNewPassword() {
   const password = $('#reset-new-password')?.value || '', confirm = $('#reset-new-password-confirm')?.value;
   const errorBox = $('#password-reset-error');
   let error = '';
-  if (!/^[a-f0-9]{64}$/.test(token)) error = 'Enter the full 64-character reset code from your email.';
-  else if (password.length < 6) error = 'Use at least 6 characters for your new password.';
-  else if (new TextEncoder().encode(password).length > 72) error = 'Your password must not exceed 72 UTF-8 bytes.';
-  else if (password !== confirm) error = 'The passwords do not match.';
+  if (!/^[a-f0-9]{64}$/.test(token)) error = 'Enter the full 64-character code from your email.';
+  else if (password.length < 6) error = 'Use at least 6 characters.';
+  else if (new TextEncoder().encode(password).length > 72) error = 'Use at most 72 UTF-8 bytes; some characters use more than one byte.';
+  else if (password !== confirm) error = 'Passwords do not match.';
   if (error) { if (errorBox) errorBox.textContent = error; return; }
   return sendPasswordReset('confirm', { token, new_password: password });
 }

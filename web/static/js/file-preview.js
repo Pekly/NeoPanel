@@ -70,7 +70,7 @@ async function openFilePreview(server, path, metadata) {
   try {
     const result = await api(srvApiPath(server, `/files/zip?path=${encodeURIComponent(path)}`));
     if (!filePreviewActive(preview)) return;
-    if (!Array.isArray(result?.entries) || result.entries.length > 10000 || result.entries.some(entry => !entry || typeof entry.name !== 'string' || typeof entry.is_dir !== 'boolean' || !Number.isInteger(entry.index) || entry.index < 0)) throw Error('Invalid or oversized ZIP listing');
+    if (!Array.isArray(result?.entries) || result.entries.length > 10000 || result.entries.some(entry => !entry || typeof entry.name !== 'string' || typeof entry.is_dir !== 'boolean' || !Number.isInteger(entry.index) || entry.index < 0)) throw Error('ZIP contents are invalid or exceed 10,000 entries.');
     preview.entries = result.entries;
   } catch (err) {
     if (!filePreviewActive(preview)) return;
@@ -86,7 +86,7 @@ function fileMediaLoaded(element) {
 }
 function fileMediaFailed(element) {
   if (!filePreviewActive() || element !== document.querySelector('#file-preview-media')) return;
-  FILE_PREVIEW.current.mediaError = 'This file could not be displayed. It may be damaged, unavailable, or use a codec your browser does not support. You can still download it.';
+  FILE_PREVIEW.current.mediaError = 'Cannot display this file. It may be damaged, unavailable, or unsupported by your browser. Try downloading it.';
   R();
 }
 function zipPreviewRows(entries, folder = '', query = '') {
@@ -111,7 +111,7 @@ function zipPreviewRows(entries, folder = '', query = '') {
 }
 function archiveRowsHtml(preview) {
   const rows = zipPreviewRows(preview.entries, preview.folder, preview.query);
-  if (!rows.length) return `<tr><td colspan="3" class="file-preview-empty">${preview.entries.length ? 'No matching entries in this folder.' : 'This ZIP archive is empty.'}</td></tr>`;
+  if (!rows.length) return `<tr><td colspan="3" class="file-preview-empty">${preview.entries.length ? 'No matching entries in this folder.' : 'This ZIP is empty.'}</td></tr>`;
   return rows.map(row => `<tr><td><button type="button" class="np-file-open" ${row.is_dir
     ? `data-path="${esc(row.path)}" onclick="browseZipPreview(this.dataset.path)"`
     : `data-index="${Number(row.index)}" onclick="openZipPreviewEntry(Number(this.dataset.index))"`}>${ic(row.is_dir ? 'folder' : 'file', 15)} ${esc(row.name)}</button></td>
@@ -146,11 +146,11 @@ async function openZipPreviewEntry(index) {
   try {
     const result = await api(srvApiPath(preview.server, `/files/zip-entry?path=${encodeURIComponent(preview.path)}&index=${index}`));
     if (!filePreviewActive(preview) || preview.entrySequence !== sequence) return;
-    if (typeof result?.content !== 'string') throw Error('Invalid text preview response');
+    if (typeof result?.content !== 'string') throw Error('Could not load the text preview.');
     preview.entry.content = result.content;
   } catch (err) {
     if (!filePreviewActive(preview) || preview.entrySequence !== sequence) return;
-    preview.entry.error = err.message || 'This entry cannot be previewed as text. Download or extract the archive to open it externally.';
+    preview.entry.error = err.message || 'No text preview available. Download or extract the archive to open this entry.';
   } finally {
     if (filePreviewActive(preview) && preview.entrySequence === sequence) { preview.entry.loading = false; R(); }
   }
@@ -168,11 +168,11 @@ function archivePreviewHtml(preview) {
   let prefix = '';
   for (const name of preview.folder.split('/').filter(Boolean)) { prefix += name + '/'; crumbs.push({ name, path: prefix }); }
   const entry = preview.entry;
-  return `<p class="mu">Browse this archive without extracting it. Text entries can be previewed read-only; binary entries cannot be edited here.</p>
+  return `<p class="mu">Browse without extracting. Preview text files read-only.</p>
     <div class="file-preview-archive-tools"><div role="navigation" aria-label="ZIP folders" class="file-preview-breadcrumbs">${ic('archive', 15)} ${crumbs.map((crumb, i) => i === crumbs.length - 1 ? `<span aria-current="location">${esc(crumb.name)}</span>` : `<button type="button" class="file-preview-crumb" data-path="${esc(crumb.path)}" onclick="browseZipPreview(this.dataset.path)">${esc(crumb.name)}</button>`).join('<span class="mu" aria-hidden="true">/</span>')}</div>
     <input id="zip-preview-search" type="search" value="${esc(preview.query)}" aria-label="Search ZIP folder" placeholder="Search this folder…" oninput="filterZipPreview(this.value)"></div>
     <div class="file-preview-archive-table"><table><thead><tr><th>Name</th><th>Uncompressed size</th><th>Action</th></tr></thead><tbody id="zip-preview-rows">${archiveRowsHtml(preview)}</tbody></table></div>
-    <p class="mu">${preview.entries.length} entries · Nothing has been extracted or changed.</p>
+    <p class="mu">${preview.entries.length} entries · No files extracted or changed.</p>
     ${entry ? `<section class="file-preview-entry"><div class="file-preview-toolbar"><h3>${esc(entry.name)}</h3><button type="button" class="btn sm" onclick="closeZipPreviewEntry()">Close entry preview</button></div>
       ${entry.loading ? '<p role="status">Loading text preview…</p>' : entry.error ? `<p role="alert">${esc(entry.error)}</p>` : `<pre tabindex="0" aria-label="Read-only ZIP entry content"><code>${esc(entry.content)}</code></pre>`}</section>` : ''}`;
 }
@@ -189,9 +189,9 @@ function renderFilePreview() {
     body = `<div id="file-preview-loading" class="mu" role="status">Loading ${info.kind} preview…</div><div class="file-preview-stage">${info.kind === 'image'
       ? `<img id="file-preview-media" ${source} alt="${esc(info.name || preview.path)}" referrerpolicy="no-referrer" onload="fileMediaLoaded(this)" onerror="fileMediaFailed(this)">`
       : `<video id="file-preview-media" ${source} controls playsinline preload="metadata" onloadedmetadata="fileMediaLoaded(this)" onerror="fileMediaFailed(this)">Your browser does not support video playback.</video>`}</div>
-      ${info.kind === 'video' ? '<p class="mu">Playback depends on the file’s video/audio codecs and your browser. Download the file if playback is unsupported.</p>' : ''}`;
+      ${info.kind === 'video' ? '<p class="mu">If your browser cannot play this video, download it.</p>' : ''}`;
   } else {
-    body = `<div class="file-preview-message"><h3>Text editing is unavailable for this file</h3><p>${esc(info.reason || 'This is a binary or unsupported file. Opening it in a text editor could corrupt it. Download it to use an appropriate application.')}</p></div>`;
+    body = `<div class="file-preview-message"><h3>Cannot edit as text</h3><p>${esc(info.reason || 'Text editing could corrupt this file. Download it and open it in a compatible app.')}</p></div>`;
   }
   return `<section class="card file-preview-workspace" aria-label="${esc(title)}">
     <div class="file-preview-toolbar"><div><button type="button" class="btn sm" onclick="closeFilePreview()">← Back to files</button><h2>${title}</h2></div><button type="button" class="btn sm" onclick="downloadPreviewFile()">${ic('download', 14)} Download${info.kind === 'zip' ? ' archive' : ''}</button></div>

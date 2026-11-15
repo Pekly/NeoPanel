@@ -65,6 +65,12 @@ Desktop development stays on **`windows-desktop-release`**. It is not the primar
 
 Minimize the desktop app to keep local servers running. Closing with active local servers asks whether to save/stop them or keep running. Windows local hosting is **trusted-only**: Job Objects manage processes and memory, not filesystem or network isolation.
 
+## Accounts
+
+**Admins** manage the panel and create servers. **Users** access their own or shared
+servers. Set their role in **Admin → Users**; team permissions stay per server.
+The getting-started guide is shown only to admins, not normal users.
+
 ## Before inviting players
 
 - Use configured Linux isolation for untrusted workloads. The installer requires a successful Bubblewrap preflight; it won’t quietly bypass a failed check. Select **Bubblewrap (`bwrap`)** on the node to require filesystem isolation. Systemd resource limits alone are not a filesystem sandbox.

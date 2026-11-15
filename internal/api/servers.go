@@ -176,7 +176,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Server creation requires the servers.create permission"})
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "Server creation requires administrator access"})
 		return
 	}
 	var req CreateServerRequest

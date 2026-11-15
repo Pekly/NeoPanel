@@ -126,11 +126,14 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/community", community.GetPublic)
 	r.mux.HandleFunc("GET /api/admin/community", r.requireAdmin(community.GetAdmin))
 	r.mux.HandleFunc("PUT /api/admin/community", r.requireAdmin(community.UpdateAdmin))
-	r.mux.HandleFunc("GET /api/admin/roles", r.requireAdmin(r.auth.ListPanelRoles))
-	r.mux.HandleFunc("POST /api/admin/roles", r.requireAdmin(r.auth.CreatePanelRole))
-	r.mux.HandleFunc("PUT /api/admin/roles/{roleId}", r.requireAdmin(r.auth.UpdatePanelRole))
-	r.mux.HandleFunc("DELETE /api/admin/roles/{roleId}", r.requireAdmin(r.auth.DeletePanelRole))
-	r.mux.HandleFunc("PUT /api/admin/users/{id}/panel-role", r.requireAdmin(r.auth.AssignPanelRole))
+	// Retired API paths must not fall through to the web UI's method handler.
+	for _, retired := range []string{
+		"GET /api/admin/roles", "POST /api/admin/roles",
+		"PUT /api/admin/roles/{roleId}", "DELETE /api/admin/roles/{roleId}",
+		"PUT /api/admin/users/{id}/panel-role",
+	} {
+		r.mux.HandleFunc(retired, http.NotFound)
+	}
 	// Public auth, branding & mods runtime routes
 	passkeys := NewPasskeyHandler(r.auth)
 	for route, handler := range map[string]http.HandlerFunc{
@@ -735,8 +738,7 @@ func forwardedClaims(db *database.DB, req *http.Request, claims *JWTClaims) (*JW
 	if role != "admin" && role != "user" {
 		return nil, fmt.Errorf("invalid forwarded role")
 	}
-	allowCreate := req.Method == http.MethodPost && req.URL.Path == "/api/servers" && req.Header.Get("X-NeoPanel-Can-Create-Server") == "true"
-	forwarded := &JWTClaims{UserID: user.ID, Username: user.Username, Role: role, AuthorizedServerCreate: allowCreate}
+	forwarded := &JWTClaims{UserID: user.ID, Username: user.Username, Role: role}
 	if raw := req.Header.Get(forwardedNodePolicyHeader); raw != "" {
 		// Only reached after authenticating the privileged hop and validating
 		// the original caller. Handlers must never parse policy headers.
@@ -777,7 +779,6 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, 403, "Proxy operation requires administrator privileges")
 		return
 	}
-	createAuthorized := false
 	if req.Method == http.MethodPost && rest == "api/servers" {
 		allowed, err := r.auth.CanCreateServer(req)
 		if err != nil {
@@ -785,10 +786,9 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if !allowed {
-			writeError(w, 403, "Your panel role does not allow server creation")
+			writeError(w, 403, "Server creation requires administrator access")
 			return
 		}
-		createAuthorized = true
 	}
 	if err := r.checkProxyIdentity(req, node, claims); err != nil {
 		writeError(w, 502, err.Error())
@@ -813,9 +813,6 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	if claims.UserID > 0 && claims.Role != "admin" {
 		policy, _ := json.Marshal(userPolicyForNode(node))
 		remote.Header.Set(forwardedNodePolicyHeader, string(policy))
-	}
-	if createAuthorized && claims.UserID > 0 && claims.Role != "admin" {
-		remote.Header.Set("X-NeoPanel-Can-Create-Server", "true")
 	}
 	resp, err := fileMediaProxyClient(r.nodes.httpClient, req.Method, rest).Do(remote)
 	if err != nil {

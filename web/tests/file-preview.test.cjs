@@ -78,7 +78,7 @@ test('binary files and oversized text never receive editable state or a content 
     assert.equal(c.qol.editor, null);
     assert.equal(c.S.editingFile, null);
     assert.equal(requests.length, 1);
-    assert.match(c.lastHTML, /Text editing is unavailable/);
+    assert.match(c.lastHTML, /Cannot edit as text/);
     assert.match(c.lastHTML, /Cannot edit this file/);
     assert.doesNotMatch(c.lastHTML, /<textarea|editor-save-btn/);
   }
@@ -108,7 +108,7 @@ test('ZIP browsing synthesizes folders, filters names and never extracts files',
   const { c, requests } = setup('zip');
   await c.openQolFile('world.zip');
   assert.match(c.lastHTML, /ZIP contents/);
-  assert.match(c.lastHTML, /Nothing has been extracted or changed/);
+  assert.match(c.lastHTML, /No files extracted or changed/);
   assert.deepEqual(Array.from(c.zipPreviewRows(c.preview.current.entries), row => row.name), ['config', 'empty', 'textures', 'readme.txt']);
   c.browseZipPreview('config/');
   assert.equal(c.preview.current.folder, 'config/');
@@ -178,7 +178,7 @@ test('media failures show download fallback and filenames are safely escaped', a
   assert.doesNotMatch(c.lastHTML, /alt="" onerror="alert|<unsafe>/);
   const media = {}; elements['#file-preview-media'] = media;
   c.fileMediaFailed(media);
-  assert.match(c.lastHTML, /codec your browser does not support/);
+  assert.match(c.lastHTML, /unsupported by your browser\. Try downloading/);
   assert.doesNotMatch(c.lastHTML, /<img id=/);
 });
 

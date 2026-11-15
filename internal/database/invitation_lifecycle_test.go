@@ -76,7 +76,7 @@ func TestInvitationLifecycleRemovalAndCredentials(t *testing.T) {
 }
 
 func TestInvitationLifecyclePreservesIndependentAndAssociatedAccounts(t *testing.T) {
-	for _, kind := range []string{"existing-invite", "direct-add", "membership", "ownership", "admin", "builtin", "panel-role", "unknown-role", "unresolved", "exported", "configured-node"} {
+	for _, kind := range []string{"existing-invite", "direct-add", "membership", "ownership", "admin", "builtin", "former-panel-role", "unknown-role", "unresolved", "exported", "configured-node"} {
 		t.Run(kind, func(t *testing.T) {
 			db, owner := invitationDB(t)
 			var u *User
@@ -132,9 +132,15 @@ func TestInvitationLifecyclePreservesIndependentAndAssociatedAccounts(t *testing
 				}
 				u = owner
 				mid = su.ID
-			case "panel-role":
-				lifecycleExec(t, db, `INSERT INTO panel_roles(id,name) VALUES('r','Manager')`)
-				lifecycleExec(t, db, `INSERT INTO panel_user_roles(user_id,role_id) VALUES(?,'r')`, u.ID)
+			case "former-panel-role":
+				seedLegacyPanelRoles(t, db, u.ID)
+				if err := db.retirePanelRoles(); err != nil {
+					t.Fatal(err)
+				}
+				retained, err := db.GetUserByID(u.ID)
+				if err != nil || retained.InvitationCreated || retained.Role != "user" {
+					t.Fatalf("former assigned account was not retained independently: %+v %v", retained, err)
+				}
 			case "unknown-role":
 				lifecycleExec(t, db, `UPDATE users SET role='operator' WHERE id=?`, u.ID)
 			case "unresolved":

@@ -94,3 +94,13 @@ test('setup fields have visible labels and native form submission', () => {
   assert.match(form,/<form[^>]+onsubmit=/); assert.match(form,/type="submit"/);
   assert.match(app,/NPOnboarding\?\.resetSession\(\)/);
 });
+test('normal Linux users never see or open the guide, even with saved admin progress', () => {
+  const user = {id:'normal-user',role:'user',panel_permissions:['servers.create']};
+  const saved = new Map([['neopanel_getting_started_v1_normal-user',JSON.stringify({step:0,status:'active'})]]);
+  const g = guide(saved);
+  g.api.begin(user);
+  assert.equal(g.render({token:'user-session',user}), '');
+  g.api.open(); g.click('create'); g.click('security');
+  assert.equal(g.root.innerHTML, ''); assert.equal(g.calls.length, 0);
+  assert.match(app, /S\.user\?\.role === 'admin' \? `<button id="np-guide-open"/);
+});

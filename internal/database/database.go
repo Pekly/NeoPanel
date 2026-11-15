@@ -50,13 +50,13 @@ func InitDB(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("passkey migration failed: %w", err)
 	}
 
-	if err := db.migratePanelRoles(); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("panel role migration failed: %w", err)
-	}
 	if err := db.migrateInvitationLifecycle(); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("invitation lifecycle migration failed: %w", err)
+	}
+	if err := db.retirePanelRoles(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("panel role retirement failed: %w", err)
 	}
 	return db, nil
 }
@@ -284,7 +284,7 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 		return nil, err
 	}
 	user.TwoFactorEnabled = tfa == 1
-	return db.loadUserPanelRole(user)
+	return user, nil
 }
 
 func (db *DB) GetUserByID(id int) (*User, error) {
@@ -296,7 +296,7 @@ func (db *DB) GetUserByID(id int) (*User, error) {
 		return nil, err
 	}
 	user.TwoFactorEnabled = tfa == 1
-	return db.loadUserPanelRole(user)
+	return user, nil
 }
 
 func (db *DB) GetUserByEmailOrUsername(lookup string) (*User, error) {
@@ -309,7 +309,7 @@ func (db *DB) GetUserByEmailOrUsername(lookup string) (*User, error) {
 		return nil, err
 	}
 	user.TwoFactorEnabled = tfa == 1
-	return db.loadUserPanelRole(user)
+	return user, nil
 }
 
 func (db *DB) CreateUser(username, passwordHash, role string) (*User, error) {
@@ -426,11 +426,6 @@ func (db *DB) ListUsers() ([]*User, error) {
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
-	}
-	for _, user := range users {
-		if _, err := db.loadUserPanelRole(user); err != nil {
-			return nil, err
-		}
 	}
 	if users == nil {
 		users = []*User{}
@@ -979,7 +974,7 @@ func (db *DB) GetUserByAPIKeyHash(keyHash string) (*User, error) {
 	if err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.AuthVersion); err != nil {
 		return nil, err
 	}
-	return db.loadUserPanelRole(user)
+	return user, nil
 }
 
 // --- Cluster Nodes ---

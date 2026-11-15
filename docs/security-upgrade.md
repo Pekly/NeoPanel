@@ -23,6 +23,14 @@ security:
 
 Merge these entries into the existing sections; preserve secrets and other settings. For direct connections, leave `trusted_proxies` empty. For remote proxies, list only their actual addresses/networks, restrict direct backend access with a firewall, and make the edge proxy sanitize forwarded headers. Do **not** trust `0.0.0.0/0` or `::/0`. Client identity uses the first untrusted hop in `X-Forwarded-For` from a trusted peer. `X-Real-IP` and `CF-Connecting-IP` are not automatically trusted. Misconfigured proxy trust can group users into one rate-limit bucket or permit spoofing.
 
+## User and Admin roles
+
+Custom panel roles have been retired. Only admins can create servers; users keep
+their existing owned/shared servers and team permissions. The Roles page is gone.
+On upgrade, old custom-role assignments are removed without deleting accounts,
+credentials, API keys, or servers. Previously protected invitation-created accounts
+are kept as independent users. Back up first and update the panel and every worker.
+
 ## Patched boundaries
 
 - Password-reset tokens are never returned by the public request endpoint and become usable only after successful email delivery. Reset links require a fixed administrator-configured origin.

@@ -90,7 +90,7 @@
       [{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'translateY(0)' }],
       { duration: 380, delay: Math.min(index * 28, 210) }, 'page'));
 
-    Array.from(root.querySelectorAll('.file-row, .srow, .act-row, .np-role-row')).slice(0, 40).filter(visible).slice(0, 12)
+    Array.from(root.querySelectorAll('.file-row, .srow, .act-row')).slice(0, 40).filter(visible).slice(0, 12)
       .forEach((element, index) => play(element, [{ opacity: 0 }, { opacity: 1 }],
         { duration: 240, delay: Math.min(70 + index * 18, 230) }, 'page'));
 

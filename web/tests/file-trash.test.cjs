@@ -140,7 +140,7 @@ test('recoverable delete fails closed against a worker without Trash support', a
   c.api = async (url, options) => { requests.push({ url, options }); return {}; };
   await c.deleteFileItem('important.txt');
   assert.equal(requests.length, 1); assert.equal(requests[0].url, '/api/servers/a/files/trash');
-  assert.match(messages[0][0], /does not support Trash/);
+  assert.match(messages[0][0], /Trash is unavailable.*before deleting/);
 });
 
 test('folder reload is single-flight and preserves filter and selection', async () => {
