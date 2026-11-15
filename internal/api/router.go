@@ -50,6 +50,7 @@ type Router struct {
 	authLimiter    *IPRateLimiter
 	clientIPs      *clientIPPolicy
 	embeddedStatic fs.FS
+	desktopFrame   bool
 }
 
 func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManager, embeddedStatic fs.FS) *Router {
@@ -104,10 +105,22 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	return r
 }
 
+// EnableDesktopFrame must be called before serving requests. It only permits
+// the bundled desktop shell to frame the panel entry document, never file previews.
+func (r *Router) EnableDesktopFrame() {
+	if !r.cfg.IsNode() && r.cfg.Server.Host == "127.0.0.1" {
+		r.desktopFrame = true
+	}
+}
+
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Security & CORS headers
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
+	if r.desktopFrame && (req.URL.Path == "/" || req.URL.Path == "/index.html") {
+		w.Header().Del("X-Frame-Options")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors http://wails.localhost")
+	}
 	w.Header().Set("X-XSS-Protection", "1; mode=block")
 	if !limitAuthBody(w, req) {
 		return

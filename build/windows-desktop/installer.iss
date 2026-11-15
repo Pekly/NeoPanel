@@ -8,7 +8,7 @@
 [Setup]
 AppId={{258DA21F-66FD-4ED7-B575-1EBD072F49CD}
 AppName=NeoPanel Desktop
-AppVersion=1.0.0
+AppVersion=1.0.0-windows-beta.1
 AppPublisher=NeoPanel
 DefaultDirName={localappdata}\Programs\NeoPanel Desktop
 DefaultGroupName=NeoPanel Desktop

@@ -14,7 +14,7 @@ import (
 )
 
 const Title = "NeoPanel Desktop"
-const Version = "1.0.0"
+const Version = "1.0.0-windows-beta.1"
 
 func DataDirectory(override string) (string, error) {
 	if strings.TrimSpace(override) == "" {

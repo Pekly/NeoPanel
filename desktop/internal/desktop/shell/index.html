@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self'; frame-src http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>NeoPanel Desktop</title>
+  <link rel="stylesheet" href="shell.css">
+  <script src="shell.js" defer></script>
+</head>
+<body>
+  <header class="titlebar">
+    <div class="brand"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 10 5-10 5L2 8Zm-10 9 10 5 10-5M2 17l10 5 10-5"/></svg><strong>NeoPanel</strong><span>DESKTOP</span></div>
+    <nav aria-label="Desktop tools">
+      <button id="home" aria-label="Dashboard" title="Dashboard"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10H3ZM9 20v-7h6v7"/></svg></button>
+      <button id="reload" aria-label="Reload interface" title="Reload interface"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 6"/></svg></button>
+      <button id="data" aria-label="Open app data folder" title="Open app data folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V4h7l3 3h8v13H3Zm0 3h18"/></svg></button>
+    </nav>
+    <div class="drag-space" aria-hidden="true"></div>
+    <span id="status" role="status">Local panel</span>
+    <div class="window-controls" aria-label="Window controls">
+      <button id="minimize" aria-label="Minimize" title="Minimize — keep servers running"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
+      <button id="maximize" aria-label="Maximize" title="Maximize"><svg viewBox="0 0 24 24" aria-hidden="true"><path id="maximize-icon" d="M6 6h12v12H6Z"/></svg></button>
+      <button id="close" aria-label="Quit safely" title="Quit safely"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+  </header>
+  <main>
+    <div id="loading" role="status"><span class="loader"></span><h1>Opening your panel</h1><p>Starting the local interface…</p></div>
+    <iframe id="panel" title="NeoPanel" sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups allow-modals" allow="clipboard-read; clipboard-write; publickey-credentials-get; publickey-credentials-create"></iframe>
+    <div id="shutdown" role="status" hidden><span class="loader"></span><h1>Saving servers and shutting down</h1><p>Please leave NeoPanel open until it finishes.</p></div>
+  </main>
+</body>
+</html>

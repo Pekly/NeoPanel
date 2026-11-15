@@ -13,14 +13,14 @@ if ($LASTEXITCODE -ne 0 -or $version -notmatch 'go(\d+)\.(\d+)' -or [int]$Matche
 if (!$OutputDirectory) { $OutputDirectory = Join-Path $PSScriptRoot "dist\windows-desktop-$Architecture" }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $null = New-Item -ItemType Directory -Path $OutputDirectory -Force
-$resourcePrefix = Join-Path $PSScriptRoot 'cmd\neopanel-desktop\desktop_resources'
+$resourcePrefix = Join-Path $PSScriptRoot 'desktop\cmd\neopanel-desktop\desktop_resources'
 $resource = "${resourcePrefix}_windows_${Architecture}.syso"
 if (Test-Path -LiteralPath $resource) { throw "Refusing to overwrite existing generated resource: $resource" }
 $tempRoot = if ($env:PI_SCRATCH_DIR) { $env:PI_SCRATCH_DIR } else { [IO.Path]::GetTempPath() }
 $temp = Join-Path $tempRoot ('neopanel-desktop-build-' + [Guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $temp
 $previous = @{ GOOS = $env:GOOS; GOARCH = $env:GOARCH; CGO_ENABLED = $env:CGO_ENABLED }
-Push-Location $PSScriptRoot
+Push-Location (Join-Path $PSScriptRoot 'desktop')
 try {
     # Render NeoPanel's existing three-layer mark with Windows' code-native drawing API.
     # All intermediates live in the temporary build directory, never beside user data.

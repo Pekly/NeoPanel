@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Pekly/NeoPanel/internal/desktop"
+	"github.com/Pekly/NeoPanel/desktop/internal/desktop"
 )
 
 func main() {

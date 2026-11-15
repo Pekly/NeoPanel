@@ -45,6 +45,18 @@ type Service struct {
 // assets is the same static filesystem used by the CLI; node roles never serve
 // it. Callers must not mutate cfg while the service is running.
 func Start(cfg *config.Config, assets fs.FS) (*Service, error) {
+	return start(cfg, assets, false)
+}
+
+// StartDesktop is opt-in and loopback-only; ordinary CLI/node hosts retain DENY framing.
+func StartDesktop(cfg *config.Config, assets fs.FS) (*Service, error) {
+	if cfg == nil || cfg.IsNode() || cfg.Server.Host != "127.0.0.1" || cfg.SFTP.Enabled {
+		return nil, errors.New("desktop requires a loopback panel with SFTP disabled")
+	}
+	return start(cfg, assets, true)
+}
+
+func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 	if cfg == nil {
 		return nil, errors.New("daemon: configuration is nil")
 	}
@@ -78,8 +90,12 @@ func Start(cfg *config.Config, assets fs.FS) (*Service, error) {
 		done: make(chan struct{}), cleaned: make(chan struct{}),
 	}
 	s.listener = &serviceListener{Listener: listener, connections: make(map[*serviceConn]struct{})}
+	router := api.NewRouter(cfg, db, manager, assets)
+	if desktop {
+		router.EnableDesktopFrame()
+	}
 	s.http = &http.Server{
-		Addr: addr, Handler: s.guard(api.NewRouter(cfg, db, manager, assets)),
+		Addr: addr, Handler: s.guard(router),
 		ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
 	}
 	if cfg.SFTP.Enabled {
