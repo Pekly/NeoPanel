@@ -5898,6 +5898,7 @@ const V = {
         <span id="dash-running-summary" class="mu">${runningCount} of ${totalCount} servers running</span>
       </div>
       <div class="row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
+        ${S.user?.role === 'admin' ? `<button id="np-guide-open" type="button" class="btn sm" onclick="window.NPOnboarding?.open()">${ic('book', 14)} Getting started</button>` : ''}
         <div style="position: relative;">
           <input type="text" id="srv-filter" aria-label="Filter servers" placeholder="Find a server…" value="${esc(S.serverFilter || '')}" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
@@ -5917,6 +5918,7 @@ const V = {
         </button>` : ''}
       </div>
     </div>
+    ${window.NPOnboarding?.render(S) || ''}
 
     ${(errEntries.length > 0 && S.user?.role === 'admin') ? `
       <div class="node-error-note" style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
@@ -16527,30 +16529,29 @@ function showSetupScreen() {
   const d = document.createElement('div');
   d.id = 'login';
   d.className = 'login';
-  d.innerHTML = `<div class="lbox">
+  d.innerHTML = `<form class="lbox np-setup-box" id="setup-form" onsubmit="event.preventDefault(); submitSetup();">
     <div class="llogo">${brandLogoHtml(true)}</div>
-    <div class="lg">Welcome</div>
-    <h1 class="lt">Create your admin account</h1>
-    <label class="lf">
-      ${ic('user', 16)}
-      <input id="su-name" type="text" placeholder="Admin Username" autocomplete="username" onkeydown="if(event.key==='Enter')submitSetup()">
-    </label>
-    <label class="lf">
-      ${ic('mail', 16)}
-      <input id="su-email" type="email" placeholder="Administrator Email" autocomplete="email" onkeydown="if(event.key==='Enter')submitSetup()">
-    </label>
-    <label class="lf">
-      ${ic('lock', 16)}
-      <input id="su-pw" type="password" placeholder="Password" autocomplete="new-password" onkeydown="if(event.key==='Enter')submitSetup()">
-      <button class="eye" type="button" onclick="const p=$('#su-pw'); p.type=p.type==='password'?'text':'password';" aria-label="Toggle password visibility">
-        ${ic('eye', 16)}
-      </button>
-    </label>
+    <div class="lg">Welcome · First-time setup</div>
+    <h1 class="lt">Your panel starts here.</h1>
+    <p class="np-setup-lead">Create your administrator account. Then we’ll walk through choosing a host and setting up your first server.</p>
+    <label class="np-setup-label" for="su-name">Admin username</label>
+    <div class="lf">${ic('user', 16)}<input id="su-name" type="text" placeholder="e.g. alex" autocomplete="username" required minlength="3"></div>
+    <label class="np-setup-label" for="su-email">Email address</label>
+    <div class="lf">${ic('mail', 16)}<input id="su-email" type="email" placeholder="you@example.com" autocomplete="email" required aria-describedby="su-email-help"></div>
+    <p id="su-email-help" class="np-setup-hint">Use an address you control. You can configure recovery email delivery after setup.</p>
+    <label class="np-setup-label" for="su-pw">Password</label>
+    <div class="lf">${ic('lock', 16)}
+      <input id="su-pw" type="password" autocomplete="new-password" required minlength="6" aria-describedby="su-pw-help">
+      <button class="eye" type="button" onclick="const p=$('#su-pw'); p.type=p.type==='password'?'text':'password'; this.setAttribute('aria-pressed',p.type==='text');" aria-label="Show password" aria-pressed="false">${ic('eye', 16)}</button>
+    </div>
+    <p id="su-pw-help" class="np-setup-hint">Use a unique passphrase, ideally 12 or more characters. Minimum: 6 characters.</p>
+    <label class="np-setup-label" for="su-confirm">Confirm password</label>
+    <div class="lf">${ic('lock', 16)}<input id="su-confirm" type="password" autocomplete="new-password" required></div>
     ${S.turnstileEnabled ? '<div id="turnstile-setup" class="turnstile-wrap"></div>' : ''}
     <div class="lerr" id="lerr" role="alert"></div>
-    <button class="lbtn" onclick="submitSetup()">Complete setup</button>
+    <button type="submit" class="lbtn">Create account &amp; continue</button>
     <div class="lsm foot">${renderFooterHtml(footTxt)}</div>
-  </div>`;
+  </form>`;
   applyLoginOverlayBackground(d);
   document.body.appendChild(d);
   if (S.turnstileEnabled) mountTurnstileWidget('#turnstile-setup');
@@ -16558,10 +16559,14 @@ function showSetupScreen() {
 }
 
 async function submitSetup() {
+  if (S.setupSubmitting) return;
+  const form = $('#setup-form');
+  if (form && !form.reportValidity()) return;
   const username = $('#su-name')?.value.trim();
   const email = $('#su-email')?.value.trim();
   const password = $('#su-pw')?.value;
   const err = $('#lerr');
+  if (err) err.textContent = '';
   if (!username || !password) {
     if (err) err.textContent = 'Username and password are required.';
     return;
@@ -16570,14 +16575,24 @@ async function submitSetup() {
     if (err) err.textContent = 'A valid administrator email address is required.';
     return;
   }
+  if (username.length < 3 || password.length < 6) {
+    if (err) err.textContent = 'Use at least 3 characters for your username and 6 for your password.';
+    return;
+  }
+  if (password !== $('#su-confirm')?.value) {
+    if (err) err.textContent = 'The passwords do not match. Please enter the same password twice.';
+    $('#su-confirm')?.focus();
+    return;
+  }
   if (S.turnstileEnabled && !S.turnstileToken) {
     if (err) err.textContent = 'Please complete the Cloudflare Turnstile security check.';
     return;
   }
   const btn = $('#login .lbtn');
+  S.setupSubmitting = true;
   setBtnLoading(btn, true, 'Initializing...');
   try {
-    const res = await (await fetch('/api/auth/setup', {
+    const response = await fetch('/api/auth/setup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -16586,15 +16601,18 @@ async function submitSetup() {
         password,
         'cf-turnstile-response': S.turnstileToken
       })
-    })).json();
+    });
+    const res = await response.json();
 
-    if (res.token) {
+    if (response.ok && res.token) {
       S.token = res.token;
       S.turnstileToken = '';
       localStorage.setItem('neopanel_token', res.token);
+      window.NPOnboarding?.begin(res.user);
+      try { history.replaceState(null, '', withSafeModeQuery('/')); } catch (_) {}
       $('#login')?.remove();
       toast(`Setup complete! Welcome to ${getBrand('brand_name') || 'NeoPanel'}.`);
-      checkAuth();
+      await checkAuth();
     } else {
       setBtnLoading(btn, false);
       resetTurnstileWidget();
@@ -16603,7 +16621,10 @@ async function submitSetup() {
   } catch (e) {
     setBtnLoading(btn, false);
     resetTurnstileWidget();
-    if (err) err.textContent = 'Connection error.';
+    if (err) err.textContent = 'Could not finish setup. Check your connection and try again. If the account was already created, reload and sign in.';
+  } finally {
+    S.setupSubmitting = false;
+    setBtnLoading(btn, false);
   }
 }
 
@@ -16807,6 +16828,7 @@ async function logout() {
   window.NPFileDrag?.cancel();
   window.NPMotion?.resetSession();
   window.NPProgress?.clear();
+  window.NPOnboarding?.resetSession();
   cancelAllUploads();
   QOL.uploads = [];
   renderUploadQueue();
