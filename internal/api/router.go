@@ -94,7 +94,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		schedules:      scheduleHandler,
 		clientAPI:      clientAPIHandler,
 		email:          emailHandler,
-		globalLimiter:  NewIPRateLimiter(60, 100),
+		globalLimiter:  NewIPRateLimiter(defaultAPIRequestsPerMinute, defaultAPIRequestsPerMinute),
 		authLimiter:    NewIPRateLimiter(1, 15),
 		clientIPs:      newClientIPPolicy(cfg.Security.TrustedProxies),
 		embeddedStatic: embeddedStatic,

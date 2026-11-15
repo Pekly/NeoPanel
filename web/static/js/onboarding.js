@@ -8,21 +8,21 @@
     action: 'Review administration', target: 'nodes', note: 'No password is needed to get started with local hosting.' };
   const steps = [
     { label: 'Your account', icon: 'shield', title: 'Make this account yours',
-      text: 'You are the administrator. This account can manage every server and invite other people, so keep its credentials private.',
-      items: ['Add two-factor authentication or a passkey in Account → Security.', 'Before inviting anyone, configure SMTP and the public panel URL in Admin. Password-reset emails need both.', 'Use separate accounts for your team instead of sharing your administrator password.'],
-      action: 'Open account security', target: 'security', note: 'Come back to Your servers to continue this guide.' },
+      text: 'Your account manages your servers and team.',
+      items: ['Add two-factor authentication or a passkey in Account → Security.', 'Set up email in Admin before inviting others or using password resets.', 'Give each teammate their own account.'],
+      action: 'Open account security', target: 'security', note: 'Return to Your servers to continue.' },
     { label: 'Choose a host', icon: 'server', title: 'Decide where Minecraft will run',
-      text: 'The panel is your control room. A host (shown as a node) is the machine that actually runs a game server.',
-      items: ['Choose Local to run a server on the same machine as this panel. No extra worker is needed.', 'For another machine, install a worker and connect it under Admin → Nodes. Protect worker APIs with HTTPS or a trusted private network.', 'Use configured Linux isolation for untrusted workloads. Windows local hosting is trusted-only; process limits are not a filesystem or network sandbox.'],
-      action: 'Review hosts and nodes', target: 'nodes', note: 'Players connect to the game host and port, not the panel’s web address.' },
+      text: 'Choose the computer that will run your server.',
+      items: ['Choose Local to use this computer.', 'To use another computer, connect a worker in Admin → Nodes over HTTPS or a trusted private network.', 'Only run trusted servers on Windows. Use isolated Linux workers for untrusted workloads.'],
+      action: 'Review hosts and nodes', target: 'nodes', note: 'Players connect to the game server’s address, not the panel.' },
     { label: 'Create a server', icon: 'plus', title: 'Start with one server',
-      text: 'The Create server form lets you choose the host, server software, Minecraft version, memory, and game port.',
-      items: ['Paper is a common choice for a plugin-based Java server; Vanilla keeps the original server software. Pick the engine your world needs.', 'Choose a compatible Java runtime on the selected host. If Java is missing, use the runtime controls in the form.', 'Leave memory for the operating system and use an unused game port. Review the Minecraft EULA before running Minecraft.'],
-      action: 'Create a server', target: 'create', note: 'This opens the form only. You stay in control of installation and startup.' },
+      text: 'Choose your server software, Minecraft version, and memory.',
+      items: ['Choose Paper for plugins or Vanilla for the original game.', 'Select a compatible Java version; install it here if needed.', 'Leave some memory free for your computer and review the Minecraft EULA.'],
+      action: 'Create a server', target: 'create', note: 'Nothing starts until you choose to start it.' },
     { label: 'Run and protect', icon: 'terminal', title: 'Know your way around',
-      text: 'Open a server card to reach its console. That is where you start and stop it, read startup errors, and send commands.',
-      items: ['Wait for the console to confirm the server is ready before connecting. The server address includes the game port.', 'Files is where you edit configuration and manage plugins. Stop the server before changes that require a restart.', 'Use Backups before upgrades, keep an independent copy, and stop the server for a consistent world snapshot. Restore replaces active files.'],
-      action: 'Back to your servers', target: 'dashboard', note: 'Finishing this guide marks the tutorial as read. It does not certify your server or security configuration.' }
+      text: 'Open a server to start it and see its console.',
+      items: ['Wait until the console says the server is ready, then join.', 'Use Files to change settings or manage plugins.', 'Back up before upgrades. Stop the server for a consistent backup; restoring replaces current files.'],
+      action: 'Back to your servers', target: 'dashboard', note: 'You can reopen this guide anytime.' }
   ];
   const eligible = state => Boolean(state?.token && state.user?.id && state.user.role === 'admin');
   // Presentation only: the API validates the JWT and remains authoritative.
@@ -52,7 +52,7 @@
     if (saved.status !== 'active') return '';
     const step = saved.step === 0 && isGuest(state) ? guestStep : steps[saved.step];
     return `<section class="np-guide" aria-labelledby="np-guide-title">
-      <div class="np-guide-intro"><span class="np-guide-kicker">GETTING STARTED</span><h2>Let’s get you ready to host.</h2><p>A short tour of the essentials. Take it at your own pace.</p>
+      <div class="np-guide-intro"><span class="np-guide-kicker">GETTING STARTED</span><h2>Set up your first server.</h2><p>Four quick steps. Skip or come back anytime.</p>
         <ol class="np-guide-steps">${steps.map((s, i) => `<li><button type="button" data-guide-step="${i}" ${i === saved.step ? 'aria-current="step"' : ''}><span>${i + 1}</span>${s.label}</button></li>`).join('')}</ol>
         <button type="button" class="btn sm" data-guide-action="pause">Not now</button>
       </div>

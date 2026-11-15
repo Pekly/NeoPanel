@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+// Dashboard loads, file browsing and background polls share this allowance.
+// Sensitive authentication routes also have their own stricter limiter.
+const defaultAPIRequestsPerMinute = 600
+
 // clientBucket tracks token-bucket rate limit state for a single client IP.
 type clientBucket struct {
 	tokens     float64
@@ -29,11 +33,11 @@ type IPRateLimiter struct {
 }
 
 // NewIPRateLimiter creates a rate limiter.
-// defaultLimit: requests per minute allowed for general endpoints (e.g. 180 req/min).
+// defaultLimit: requests per minute allowed for general endpoints (default 600).
 // authLimit: requests per minute allowed for sensitive auth endpoints (e.g. 15 req/min).
 func NewIPRateLimiter(defaultLimit float64, authLimit float64) *IPRateLimiter {
 	if defaultLimit <= 0 {
-		defaultLimit = 180 // 3 req/sec continuous
+		defaultLimit = defaultAPIRequestsPerMinute
 	}
 	if authLimit <= 0 {
 		authLimit = 15 // thwarts brute-force login attempts
@@ -42,7 +46,7 @@ func NewIPRateLimiter(defaultLimit float64, authLimit float64) *IPRateLimiter {
 	return &IPRateLimiter{
 		buckets:       make(map[string]*clientBucket),
 		ratePerSec:    defaultLimit / 60.0,
-		burstCapacity: defaultLimit / 3.0, // burst capacity (e.g. 60 requests)
+		burstCapacity: defaultLimit / 3.0, // 200 requests at the default rate
 		authBuckets:   make(map[string]*clientBucket),
 		authRateSec:   authLimit / 60.0,
 		authBurst:     authLimit / 3.0, // auth burst (e.g. 5 requests)
@@ -213,7 +217,7 @@ func (lim *IPRateLimiter) Middleware(next http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Retry-After", "5")
 				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":"Too many requests. Please slow down and try again shortly."}`))
+				_, _ = w.Write([]byte(`{"error":"Please wait a few seconds and try again."}`))
 				return
 			}
 		}
