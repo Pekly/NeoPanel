@@ -61,7 +61,7 @@ Back up your database, configuration, and worlds before upgrading. Update the pa
 
 [Download the portable beta](https://github.com/Pekly/NeoPanel/releases/tag/v1.0.0-windows-beta.1), extract the ZIP, and run `NeoPanel-Desktop.exe`. It opens its own window and needs Microsoft Edge WebView2 Runtime. No Go installation is needed to run the download.
 
-Desktop development stays on **`windows-desktop-release`**. It is not the primary focus and gets occasional updates; the published beta may lag behind branch changes. See the [desktop guide on that branch](https://github.com/Pekly/NeoPanel/blob/windows-desktop-release/docs/windows-desktop.md) for building, storage, and safe shutdown. For the Windows browser/CLI version, use the [Windows setup guide](docs/windows.md).
+Desktop development stays on **`windows-desktop-release`**. It is not the primary focus and gets occasional updates; the published beta may lag behind branch changes. See the [desktop guide on that branch](https://github.com/Pekly/NeoPanel/blob/windows-desktop-release/docs/windows-desktop.md) for building, storage, and safe shutdown. The desktop EXE is the Windows panel edition—there is no separate console/browser package or startup script. An optional [API-only Windows worker](docs/windows.md) can host servers on another PC.
 
 Minimize the desktop app to keep local servers running. Closing with active local servers asks whether to save/stop them or keep running. Windows local hosting is **trusted-only**: Job Objects manage processes and memory, not filesystem or network isolation.
 
