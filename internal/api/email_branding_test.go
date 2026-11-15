@@ -1,12 +1,19 @@
 package api
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http/httptest"
 	"net/mail"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -60,40 +67,53 @@ func brandedEmailParts(t *testing.T, smtp *invitationSMTP) map[string]string {
 	case <-time.After(3 * time.Second):
 		t.Fatal("no email received")
 	}
+	return decodedEmailParts(t, raw)
+}
+
+func decodedEmailParts(t *testing.T, raw string) map[string]string {
+	t.Helper()
 	message, err := mail.ReadMessage(strings.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	kind, params, err := mime.ParseMediaType(message.Header.Get("Content-Type"))
-	if err != nil || kind != "multipart/alternative" {
-		t.Fatal(kind, err)
-	}
-	reader := multipart.NewReader(message.Body, params["boundary"])
 	parts := map[string]string{}
-	for {
-		part, err := reader.NextPart()
-		if err == io.EOF {
-			break
-		}
+	var read func(io.Reader, string, string)
+	read = func(body io.Reader, contentType, transfer string) {
+		kind, params, err := mime.ParseMediaType(contentType)
 		if err != nil {
 			t.Fatal(err)
 		}
-		kind, _, err := mime.ParseMediaType(part.Header.Get("Content-Type"))
+		if strings.HasPrefix(kind, "multipart/") {
+			reader := multipart.NewReader(body, params["boundary"])
+			for {
+				part, err := reader.NextPart()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				read(part, part.Header.Get("Content-Type"), part.Header.Get("Content-Transfer-Encoding"))
+			}
+			return
+		}
+		if transfer == "base64" {
+			body = base64.NewDecoder(base64.StdEncoding, body)
+		}
+		data, err := io.ReadAll(body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		body, err := io.ReadAll(part)
-		if err != nil {
-			t.Fatal(err)
-		}
-		parts[kind] = string(body)
+		parts[kind] = string(data)
 	}
+	read(message.Body, message.Header.Get("Content-Type"), "")
 	return parts
 }
 
 func TestPanelLogoInEveryEmailType(t *testing.T) {
 	smtp := newInvitationSMTP(t)
 	h := newInvitationHarness(t, smtp)
+	writeEmailLogoFixture(t, h.router.cfg.Paths.DataDir, "logo.png", color.RGBA{R: 255, A: 255})
 	branding, _ := json.Marshal(PanelBrandingConfig{BrandName: "Acme & Cloud", LogoURL: "/branding/logo.png", AccentColor: "#123456"})
 	if err := h.db.SetPanelSetting(panelSettingBrandingKey, string(branding)); err != nil {
 		t.Fatal(err)
@@ -126,10 +146,10 @@ func TestPanelLogoInEveryEmailType(t *testing.T) {
 			}
 			parts := brandedEmailParts(t, smtp)
 			html := parts["text/html"]
-			if len(parts) != 2 || parts["text/plain"] == "" || strings.Contains(parts["text/plain"], "<img") {
+			if len(parts) != 3 || parts["text/plain"] == "" || parts["image/png"] == "" || strings.Contains(parts["text/plain"], "<img") {
 				t.Fatal("plain alternative changed", parts)
 			}
-			if strings.Count(html, "<img ") != 1 || !strings.Contains(html, `src="https://mail.example:8443/branding/logo.png"`) || !strings.Contains(html, `alt="Acme &amp; Cloud logo"`) || !strings.Contains(html, "#123456") {
+			if strings.Count(html, "<img ") != 1 || !strings.Contains(html, `src="cid:neopanel-logo"`) || !strings.Contains(html, `alt="Acme &amp; Cloud logo"`) || !strings.Contains(html, "#123456") {
 				t.Fatal("missing branded logo", html)
 			}
 			if strings.Contains(html, "untrusted.example") || strings.Contains(html, "spoof.example") || strings.Contains(html, "ZgotmplZ") {
@@ -138,7 +158,8 @@ func TestPanelLogoInEveryEmailType(t *testing.T) {
 		})
 	}
 	// A subsequent delivery reflects saved branding changes without restarting.
-	branding, _ = json.Marshal(PanelBrandingConfig{BrandName: "Changed", LogoURL: "https://cdn.example/new-logo.png"})
+	writeEmailLogoFixture(t, h.router.cfg.Paths.DataDir, "new-logo.png", color.RGBA{B: 255, A: 255})
+	branding, _ = json.Marshal(PanelBrandingConfig{BrandName: "Changed", LogoURL: "/branding/new-logo.png"})
 	if err := h.db.SetPanelSetting(panelSettingBrandingKey, string(branding)); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +169,7 @@ func TestPanelLogoInEveryEmailType(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	parts := brandedEmailParts(t, smtp)
-	if !strings.Contains(parts["text/html"], `src="https://cdn.example/new-logo.png"`) || strings.Contains(parts["text/html"], "Acme") {
+	if !strings.Contains(parts["text/html"], `src="cid:neopanel-logo"`) || !strings.Contains(parts["text/html"], "Changed") || strings.Contains(parts["text/html"], "Acme") {
 		t.Fatal("stale branding", parts["text/html"])
 	}
 }
@@ -171,5 +192,26 @@ func TestSMTPTestLogoWithoutPublicURLFallsBackSafely(t *testing.T) {
 	parts := brandedEmailParts(t, smtp)
 	if strings.Contains(parts["text/html"], "<img") || !strings.Contains(parts["text/html"], "My panel") {
 		t.Fatal("unsafe missing-origin fallback", parts["text/html"])
+	}
+}
+
+func writeEmailLogoFixture(t *testing.T, dataDir, name string, fill color.RGBA) {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			img.SetRGBA(x, y, fill)
+		}
+	}
+	var data bytes.Buffer
+	if err := png.Encode(&data, img); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(dataDir, "branding")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), data.Bytes(), 0600); err != nil {
+		t.Fatal(err)
 	}
 }

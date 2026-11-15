@@ -76,7 +76,7 @@ func TestInvitationExpiryRevocationRotationAndCollisions(t *testing.T) {
 	if _, e := db.RotateInvitation(i.ID, "new-hash", time.Now()); !errors.Is(e, ErrInvitationCooldown) {
 		t.Fatal(e)
 	}
-	rotated, e := db.RotateInvitation(i.ID, "new-hash", time.Now().Add(2*time.Minute))
+	rotated, e := db.RotateInvitation(i.ID, "new-hash", i.LastSentAt.Add(InvitationResendCooldown))
 	if e != nil {
 		t.Fatal(e)
 	}

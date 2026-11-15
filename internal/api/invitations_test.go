@@ -95,6 +95,8 @@ func (s *invitationSMTP) token(t *testing.T) string {
 	t.Helper()
 	select {
 	case message := <-s.messages:
+		parts := decodedEmailParts(t, message)
+		message = parts["text/plain"] + "\n" + parts["text/html"]
 		match := regexp.MustCompile(`https?://[^\s]+/#invite-token=([a-f0-9]{64})`).FindStringSubmatch(message)
 		if len(match) != 2 {
 			t.Fatal("email missing fragment invitation link")
@@ -264,7 +266,7 @@ func TestInvitationSMTPResendRevokeFailureValidation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	past := time.Now().UTC().Add(-2 * time.Minute)
+	past := time.Now().UTC().Add(-database.InvitationResendCooldown - time.Minute)
 	seed := &database.Invitation{ID: "resend-test", ServerID: "server", NodeID: "local", Username: "rotateduser", Email: "rotateduser@example.test", Permissions: []string{}, InviterID: h.owner.ID, TokenHash: hash, Status: "pending", DeliveryStatus: "sent", CreatedAt: past, LastSentAt: past, ExpiresAt: past.Add(72 * time.Hour)}
 	if e = h.db.CreateInvitation(seed); e != nil {
 		t.Fatal(e)

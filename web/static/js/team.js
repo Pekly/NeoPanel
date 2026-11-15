@@ -55,8 +55,15 @@ function renderTeamPage() {
     ${!invitations.length ? '<div class="np-empty-state"><b>No invitations yet</b><p class="mu">Invite a teammate by username and email.</p></div>' : `<div class="np-table-scroll"><table class="np-team-invitations"><thead><tr><th>Recipient</th><th>Permissions</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead><tbody>${invitations.map(invite => {
       const terminal = ['accepted', 'revoked'].includes(invite.status);
       const id = esc(String(invite.id));
-      return `<tr><td><b>${esc(invite.username)}</b><div class="mu pv">${esc(invite.email)}</div></td><td>${invite.permissions?.length || 0} permission${invite.permissions?.length === 1 ? '' : 's'}</td><td><span class="chip">${esc(invitationStatusLabel(invite))}</span></td><td class="mu">${esc(formatInvitationExpiry(invite.expires_at))}</td><td><div class="row">${terminal ? '—' : `<button class="btn sm" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'resend')" ${TeamUI.inviteAction ? 'disabled' : ''}>Resend</button><button class="btn sm dg" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'revoke')" ${TeamUI.inviteAction ? 'disabled' : ''}>Revoke</button>`}</div></td></tr>`;
+      const coolingDown = invitationResendCoolingDown(invite);
+      return `<tr><td><b>${esc(invite.username)}</b><div class="mu pv">${esc(invite.email)}</div></td><td>${invite.permissions?.length || 0} permission${invite.permissions?.length === 1 ? '' : 's'}</td><td><span class="chip">${esc(invitationStatusLabel(invite))}</span></td><td class="mu">${esc(formatInvitationExpiry(invite.expires_at))}</td><td><div class="row">${terminal ? '—' : `<button class="btn sm" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'resend')" ${TeamUI.inviteAction || coolingDown || invite.status === 'granting' ? 'disabled' : ''}>Resend</button><button class="btn sm dg" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'revoke')" ${TeamUI.inviteAction ? 'disabled' : ''}>Revoke</button>`}</div>${!terminal && coolingDown ? `<div class="mu pv">Resend after ${esc(formatInvitationResendTime(invite.resend_available_at))}</div>` : ''}</td></tr>`;
     }).join('')}</tbody></table></div>`}</section></div>`;
+}
+function invitationResendCoolingDown(invite) {
+  return new Date(invite?.resend_available_at).getTime() > Date.now();
+}
+function formatInvitationResendTime(value) {
+  return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 function invitationStatusLabel(invite) {
   if (['accepted', 'revoked'].includes(invite.status)) return invite.status;
@@ -101,6 +108,14 @@ async function submitTeamInvitation(event) {
 async function changeTeamInvitation(id, action) {
   const srv = curServer();
   if (!srv || !canManageTeam() || TeamUI.inviteAction) return;
+  const invite = S.teamState?.invitations?.find(invite => String(invite.id) === String(id));
+  if (action === 'resend') {
+    if (!invite || !['pending', 'expired'].includes(invite.status)) return;
+    if (invitationResendCoolingDown(invite)) {
+      toast(`Resend available after ${formatInvitationResendTime(invite.resend_available_at)}.`, 'bad');
+      return;
+    }
+  }
   if (action === 'revoke' && !await uiConfirm({ title: 'Revoke invitation?', message: 'Disable this invitation link. Existing accounts and server access stay unchanged.', confirmText: 'Revoke invitation', isDanger: true })) return;
   TeamUI.inviteAction = id;
   try {

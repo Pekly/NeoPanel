@@ -122,3 +122,30 @@ test('an unresolved granting invitation cannot be duplicated even after its expi
   const {c}=setup();c.S.teamState={invitations:[{username:'invitee',email:'invitee@example.test',status:'granting',expires_at:'2000-01-01'}]};
   assert.match(c.teamInvitationConflict('invitee','invitee@example.test'),/Already invited/);
 });
+
+test('resend cooldown disables only Resend, guards requests and refresh enables at the boundary',async()=>{
+  const {c,notices}=setup();
+  const deadline=Date.parse('2035-06-15T12:00:00Z');let now=deadline-1;
+  c.Date=class extends Date { static now(){return now;} };
+  const invite={id:'cooldown',username:'invitee',email:'invitee@example.test',status:'pending',delivery_status:'failed',resend_available_at:new Date(deadline).toISOString()};
+  c.S.teamState={permission:{is_owner:true},smtp_configured:true,invitations:[invite]};
+  let html=c.renderTeamPage();
+  assert.match(html,/<button[^>]*disabled[^>]*>Resend<\/button>/);
+  assert.match(html,/Resend after/);
+  assert.doesNotMatch(html,/<button[^>]*disabled[^>]*>Revoke<\/button>/);
+  const calls=[];c.api=async(url,opts)=>{calls.push({url,opts});if(url.endsWith('/permissions'))return {is_owner:true};if(url.endsWith('/subusers'))return [];return {smtp_configured:true,invitations:[invite]};};
+  await c.changeTeamInvitation('cooldown','resend');assert.equal(calls.length,0);assert.match(notices[0].message,/Resend available after/);
+  now=deadline;await c.loadTeamPage();html=c.renderTeamPage();
+  assert.doesNotMatch(html,/<button[^>]*disabled[^>]*>Resend<\/button>/);assert.doesNotMatch(html,/Resend after/);
+  await c.changeTeamInvitation('cooldown','resend');
+  assert.equal(calls.filter(call=>call.opts?.method==='POST'&&call.url.endsWith('/resend')).length,1);
+});
+test('eligible expired invitation can resend but terminal and granting invitations cannot',async()=>{
+  const {c}=setup();const invite={id:'eligible',status:'expired',resend_available_at:'2000-01-01'};
+  c.S.teamState={permission:{is_owner:true},smtp_configured:true,invitations:[invite]};
+  const calls=[];c.api=async(url,opts)=>{calls.push({url,opts});return {};};c.loadTeamPage=async()=>{};
+  assert.doesNotMatch(c.renderTeamPage(),/<button[^>]*disabled[^>]*>Resend<\/button>/);
+  await c.changeTeamInvitation('eligible','resend');assert.equal(calls.length,1);
+  for(const status of ['accepted','revoked','granting']){invite.status=status;await c.changeTeamInvitation('eligible','resend');}
+  assert.equal(calls.length,1);
+});

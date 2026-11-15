@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// InvitationResendCooldown limits each invitation independently, including failed deliveries.
+const InvitationResendCooldown = 2 * time.Hour
+
 // Invitation secrets and recovery account IDs are deliberately never serialized.
 type Invitation struct {
 	ID             string    `json:"id"`
@@ -27,13 +30,33 @@ type Invitation struct {
 	LastSentAt     time.Time `json:"-"`
 }
 
+func (i Invitation) ResendAvailableAt() time.Time {
+	return i.LastSentAt.Add(InvitationResendCooldown)
+}
+
+func (i Invitation) MarshalJSON() ([]byte, error) {
+	type invitation Invitation
+	return json.Marshal(struct {
+		invitation
+		ResendAvailableAt time.Time `json:"resend_available_at"`
+	}{invitation(i), i.ResendAvailableAt()})
+}
+
+// InvitationCooldownError carries the deadline read under the rotation lock.
+type InvitationCooldownError struct {
+	AvailableAt time.Time
+}
+
+func (e *InvitationCooldownError) Error() string { return ErrInvitationCooldown.Error() }
+func (e *InvitationCooldownError) Unwrap() error { return ErrInvitationCooldown }
+
 var (
 	ErrInvitationGone      = errors.New("invitation expired, revoked or already accepted")
 	ErrInvitationConflict  = errors.New("invitation conflicts with an existing account or pending invitation; use the account's exact username and email, or manage the pending invitation")
 	ErrInvitationIdentity  = errors.New("sign in to the existing account with the invited email; invitations cannot change passwords")
 	ErrInvitationForbidden = errors.New("inviter no longer has permission or server was deleted")
 	ErrInvitationBusy      = errors.New("remote acceptance is unresolved; retry acceptance or revoke before resending")
-	ErrInvitationCooldown  = errors.New("wait at least one minute before resending")
+	ErrInvitationCooldown  = errors.New("invitations can be resent every 2 hours; please wait until the next available time")
 	ErrInvitationMember    = fmt.Errorf("%w: this account already has server access; manage its existing permissions instead", ErrInvitationConflict)
 )
 
@@ -141,8 +164,8 @@ func (db *DB) RotateInvitation(id, hash string, now time.Time) (*Invitation, err
 	if err = invitationPending(tx, i); err != nil {
 		return nil, err
 	}
-	if now.Sub(i.LastSentAt) < time.Minute {
-		return nil, ErrInvitationCooldown
+	if now.Before(i.ResendAvailableAt()) {
+		return nil, &InvitationCooldownError{AvailableAt: i.ResendAvailableAt()}
 	}
 	i.TokenHash = hash
 	i.ExpiresAt = now.Add(72 * time.Hour)

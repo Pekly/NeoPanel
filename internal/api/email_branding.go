@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// Normal image URLs work across mail clients without fetching administrator-selected
-// URLs on the daemon. Inline data/SVG markup and credential-bearing URLs are not used.
+// Resolve image URLs without inheriting account-link credentials or tokens.
+// SendEmail converts this marked header image into a mail-compatible inline PNG.
 func emailLogoURL(raw, panelURL string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > 4096 || strings.ContainsAny(raw, "\\\r\n\x00") {
@@ -108,7 +108,7 @@ func emailBrand(brand PanelBrandingConfig, panelURL string) emailBranding {
 	return b
 }
 
-const emailBrandHeaderTemplate = `{{define "emailBrand"}}<table role="presentation" cellspacing="0" cellpadding="0" class="np-email-brand"><tr>{{if .LogoURL}}<td width="24" style="width:24px;padding:0 10px 0 0;vertical-align:middle;"><img src="{{.LogoURL}}" alt="{{.Name}} logo" width="24" height="24" style="display:block;width:24px;height:24px;object-fit:contain;border:0;"></td>{{end}}<td style="padding:0;vertical-align:middle;color:{{.Text}};font-size:18px;font-weight:bold;line-height:24px;word-break:break-word;overflow-wrap:anywhere;">{{.Name}}</td></tr></table>{{end}}`
+const emailBrandHeaderTemplate = `{{define "emailBrand"}}<table role="presentation" cellspacing="0" cellpadding="0" class="np-email-brand"><tr>{{if .LogoURL}}<td data-neopanel-logo="true" width="24" style="width:24px;padding:0 10px 0 0;vertical-align:middle;"><img src="{{.LogoURL}}" alt="{{.Name}} logo" width="24" height="24" style="display:block;width:24px;height:24px;object-fit:contain;border:0;"></td>{{end}}<td style="padding:0;vertical-align:middle;color:{{.Text}};font-size:18px;font-weight:bold;line-height:24px;word-break:break-word;overflow-wrap:anywhere;">{{.Name}}</td></tr></table>{{end}}`
 
 var emailBrandHeader = template.Must(template.New("branding").Parse(emailBrandHeaderTemplate))
 

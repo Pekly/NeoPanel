@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/mail"
 	"regexp"
@@ -98,6 +99,13 @@ func invitationError(w http.ResponseWriter, err error) {
 	case errors.Is(err, database.ErrInvitationCooldown):
 		code = 429
 		message = err.Error()
+		var cooldown *database.InvitationCooldownError
+		if errors.As(err, &cooldown) {
+			seconds := max(1, int(math.Ceil(time.Until(cooldown.AvailableAt).Seconds())))
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			writeJSON(w, code, map[string]any{"error": message, "resend_available_at": cooldown.AvailableAt})
+			return
+		}
 	default:
 		var remote *invitationRemoteError
 		if errors.As(err, &remote) {
@@ -282,7 +290,7 @@ func (h *InvitationHandler) deliver(w http.ResponseWriter, i *database.Invitatio
 		return
 	}
 	if err != nil {
-		writeJSON(w, 502, map[string]any{"error": "SMTP delivery failed; invitation retained. Correct SMTP settings and resend.", "invitation": i})
+		writeJSON(w, 502, map[string]any{"error": "SMTP delivery failed; invitation retained. Correct SMTP settings and resend when the 2-hour cooldown ends.", "invitation": i})
 		return
 	}
 	writeJSON(w, code, i)

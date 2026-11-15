@@ -1,5 +1,17 @@
 # Invitation-created account lifecycle
 
+## Email delivery
+
+Each invitation can be resent once every **2 hours**, including after a failed
+delivery attempt. The Team page shows when Resend becomes available. Resending
+creates a new link; the previous link stops working.
+
+Emails show the full invitation URL and include a small PNG copy of the logo.
+Uploaded logos are read locally; external logos must use public HTTPS. Missing,
+unsupported, or oversized images fall back to the panel name. PNG/JPEG/GIF/WebP
+and basic SVG logos up to 2 MiB are supported; SVGs must be under 128 KiB and use
+supported vector shapes without style blocks, scripts, linked images, or filters.
+
 ## Local account cleanup
 
 An account is eligible only when `users.invitation_created` is true. This flag is
@@ -19,9 +31,9 @@ failure does not remove the accounts or memberships.
 
 Cleanup retains the account if **any** server ownership or membership remains,
 regardless of the server's node or permission list. Built-in user ID 1, admins,
-unknown/non-user roles, and any assigned panel role are retained. Unresolved
-invitation grants and remote identities are also retained (see below). There is
-no background orphan sweep: a later role change alone does not trigger deletion.
+unknown/non-user roles are retained. Former custom-role accounts are made
+independent during upgrade. Unresolved invitation grants and remote identities
+are also retained. There is no background orphan sweep.
 
 Eligible deletion removes password/TOTP/recovery information with the user row,
 and explicitly deletes SSH keys, API keys, password reset tokens, passkeys and

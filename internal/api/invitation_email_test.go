@@ -93,7 +93,7 @@ func TestInvitationEmailCompactWidthSafetyAndBranding(t *testing.T) {
 		`src="https://panel.example.test/brand.svg"`, `alt="Example &amp; Cloud logo"`,
 		`width="24" height="24"`, "#123456", "#ffffff", "#0f172a",
 		html.EscapeString(username), html.EscapeString(server), html.EscapeString(permission),
-		`>Accept invitation</a>`, `>Open invitation link</a>`, "copy its link address",
+		`>Accept invitation</a>`, "Invitation link:", `word-break:break-all;overflow-wrap:anywhere;`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Errorf("HTML missing %q", want)
@@ -104,8 +104,8 @@ func TestInvitationEmailCompactWidthSafetyAndBranding(t *testing.T) {
 			t.Errorf("HTML contains %q", unwanted)
 		}
 	}
-	if strings.Count(output, "<img ") != 1 || strings.Count(output, `href="`+html.EscapeString(link)+`"`) != 2 || strings.Contains(output, ">"+html.EscapeString(link)+"</a>") {
-		t.Error("logo or compact CTA/fallback changed")
+	if strings.Count(output, "<img ") != 1 || strings.Count(output, `href="`+html.EscapeString(link)+`"`) != 2 || !strings.Contains(output, ">"+html.EscapeString(link)+"</a>") {
+		t.Error("logo or visible full invitation link changed")
 	}
 	for _, want := range []string{"12 Jun 2030 at 15:30 UTC", "Single-use link; do not share it.", "Sign in with the account matching this invitation.", "Register using the requested username and invited email.", "Existing passwords stay unchanged.", "No access is granted until you accept."} {
 		if !strings.Contains(output, want) || !strings.Contains(plain, want) {
