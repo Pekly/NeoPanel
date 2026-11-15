@@ -1,9 +1,10 @@
 # NeoPanel Desktop for Windows
 
-The `windows-desktop` branch adds a standalone Windows application using Wails and
-Microsoft Edge WebView2. Double-click **NeoPanel-Desktop.exe**: the app opens its own
-native window and starts its local Go backend. No console launcher or browser tab
-is needed. The familiar panel interface is embedded, not rewritten into WinUI controls.
+The `windows-desktop-release` branch contains the Windows-only prerelease
+`v1.0.0-windows-beta.1`; `main` and the Linux release path remain unchanged.
+Double-click **NeoPanel-Desktop.exe** to open the app's own window and local Go
+backend. No console launcher or browser tab is needed. The familiar panel interface
+is embedded using Wails and Microsoft Edge WebView2.
 
 The same app is the head/master, can host trusted Minecraft servers locally, and
 can manage separate web-less Linux or Windows nodes. Players still connect directly
@@ -11,7 +12,8 @@ to each game server's host/port; the head does not tunnel game traffic.
 
 ## Build and run
 
-On Windows with Go 1.26+:
+On Windows with Git and Go 1.26+, check out `windows-desktop-release`, then run
+these commands from the repository root:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build-windows-desktop.ps1
@@ -24,14 +26,27 @@ Use `-Architecture arm64` to cross-build for Windows ARM64. The pinned resource
 builder is downloaded through Go modules on the first build. Node/npm and the Wails
 CLI are not required: the current interface has no frontend compilation step.
 
+Desktop dependencies live in the nested `desktop/go.mod` module, the application
+in `desktop/internal/desktop`, and its entry point in `desktop/cmd/neopanel-desktop`.
+The root PowerShell script handles the separate build. To run desktop tests on Windows:
+
+```powershell
+Push-Location .\desktop
+go test -tags desktop ./...
+Pop-Location
+```
+
 To run a package you only need Windows 10/11 and Microsoft Edge WebView2 Runtime
 (normally already present). Go is not needed. If WebView2 is missing, install it
-from Microsoft's official WebView2 download page; no runtime is bundled in the ZIP.
+from [Microsoft's WebView2 page](https://developer.microsoft.com/en-us/microsoft-edge/webview2/);
+no runtime is bundled in the ZIP.
 Java is needed only for local Java servers and can be installed through the panel.
 
-### Optional installer
+### Portable beta and optional installer
 
-Install Inno Setup 6, then:
+This beta ships the portable EXE/ZIP only. Inno Setup was unavailable for this
+release, so no setup EXE is included or claimed as tested. The portable build does
+not need Inno Setup. For your own optional installer build, install Inno Setup 6:
 
 ```powershell
 .\build-windows-desktop.ps1 -Installer
@@ -60,7 +75,7 @@ separate from the console panel so both cannot accidentally use the same databas
 | Desktop log | `%LOCALAPPDATA%\NeoPanel-Desktop\desktop.log` |
 | Window preferences | `%LOCALAPPDATA%\NeoPanel-Desktop\window.json` |
 
-**NeoPanel → Open app data folder** opens this folder. A second launch for the same
+The toolbar's **Data folder** button opens this folder. A second launch for the same
 data directory focuses the existing window rather than starting another backend.
 
 An alternate instance can be launched with an explicit data directory:
@@ -93,6 +108,13 @@ browser-based head, SFTP, or a separately managed background service.
 - For Windows workers select Automatic/Host Direct process management, not a Linux
   isolation engine. Linux workers keep their existing isolation mechanisms.
 
+## Window controls
+
+The frameless window has a custom toolbar with **Dashboard**, **Reload**, and
+**Data folder** actions, plus minimize, maximize/restore, and safe close. Drag the
+empty title-bar area to move the window. Reload refreshes the interface, not the
+backend or game servers; save editor changes before reloading.
+
 ## Closing and background operation
 
 Minimizing the app keeps the backend and local servers running in the taskbar.
@@ -100,7 +122,7 @@ There is no tray-only mode in this first desktop version. Closing with active lo
 servers asks whether to stop/save and quit (**Yes**) or minimize/keep running (**No**).
 The window remains responsive while shutting down. Remote workers are not stopped.
 Without active local servers, closing exits normally. Window size/maximized state
-is saved. The View menu can reset window size or reload the interface.
+is saved. Use the toolbar to return to the dashboard or reload the interface.
 
 The existing runner sends each engine's normal stop command and waits before its
 bounded force-stop fallback. A crashed/hung server may require force termination;
@@ -110,13 +132,15 @@ can interrupt hosting; this app is not an always-on Windows service.
 
 ## Security and compatibility
 
-- The native shell exposes no panel-callable Go bindings. The panel continues to
-  use its existing authenticated HTTP/WebSocket APIs on loopback.
+- Panel operations continue to use the existing authenticated HTTP/WebSocket APIs
+  on loopback; the native toolbar does not replace panel authentication.
 - Windows local workloads are **trusted-only**. Job Objects manage process trees
   and memory but do not isolate filesystem, account credentials or network access.
 - No automatic elevation, firewall opening, node deployment or EULA approval is
   added by the desktop shell.
-- The existing `cmd/neopanel` and `-tags node` builds remain available. Desktop-only
-  Wails code is Windows-gated; Linux headless builds do not require GTK/WebKit.
-- Branch creation carries uncommitted changes onto this branch; it does not create
-  a commit or push a release automatically.
+- The existing `cmd/neopanel` and `-tags node` builds remain available. Wails belongs
+  only to `desktop/go.mod`, not the root module. Linux install/update checkouts omit
+  desktop code, packaging, Windows scripts, and Windows documentation, while keeping
+  shared Windows build-tag code. Linux builds do not install Wails, GTK, or WebKit.
+- Read the [security upgrade notes](https://github.com/Pekly/NeoPanel/blob/main/docs/security-upgrade.md)
+  before upgrading an existing panel or workers.
