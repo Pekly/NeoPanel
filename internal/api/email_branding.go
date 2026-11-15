@@ -42,7 +42,7 @@ func emailLogoURL(raw, panelURL string) string {
 }
 
 type emailBranding struct {
-	Name, Accent, LogoURL                                                      string
+	Name, Accent, LogoURL, LogoSource, LogoAccent                              string
 	Background, Surface, Header, Text, Muted, Border, Inner, ButtonText, Theme string
 	Radius                                                                     int
 }
@@ -102,13 +102,16 @@ func emailBrand(brand PanelBrandingConfig, panelURL string) emailBranding {
 	b.Muted, b.Border = emailMix(b.Text, b.Surface, .72), emailMix(b.Text, b.Surface, .16)
 	b.ButtonText = emailButtonText(b.Accent)
 	b.LogoURL = emailLogoURL(brand.LogoURL, panelURL)
+	// Match brandLogoHtml: logo_url is the sidebar logo; favicon_url is separate.
+	b.LogoSource = strings.TrimSpace(brand.LogoURL)
+	b.LogoAccent = emailColor(brand.AccentColor, "#387aff")
 	if brand.BorderRadiusPx >= 0 && brand.BorderRadiusPx <= 28 {
 		b.Radius = brand.BorderRadiusPx
 	}
 	return b
 }
 
-const emailBrandHeaderTemplate = `{{define "emailBrand"}}<table role="presentation" cellspacing="0" cellpadding="0" class="np-email-brand"><tr>{{if .LogoURL}}<td data-neopanel-logo="true" width="24" style="width:24px;padding:0 10px 0 0;vertical-align:middle;"><img src="{{.LogoURL}}" alt="{{.Name}} logo" width="24" height="24" style="display:block;width:24px;height:24px;object-fit:contain;border:0;"></td>{{end}}<td style="padding:0;vertical-align:middle;color:{{.Text}};font-size:18px;font-weight:bold;line-height:24px;word-break:break-word;overflow-wrap:anywhere;">{{.Name}}</td></tr></table>{{end}}`
+const emailBrandHeaderTemplate = `{{define "emailBrand"}}<table role="presentation" cellspacing="0" cellpadding="0" class="np-email-brand"><tr><td data-neopanel-logo="true" data-logo-source="{{.LogoSource}}" data-logo-accent="{{.LogoAccent}}" width="24" style="width:24px;padding:0 10px 0 0;vertical-align:middle;"><img src="{{if .LogoURL}}{{.LogoURL}}{{else}}cid:neopanel-logo{{end}}" alt="{{.Name}} logo" width="24" height="24" style="display:block;width:24px;height:24px;object-fit:contain;border:0;"></td><td style="padding:0;vertical-align:middle;color:{{.Text}};font-size:18px;font-weight:bold;line-height:24px;word-break:break-word;overflow-wrap:anywhere;">{{.Name}}</td></tr></table>{{end}}`
 
 var emailBrandHeader = template.Must(template.New("branding").Parse(emailBrandHeaderTemplate))
 

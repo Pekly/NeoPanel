@@ -72,6 +72,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	scheduleHandler := NewScheduleHandler(db, manager)
 	clientAPIHandler := NewClientAPIHandler(cfg, db, manager)
 	emailHandler := NewEmailHandler(db, cfg, authHandler)
+	emailHandler.assets = embeddedStatic
 
 	r := &Router{
 		mux:            http.NewServeMux(),

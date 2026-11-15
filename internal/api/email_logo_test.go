@@ -162,9 +162,9 @@ func TestEmailLogoLocalSVGAndMIMEAttachment(t *testing.T) {
 	}
 	for _, path := range []string{"/branding/missing.png", "/branding/../secret.png", "/branding/%2e%2e%2fsecret.png"} {
 		source := renderEmailBrand(emailBrand(PanelBrandingConfig{BrandName: "Test Brand", LogoURL: cfg.Server.PublicURL + path}, cfg.Server.PublicURL))
-		fallback, image := h.prepareEmailLogo(source)
-		if len(image) != 0 || strings.Contains(fallback, "<img") || !strings.Contains(fallback, "Test Brand") {
-			t.Fatal("bad fallback", fallback)
+		fallback, image, warning := h.prepareSidebarEmailLogo(source)
+		if len(image) == 0 || !warning || !strings.Contains(fallback, `src="cid:neopanel-logo"`) || !strings.Contains(fallback, "Test Brand") {
+			t.Fatal("missing sidebar fallback or diagnostic", fallback)
 		}
 	}
 	if preview := os.Getenv("NEOPANEL_EMAIL_LOGO_PREVIEW_DIR"); preview != "" {

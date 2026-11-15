@@ -99,11 +99,18 @@ func invitationError(w http.ResponseWriter, err error) {
 	case errors.Is(err, database.ErrInvitationCooldown):
 		code = 429
 		message = err.Error()
+		var budget *database.InvitationSendBudgetError
+		if errors.As(err, &budget) {
+			seconds := max(1, int(math.Ceil(time.Until(budget.AvailableAt).Seconds())))
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			writeJSON(w, code, map[string]any{"error": message, "scope": budget.Scope, "send_available_at": budget.AvailableAt, "resend_available_at": budget.AvailableAt})
+			return
+		}
 		var cooldown *database.InvitationCooldownError
 		if errors.As(err, &cooldown) {
 			seconds := max(1, int(math.Ceil(time.Until(cooldown.AvailableAt).Seconds())))
 			w.Header().Set("Retry-After", strconv.Itoa(seconds))
-			writeJSON(w, code, map[string]any{"error": message, "resend_available_at": cooldown.AvailableAt})
+			writeJSON(w, code, map[string]any{"error": message, "scope": "invitation", "send_available_at": cooldown.AvailableAt, "resend_available_at": cooldown.AvailableAt})
 			return
 		}
 	default:
@@ -322,8 +329,13 @@ func (h *InvitationHandler) List(w http.ResponseWriter, r *http.Request) {
 		invitationError(w, e)
 		return
 	}
+	availability, e := h.db.InvitationSendAvailability(c.UserID, nodeID, server, time.Now().UTC())
+	if e != nil {
+		invitationError(w, e)
+		return
+	}
 	_, e = h.smtp()
-	writeJSON(w, 200, map[string]any{"invitations": list, "smtp_configured": e == nil})
+	writeJSON(w, 200, map[string]any{"invitations": list, "smtp_configured": e == nil, "send_availability": availability})
 }
 func (h *InvitationHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !h.master(w, r) {
@@ -397,7 +409,7 @@ func (h *InvitationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		invitationError(w, e)
 		return
 	}
-	if e = h.db.CreateInvitation(i); e != nil {
+	if e = h.db.CreateInvitationForSend(i); e != nil {
 		invitationError(w, e)
 		return
 	}
@@ -461,7 +473,7 @@ func (h *InvitationHandler) Resend(w http.ResponseWriter, r *http.Request) {
 		invitationError(w, e)
 		return
 	}
-	i, e = h.db.RotateInvitation(i.ID, hash, time.Now().UTC())
+	i, e = h.db.RotateInvitationForSend(i.ID, hash, time.Now().UTC(), c.UserID)
 	if e != nil {
 		invitationError(w, e)
 		return

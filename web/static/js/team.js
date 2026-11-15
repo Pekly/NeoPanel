@@ -1,5 +1,5 @@
 // Team management and invitation registration. Loaded before app.js.
-const TeamUI = { sequence: 0, inviteServer: null, memberServer: null, sending: false, inviteAction: null };
+const TeamUI = { sequence: 0, inviteServer: null, memberServer: null, sending: false, inviteAction: null, recipientSession: '', recipientCooldowns: new Map() };
 const InvitationUI = { token: '', info: null, error: '', busy: false, accepted: false };
 
 function canManageTeam(permission = S.teamState?.permission) {
@@ -30,6 +30,7 @@ async function loadTeamPage(skipRender = false) {
       S.serverSubusers = Array.isArray(members) ? members : (members.subusers || []);
       state.invitations = invites.invitations || [];
       state.smtp_configured = Boolean(invites.smtp_configured);
+      state.send_availability = invites.send_availability;
     } else S.serverSubusers = [];
     S.teamState = state;
   } catch (err) {
@@ -49,21 +50,55 @@ function renderTeamPage() {
   if (!canManageTeam()) return header + `<div class="card"><h3>Team management is restricted</h3><p class="mu">You need Manage Team permission to add members or send invitations.</p></div>`;
   const invitations = state.invitations || [];
   return header + `<div class="np-team-stack">
-    <section class="card"><div class="np-team-heading"><div><h3>Members</h3><p class="mu">${S.serverSubusers?.length || 0} team member${S.serverSubusers?.length === 1 ? '' : 's'} · Owner and administrator access stays unchanged.</p></div><div class="row"><button class="btn sm" onclick="openSubuserModal()">${ic('user', 13)} Add existing user</button><button class="btn sm pr" id="team-invite-btn" onclick="openTeamInviteModal()">${ic('mail', 13)} Invite by email</button></div></div><div id="subusers-list-wrap">${renderSubusersListHtml(srv)}</div></section>
+    <section class="card"><div class="np-team-heading"><div><h3>Members</h3><p class="mu">${S.serverSubusers?.length || 0} team member${S.serverSubusers?.length === 1 ? '' : 's'} · Owner and administrator access stays unchanged.</p></div><div class="row"><button class="btn sm" onclick="openSubuserModal()">${ic('user', 13)} Add existing user</button><button class="btn sm pr" id="team-invite-btn" onclick="openTeamInviteModal()" ${!state.smtp_configured || teamSendCoolingDown() ? 'disabled' : ''}>${ic('mail', 13)} Invite by email</button></div></div><div id="subusers-list-wrap">${renderSubusersListHtml(srv)}</div></section>
     <section class="card"><div class="np-team-heading"><div><h3>Email invitations</h3><p class="mu">Send a single-use link. No server access until accepted.</p></div></div>
     ${!state.smtp_configured ? '<p class="np-team-notice" role="status">Enable SMTP in Admin → Email &amp; SMTP to send invitations. You can still add existing users directly.</p>' : ''}
+    ${teamSendCoolingDown() ? `<p class="np-team-notice" role="status">Invitation ${esc(state.send_availability.scope || 'send')} limit reached. Send after ${esc(formatInvitationResendTime(state.send_availability.available_at))}. Refresh to update availability.</p>` : ''}
     ${!invitations.length ? '<div class="np-empty-state"><b>No invitations yet</b><p class="mu">Invite a teammate by username and email.</p></div>' : `<div class="np-table-scroll"><table class="np-team-invitations"><thead><tr><th>Recipient</th><th>Permissions</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead><tbody>${invitations.map(invite => {
       const terminal = ['accepted', 'revoked'].includes(invite.status);
       const id = esc(String(invite.id));
       const coolingDown = invitationResendCoolingDown(invite);
-      return `<tr><td><b>${esc(invite.username)}</b><div class="mu pv">${esc(invite.email)}</div></td><td>${invite.permissions?.length || 0} permission${invite.permissions?.length === 1 ? '' : 's'}</td><td><span class="chip">${esc(invitationStatusLabel(invite))}</span></td><td class="mu">${esc(formatInvitationExpiry(invite.expires_at))}</td><td><div class="row">${terminal ? '—' : `<button class="btn sm" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'resend')" ${TeamUI.inviteAction || coolingDown || invite.status === 'granting' ? 'disabled' : ''}>Resend</button><button class="btn sm dg" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'revoke')" ${TeamUI.inviteAction ? 'disabled' : ''}>Revoke</button>`}</div>${!terminal && coolingDown ? `<div class="mu pv">Resend after ${esc(formatInvitationResendTime(invite.resend_available_at))}</div>` : ''}</td></tr>`;
+      return `<tr><td><b>${esc(invite.username)}</b><div class="mu pv">${esc(invite.email)}</div></td><td>${invite.permissions?.length || 0} permission${invite.permissions?.length === 1 ? '' : 's'}</td><td><span class="chip">${esc(invitationStatusLabel(invite))}</span></td><td class="mu">${esc(formatInvitationExpiry(invite.expires_at))}</td><td><div class="row">${terminal ? '—' : `<button class="btn sm" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'resend')" ${TeamUI.inviteAction || coolingDown || !state.smtp_configured || invite.status === 'granting' ? 'disabled' : ''}>Resend</button><button class="btn sm dg" data-invite-id="${id}" onclick="changeTeamInvitation(this.dataset.inviteId, 'revoke')" ${TeamUI.inviteAction ? 'disabled' : ''}>Revoke</button>`}</div>${!terminal && coolingDown ? `<div class="mu pv">Resend after ${esc(formatInvitationResendTime(invitationNextSendTime(invite)))}</div>` : ''}</td></tr>`;
     }).join('')}</tbody></table></div>`}</section></div>`;
 }
+function teamSendCoolingDown() {
+  return new Date(S.teamState?.send_availability?.available_at).getTime() > Date.now();
+}
+function invitationNextSendTime(invite) {
+  return new Date(Math.max(new Date(invite?.resend_available_at).getTime() || 0, new Date(S.teamState?.send_availability?.available_at).getTime() || 0, invitationRecipientDeadline(invite?.email)));
+}
 function invitationResendCoolingDown(invite) {
-  return new Date(invite?.resend_available_at).getTime() > Date.now();
+  return invitationNextSendTime(invite).getTime() > Date.now();
 }
 function formatInvitationResendTime(value) {
   return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function invitationRecipientDeadline(email) {
+  const session = `${S.user?.id || ''}:${S.token || ''}`;
+  if (TeamUI.recipientSession !== session) { TeamUI.recipientSession = session; TeamUI.recipientCooldowns.clear(); }
+  for (const [key, until] of TeamUI.recipientCooldowns) if (until <= Date.now()) TeamUI.recipientCooldowns.delete(key);
+  return TeamUI.recipientCooldowns.get(String(email || '').trim().toLowerCase()) || 0;
+}
+function invitationSendError(error, email, token) {
+  if (token !== S.token) return error.message;
+  const until = new Date(error.data?.send_available_at || error.data?.resend_available_at).getTime();
+  if (error.status !== 429 || !Number.isFinite(until) || until <= Date.now()) return error.message;
+  if (error.data?.scope === 'recipient') {
+    invitationRecipientDeadline(email);
+    TeamUI.recipientCooldowns.set(String(email || '').trim().toLowerCase(), until);
+    if (TeamUI.recipientCooldowns.size > 100) TeamUI.recipientCooldowns.delete(TeamUI.recipientCooldowns.keys().next().value);
+  }
+  return `${error.message} Try again after ${formatInvitationResendTime(until)}.`;
+}
+function updateTeamInviteAvailability(clearError = false) {
+  const input = document.querySelector('#team-invite-email');
+  const button = document.querySelector('#team-invite-submit');
+  const error = document.querySelector('#team-invite-error');
+  if (!input || !button) return;
+  const until = invitationRecipientDeadline(input.value);
+  button.disabled = TeamUI.sending || teamSendCoolingDown() || until > Date.now();
+  if (error && until > Date.now()) error.textContent = `This recipient can be invited after ${formatInvitationResendTime(until)}.`;
+  else if (error && clearError) error.textContent = '';
 }
 function invitationStatusLabel(invite) {
   if (['accepted', 'revoked'].includes(invite.status)) return invite.status;
@@ -78,20 +113,26 @@ function teamPermissionChecklist(selected = ['console.view']) {
 }
 function openTeamInviteModal() {
   if (!canManageTeam()) return;
+  if (teamSendCoolingDown()) { toast('Invitation send limit reached. Refresh after the displayed next send time.', 'bad'); return; }
   if (!S.teamState.smtp_configured) { uiAlert({ title: 'Email is not configured', message: 'Ask an administrator to enable SMTP in Admin → Email &amp; SMTP, then refresh.' }); return; }
   TeamUI.inviteServer = { ...curServer() };
   const container = document.querySelector('#modal-container');
   container.innerHTML = `<div class="pal" onclick="if(event.target===this&&!TeamUI.sending)closeModal()"><div class="card pbox np-team-modal" role="dialog" aria-modal="true" aria-labelledby="team-invite-title"><div class="np-team-heading"><h2 id="team-invite-title">Invite a teammate</h2><button class="btn sm" onclick="closeModal()" aria-label="Close invitation">×</button></div><p class="mu">Invite someone to <b>${esc(TeamUI.inviteServer.name)}</b>. New users register; existing users sign in. Use their current username and email if registered. Existing members cannot be invited again.</p>
     <form id="team-invite-form" onsubmit="submitTeamInvitation(event)"><div class="grid g2"><label class="f"><span>Requested username</span><input id="team-invite-username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9][A-Za-z0-9_.\\-]{2,31}" autocomplete="off" placeholder="teammate"></label><label class="f"><span>Email address</span><input id="team-invite-email" type="email" required maxlength="254" autocomplete="off" placeholder="teammate@example.com"></label></div><h3>Server permissions</h3><p class="mu">Choose only needed permissions. No access until accepted.</p>${teamPermissionChecklist()}<p id="team-invite-error" class="upload-error" role="alert"></p><div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn" type="button" onclick="closeModal()">Cancel</button><button id="team-invite-submit" class="btn pr" type="submit">Send invitation</button></div></form></div></div>`;
   document.querySelector('#team-invite-username').focus();
+  document.querySelector('#team-invite-email')?.addEventListener?.('input', () => updateTeamInviteAvailability(true));
+  updateTeamInviteAvailability();
 }
 async function submitTeamInvitation(event) {
   event.preventDefault();
   const srv = TeamUI.inviteServer;
   if (TeamUI.sending || !srv || !sameQolServer(srv, curServer())) return;
+  if (teamSendCoolingDown()) { document.querySelector('#team-invite-error').textContent = 'Invitation send limit reached. Refresh after the displayed next send time.'; return; }
   const form = document.querySelector('#team-invite-form');
   if (!form?.reportValidity()) return;
+  const token = S.token;
   const body = { server_id: srv.id, node_id: srv.node_id || 'local', username: document.querySelector('#team-invite-username').value.trim(), email: document.querySelector('#team-invite-email').value.trim(), permissions: [...form.querySelectorAll('[name=permissions]:checked')].map(el => el.value) };
+  if (invitationRecipientDeadline(body.email) > Date.now()) { updateTeamInviteAvailability(); return; }
   const conflict = teamInvitationConflict(body.username, body.email, srv);
   if (conflict) { document.querySelector('#team-invite-error').textContent = conflict; return; }
   TeamUI.sending = true;
@@ -101,18 +142,20 @@ async function submitTeamInvitation(event) {
     closeModal(); toast(result.message || 'Invitation email sent.', 'ok');
     if (sameQolServer(srv, curServer())) await loadTeamPage();
   } catch (err) {
-    const error = document.querySelector('#team-invite-error'); if (error) error.textContent = err.message;
+    const error = document.querySelector('#team-invite-error'); if (error && token === S.token) error.textContent = invitationSendError(err, body.email, token);
     if (sameQolServer(srv, curServer())) await loadTeamPage();
-  } finally { TeamUI.sending = false; if (button?.isConnected) setBtnLoading(button, false); }
+  } finally { TeamUI.sending = false; if (button?.isConnected) { setBtnLoading(button, false); updateTeamInviteAvailability(); } }
 }
 async function changeTeamInvitation(id, action) {
   const srv = curServer();
   if (!srv || !canManageTeam() || TeamUI.inviteAction) return;
+  const token = S.token;
   const invite = S.teamState?.invitations?.find(invite => String(invite.id) === String(id));
   if (action === 'resend') {
     if (!invite || !['pending', 'expired'].includes(invite.status)) return;
+    if (!S.teamState.smtp_configured) { toast('Email is not configured.', 'bad'); return; }
     if (invitationResendCoolingDown(invite)) {
-      toast(`Resend available after ${formatInvitationResendTime(invite.resend_available_at)}.`, 'bad');
+      toast(`Resend available after ${formatInvitationResendTime(invitationNextSendTime(invite))}.`, 'bad');
       return;
     }
   }
@@ -122,7 +165,7 @@ async function changeTeamInvitation(id, action) {
     const url = `/api/team/invitations/${encodeURIComponent(id)}` + (action === 'resend' ? '/resend' : '');
     const result = await api(url, { method: action === 'resend' ? 'POST' : 'DELETE', suppressToast: true });
     toast(result.message || (action === 'resend' ? 'Invitation resent. The old link no longer works.' : 'Invitation revoked.'), 'ok');
-  } catch (err) { toast(err.message, 'bad'); }
+  } catch (err) { toast(invitationSendError(err, invite?.email, token), 'bad'); }
   finally { TeamUI.inviteAction = null; if (sameQolServer(srv, curServer())) await loadTeamPage(); }
 }
 

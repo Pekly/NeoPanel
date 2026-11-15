@@ -73,7 +73,10 @@ func (db *DB) MigrateInvitations() error {
  id TEXT PRIMARY KEY, server_id TEXT NOT NULL, user_id INTEGER NOT NULL, permissions TEXT NOT NULL,
  status TEXT NOT NULL, membership_id INTEGER NOT NULL DEFAULT 0
  );`)
-	return err
+	if err != nil {
+		return err
+	}
+	return db.migrateInvitationSendBudget()
 }
 
 const invitationColumns = `id,server_id,node_id,username,email,permissions,inviter_id,token_hash,status,delivery_status,expires_at,created_at,last_sent_at,account_id`
@@ -114,6 +117,16 @@ func (db *DB) ListInvitations(server, node string) ([]*Invitation, error) {
 	return out, rows.Err()
 }
 func (db *DB) CreateInvitation(i *Invitation) error {
+	return db.createInvitation(i, false)
+}
+
+// CreateInvitationForSend atomically reserves the sender/server/recipient budgets.
+// CreateInvitation is a non-delivery helper; HTTP delivery must use this method.
+func (db *DB) CreateInvitationForSend(i *Invitation) error {
+	return db.createInvitation(i, true)
+}
+
+func (db *DB) createInvitation(i *Invitation, send bool) error {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return err
@@ -128,6 +141,14 @@ func (db *DB) CreateInvitation(i *Invitation) error {
 	if err = invitationPending(tx, i); err != nil {
 		return err
 	}
+	if send {
+		if err = invitationSendActor(tx, i, i.InviterID); err != nil {
+			return err
+		}
+		if err = reserveInvitationSend(tx, i, i.InviterID, i.LastSentAt, time.Time{}); err != nil {
+			return err
+		}
+	}
 	p, _ := json.Marshal(i.Permissions)
 	_, err = tx.Exec(`INSERT INTO team_invitations (`+invitationColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)`, i.ID, i.ServerID, i.NodeID, i.Username, i.Email, string(p), i.InviterID, i.TokenHash, i.Status, i.DeliveryStatus, i.ExpiresAt, i.CreatedAt, i.LastSentAt)
 	if err != nil {
@@ -140,6 +161,18 @@ func (db *DB) InvitationDelivery(id, hash, status string) error {
 	return err
 }
 func (db *DB) RotateInvitation(id, hash string, now time.Time) (*Invitation, error) {
+	return db.rotateInvitation(id, hash, now, 0)
+}
+
+// RotateInvitationForSend charges the actual caller, never the original inviter.
+func (db *DB) RotateInvitationForSend(id, hash string, now time.Time, actorID int) (*Invitation, error) {
+	if actorID <= 0 {
+		return nil, ErrInvitationForbidden
+	}
+	return db.rotateInvitation(id, hash, now, actorID)
+}
+
+func (db *DB) rotateInvitation(id, hash string, now time.Time, actorID int) (*Invitation, error) {
 	tx, err := db.conn.Begin()
 	if err != nil {
 		return nil, err
@@ -164,7 +197,14 @@ func (db *DB) RotateInvitation(id, hash string, now time.Time) (*Invitation, err
 	if err = invitationPending(tx, i); err != nil {
 		return nil, err
 	}
-	if now.Before(i.ResendAvailableAt()) {
+	if actorID != 0 {
+		if err = invitationSendActor(tx, i, actorID); err != nil {
+			return nil, err
+		}
+		if err = reserveInvitationSend(tx, i, actorID, now, i.ResendAvailableAt()); err != nil {
+			return nil, err
+		}
+	} else if now.Before(i.ResendAvailableAt()) {
 		return nil, &InvitationCooldownError{AvailableAt: i.ResendAvailableAt()}
 	}
 	i.TokenHash = hash

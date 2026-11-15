@@ -2,10 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"io"
-	"mime"
-	"mime/multipart"
-	"net/mail"
 	"regexp"
 	"strings"
 	"sync"
@@ -270,37 +266,10 @@ func TestInvitationStyledEmailMIME(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("missing email")
 	}
-	message, err := mail.ReadMessage(strings.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	media, params, err := mime.ParseMediaType(message.Header.Get("Content-Type"))
-	if err != nil || media != "multipart/alternative" {
-		t.Fatalf("not multipart alternative: %s %v", media, err)
-	}
-	reader := multipart.NewReader(message.Body, params["boundary"])
-	parts := map[string]string{}
-	for {
-		part, err := reader.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		kind, _, err := mime.ParseMediaType(part.Header.Get("Content-Type"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := io.ReadAll(part)
-		if err != nil {
-			t.Fatal(err)
-		}
-		parts[kind] = string(body)
-	}
+	parts := decodedEmailParts(t, raw)
 	plain, html := parts["text/plain"], parts["text/html"]
 	match := regexp.MustCompile(`https://configured\.example:8443/#invite-token=([a-f0-9]{64})`).FindStringSubmatch(plain)
-	if len(parts) != 2 || len(match) != 2 {
+	if len(parts) != 3 || parts["image/png"] == "" || len(match) != 2 {
 		t.Fatal("missing plain/html or configured-origin link")
 	}
 	link, token := match[0], match[1]
@@ -312,7 +281,7 @@ func TestInvitationStyledEmailMIME(t *testing.T) {
 			t.Errorf("HTML missing %q", text)
 		}
 	}
-	if strings.Contains(html, "<img") || strings.Contains(html, "<b>Cloud") || strings.Contains(html, "ZgotmplZ") {
+	if strings.Count(html, "<img ") != 1 || strings.Contains(html, "<img src=x") || strings.Contains(html, "<b>Cloud") || strings.Contains(html, "ZgotmplZ") {
 		t.Fatal("unescaped or unsafe HTML")
 	}
 	if !strings.Contains(plain, brand) || !strings.Contains(plain, server) || !strings.Contains(plain, "UTC") {
@@ -325,7 +294,7 @@ func TestInvitationStyledEmailMIME(t *testing.T) {
 	invitationWant(t, h.request("POST", "/api/auth/invitations/accept", map[string]string{"token": token, "password": "a-strong-password"}, ""), 410)
 	// Defense in depth: template rendering escapes even names not admitted by the API.
 	i.Username = `<script>alert(1)</script>`
-	html, _, err = invitationEmail(PanelBrandingConfig{BrandName: brand, AccentColor: `red; background:url(https://attacker.test)`}, &i, server, link)
+	html, _, err := invitationEmail(PanelBrandingConfig{BrandName: brand, AccentColor: `red; background:url(https://attacker.test)`}, &i, server, link)
 	if err != nil || strings.Contains(html, "<script>") || strings.Contains(html, "attacker.test") || !strings.Contains(html, "#2f6feb") {
 		t.Fatalf("unsafe template rendering: %v", err)
 	}

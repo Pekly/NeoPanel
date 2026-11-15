@@ -149,3 +149,59 @@ test('eligible expired invitation can resend but terminal and granting invitatio
   for(const status of ['accepted','revoked','granting']){invite.status=status;await c.changeTeamInvitation('eligible','resend');}
   assert.equal(calls.length,1);
 });
+
+test('sender and server budgets disable Invite and Resend but never Revoke',async()=>{
+  for (const scope of ['sender','server']) {
+    const {c}=setup();const deadline=Date.parse('2035-06-15T12:00:00Z');let now=deadline-1;
+    c.Date=class extends Date { static now(){return now;} };
+    const invite={id:'budgeted',username:'invitee',email:'invitee@example.test',status:'pending',resend_available_at:'2000-01-01'};
+    const availability={scope,available_at:new Date(deadline).toISOString()};
+    const calls=[];c.api=async(url,opts)=>{calls.push({url,opts});if(url.endsWith('/permissions'))return {is_owner:true};if(url.endsWith('/subusers'))return [];return {smtp_configured:true,send_availability:availability,invitations:[invite]};};
+    await c.loadTeamPage();assert.equal(c.S.teamState.send_availability.scope,scope);
+    let html=c.renderTeamPage();assert.match(html,/<button[^>]*id="team-invite-btn"[^>]*disabled/);
+    assert.match(html,/<button[^>]*disabled[^>]*>Resend<\/button>/);assert.doesNotMatch(html,/<button[^>]*disabled[^>]*>Revoke<\/button>/);
+    assert.match(html,/Refresh to update availability/);
+    c.openTeamInviteModal();await c.changeTeamInvitation('budgeted','resend');assert.equal(calls.filter(call=>call.opts?.method==='POST').length,0);
+    await c.changeTeamInvitation('budgeted','revoke');assert.equal(calls.filter(call=>call.opts?.method==='DELETE').length,1);
+    now=deadline;await c.loadTeamPage();html=c.renderTeamPage();assert.doesNotMatch(html,/<button[^>]*id="team-invite-btn"[^>]*disabled/);assert.doesNotMatch(html,/<button[^>]*disabled[^>]*>Resend<\/button>/);
+  }
+});
+test('resend display uses maximum of invitation cooldown and caller/server budget',()=>{
+  const {c}=setup();c.S.teamState={send_availability:{available_at:'2035-06-15T12:00:00Z'}};
+  assert.equal(c.invitationNextSendTime({resend_available_at:'2035-06-15T13:00:00Z'}).toISOString(),'2035-06-15T13:00:00.000Z');
+  assert.equal(c.invitationNextSendTime({resend_available_at:'2035-06-15T11:00:00Z'}).toISOString(),'2035-06-15T12:00:00.000Z');
+});
+test('SMTP unavailable disables delivery buttons without disabling revocation',()=>{
+  const {c}=setup();c.S.teamState={permission:{is_owner:true},smtp_configured:false,invitations:[{id:'smtp',status:'pending',resend_available_at:'2000-01-01'}]};
+  const html=c.renderTeamPage();assert.match(html,/<button[^>]*id="team-invite-btn"[^>]*disabled/);assert.match(html,/<button[^>]*disabled[^>]*>Resend<\/button>/);assert.doesNotMatch(html,/<button[^>]*disabled[^>]*>Revoke<\/button>/);
+});
+
+test('recipient budget errors show retry time and block repeat sends for that recipient', async () => {
+  const {c,elements}=setup();
+  c.team.inviteServer=c.curServer();c.S.teamState={smtp_configured:true,permission:{is_owner:true},invitations:[]};
+  elements['#team-invite-form']={reportValidity:()=>true,querySelectorAll:()=>[]};
+  elements['#team-invite-username']={value:'member'};
+  elements['#team-invite-email']={value:'MEMBER@example.test'};
+  elements['#team-invite-error']={textContent:''};
+  elements['#team-invite-submit']={isConnected:true,disabled:false};
+  const deadline=Date.now()+3600000;let calls=0;
+  c.loadTeamPage=async()=>{};
+  c.api=async()=>{calls++;throw Object.assign(new Error('Recipient limit reached.'),{status:429,data:{scope:'recipient',send_available_at:new Date(deadline).toISOString()}});};
+  await c.submitTeamInvitation({preventDefault(){}});
+  assert.equal(elements['#team-invite-submit'].disabled,true);
+  assert.match(elements['#team-invite-error'].textContent,/recipient can be invited after/);
+  assert.equal(c.invitationRecipientDeadline('member@example.test'),deadline);
+  await c.submitTeamInvitation({preventDefault(){}});assert.equal(calls,1);
+  elements['#team-invite-email'].value='different@example.test';c.updateTeamInviteAvailability(true);
+  assert.equal(elements['#team-invite-submit'].disabled,false);
+  assert.equal(elements['#team-invite-error'].textContent,'');
+  c.S.token='different-session';assert.equal(c.invitationRecipientDeadline('member@example.test'),0);
+});
+
+test('API errors preserve retry metadata for invitation controls', async () => {
+  const {c}=setup();c.FormData=class {};c.assertClientRequestAccess=()=>{};
+  const details={error:'Recipient limit reached.',scope:'recipient',send_available_at:'2035-01-01T00:00:00Z'};
+  c.fetch=async()=>({ok:false,status:429,json:async()=>details});
+  vm.runInContext(app.slice(app.indexOf('async function api('),app.indexOf('function curServer()')),c);
+  await assert.rejects(c.api('/api/team/invitations',{suppressToast:true}),error=>error.status===429 && error.data===details);
+});

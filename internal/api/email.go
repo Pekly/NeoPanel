@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"mime"
 	"net"
 	"net/http"
@@ -21,9 +22,10 @@ import (
 )
 
 type EmailHandler struct {
-	db   *database.DB
-	cfg  *config.Config
-	auth *AuthHandler
+	db     *database.DB
+	cfg    *config.Config
+	auth   *AuthHandler
+	assets fs.FS
 }
 
 func NewEmailHandler(db *database.DB, cfg *config.Config, auth *AuthHandler) *EmailHandler {
@@ -113,6 +115,10 @@ func (h *EmailHandler) SaveSMTPSettings(s database.SMTPSettings) error {
 }
 
 func (h *EmailHandler) SendEmail(cfg *database.SMTPSettings, toEmail, toName, subject, bodyHTML, bodyPlain string) error {
+	return h.sendEmail(cfg, toEmail, toName, subject, bodyHTML, bodyPlain, nil)
+}
+
+func (h *EmailHandler) sendEmail(cfg *database.SMTPSettings, toEmail, toName, subject, bodyHTML, bodyPlain string, logoWarning *bool) error {
 	if cfg == nil || !cfg.Enabled || cfg.Host == "" {
 		return fmt.Errorf("SMTP is not configured or disabled")
 	}
@@ -135,7 +141,10 @@ func (h *EmailHandler) SendEmail(cfg *database.SMTPSettings, toEmail, toName, su
 			return fmt.Errorf("invalid email address")
 		}
 	}
-	bodyHTML, logo := h.prepareEmailLogo(bodyHTML)
+	bodyHTML, logo, fallback := h.prepareSidebarEmailLogo(bodyHTML)
+	if logoWarning != nil {
+		*logoWarning = fallback
+	}
 	contentType, body, err := emailMIME(bodyHTML, bodyPlain, logo)
 	if err != nil {
 		return fmt.Errorf("could not encode email: %w", err)
@@ -275,13 +284,19 @@ func (h *EmailHandler) HandleTestEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.SendEmail(s, toEmail, "NeoPanel Administrator", subject, bodyHTML, bodyPlain); err != nil {
+	var logoWarning bool
+	if err := h.sendEmail(s, toEmail, "NeoPanel Administrator", subject, bodyHTML, bodyPlain, &logoWarning); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "SMTP delivery test failed: " + err.Error()})
 		return
 	}
 
 	logAudit(h.db, r, "admin_smtp_test", fmt.Sprintf("Sent test email to %s", toEmail))
-	writeJSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("Test email sent successfully to %s!", toEmail)})
+	message := fmt.Sprintf("Test email sent to %s.", toEmail)
+	warning := ""
+	if logoWarning {
+		warning = "Sidebar logo could not be loaded for email; the default cube was used. Try uploading a PNG in Appearance."
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": message, "logo_warning": warning})
 }
 
 func (h *EmailHandler) RequestPasswordReset(w http.ResponseWriter, r *http.Request) {
