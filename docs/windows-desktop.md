@@ -11,8 +11,9 @@ saved per account in the local browser profile, not synchronized across devices.
 The tutorial only explains and opens controls—it never starts a server or accepts an EULA.
 
 Double-click **NeoPanel-Desktop.exe** to open the app's own window and local Go
-backend. No console launcher or browser tab is needed. The familiar panel interface
-is embedded using Wails and Microsoft Edge WebView2.
+backend. This is the Windows panel edition: no separate console/browser package
+or startup script is needed. The familiar panel interface is embedded using Wails
+and Microsoft Edge WebView2.
 
 The same app is the head/master, can host trusted Minecraft servers locally, and
 can manage separate web-less Linux or Windows nodes. Players still connect directly
@@ -80,10 +81,9 @@ Anyone able to open this Windows profile can use Guest, including its connected
 nodes. To require login, edit Guest under **Admin → Users** and set a password.
 Password changes, security enrollment, role changes, or deleting Guest permanently
 disable automatic Guest sign-in. Sign-out lasts until the app restarts; Reload
-does not sign you back in. Normal browser/CLI/Linux authentication is unchanged.
+does not sign you back in. Linux panel authentication is unchanged.
 
-Desktop defaults are intentionally separate from the console panel so both cannot
-accidentally use the same database:
+Desktop storage stays separate from legacy installations and worker data:
 
 | Data | Location |
 | --- | --- |
@@ -109,12 +109,12 @@ and remembers it. If another application occupies that port later, NeoPanel sele
 another; you may need to sign in again because browser storage is origin-specific.
 Accounts, server files and node configuration remain in the database.
 
-To reuse an existing console-panel installation, first **stop that panel and all
+To migrate an older Windows panel installation, first **stop that panel and all
 its local servers**, back up its data/configuration, then explicitly select its
-data directory. Never operate desktop and CLI processes against the same database
-or server directories. The desktop does not import, move or erase existing data
-automatically. Keep using the normal CLI panel when you need a publicly reachable
-browser-based head, SFTP, or a separately managed background service.
+data directory. Never run two processes against the same database or server
+directories. The desktop does not import, move or erase existing data automatically.
+Use the Linux panel when you need a publicly reachable web interface, SFTP, or a
+separately managed background service.
 
 ## Hosting and nodes
 
@@ -124,8 +124,9 @@ browser-based head, SFTP, or a separately managed background service.
 - Connect your game client to `localhost:<game port>`; HTTP and game ports differ.
 - Add remote workers under **Admin → Nodes**, using their reachable API URL and
   node token. Protect worker APIs with TLS or a trusted private/VPN network.
-- For Windows workers select Automatic/Host Direct process management, not a Linux
-  isolation engine. Linux workers keep their existing isolation mechanisms.
+- An optional [API-only Windows worker](https://github.com/Pekly/NeoPanel/blob/windows-desktop-release/docs/windows.md) can host servers on another PC.
+  Select Automatic/Host Direct process management for it, not a Linux isolation
+  engine. No worker is needed for desktop-local hosting.
 
 ## Window controls
 
@@ -157,8 +158,8 @@ can interrupt hosting; this app is not an always-on Windows service.
   and memory but do not isolate filesystem, account credentials or network access.
 - No automatic elevation, firewall opening, node deployment or EULA approval is
   added by the desktop shell.
-- The existing `cmd/neopanel` and `-tags node` builds remain available. Wails belongs
-  only to `desktop/go.mod`, not the root module. Linux install/update checkouts omit
+- Linux panel and API-only worker builds retain the shared `cmd/neopanel` entry
+  point. Wails belongs only to `desktop/go.mod`, not the root module. Linux install/update checkouts omit
   desktop code, packaging, Windows scripts, and Windows documentation, while keeping
   shared Windows build-tag code. Linux builds do not install Wails, GTK, or WebKit.
 - Read the [security upgrade notes](https://github.com/Pekly/NeoPanel/blob/main/docs/security-upgrade.md)
