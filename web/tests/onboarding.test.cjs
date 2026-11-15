@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/js/onboarding.js'), 'utf8');
 const app = fs.readFileSync(path.join(__dirname, '../static/js/app.js'), 'utf8');
 const admin = {id: 'admin-one', role: 'admin'};
-function guide(storage = new Map(), broken = false) {
+function guide(storage = new Map(), broken = false, guest = false) {
   const events = {}, calls = [], root = {innerHTML: '', scrollIntoView() {}}, focus = [];
   const c = {localStorage: {getItem(k) {if (broken) throw Error('blocked'); return storage.get(k);}, setItem(k,v) {if (broken) throw Error('blocked'); storage.set(k,v);}},
     document: {addEventListener(n,fn) {events[n] = fn;}, getElementById(id) {
@@ -14,8 +14,8 @@ function guide(storage = new Map(), broken = false) {
       if (id === 'np-guide-title' && !root.innerHTML) return null;
       return {focus() {focus.push(id);}, scrollIntoView() {}};
     }}, go: (...args) => calls.push(args), openCreateServerModal: () => calls.push(['create'])};
-  c.window = c; vm.runInNewContext(source,c);
-  const state = {token:'session',user:admin};
+  c.window = c; c.NPDesktopGuest = guest; c.atob = s => Buffer.from(s, 'base64').toString(); vm.runInNewContext(source,c);
+  const state = {token: guest ? `header.${Buffer.from(JSON.stringify({scope:'desktop_guest'})).toString('base64url')}.signature` : 'session',user:admin};
   const render = (s=state) => root.innerHTML = c.NPOnboarding.render(s);
   function click(action, step) {
     const b = {dataset:{guideAction:action,guideStep:step},hasAttribute() {return step !== undefined;},closest() {return root;}};
@@ -93,4 +93,21 @@ test('setup fields have visible labels and native form submission', () => {
   for(const id of ['su-name','su-email','su-pw','su-confirm']) assert.ok(form.includes(`for="${id}"`));
   assert.match(form,/<form[^>]+onsubmit=/); assert.match(form,/type="submit"/);
   assert.match(app,/NPOnboarding\?\.resetSession\(\)/);
+});
+test('desktop Guest gets honest local-account guidance and can dismiss it', () => {
+  const g = guide(new Map(), false, true);
+  assert.match(g.render(), /Your local Guest workspace/);
+  assert.match(g.root.innerHTML, /Admin → Users/);
+  assert.match(g.root.innerHTML, /permanently turns off Guest auto-login/);
+  g.click('pause');
+  const resumed = guide(g.storage, false, true);
+  assert.doesNotMatch(resumed.render(), /np-guide-detail/);
+});
+test('password login and other administrators do not inherit Guest guidance', () => {
+  const g = guide(new Map(), false, true);
+  g.render();
+  g.state.token = 'header.e30.signature';
+  assert.doesNotMatch(g.render(), /Your local Guest workspace/);
+  assert.match(g.root.innerHTML, /Make this account yours/);
+  assert.doesNotMatch(g.render({token:'normal-login',user:{id:'another-admin',role:'admin'}}), /np-guide-detail/);
 });

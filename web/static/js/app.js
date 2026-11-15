@@ -17493,7 +17493,16 @@ const globalSelectObserver = (typeof MutationObserver !== 'undefined') ? new Mut
 }) : null;
 
 // --- Initialize Application ---
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  // Defined only by the native desktop's asset wrapper; ordinary hosts skip it.
+  if (window.NPDesktopSession) {
+    const token = await window.NPDesktopSession;
+    delete window.NPDesktopSession;
+    if (token) {
+      S.token = token;
+      localStorage.setItem('neopanel_token', token);
+    }
+  }
   checkAuth();
   initDragAndDrop();
   enhanceSelects(document.body);

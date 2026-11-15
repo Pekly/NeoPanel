@@ -2,6 +2,10 @@
   'use strict';
   const cache = new Map();
   let context = null;
+  const guestStep = { label: 'Your account', icon: 'shield', title: 'Your local Guest workspace',
+    text: 'Guest is the administrator of this desktop workspace. No login is needed in this app, but its HTTP API still requires authentication.',
+    items: ['Anyone who can open this Windows profile can use Guest and manage its local servers and connected nodes.', 'To require login, edit Guest in Admin → Users and set a password. This permanently turns off Guest auto-login. Then use Account → Security for two-factor authentication or passkeys.', 'Signing out lasts until the app is restarted. Keep this local workspace on a trusted machine; it is not a public hosting sandbox.'],
+    action: 'Review administration', target: 'nodes', note: 'No password is needed to get started with local hosting.' };
   const steps = [
     { label: 'Your account', icon: 'shield', title: 'Make this account yours',
       text: 'You are the administrator. This account can manage every server and invite other people, so keep its credentials private.',
@@ -21,6 +25,12 @@
       action: 'Back to your servers', target: 'dashboard', note: 'Finishing this guide marks the tutorial as read. It does not certify your server or security configuration.' }
   ];
   const eligible = state => Boolean(state?.token && state.user?.id && state.user.role === 'admin');
+  // Presentation only: the API validates the JWT and remains authoritative.
+  const isGuest = state => {
+    if (!window.NPDesktopGuest || !state?.token) return false;
+    try { return JSON.parse(atob(state.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).scope === 'desktop_guest'; }
+    catch (_) { return false; }
+  };
   const keyFor = user => `neopanel_getting_started_v1_${user.id}`;
   function read(user) {
     const key = keyFor(user);
@@ -28,7 +38,7 @@
     let saved;
     try { saved = JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) {}
     const value = { step: Number.isInteger(saved?.step) ? Math.max(0, Math.min(3, saved.step)) : 0,
-      status: ['active', 'paused', 'done'].includes(saved?.status) ? saved.status : 'paused' };
+      status: ['active', 'paused', 'done'].includes(saved?.status) ? saved.status : (isGuest(context) ? 'active' : 'paused') };
     cache.set(key, value);
     return value;
   }
@@ -40,7 +50,7 @@
   function content(state) {
     const saved = read(state.user);
     if (saved.status !== 'active') return '';
-    const step = steps[saved.step];
+    const step = saved.step === 0 && isGuest(state) ? guestStep : steps[saved.step];
     return `<section class="np-guide" aria-labelledby="np-guide-title">
       <div class="np-guide-intro"><span class="np-guide-kicker">GETTING STARTED</span><h2>Let’s get you ready to host.</h2><p>A short tour of the essentials. Take it at your own pace.</p>
         <ol class="np-guide-steps">${steps.map((s, i) => `<li><button type="button" data-guide-step="${i}" ${i === saved.step ? 'aria-current="step"' : ''}><span>${i + 1}</span>${s.label}</button></li>`).join('')}</ol>

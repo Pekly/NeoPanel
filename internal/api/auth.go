@@ -83,11 +83,22 @@ func (h *AuthHandler) CheckPasswordHash(password, hash string) bool {
 }
 
 func (h *AuthHandler) GenerateToken(user *database.User) (string, error) {
+	return h.generateSessionToken(user, "")
+}
+
+// GenerateDesktopGuestToken is used only by the native host, never a login route.
+// The scope labels the UI session; it grants no permissions beyond the user.
+func (h *AuthHandler) GenerateDesktopGuestToken(user *database.User) (string, error) {
+	return h.generateSessionToken(user, "desktop_guest")
+}
+
+func (h *AuthHandler) generateSessionToken(user *database.User, scope string) (string, error) {
 	claims := JWTClaims{
 		UserID:      user.ID,
 		Username:    user.Username,
 		Role:        user.Role,
 		AuthVersion: user.AuthVersion,
+		Scope:       scope,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(h.expHours) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

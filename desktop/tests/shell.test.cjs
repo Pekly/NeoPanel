@@ -21,7 +21,9 @@ test('only loopback panel can be loaded; no frame-to-native message relay', () =
   assert.equal(get('panel').src, undefined);
   window.desktopShell.init('http://127.0.0.1:1234');
   assert.equal(get('panel').src,'http://127.0.0.1:1234/');
-  assert.equal(events.message,undefined);
+  const before = get('panel').src;
+  events.message({origin:'http://127.0.0.1:1234',source:{},data:{type:'desktop:data'}});
+  assert.equal(get('panel').src,before);
 });
 test('toolbar uses native window actions; closing disables repeat operations', async () => {
   const {window,get,calls} = setup();
@@ -45,4 +47,29 @@ test('shell restricts navigation without disabling scripts, downloads or forms',
   assert.ok(!sandbox.includes('allow-top-navigation'));
   assert.ok(!sandbox.includes('allow-popups-to-escape-sandbox'));
   assert.ok(html.includes("object-src 'none'"));
+});
+test('Guest session goes only to the initial panel, once, never to native commands', () => {
+  const {window,get,events,calls} = setup(), messages=[];
+  const source = {postMessage:(...args) => messages.push(args)};
+  get('panel').contentWindow = source;
+  window.desktopShell.init('http://127.0.0.1:1234','private-session');
+  for (const event of [
+    {origin:'http://evil.example',source,data:{type:'np:desktop-ready'}},
+    {origin:'http://127.0.0.1:1234',source:{},data:{type:'np:desktop-ready'}},
+    {origin:'http://127.0.0.1:1234',source,data:{type:'desktop:data'}}
+  ]) events.message(event);
+  assert.equal(messages.length,0);
+  const count = calls.length;
+  const ready = {origin:'http://127.0.0.1:1234',source,data:{type:'np:desktop-ready'}};
+  events.message(ready);
+  assert.equal(messages[0][0].token,'private-session');
+  assert.equal(messages[0][1],'http://127.0.0.1:1234');
+  window.desktopShell.init('http://127.0.0.1:1234','must-not-rearm');
+  get('reload').handlers.click();
+  events.message(ready);
+  assert.equal(messages[1][0].token,'');
+  assert.equal(calls.length,count);
+  window.desktopShell.stopping();
+  events.message(ready);
+  assert.equal(messages.length,2);
 });

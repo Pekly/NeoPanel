@@ -24,15 +24,16 @@ import (
 // Service is a running backend. Construct it with Start; its methods are safe
 // for concurrent use. The host owns signals and must call Shutdown before exit.
 type Service struct {
-	url      string
-	db       *database.DB
-	manager  *runner.ServerManager
-	sftp     *sftp.SFTPServer
-	http     *http.Server
-	listener *serviceListener
-	done     chan struct{}
-	cleaned  chan struct{}
-	once     sync.Once
+	url          string
+	db           *database.DB
+	manager      *runner.ServerManager
+	sftp         *sftp.SFTPServer
+	http         *http.Server
+	listener     *serviceListener
+	done         chan struct{}
+	cleaned      chan struct{}
+	once         sync.Once
+	desktopToken string
 
 	mu          sync.Mutex
 	stopping    bool
@@ -77,6 +78,18 @@ func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("create servers directory: %w", err)
 	}
+	var desktopToken string
+	if desktop {
+		guest, guestErr := db.PrepareDesktopGuest()
+		if guestErr == nil && guest != nil {
+			desktopToken, guestErr = api.NewAuthHandler(db, cfg).GenerateDesktopGuestToken(guest)
+		}
+		if guestErr != nil {
+			_ = listener.Close()
+			_ = db.Close()
+			return nil, fmt.Errorf("prepare desktop guest: %w", guestErr)
+		}
+	}
 	log.Printf("[INFO] Initializing server manager with data directory: %s", cfg.Paths.ServersDir)
 	manager := runner.NewServerManager(cfg.Paths.ServersDir, db)
 	if cfg.Server.StartupTimeoutSec > 0 {
@@ -88,6 +101,7 @@ func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 	s := &Service{
 		url: "http://" + listener.Addr().String(), db: db, manager: manager,
 		done: make(chan struct{}), cleaned: make(chan struct{}),
+		desktopToken: desktopToken,
 	}
 	s.listener = &serviceListener{Listener: listener, connections: make(map[*serviceConn]struct{})}
 	router := api.NewRouter(cfg, db, manager, assets)
@@ -117,6 +131,16 @@ func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 
 // URL returns the actual bound HTTP address, not the configured port.
 func (s *Service) URL() string { return s.url }
+
+// TakeDesktopSession transfers the initial Guest session to the native shell
+// once. It is never exposed by an HTTP route or included in a URL/log.
+func (s *Service) TakeDesktopSession() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	token := s.desktopToken
+	s.desktopToken = ""
+	return token
+}
 
 // Done closes when HTTP serving stops. Call Shutdown to wait for cleanup too.
 func (s *Service) Done() <-chan struct{} { return s.done }

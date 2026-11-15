@@ -92,11 +92,11 @@ func shutdownBackend(service interface{ Shutdown(context.Context) error }) error
 }
 
 func startBackend(cfg *config.Config) (*daemon.Service, error) {
-	service, err := daemon.StartDesktop(cfg, web.GetFS())
+	service, err := daemon.StartDesktop(cfg, desktopPanelAssets{web.GetFS()})
 	if err != nil && cfg.Server.Port != 0 && errors.Is(err, windows.WSAEADDRINUSE) {
 		log.Printf("Remembered desktop port is occupied; choosing a free loopback port")
 		cfg.Server.Port = 0
-		service, err = daemon.StartDesktop(cfg, web.GetFS())
+		service, err = daemon.StartDesktop(cfg, desktopPanelAssets{web.GetFS()})
 	}
 	if err != nil {
 		return nil, err
@@ -158,9 +158,10 @@ func (a *desktopApp) startup(ctx context.Context) {
 
 func (a *desktopApp) domReady(ctx context.Context) {
 	// Only the bundled shell stays on Wails' privileged origin. The panel runs
-	// in a sandboxed cross-origin frame, with no native bindings or message relay.
+	// in a sandboxed cross-origin frame, with no native bindings or command relay.
 	target, _ := json.Marshal(a.service.URL())
-	wruntime.WindowExecJS(ctx, "window.desktopShell.init("+string(target)+");")
+	token, _ := json.Marshal(a.service.TakeDesktopSession())
+	wruntime.WindowExecJS(ctx, "window.desktopShell.init("+string(target)+","+string(token)+");")
 }
 
 func (a *desktopApp) beforeClose(ctx context.Context) bool {

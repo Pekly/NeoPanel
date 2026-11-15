@@ -5,7 +5,7 @@ receives updates occasionally, rather than alongside every Linux change.
 Development continues on `windows-desktop-release`; `main` stays the Linux/headless line.
 The published portable beta is `v1.0.0-windows-beta.1` and may lag behind this branch.
 
-After creating the first administrator, the dashboard offers a skippable
+A fresh desktop workspace opens as **Guest**, with a skippable
 **Getting started** tutorial. Reopen it with the dashboard button; progress is
 saved per account in the local browser profile, not synchronized across devices.
 The tutorial only explains and opens controls—it never starts a server or accepts an EULA.
@@ -71,8 +71,19 @@ These builds are unsigned; production code signing is a separate release step.
 
 ## First start and storage
 
-Create the first administrator inside the app. Desktop defaults are intentionally
-separate from the console panel so both cannot accidentally use the same database:
+An empty desktop database gets a local **Guest** administrator and opens straight
+to the dashboard, without setup or login. Existing accounts are never converted
+or bypassed. Guest has no usable password; its authenticated session is handed
+from the native shell to the panel, never exposed in an HTTP endpoint or URL.
+
+Anyone able to open this Windows profile can use Guest, including its connected
+nodes. To require login, edit Guest under **Admin → Users** and set a password.
+Password changes, security enrollment, role changes, or deleting Guest permanently
+disable automatic Guest sign-in. Sign-out lasts until the app restarts; Reload
+does not sign you back in. Normal browser/CLI/Linux authentication is unchanged.
+
+Desktop defaults are intentionally separate from the console panel so both cannot
+accidentally use the same database:
 
 | Data | Location |
 | --- | --- |
