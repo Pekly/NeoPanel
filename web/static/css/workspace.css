@@ -1,0 +1,21 @@
+.np-qol-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 16px; border: 1px solid var(--ln); border-left: 3px solid #eab308; border-radius: 10px; background: var(--bg-card, var(--bg)); }
+.np-qol-notice[hidden], .con-line[hidden], #np-server-empty[hidden], #np-countdown-retry[hidden] { display: none; }
+.np-console-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--ln); }
+.np-console-tools label { display: flex; align-items: center; gap: 8px; color: var(--tx-muted); font-size: 12px; }
+.np-console-tools input { width: min(220px, 100%); min-width: 0; }
+.np-countdown { padding: 14px 18px; margin-bottom: 18px; }
+#np-countdown-retry { margin-top: 10px; }
+.np-countdown details { margin-top: 10px; }
+.np-countdown summary { cursor: pointer; font-weight: 600; }
+.np-countdown form { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.np-countdown label { display: grid; gap: 6px; font-size: 12px; flex: 1 1 170px; }
+.np-countdown input, .np-countdown select { width: 100%; }
+.np-countdown form p { flex: 1 0 100%; font-size: 12px; }
+.np-favourite { color: #facc15 !important; }
+[data-power-btn][aria-busy="true"] { opacity: .55; cursor: wait; }
+@media (max-width: 640px) {
+  .np-console-tools label { width: 100%; }
+  .np-console-tools input { flex: 1; }
+  .np-countdown form > button { width: 100%; }
+  .np-maint-banner { flex-wrap: wrap; }
+}

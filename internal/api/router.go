@@ -188,6 +188,9 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("PUT /api/servers/{id}", r.requireAuth(r.servers.UpdateServer))
 	r.mux.HandleFunc("DELETE /api/servers/{id}", r.requireAuth(r.servers.DeleteServer))
 	r.mux.HandleFunc("POST /api/servers/{id}/power", r.requireAuth(r.servers.PowerAction))
+	r.mux.HandleFunc("GET /api/servers/{id}/power/countdown", r.requireAuth(r.servers.PowerCountdown))
+	r.mux.HandleFunc("POST /api/servers/{id}/power/countdown", r.requireAuth(r.servers.PowerCountdown))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/power/countdown", r.requireAuth(r.servers.PowerCountdown))
 	r.mux.HandleFunc("POST /api/servers/{id}/command", r.requireAuth(r.servers.SendCommand))
 
 	// Server Icon routes
@@ -612,6 +615,14 @@ func serverActionPermission(method, suffix string) string {
 	case "command":
 		return "console.command"
 	case "power":
+		if suffix == "power/countdown" {
+			if read {
+				return "console.view|server.power"
+			}
+			if method == http.MethodPost {
+				return "server.power+console.command"
+			}
+		}
 		return "server.power"
 	case "files":
 		if len(parts) > 1 && parts[1] == "trash" {
@@ -693,14 +704,16 @@ func authorizeServer(db *database.DB, claims *JWTClaims, serverID, permission st
 	if permission == "" {
 		return 0
 	}
-	// '+' is an internal conjunction, never a grant: destructive writes need
-	// both capabilities, matching SFTP rename/overwrite authorization.
+	// '+' requires every capability; '|' accepts any listed alternative.
+	// These separators are internal expressions, never permission grants.
 	for _, required := range strings.Split(permission, "+") {
 		allowed := false
-		for _, p := range perms {
-			if p == required && required != "owner" {
-				allowed = true
-				break
+		for _, alternative := range strings.Split(required, "|") {
+			for _, p := range perms {
+				if p == alternative && alternative != "owner" {
+					allowed = true
+					break
+				}
 			}
 		}
 		if !allowed {
@@ -811,6 +824,12 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	remote.ContentLength = req.ContentLength
 	setProxyIdentity(remote.Header, claims, node.APIToken)
+	// Countdown execution must retain even an administrator's originating
+	// identity rather than becoming a permanently privileged node-daemon job.
+	if claims.UserID > 0 && strings.HasPrefix(rest, "api/servers/") && strings.HasSuffix(rest, "/power/countdown") {
+		remote.Header.Set("X-NeoPanel-User-ID", strconv.Itoa(claims.UserID))
+		remote.Header.Set("X-NeoPanel-User-Role", claims.Role)
+	}
 	if claims.UserID > 0 && claims.Role != "admin" {
 		policy, _ := json.Marshal(userPolicyForNode(node))
 		remote.Header.Set(forwardedNodePolicyHeader, string(policy))
