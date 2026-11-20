@@ -81,6 +81,8 @@ The getting-started guide is shown only to admins, not normal users.
 
 More details: [invited accounts](docs/invitation-account-lifecycle.md), [file-manager Trash](internal/trash/README.md), [server deletion](docs/server-deletion.md), [file previews](docs/file-previews.md), and [memory limits](internal/runner/MEMORY_POLICY.md).
 
+See [panel quality-of-life controls](docs/panel-qol.md) for workspace recovery, console filters, pinned servers, maintenance access, and cancellable restart countdowns.
+
 ## Working on the code
 
 Use Go 1.26 or newer with current security patches. The web UI doesn’t need a bundler or npm install.

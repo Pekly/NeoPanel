@@ -1861,6 +1861,7 @@ function syncActiveServerState(srv) {
     S.startupHalted = Boolean(srv.stats?.startup_halted);
     applyServerStatsSnapshot(srv, srv.stats, false);
     resetServerAccess();
+    window.NPWorkspace?.activate(srv);
     if (window.NP && typeof window.NP._emit === 'function') {
       window.NP._emit('server:switch', { server: srv });
     }
@@ -1869,6 +1870,7 @@ function syncActiveServerState(srv) {
 
 function applyRoute(urlStr, opts = {}) {
   captureEditor();
+  window.NPWorkspace?.remember();
   if (!opts.editorChecked && (editorIsDirty() || QOL.editor?.saving || QOL.leaving)) {
     return guardEditorLeave().then(allowed => {
       if (allowed) applyRoute(urlStr, { ...opts, editorChecked: true });
@@ -2364,7 +2366,7 @@ function copyServerAddress(addr, ev) {
     ev.stopPropagation();
   }
   if (!addr) return false;
-  copyDbText(addr, 'Server Address');
+  copyDbText(addr, 'Player connection address');
   return false;
 }
 
@@ -3357,6 +3359,7 @@ async function api(endpoint, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
   const finishProgress = window.NPProgress?.startRequest(endpoint, options) || (() => {});
+  const requestToken = S.token;
 
   try {
     const res = await fetch(endpoint, { ...fetchOpts, headers });
@@ -3373,10 +3376,12 @@ async function api(endpoint, options = {}) {
       error.data = data; // Preserve safe retry metadata for invitation controls.
       throw error;
     }
+    window.NPWorkspace?.requestResult(endpoint, null, requestToken);
     return data;
   } catch (err) {
+    window.NPWorkspace?.requestResult(endpoint, err, requestToken);
     if (!suppressToast && err.message && !err.message.includes('Session expired')) {
-      toast(err.message, 'error');
+      toast(window.NPWorkspace ? `${err.message} ${window.NPWorkspace.errorAdvice(err)}` : err.message, 'error');
     }
     throw err;
   } finally {
@@ -4144,8 +4149,8 @@ function formatLogLine(raw) {
 }
 
 function updateInputState() {
-  const isOnline = S.status === 'online' && hasServerPermission('console.command');
-  const placeholder = isOnline ? 'Type a command, try help...' : 'Server is offline';
+  const isOnline = S.status === 'online' && hasServerPermission('console.command') && !window.NPWorkspace?.connectionBlocked();
+  const placeholder = isOnline ? 'Type a command, try help...' : !hasServerPermission('console.command') ? 'Console is read-only' : window.NPWorkspace?.connectionBlocked() ? 'Reconnecting… commands paused' : 'Server is offline';
   for (const id of ['#cmd', '#fly-cmd']) {
     const inp = $(id);
     if (inp) {
@@ -4155,6 +4160,7 @@ function updateInputState() {
   }
   const sendBtn = $('#fly-send-btn');
   if (sendBtn) sendBtn.disabled = !isOnline;
+  window.NPWorkspace?.syncControls();
 }
 
 function updateHeaderBadge() {
@@ -4179,6 +4185,7 @@ function updateHeaderBadge() {
   if (stopBtn) stopBtn.disabled = !(S.status === 'online' || S.status === 'starting') || !hasServerPermission('server.power');
   const fabDot = $('#fly-con-fab .fly-con-dot');
   if (fabDot) fabDot.className = `fly-con-dot ${S.status}`;
+  window.NPWorkspace?.syncControls();
 }
 
 function applyWsPillState(pill) {
@@ -4198,6 +4205,7 @@ function applyWsPillState(pill) {
 function updateWsLivePill() {
   applyWsPillState($('#ws-live-pill'));
   applyWsPillState($('#fly-ws-pill'));
+  window.NPWorkspace?.syncControls();
 }
 
 function updateConBufferCount() {
@@ -4224,6 +4232,7 @@ function appendLogToEl(el, html) {
     el.removeChild(el.firstChild);
   }
   if (atBottom) el.scrollTop = el.scrollHeight;
+  globalThis.NPWorkspace?.appended(el, row, atBottom);
 }
 
 function addLog(line) {
@@ -4258,7 +4267,8 @@ function paintTargetLog(l) {
   l.innerHTML = S.log.length
     ? S.log.map(line => `<div class="con-line">${line}</div>`).join('')
     : `<div class="con-line dim">No console output buffered yet. Start the server or type a command below.</div>`;
-  l.scrollTop = l.scrollHeight;
+  if (window.NPWorkspace) window.NPWorkspace.bindLog(l);
+  else l.scrollTop = l.scrollHeight;
 }
 
 function paintFlyConsole() {
@@ -4294,7 +4304,8 @@ function bindFlyConsoleInput() {
       inp.value = S.hist[--S.hi] || '';
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      inp.value = S.hist[++S.hi] || '';
+      S.hi = Math.min(S.hi + 1, S.hist.length);
+      inp.value = S.hist[S.hi] || '';
     }
   });
 }
@@ -4304,8 +4315,6 @@ function runFlyCmd() {
   if (!inp || !inp.value.trim()) return;
   const c = inp.value.trim();
   runCmd(c);
-  S.hist.push(c);
-  S.hi = S.hist.length;
   inp.value = '';
 }
 
@@ -4353,6 +4362,7 @@ function renderFlyConsole() {
     return;
   }
 
+  if (!hasServerPermission('console.view')) { root.innerHTML = ''; delete root.dataset.flySig; return; }
   const nodeId = srv.node_id || 'local';
   const sig = `${nodeId}|${srv.id}|${S.flyConOpen ? 1 : 0}|${S.flyConTall ? 1 : 0}`;
   if (root.dataset.flySig === sig && root.children.length > 0) {
@@ -4382,6 +4392,7 @@ function renderFlyConsole() {
             <button type="button" class="btn sm" onclick="closeFlyConsole()" aria-label="Minimize live console">&times;</button>
           </div>
         </div>
+        ${window.NPWorkspace?.consoleTools('fly-log') || ''}
         <div class="con fly-con-logs" id="fly-log" role="log" aria-live="polite"></div>
         <div class="cin fly-con-input">
           <span>&raquo;</span>
@@ -4466,6 +4477,8 @@ function connectWs(serverId, isReconnect = false, nodeId = null) {
       S.wsState = 'connected';
       S.wsAttempts = 0;
       updateWsLivePill();
+      refreshServerStatus();
+      window.NPWorkspace?.pollCountdown();
 
       clearInterval(S.wsPingTimer);
       S.wsPingTimer = setInterval(() => {
@@ -4586,11 +4599,13 @@ async function power(action, skipConfirm = false) {
   if (!hasServerPermission('server.power')) { toast('Access restricted: server.power required', 'bad'); return; }
   const srv = curServer();
   if (!srv) return;
+  if (globalThis.NPWorkspace?.powerBlocked()) { toast('Reconnect or cancel the pending countdown before another power action.', 'bad'); return; }
   const key = `${srv.node_id || 'local'}:${srv.id}`;
   if (powerRequests.has(key)) return;
   powerRequests.set(key, true);
+  globalThis.NPWorkspace?.syncControls();
   try { await performPowerAction(action, skipConfirm, srv); }
-  finally { setTimeout(() => powerRequests.delete(key), 1200); }
+  finally { setTimeout(() => { powerRequests.delete(key); globalThis.NPWorkspace?.syncControls(); }, 1200); }
 }
 
 async function performPowerAction(action, skipConfirm, srv) {
@@ -4636,6 +4651,7 @@ async function performPowerAction(action, skipConfirm, srv) {
   }
 
   if (!live() || !hasServerPermission('server.power')) return;
+  if (globalThis.NPWorkspace?.powerBlocked()) return;
   if (action === 'start') {
     S.status = 'starting';
     S.startupHalted = false;
@@ -4690,7 +4706,7 @@ async function performPowerAction(action, skipConfirm, srv) {
     let modalMsg = `Failed to ${action} server: <b>${esc(err.message)}</b>`;
 
     const lower = (err.message || '').toLowerCase();
-    if (lower.includes('jar file') || lower.includes('jar') || lower.includes('not found')) {
+    if (lower.includes('jar file') || lower.includes('executable') || lower.includes('jar')) {
       modalTitle = 'Server Executable Not Found';
       modalMsg = `<div style="line-height:1.6;">
         The server executable <b>${esc(serverExecutable(srv))}</b> could not be found in the server directory.<br><br>
@@ -4719,6 +4735,7 @@ async function performPowerAction(action, skipConfirm, srv) {
       </div>`;
     }
 
+    if (globalThis.NPWorkspace) modalMsg += `<p>${esc(globalThis.NPWorkspace.errorAdvice(err))}</p>`;
     uiAlert({
       title: modalTitle,
       message: modalMsg,
@@ -4748,10 +4765,12 @@ async function refreshServerStatus() {
 
 async function runCmd(cmd) {
   if (!hasServerPermission('console.command')) { toast('Access restricted: console.command required', 'bad'); return; }
+  if (globalThis.NPWorkspace?.connectionBlocked()) { toast('Reconnect before sending console commands.', 'bad'); return; }
   if (!cmd) return;
   addCommandLog(cmd);
   const srv = curServer();
   if (!srv) return;
+  globalThis.NPWorkspace?.recordCommand(cmd);
 
   if (S.activeWs && S.activeWs.readyState === WebSocket.OPEN) {
     S.activeWs.send(JSON.stringify({ event: 'command', data: cmd }));
@@ -5182,7 +5201,7 @@ function srvh() {
   const c = active ? (S.cpu.at(-1) || 0) : 0;
   const maxRamMB = S.memMaxMB || getServerMaxRamMB(srv);
   const m = active ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
-  const hostAddr = `${srvHost(srv)}:${srv ? srv.port : 25565}`;
+  const hostAddr = `${srvHost(srv)}:${srv?.port || 25565}`;
   const nodeId = srv?.node_id || 'local';
   const nodeLabel = displayNodeName(nodeId, srv?.node_name || getNodeById(nodeId)?.name);
   const heroUrl = getBrand('server_hero_url');
@@ -5212,7 +5231,7 @@ function srvh() {
       <div class="srv-connection">
         <span id="srv-hero-engine" class="eng-pill" title="Server software">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
         <div id="hst" class="row hst" style="margin-top: 0;">
-          <button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy server address" aria-label="Copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button>
+          <button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy player connection address — not the panel URL" aria-label="Copy player connection address">Join: <span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button>
           <span class="mono mu">CPU ${c.toFixed(1)}%</span>
           <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
         </div>
@@ -5223,7 +5242,7 @@ function srvh() {
       <button class="btn pr" data-power-btn="start" onclick="power('start')" ${st !== 'offline' ? 'disabled' : ''}>${ic('play', 14)} Start</button>
       <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
       <button class="btn stop" data-power-btn="stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
-      <button class="btn dg" onclick="power('kill')" title="Stop immediately; unsaved data may be lost">Force stop</button>
+      <button class="btn dg" data-power-btn="kill" onclick="power('kill')" title="Stop immediately; unsaved data may be lost">Force stop</button>
     </div>
   </div>`;
 }
@@ -5882,7 +5901,7 @@ const V = {
     const errEntries = Object.entries(nodeErrs);
     const activeNodeFilter = S.nodeFilter || 'all';
 
-    const indexedServers = S.servers.map((s, origIdx) => ({ s, origIdx }));
+    const indexedServers = window.NPWorkspace ? window.NPWorkspace.sortServers(S.servers.map((s, origIdx) => ({ s, origIdx }))) : S.servers.map((s, origIdx) => ({ s, origIdx }));
     const visibleServers = activeNodeFilter === 'all'
       ? indexedServers
       : indexedServers.filter(({ s }) => (s.node_id || 'local') === activeNodeFilter);
@@ -5904,7 +5923,7 @@ const V = {
           <input type="text" id="srv-filter" aria-label="Filter servers" placeholder="Find a server…" value="${esc(S.serverFilter || '')}" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
         </div>
-        ${nodesList.length > 1 ? `
+        ${nodesList.length > 1 || activeNodeFilter !== 'all' ? `
           <select class="sel sm" style="width: auto; min-width: 130px; height: 36px;" onchange="setNodeFilter(this.value)">
             <option value="all" ${activeNodeFilter === 'all' ? 'selected' : ''}>All Locations (${totalCount})</option>
             ${nodesList.map(n => {
@@ -5913,6 +5932,7 @@ const V = {
             }).join('')}
           </select>
         ` : ''}
+        ${window.NPWorkspace?.listControls() || ''}
         ${renderViewModeToggle('dash', 'tiles')}
         ${canCreateServers() ? `<button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
           ${ic('plus', 14)} Create server
@@ -5995,6 +6015,7 @@ const V = {
                 </div>
               </div>
               <div class="vm-dash-row-actions">
+                ${window.NPWorkspace?.favouriteButton(s, origIdx) || ''}
                 <span class="srv-card-action-btn" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();this.click();}" onclick="event.preventDefault(); event.stopPropagation(); refreshDashboard();" title="Refresh status" aria-label="Refresh server status">${ic('refresh', 13)}</span>
                 ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
@@ -6008,6 +6029,7 @@ const V = {
                 <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:6px;">${engBadgeIcon} <span>${esc(coreLabel)}</span></span>
               </div>
               <div class="srv-card-actions">
+                ${window.NPWorkspace?.favouriteButton(s, origIdx) || ''}
                 <span class="srv-card-action-btn" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();this.click();}" onclick="event.preventDefault(); event.stopPropagation(); refreshDashboard();" title="Refresh status" aria-label="Refresh server status">${ic('refresh', 13)}</span>
                 ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
@@ -6056,6 +6078,7 @@ const V = {
             </div>
           </a>`;
         }).join('')}
+        <p id="np-server-empty" class="mu" hidden>No servers match your filters. Try another search, location, or turn off Pinned only.</p>
 
         <!-- Dashed Create Server Card -->
         ${canCreateServers() ? `<button type="button" class="create-server-dashed-card ${dashVm === 'list' ? 'compact' : ''}" onclick="openCreateServerModal()">
@@ -6111,7 +6134,9 @@ const V = {
   },
 
   con() {
+    if (window.NPWorkspace && !hasServerPermission('console.view')) return `${srvh()}${window.NPWorkspace.countdownSection()}<div class="card">Console output is unavailable with your current permissions. Power controls remain available if permitted.</div>`;
     return `${srvh()}
+    ${window.NPWorkspace?.countdownSection() || ''}
     <div class="np-section-heading"><div><h2>Console</h2><p>Live output and server performance.</p></div><span class="np-shortcut-hint">Command history <kbd>↑</kbd> <kbd>↓</kbd></span></div>
     <div class="cgrid">
       <div class="cwrap">
@@ -6130,6 +6155,7 @@ const V = {
             <button type="button" class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');" style="font-size:11px; padding:3px 9px;">Clear</button>
           </div>
         </div>
+        ${window.NPWorkspace?.consoleTools() || ''}
         <div class="con" id="log" role="log" aria-live="polite"></div>
         <div class="cin">
           <span>&raquo;</span>
@@ -7526,8 +7552,10 @@ const V = {
         <div class="np-status-code warn">${ic('alert', 14)} 503 MAINTENANCE</div>
         <h1 style="font-size:25px; font-weight:800; margin:0 0 10px; color:var(--tx);">${esc(title)}</h1>
         <p class="mu" style="font-size:13.5px; line-height:1.65; margin:0;">${esc(message)}</p>
+        <p class="mu">Sign in to use your server’s power controls and console with your existing permissions.</p>
         ${eta ? `<div class="chip mono" style="margin-top:14px; display:inline-flex;">Estimated return: ${esc(eta)}</div>` : ''}
         <div class="row" style="justify-content:center; gap:10px; margin-top:24px; flex-wrap:wrap;">
+          <button type="button" class="btn" onclick="S.maintPreview=false;go('dash')">Your servers &amp; console</button>
           ${isAdminPreview
             ? `<button type="button" class="btn pr" onclick="toggleMaintPreview(false)">Exit Maintenance Preview</button>`
             : `<button type="button" class="btn pr" onclick="checkAuth()">${ic('refresh', 14)} Check Status</button>
@@ -8627,7 +8655,7 @@ const V = {
               </span>
             </div>
             <span class="mu" style="font-size:12.5px; display:block; margin-bottom:14px;">
-              Locks standard user access and guests behind a 503 Maintenance screen while Administrators retain full access.
+              Shows a maintenance notice while players retain their permitted server power and console controls. Administrators retain full access.
             </span>
             <div style="margin-bottom:12px; padding:10px 12px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px;">
               <label class="row sb" style="cursor:pointer;">
@@ -9320,6 +9348,8 @@ window.addEventListener('hashchange', () => {
 // --- Main Render Function (R) ---
 window.R = function() {
   captureEditor();
+  window.NPWorkspace?.captureConsole();
+  window.NPWorkspace?.activate(curServer());
   window.NPEditorSyntax?.dispose();
   if (typeof filePreviewActive === 'function' && !filePreviewActive()) disposeFilePreview();
   closeAllCustomSelects();
@@ -9331,11 +9361,11 @@ window.R = function() {
 
   const isMaintEnabled = Boolean(S.branding?.maintenance_enabled);
   const isAdmin = S.user?.role === 'admin';
-  const showMaintLockout = (isMaintEnabled && !isAdmin) || (S.maintPreview && isAdmin);
+  const showMaintLockout = (isMaintEnabled && !isAdmin && !['dash', 'con', 'acc'].includes(S.view)) || (S.maintPreview && isAdmin);
 
   if (showMaintLockout) {
     if (typeof disposeFilePreview === 'function') disposeFilePreview();
-    if (nav) nav.innerHTML = '';
+    if (nav) nav.innerHTML = navHtml();
     if (main) {
       main.innerHTML = V.maintenance();
       main.scrollTop = 0;
@@ -9355,20 +9385,12 @@ window.R = function() {
     nav.scrollTop = prevNavScroll;
   }
   if (main) {
-    const maintBannerHtml = (isMaintEnabled && isAdmin)
-      ? `<div class="np-maint-banner">
-          <span><b>Maintenance mode:</b> Only admins can access the panel.</span>
-          <div class="row" style="gap: 8px;">
-            <button type="button" class="btn sm" onclick="toggleMaintPreview(true)">${ic('eye', 13)} Preview Screen</button>
-            <a href="/admin/branding" onclick="return handleNavClick(event, 'admin', { adminTab: 4 })" class="btn sm pr" style="text-decoration:none;">Manage</a>
-          </div>
-        </div>`
-      : '';
+    const maintBannerHtml = window.NPWorkspace?.maintenanceBanner() || '';
     const viewFn = V[S.view] || V.notfound;
     const blocked = serverPagePermission(S.view) && !canServerPage(S.view);
     if (blocked && typeof disposeFilePreview === 'function') disposeFilePreview();
     const retainedPreviewMedia = typeof captureFilePreviewMedia === 'function' ? captureFilePreviewMedia() : null;
-    main.innerHTML = renderAnnouncement() + maintBannerHtml + (blocked ? renderAccessRestricted() : (S.view === 'admin' && !isAdmin ? renderAccessRestricted(false) : viewFn())) + (S.view === 'dash' ? renderDiscordCard() : '');
+    main.innerHTML = (window.NPWorkspace?.connectionBanner() || '') + renderAnnouncement() + maintBannerHtml + (blocked ? renderAccessRestricted() : (S.view === 'admin' && !isAdmin ? renderAccessRestricted(false) : viewFn())) + (S.view === 'dash' ? renderDiscordCard() : '');
     if (typeof restoreFilePreviewMedia === 'function') restoreFilePreviewMedia(retainedPreviewMedia);
     if (S.view === 'set' && !blocked) organizeServerSettings(main);
     applyPermissionControls(main);
@@ -9394,6 +9416,7 @@ window.R = function() {
   }
   window.NPFind?.refresh();
   window.NPFileDrag?.afterRender($('#main'));
+  window.NPWorkspace?.afterRender();
 };
 
 function bindConsoleInput() {
@@ -9403,13 +9426,14 @@ function bindConsoleInput() {
     if (e.key === 'Enter' && inp.value.trim()) {
       const c = inp.value.trim();
       runCmd(c);
-      S.hist.push(c);
-      S.hi = S.hist.length;
       inp.value = '';
     } else if (e.key === 'ArrowUp' && S.hi > 0) {
+      e.preventDefault();
       inp.value = S.hist[--S.hi];
     } else if (e.key === 'ArrowDown') {
-      inp.value = S.hist[++S.hi] || '';
+      e.preventDefault();
+      S.hi = Math.min(S.hi + 1, S.hist.length);
+      inp.value = S.hist[S.hi] || '';
     }
   });
 }
@@ -9418,6 +9442,7 @@ function bindEditorTabKey() { bindQolEditor(); }
 
 // --- View Transition Lifecycle Hook & Initial Route Preloader ---
 async function loadInitialRouteData(view) {
+  if (window.NPWorkspace?.maintenanceLimited() && !window.NPWorkspace.maintenanceAllowed(view)) return;
   if (serverPagePermission(view)) {
     await ensureServerAccess();
     if (!canServerPage(view) || S.view !== view) return;
@@ -9456,16 +9481,19 @@ async function loadInitialRouteData(view) {
   else if (view === 'admin') jobs.push(loadAdminData(true));
   else if (view === 'acc') jobs.push(loadAccountData(true));
   else if (view === 'con' && hasServerPermission('settings.view')) jobs.push(loadServerPorts(true));
+  if (view === 'con') jobs.push(window.NPWorkspace?.pollCountdown());
   await Promise.all(jobs).catch(() => {});
 }
 
 window.onEnterView = function(view) {
+  if (window.NPWorkspace?.maintenanceLimited() && !window.NPWorkspace.maintenanceAllowed(view)) return;
   if (serverPagePermission(view) && !canServerPage(view)) {
     ensureServerAccess().then(() => { if (S.view === view) { R(); if (canServerPage(view)) onEnterView(view); } });
     return;
   }
   if (view === 'create') { if (canCreateServers()) openCreateServerModal(); return; }
   if (serverPagePermission(view) && hasServerPermission('console.view')) connectWs(curServer()?.id, false, curServer()?.node_id || 'local');
+  if (view === 'con') { window.NPWorkspace?.pollCountdown(); refreshServerStatus(); }
   if (view === 'sftp') { loadSFTPDetails(); return; }
   if (view === 'pl') loadPlayersData();
   else if (view === 'fi') loadFileList(S.currentDir);
@@ -9495,6 +9523,7 @@ window.onEnterView = function(view) {
 
 function setNodeFilter(nodeId) {
   S.nodeFilter = nodeId || 'all';
+  window.NPWorkspace?.saveList();
   R();
 }
 
@@ -10203,6 +10232,7 @@ function formatNum(n) {
 
 function filterServerCards(q) {
   S.serverFilter = q || '';
+  window.NPWorkspace?.saveList();
   const cards = $$('.sift-server-card');
   const term = (q || '').toLowerCase();
   cards.forEach(c => {
@@ -10210,6 +10240,8 @@ function filterServerCards(q) {
     const addr = (c.getAttribute('data-addr') || '').toLowerCase();
     c.style.display = (name.includes(term) || addr.includes(term)) ? '' : 'none';
   });
+  const empty = document.getElementById('np-server-empty');
+  if (empty) empty.hidden = Array.from(cards).some(c => c.style.display !== 'none');
 }
 
 function filterFileList(q) {
@@ -16452,6 +16484,7 @@ async function checkAuth() {
     }
     const user = await meRes.json();
     S.user = user;
+    window.NPWorkspace?.loadUser();
     S.acct.un = user.username || '';
     S.acct.em = user.email || '';
     S.acct.avatar_url = user.avatar_url || '';
@@ -16462,6 +16495,7 @@ async function checkAuth() {
 
     setPageProgress(65);
     await loadDashboard(true, preferredRef || getSavedActiveServerRef());
+    window.NPWorkspace?.restoreRoute();
     // Navigation can change while authentication/inventory requests are in flight.
     route = parseCurrentRoute(window.location.pathname + window.location.search, window.location.hash);
     S.view = route.notFoundPath ? 'notfound' : normalizeRoute(route.view || 'dash');
@@ -16505,6 +16539,7 @@ async function checkAuth() {
     setPageProgress(82);
     if (!['notfound', 'serverpending', 'maintenance'].includes(S.view)) {
       await loadInitialRouteData(S.view);
+      if (S.view === 'fi') await window.NPWorkspace?.restoreFile();
     }
     if (!serverPagePermission(S.view) && !['plug', 'set', 'ver', 'notfound', 'serverpending', 'maintenance'].includes(S.view)) {
       loadVersionsCatalog();
@@ -16648,7 +16683,7 @@ function showLoginScreen() {
       ${eta ? `<div class="chip mono" style="margin-top:14px; display:inline-flex;">Estimated return: ${esc(eta)}</div>` : ''}
       <div class="row" style="justify-content:center; gap:10px; margin-top:24px; flex-wrap:wrap;">
         <button type="button" class="btn pr" onclick="$('#login')?.remove(); checkAuth();">${ic('refresh', 14)} Check Status</button>
-        <button type="button" class="btn" onclick="enterAdminLoginFromMaint()">${ic('shield', 14)} Administrator Sign In</button>
+        <button type="button" class="btn" onclick="enterAdminLoginFromMaint()">${ic('user', 14)} Sign in to control your server</button>
       </div>
       <div class="lsm foot" style="margin-top:18px;">${renderFooterHtml(footTxt)}</div>
     </div>`;
@@ -16666,7 +16701,7 @@ function showLoginScreen() {
   d.className = 'login';
   d.innerHTML = `<div class="lbox">
     <div class="llogo">${brandLogoHtml(true)}</div>
-    ${maintEnabled ? `<div class="np-status-code warn" style="margin-bottom:10px;">${ic('alert', 13)} MAINTENANCE MODE &bull; ADMIN LOGIN</div>` : ''}
+    ${maintEnabled ? `<div class="np-status-code warn" style="margin-bottom:10px;">${ic('alert', 13)} MAINTENANCE · SERVER CONTROLS AVAILABLE</div>` : ''}
     <div class="lg">${greeting}</div>
     <h1 class="lt">Sign in to ${esc(brandName)}</h1>
     <label class="lf">
@@ -16828,6 +16863,7 @@ async function logout() {
   window.NPMotion?.resetSession();
   window.NPProgress?.clear();
   window.NPOnboarding?.resetSession();
+  window.NPWorkspace?.reset();
   cancelAllUploads();
   QOL.uploads = [];
   renderUploadQueue();
@@ -17542,6 +17578,8 @@ function hasServerPermission(permission, srv = curServer()) {
   return state.data.is_admin === true || state.data.is_owner === true || state.data.permissions.includes(permission);
 }
 function canServerPage(view) {
+  if (window.NPWorkspace?.maintenanceLimited() && !window.NPWorkspace.maintenanceAllowed(view)) return false;
+  if (view === 'con' && hasServerPermission('server.power')) return true;
   const permission = serverPagePermission(view);
   return !permission || hasServerPermission(permission);
 }
@@ -17603,6 +17641,7 @@ function clientRequestPermission(suffix, method = 'GET') {
   if (path.startsWith('/databases')) return 'database.manage';
   if (path.startsWith('/schedules')) return 'schedules.manage';
   if (path.startsWith('/subusers')) return 'subusers.manage';
+  if (path === '/power/countdown' && read) return hasServerPermission('server.power') ? 'server.power' : 'console.view';
   if (path.startsWith('/power')) return 'server.power';
   if (path.startsWith('/command')) return 'console.command';
   if (path.startsWith('/players')) return read ? 'console.view' : 'console.command';
@@ -17617,6 +17656,7 @@ function assertClientRequestAccess(endpoint, options = {}) {
   if (!match || match[3] === '/permissions' || S.user?.role === 'admin') return;
   const srv = { id: decodeURIComponent(match[2]), node_id: decodeURIComponent(match[1] || 'local') };
   const permission = clientRequestPermission(match[3], method);
+  if (match[3] === '/power/countdown' && method === 'POST' && !hasServerPermission('console.command', srv)) throw Object.assign(new Error('Access restricted: console.command required'), { status: 403 });
   if (!['GET', 'HEAD'].includes(method) && (/^\/files\/(rename|move|unzip|extract)$/.test(match[3]) || /^\/files\/trash\/[^/]+\/restore$/.test(match[3])) && !hasServerPermission('files.edit', srv)) throw Object.assign(new Error('Access restricted: files.edit required'), { status: 403 });
   if ((permission && !hasServerPermission(permission, srv)) || (match[3].startsWith('/files') && !hasServerPermission('files.view', srv))) throw Object.assign(new Error('Access restricted: ' + (permission || 'files.view') + ' required'), { status: 403 });
 }
@@ -17635,6 +17675,7 @@ function applyPermissionControls(root) {
     disable('[onclick*="deleteFile"], [onclick*="deleteSelected"], [onclick*="RenameFile"], [onclick*="MoveFiles"], [onclick*="unzipFile"], [onclick*="unzipSelected"], [onclick*="deletePlugin"]', 'files.delete');
     disable('[onclick*="RenameFile"], [onclick*="MoveFiles"], [onclick*="unzipFile"], [onclick*="unzipSelected"]', 'files.edit');
   }
+  window.NPWorkspace?.syncControls();
 }
 V.sftp = () => `${srvh()}<div class="np-section-heading"><div><h2>SFTP</h2><p>One place for external file transfer connections.</p></div></div>${S.sftpLoading ? '<div class="card" role="status">Loading connection details…</div>' : S.sftp ? renderSftpCardHtml(curServer()) : `<div class="card" role="status">${esc(S.sftpError || 'Connection details are not loaded.')} <button class="btn sm" onclick="loadSFTPDetails()">Retry</button></div>`}`;
 V.create = () => canCreateServers() ? '<section class="card"><h1>Create server</h1><p class="mu">Choose a node and configure your Minecraft server.</p><button class="btn pr" onclick="openCreateServerModal()">Configure server</button></section>' : renderAccessRestricted(false);

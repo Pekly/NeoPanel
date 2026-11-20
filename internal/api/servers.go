@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
@@ -34,12 +35,14 @@ import (
 )
 
 type ServerHandler struct {
-	cfg        *config.Config
-	db         *database.DB
-	manager    *runner.ServerManager
-	httpClient *http.Client
-	allowPort  func(int, string)
-	removePort func(int)
+	cfg           *config.Config
+	db            *database.DB
+	manager       *runner.ServerManager
+	httpClient    *http.Client
+	allowPort     func(int, string)
+	removePort    func(int)
+	countdownOnce sync.Once
+	countdowns    *powerCountdownCoordinator
 }
 
 func NewServerHandler(cfg *config.Config, db *database.DB, manager *runner.ServerManager) *ServerHandler {
@@ -457,6 +460,10 @@ func (h *ServerHandler) DeleteServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "Deletion refused: this record is assigned to another node. Delete the server on its hosting worker and reconcile this record only after confirming shutdown."})
 		return
 	}
+	countdowns := h.powerCountdowns()
+	countdowns.mu.Lock()
+	defer countdowns.mu.Unlock()
+	countdowns.cancelLocked(serverID)
 
 	err = h.manager.DeleteServer(r.Context(), serverID, func() error {
 		// The manager retains the restore/power gate through all disk and DB work.
@@ -499,6 +506,14 @@ func (h *ServerHandler) PowerAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid action request"})
+		return
+	}
+	countdowns := h.powerCountdowns()
+	countdowns.mu.Lock()
+	defer countdowns.mu.Unlock()
+	countdowns.expireLocked(serverID)
+	if countdowns.pending[serverID] != nil {
+		writeError(w, http.StatusConflict, "Cancel the pending power countdown first")
 		return
 	}
 
