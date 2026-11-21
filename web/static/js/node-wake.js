@@ -133,14 +133,16 @@
     } catch (error) { if (live(ctx) && sequence === ctx.uploadSequence) ctx.error = error.message; }
     finally { if (live(ctx) && sequence === ctx.uploadSequence) { ctx.busy = false; el(ctx, 'upload').value = ''; paint(ctx); } }
   }
-  async function open(id) {
+  async function open(id, returnToEdit = false) {
     if (!admin()) return;
     const container = document.querySelector('#modal-container');
     if (!container) return;
     const name = typeof displayNodeName === 'function' ? displayNodeName(id) : id;
     const opener = document.activeElement;
+    // Keep the actual form nodes: serializing HTML would lose unsaved values.
+    const previous = returnToEdit ? [...container.childNodes] : null;
     container.innerHTML = `<div class="pal" id="wake-modal"><div class="card pbox" role="dialog" aria-modal="true" aria-labelledby="wake-title" style="padding:26px;max-width:720px;width:95vw;max-height:90vh;overflow:auto">
-      <div class="row sb"><h2 id="wake-title">Join to start — ${escape(name)}</h2><button type="button" class="btn sm" id="wake-close" aria-label="Close join-to-start settings">×</button></div>
+      <div class="row sb"><h2 id="wake-title">Join to start — ${escape(name)}</h2><button type="button" class="btn sm" id="wake-close" aria-label="${previous ? 'Back to node settings' : 'Close join-to-start settings'}">${previous ? 'Back' : '×'}</button></div>
       <p>Opt in this node’s entire local Minecraft Java inventory. Bedrock is not supported. Offline status pings never wake a server; only a login attempt requests a start.</p>
       <p>Players receive a disconnect message and must reconnect after the real server takes its port. Early reconnects may fail during boot. This is not a proxy or a Minecraft 1.21.6 dialog.</p>
       <p><b>Security:</b> An unauthenticated login can request a start. This is not authorization or proof of player identity. Disable for maintenance and confirm worker acceptance; online server MOTD and icons are unaffected.</p>
@@ -160,7 +162,13 @@
       </div></div>`;
     const ctx = { id, owner: identity(), root: document.querySelector('#wake-modal'), saved: null, loaded: false, busy: false, dirty: false, unknown: false, icon: '', error: '', uploadSequence: 0 };
     current = ctx;
-    const close = () => { if (current === ctx) current = null; ctx.root.remove(); opener?.focus(); };
+    const close = () => {
+      const restore = previous && live(ctx);
+      if (current === ctx) current = null;
+      ctx.root.remove();
+      if (restore) container.replaceChildren(...previous);
+      if (ctx.owner === identity()) opener?.focus();
+    };
     el(ctx, 'close').onclick = close;
     ctx.root.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.stopPropagation(); close(); }
