@@ -446,7 +446,7 @@ html body #pal .pit:focus-visible { outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) {
   .np-announcement, #pal .pbox { animation: none; transition: none; }
 }
-.np-server-settings-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.np-server-settings-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
 .np-server-settings-group[hidden] { display: none; }
 .np-server-settings-group > .card { min-width: 0; }
 .np-server-settings-group[data-settings-panel="2"] { grid-template-columns: minmax(0, 1fr); }
