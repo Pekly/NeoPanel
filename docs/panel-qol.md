@@ -52,4 +52,5 @@ Use **Admin → Appearance → Public URL** to change the public panel FQDN. Che
 
 - **Getting started** is available only to administrators during the first three days after their account was created, never to ordinary users.
 - Under **Admin → Nodes**, choose **Rename** for any node, including the local host. This changes only its display name, not its addresses, credentials, policies, or running servers.
+- Local node cards distinguish the saved **Panel URL** from the **Game / SFTP host**. A panel-domain change updates the panel label without silently moving game connections. Use the local node's **Edit address** button to open Appearance → Server defaults and change the advertised game/SFTP host. Successful saves refresh cached local server addresses; **Refresh Nodes** reloads both the node details and saved panel URL.
 - The saved panel palette and your selected light/dark/OLED/automatic appearance are applied before the page's styles render. The server supplies the current palette for new browsers; a validated browser cache is the fallback when that response is unavailable.
