@@ -79,6 +79,18 @@ func (m *ServerManager) stopIdleServer(id string, expected *ProcessInstance, run
 		_ = m.db.CreateAuditLog("system", "server.idle_timeout_failed", fmt.Sprintf("Idle stop failed for server %s: %v", id, err), "")
 		return
 	}
+	// stopIfIdle waits for run completion including owned-process cleanup.
+	// Serialize publication with launches; the operation gate excludes manual stop.
+	m.launchMu.Lock()
+	if !m.isShuttingDown() && inst.GetStatus() == "offline" {
+		if err := m.db.SetServerIdleStopped(id, true); err != nil {
+			m.wakeSuppressed.Store(id, true)
+			log.Printf("[WARN] Cannot persist idle wake authority for %s: %v", id, err)
+		} else {
+			m.wakeSuppressed.Delete(id)
+		}
+	}
+	m.launchMu.Unlock()
 	inst.broadcast(fmt.Sprintf("[NeoPanel] Idle auto-shutdown completed after at least %d minutes with no tracked players.", policy.TimeoutMinutes))
 	_ = m.db.CreateAuditLog("system", "server.idle_timeout", fmt.Sprintf("Server %s auto-stopped after at least %d minutes idle", srv.Name, policy.TimeoutMinutes), "")
 }

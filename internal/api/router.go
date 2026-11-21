@@ -191,6 +191,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("PUT /api/servers/{id}", r.requireAuth(r.servers.UpdateServer))
 	r.mux.HandleFunc("DELETE /api/servers/{id}", r.requireAuth(r.servers.DeleteServer))
 	r.mux.HandleFunc("POST /api/servers/{id}/power", r.requireAuth(r.servers.PowerAction))
+	r.mux.HandleFunc("GET /api/servers/{id}/automation", r.requireAuth(r.servers.GetServerAutomation))
+	r.mux.HandleFunc("PATCH /api/servers/{id}/automation", r.requireAuth(r.servers.PatchServerAutomation))
 	r.mux.HandleFunc("GET /api/servers/{id}/power/countdown", r.requireAuth(r.servers.PowerCountdown))
 	r.mux.HandleFunc("POST /api/servers/{id}/power/countdown", r.requireAuth(r.servers.PowerCountdown))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/power/countdown", r.requireAuth(r.servers.PowerCountdown))
@@ -627,6 +629,14 @@ func serverActionPermission(method, suffix string) string {
 			return ""
 		}
 		return "settings.edit"
+	case "automation":
+		if read {
+			return ""
+		}
+		if method == http.MethodPatch {
+			return "settings.edit+server.power"
+		}
+		return "owner"
 	case "ws":
 		return "console.view"
 	case "command":

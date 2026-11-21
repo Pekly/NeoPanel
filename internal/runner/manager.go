@@ -32,6 +32,7 @@ type ServerManager struct {
 	idleWG           sync.WaitGroup
 	launchMu         sync.Mutex // Serializes process launch with the shutdown boundary.
 	wake             wakeCoordinator
+	wakeSuppressed   sync.Map // failed durable invalidations fail closed until repaired
 	recoveryMu       sync.Mutex
 	recoveryOnce     sync.Once
 	recoveryErr      error
@@ -294,7 +295,9 @@ func (m *ServerManager) waitAndRetryStart(srvID string, attemptNum int, cancelCh
 		return
 	}
 
-	m.releaseWakeListener(srvID)
+	if err := m.invalidateIdleWake(srvID); err != nil {
+		return
+	}
 	inst := m.getOrCreateInstance(latestSrv)
 	inst.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Executing auto-restart startup attempt %d/%d...\x1b[0m", attemptNum, MaxStartupAttempts))
 
@@ -343,7 +346,9 @@ func (m *ServerManager) startWithLaunchPolicy(srv *database.Server, resetFailure
 	if m.isShuttingDown() {
 		return errDaemonShuttingDown
 	}
-	m.releaseWakeListener(srv.ID)
+	if err := m.invalidateIdleWake(srv.ID); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.cancelRetryLocked(srv.ID)
 	m.restorePaused.Delete(srv.ID)
@@ -381,13 +386,19 @@ func (m *ServerManager) Stop(serverID string, graceful bool) error {
 		return err
 	}
 	defer unlock()
+	m.launchMu.Lock()
+	err = m.invalidateIdleWake(serverID)
+	m.launchMu.Unlock()
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	m.cancelRetryLocked(serverID)
 	inst, ok := m.instances[serverID]
 	m.mu.Unlock()
 
 	if !ok {
-		return fmt.Errorf("server instance not found or already offline")
+		return nil
 	}
 
 	return inst.Stop(graceful)

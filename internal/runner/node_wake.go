@@ -91,6 +91,10 @@ func (m *ServerManager) wakeEligible(s *database.Server) bool {
 	if !localWakeServer(s) || m.isShuttingDown() || m.GetStatus(s.ID) != "offline" {
 		return false
 	}
+	view, err := m.wakePolicyView(s)
+	if err != nil || view.Reason != "eligible" {
+		return false
+	}
 	if _, blocked := m.restoreBlocked.Load(s.ID); blocked {
 		return false
 	}
@@ -310,7 +314,7 @@ func (m *ServerManager) acceptWake(e *wakeListener) {
 			defer w.wg.Done()
 			defer func() { <-w.slots; w.mu.Lock(); delete(e.connections, conn); w.mu.Unlock() }()
 			requested := false
-			_ = mcwake.Handle(conn, func(_ int32) mcwake.Status {
+			_ = mcwake.HandleWithOptions(conn, mcwake.Options{LegacyDisconnectColors: e.config.LegacyDisconnectColors}, func(_ int32) mcwake.Status {
 				return mcwake.Status{MOTD: wakeText(e.config.OfflineMOTD, e.server), VersionName: wakeText(e.config.VersionLabel, e.server), MaxPlayers: e.config.MaxPlayers, IconDataURL: e.icon}
 			}, func(_ mcwake.Join) string {
 				requested = m.reserveWake(e)

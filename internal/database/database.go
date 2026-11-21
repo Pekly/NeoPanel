@@ -58,6 +58,10 @@ func InitDB(dbPath string) (*DB, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("panel role retirement failed: %w", err)
 	}
+	if err := db.migrateServerWake(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("server wake migration failed: %w", err)
+	}
 	return db, nil
 }
 

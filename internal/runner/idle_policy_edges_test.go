@@ -29,6 +29,7 @@ func TestIdleFailedStopNeverLogsSuccess(t *testing.T) {
 	p.cmd = nil
 	p.status = "offline"
 	p.mu.Unlock()
+	assertIdleWake(t, m, s.ID, false)
 	rows, err := db.ListActivity(0, true, 50)
 	if err != nil {
 		t.Fatal(err)

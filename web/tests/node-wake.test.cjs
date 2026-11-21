@@ -1,7 +1,7 @@
 const test = require('node:test'), assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/js/node-wake.js'), 'utf8');
-const defaults = () => ({ enabled: false, bind_address: '', offline_motd: '{server} sleeps\n&bJoin!', version_label: 'Join to start', max_players: 20, icon_data_url: '', use_server_icon: true, starting_message: 'Reconnect', unavailable_message: 'Unavailable', cooldown_seconds: 30 });
+const defaults = () => ({ enabled: false, bind_address: '', offline_motd: '{server} sleeps\n&bJoin!', version_label: 'Join to start', max_players: 20, icon_data_url: '', use_server_icon: true, starting_message: 'Reconnect', unavailable_message: 'Unavailable', cooldown_seconds: 30, legacy_disconnect_colors: false });
 const envelope = (config = defaults(), applied = true, error = '') => ({ config, applied, error });
 const runtimeReport = overrides => ({ checked_at: new Date().toISOString(), enabled: true, coordinator_running: true, config_matches: true, config_hash: 'a'.repeat(64), listeners: 1, servers: [{id:'one', name:'Server one', port:25565, state:'listening', detail:'Listening for Java joins'}], error:'', ...overrides });
 function setup(handler = async () => envelope(), runtimeHandler = async () => runtimeReport({enabled:false,listeners:0,servers:[]})) {

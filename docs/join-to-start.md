@@ -1,6 +1,6 @@
 # Minecraft Java join to start
 
-Join to start is **off by default**, separately for Local and every connected remote node. In **Admin → Nodes**, choose **Edit** on the target node, then **Configure join to start**. This is available for Local and remote nodes in both list and card layouts. **Back** returns to the node settings without discarding unsaved node edits; wake settings are saved separately. Enabling it opts in that node’s **entire local Minecraft Java inventory**, not an individual server or every node in the cluster. Bedrock is not supported.
+Join to start is **off by default per node**. In **Admin → Nodes → Edit → Configure join to start**, administrators opt the node in. Both node idle auto-shutdown and join-to-start must be enabled, and the individual server must allow it. **Only servers successfully stopped by the node's idle auto-shutdown policy can wake.** Manual stops, crashes, new servers, maintenance/restore, and failed launches do not qualify. Bedrock is not supported. **Back** preserves unsaved node edits; wake settings save separately.
 
 ## Requirements and setup
 
@@ -9,6 +9,9 @@ Join to start is **off by default**, separately for Local and every connected re
 - Players must be able to reach the server’s normal Java TCP port on the node. Configure firewalls/NAT as usual. The selected bind IP must exist on the node; use an empty address for all interfaces. A hostname, URL, or address with a port is not a bind address.
 - A stopped server’s port must be available to the node daemon. Resolve duplicate/conflicting ports and other processes occupying them. The real server must be able to bind its normal port after handoff.
 - Only locally assigned, recognized Java-protocol server types with primary ports 1024–65535 are eligible. Startup-halted, restore-blocked, active, conflicting, and busy servers are skipped. Listeners do not count as running servers for restart recovery.
+- A trusted idle-stop marker is stored only after a completed idle shutdown. Every launch attempt consumes it; accepted manual Stop (including already-offline servers), maintenance, restore, and deletion invalidate it. Existing idle-stopped markers survive a clean panel restart, but panel shutdown never creates new ones. Read/write failures fail closed for automatic wake.
+- Upgrading does not infer eligibility from old logs or offline status. A previously stopped server needs a manual start and a successful idle auto-shutdown under this version before it can wake.
+- Users can enable/disable **Join to start after idle shutdown** in **Server Settings → Startup & resources → Server automation**. The preference defaults on, but does nothing without both node policies and a trusted idle-stop marker. The node's idle-shutdown toggle is visible and locked; users cannot disable it. Owners/admins or subusers with both settings-edit and server-power permissions may change the wake preference.
 - Configuration and inventory are reconciled roughly once per second. There are at most 1024 offline listeners, 64 concurrent wake connections, and 12 admitted connections per source IP per 10 seconds. Protocol connections have a five-second deadline; excessive traffic is dropped. Shared/NAT addresses share that connection budget.
 
 Open the settings, wait for the saved configuration to load, edit it, then select **Save settings**. There is no autosave. The GET response supplies authoritative defaults; the browser does not invent defaults when loading fails.
@@ -41,11 +44,18 @@ Limits on text are **UTF-8 bytes**. Text supports `{server}`, `{version}`, newli
 | `starting_message` | Branded header, green/bold **WAKE REQUEST ACCEPTED**, and yellow reconnect guidance | Colored multiline login disconnect text, at most 4096 bytes. |
 | `unavailable_message` | Branded header, gold/bold **NOT READY YET**, and yellow retry guidance | Colored multiline unavailable text, at most 4096 bytes. |
 | `cooldown_seconds` | `30` | Start request cooldown, integer 10–600 seconds; not a promised boot duration. |
+| `legacy_disconnect_colors` | `false` | Horizon-compatible reconnect colors: literal legacy `§` formatting inside the JSON reason; RGB is approximated to the 16-color palette. MOTD encoding is unchanged. |
 
 Use the PNG file picker to preview a custom icon or **Remove custom icon** to clear it; save to persist the change. The data-URL limit includes base64 overhead, so a 64 KiB PNG file is too large. Server-side validation checks the actual PNG and dimensions. The server-icon option and custom offline icon do not overwrite the server’s files or affect its online icon.
-The server icon is read when its offline listener opens; reopen the listener (for example, save a changed wake setting or stop the server after a run) to reload a changed file. A valid custom icon is the fallback when the server icon is missing or invalid. Expanded disconnect text is also subject to a bounded wire-packet limit; oversized output uses a safe reconnect fallback.
+The server icon is read when its eligible offline listener opens; save a changed wake setting or wait for the next successful idle shutdown to reload a changed file. A valid custom icon is the fallback when the server icon is missing or invalid. Expanded disconnect text is also subject to a bounded wire-packet limit; oversized output uses a safe reconnect fallback.
 
 **Use panel branding template** reads the panel's saved brand name and accent and replaces only the four text fields in your draft. It never changes enabling, bind address, cooldown, player count, or icons, and never saves automatically. Review and save to apply. Existing saved custom messages are preserved on upgrade; new configurations get the colorful NeoPanel defaults. Branding changes do not silently rewrite worker settings—apply the template again explicitly.
+
+### Horizon Rust Edition reconnect colors
+
+Enable **Horizon-compatible reconnect colors** under **Player messages**, then save and confirm worker application. Inspected [Horizon upstream](https://github.com/horizon-rust/horizon/tree/f618858113f0c3a10679072870951dee22c133ea) flattens login JSON components into plain strings, dropping their semantic colors/bold, while its HUD supports literal legacy section codes. The compatibility mode uses that supported path; it does not change eligibility, authentication, or MOTD packets.
+
+Normal mode retains full semantic RGB text for vanilla Java. Compatibility mode maps hex colors to the nearest legacy palette color, preserves standard decorations, and reapplies formatting after explicit newlines. Horizon's automatic line wrapping remains client-controlled and can reset styles at a wrap boundary; prefer short explicit lines. Your exact Horizon build still needs a visual check—the packet path was verified with local tests, not a running Horizon binary. No client-specific behavior is guessed from the protocol number.
 
 ## Live listener indicator
 
@@ -65,7 +75,7 @@ The administrator API is `GET /api/admin/nodes/{id}/wake` and `PUT /api/admin/no
 }
 ```
 
-The abbreviated `config` above is illustrative, not a valid PUT body. **PUT sends the complete configuration object only**, with the ten fields in the table; do not send the envelope or `applied`/`error` fields.
+The abbreviated `config` above is illustrative, not a valid PUT body. **PUT sends the complete configuration object only**, with the eleven fields in the table; do not send the envelope or `applied`/`error` fields. Update panel and workers together for the new eligibility and compatibility settings.
 
 - **Saved desired settings** describe what the master wants the node to use. Expand that section in the modal to inspect the last confirmed saved configuration independently of unsaved form edits.
 - **`applied: true` means configuration was accepted by the node runtime**, not that every game port is listening or every server can start. Bind failures are logged by the runtime; inspect the node logs and test actual connectivity.
@@ -90,6 +100,10 @@ HTTP 401/403 instead calls for checking the saved Node Token / administrator API
 
 The offline listener operates **before Minecraft authentication**. An unauthenticated login attempt, including one from an automated client, can request a start. A supplied player name is **not proof of identity**, and join to start is **not authorization**. The real server must still enforce its normal authentication, whitelist, bans, and permissions after reconnect; those checks do not protect the wake request itself.
 
-Only enable this behavior where anyone able to reach the port may request consumption of server resources. Restrict network access if that is not acceptable. Cooldowns limit repeated requests but are not an access-control boundary. Disable join to start on the node for maintenance and confirm acceptance before stopping servers; otherwise a login attempt may start them again.
+Only enable this behavior where anyone able to reach an eligible listener may request startup. Restrict network access if that is not acceptable. Manual stop and maintenance invalidate the idle-stop marker; disabling node wake or the server preference also prevents player-triggered starts. Cooldowns are not an access-control boundary.
 
 For problems, check desired versus accepted state first, then worker version/connectivity, runtime bind-error logs, port conflicts, bind IP, firewall/NAT, and the server’s normal Java/start logs. Test a status ping separately from a login attempt, and allow boot to finish before reconnecting.
+
+## User automation API
+
+`GET /api/servers/{id}/automation` reports the hosting node's effective idle policy, locked status, user wake preference, recorded idle-stop cause, and eligibility. `PATCH` accepts **only** `{"join_to_start_enabled":true}` (or false); readonly policy and marker fields are rejected. Remote requests use the normal authenticated node proxy. Only trusted runtime code can record an idle shutdown; this API cannot disable the node policy or manufacture wake eligibility.

@@ -129,17 +129,20 @@ func fetchNodeWakeStatus(ctx context.Context, node *database.ClusterNode) (runne
 }
 
 var wakeRemoteDetails = map[string]string{
-	"listening":   "Listener bound and waiting for a player join",
-	"cooldown":    "Listener bound; startup cooldown is active",
-	"online":      "Server is already running",
-	"starting":    "Server startup is queued or in progress",
-	"busy":        "Another server operation is in progress",
-	"blocked":     "Automatic startup is blocked; administrator action required",
-	"conflict":    "Multiple local servers use this game port",
-	"bind_failed": "Port unavailable or bind address not available; check node logs",
-	"pending":     "Waiting for listener reconciliation",
-	"disabled":    "Join-to-start is disabled",
-	"ineligible":  "Unsupported server type, server ID or game port",
+	"listening":          "Listener bound and waiting for a player join",
+	"cooldown":           "Listener bound; startup cooldown is active",
+	"online":             "Server is already running",
+	"starting":           "Server startup is queued or in progress",
+	"busy":               "Another server operation is in progress",
+	"blocked":            "Automatic startup is blocked; administrator action required",
+	"conflict":           "Multiple local servers use this game port",
+	"bind_failed":        "Port unavailable or bind address not available; check node logs",
+	"pending":            "Waiting for listener reconciliation",
+	"disabled":           "Join-to-start is disabled",
+	"ineligible":         "Unsupported server type, server ID or game port",
+	"node_idle_disabled": "Node idle shutdown is disabled",
+	"user_disabled":      "Server join-to-start preference is disabled",
+	"not_idle_stopped":   "Server was not stopped by the node idle policy",
 }
 var wakeStatusTruncation = regexp.MustCompile(`Server details truncated: [0-9]{1,10} additional local servers omitted`)
 

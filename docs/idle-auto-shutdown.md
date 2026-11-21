@@ -27,7 +27,9 @@ Player tracking uses supported console join/leave/login/list formats, not server
 
 ## Join-to-start interaction
 
-Idle auto-shutdown and join-to-start are separate node policies. If join-to-start is enabled, its listener returns after an idle shutdown and the next real player join can wake the server. Status pings do not wake it. Disable join-to-start separately for maintenance when you do not want player-triggered restarts.
+Join-to-start applies **only after a successful idle auto-shutdown**. Both node policies and the server's wake preference must be enabled. Manual stops, crashes, fresh servers, maintenance/restores, and failed launches do not create eligibility. A successful idle stop records a durable marker; a launch consumes it, while manual Stop/maintenance/restore invalidates it. Status pings never wake a server. Existing offline servers are not retroactively marked on upgrade.
+
+Users can change **Join to start after idle shutdown** in **Server Settings → Startup & resources → Server automation**. The node-enforced idle policy is displayed as a locked checkbox and cannot be toggled off by users. Changing the server wake preference never alters the idle timeout or node enable flag; only node administrators can change those.
 
 ## API
 

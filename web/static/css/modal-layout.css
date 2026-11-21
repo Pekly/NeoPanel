@@ -71,3 +71,32 @@ html body .pal {
   .pbox .np-modal-form > .f,
   .pbox .np-modal-form > .np-modal-half { grid-column: 1 / -1; }
 }
+
+/* Icon-only close controls: draw the X rather than inheriting a font baseline. */
+.pbox button[aria-label^="Close"] {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+}
+.pbox button[aria-label^="Close"] > svg { display: none; }
+.pbox button[aria-label^="Close"]::before,
+.pbox button[aria-label^="Close"]::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 1.5px;
+  left: 50%;
+  top: 50%;
+  background: currentColor;
+  border-radius: 1px;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.pbox button[aria-label^="Close"]::after { transform: translate(-50%, -50%) rotate(-45deg); }

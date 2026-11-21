@@ -17,16 +17,17 @@ import (
 // NodeWakeConfig is desired configuration on the panel and applied configuration
 // under "local" on the host. It is independent of ClusterNode policy defaults.
 type NodeWakeConfig struct {
-	Enabled            bool   `json:"enabled"`
-	BindAddress        string `json:"bind_address"`
-	OfflineMOTD        string `json:"offline_motd"`
-	VersionLabel       string `json:"version_label"`
-	MaxPlayers         int    `json:"max_players"`
-	IconDataURL        string `json:"icon_data_url"`
-	UseServerIcon      bool   `json:"use_server_icon"`
-	StartingMessage    string `json:"starting_message"`
-	UnavailableMessage string `json:"unavailable_message"`
-	CooldownSeconds    int    `json:"cooldown_seconds"`
+	Enabled                bool   `json:"enabled"`
+	BindAddress            string `json:"bind_address"`
+	OfflineMOTD            string `json:"offline_motd"`
+	VersionLabel           string `json:"version_label"`
+	MaxPlayers             int    `json:"max_players"`
+	IconDataURL            string `json:"icon_data_url"`
+	UseServerIcon          bool   `json:"use_server_icon"`
+	StartingMessage        string `json:"starting_message"`
+	UnavailableMessage     string `json:"unavailable_message"`
+	CooldownSeconds        int    `json:"cooldown_seconds"`
+	LegacyDisconnectColors bool   `json:"legacy_disconnect_colors"`
 }
 
 func DefaultNodeWakeConfig() NodeWakeConfig {

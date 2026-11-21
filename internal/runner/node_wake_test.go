@@ -45,6 +45,13 @@ func wakeFixture(t *testing.T) (*ServerManager, *database.Server, database.NodeW
 	if err := db.SetNodeWakeConfig("local", cfg); err != nil {
 		t.Fatal(err)
 	}
+	// Existing protocol fixtures represent a previously completed trusted idle stop.
+	if err := db.SetNodeIdlePolicy("local", database.NodeIdlePolicy{Enabled: true, TimeoutMinutes: 15}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetServerIdleStopped(s.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	return m, s, cfg
 }
 func wakeEntry(m *ServerManager, id string) *wakeListener {
@@ -149,6 +156,14 @@ func TestWakePingJoinPortHandoffAndCooldown(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.reconcileWakeListeners()
+	if wakeEntry(m, s.ID) != nil {
+		t.Fatal("manual stop reopened listener")
+	}
+	// Simulate a later completed idle stop to verify cooldown retention.
+	if err := m.db.SetServerIdleStopped(s.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	m.reconcileWakeListeners()
 	if e := wakeEntry(m, s.ID); e == nil || m.reserveWake(e) {
 		t.Fatal("cooldown not retained after stop")
 	}
@@ -214,9 +229,14 @@ func TestWakeInventoryAndOperationGuards(t *testing.T) {
 	}
 	release()
 	m.reconcileWakeListeners()
-	if wakeEntry(m, s.ID) == nil {
-		t.Fatal("not reopened")
+	if wakeEntry(m, s.ID) != nil {
+		t.Fatal("maintenance reopened idle authority")
 	}
+	// Remaining guard checks use a new trusted idle-stop fixture.
+	if err := m.db.SetServerIdleStopped(s.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	m.reconcileWakeListeners()
 	m.mu.Lock()
 	m.startupHalted[s.ID] = true
 	m.mu.Unlock()

@@ -131,6 +131,15 @@ func (m *ServerManager) captureWakeStatusLocked(cfg database.NodeWakeConfig, ser
 			set("starting", "A startup retry is scheduled")
 			continue
 		}
+		view, policyErr := m.wakePolicyView(s)
+		if policyErr != nil {
+			set("blocked", "Unable to read trusted wake policy")
+			continue
+		}
+		if view.Reason != "eligible" {
+			set(view.Reason, "Wake requires an enabled preference and a completed node idle shutdown")
+			continue
+		}
 		if counts[s.Port] != 1 {
 			set("conflict", "Multiple local servers use this game port")
 			continue

@@ -10,10 +10,11 @@
     use_server_icon: ['Use each server’s server-icon.png when available', 'checkbox'],
     starting_message: ['Starting disconnect message (4096 UTF-8 bytes)', 'textarea', 4096],
     unavailable_message: ['Unavailable disconnect message (4096 UTF-8 bytes)', 'textarea', 4096],
+    legacy_disconnect_colors: ['Horizon-compatible reconnect colors', 'checkbox'],
     cooldown_seconds: ['Start request cooldown (seconds)', 'number', 10, 600]
   };
   const help = {
-    enabled: 'Applies to eligible offline Java servers hosted on this node only. Off by default; it does not enable other nodes.',
+    enabled: 'Applies only after this node successfully stops a server through idle auto-shutdown, and only if that server allows join-to-start. Manual stops, crashes and new servers never qualify.',
     bind_address: 'Usually leave empty. Advanced: use an IP assigned to this node, not a hostname or game port. This does not change player addresses.',
     offline_motd: 'Shown in the multiplayer server list while offline. Pings never start the server. Up to 2048 UTF-8 bytes.',
     version_label: 'Cosmetic offline label only; does not change the installed Minecraft version. Up to 128 UTF-8 bytes.',
@@ -21,6 +22,7 @@
     use_server_icon: 'Prefer a valid server-icon.png from each server. The uploaded icon below is the fallback; neither changes the online icon.',
     starting_message: 'Sent when a start request is accepted. Ask the player to reconnect after boot; this is not proof the game finished starting. Up to 4096 UTF-8 bytes.',
     unavailable_message: 'Sent when the listener declines a request, for example during cooldown. If no listener is available, Minecraft shows its normal connection error. Up to 4096 UTF-8 bytes.',
+    legacy_disconnect_colors: 'Enable for Horizon Rust Edition: its disconnect screen flattens JSON styles. Uses literal legacy colors (16-color palette) for reconnect messages, not the MOTD. Off preserves exact RGB for vanilla clients. Save and apply to the worker.',
     cooldown_seconds: 'Minimum time between accepted start requests per server: 10–600 seconds (default 30). This is not the server boot time.'
   };
   const keys = [...Object.keys(fields), 'icon_data_url'];
@@ -248,12 +250,12 @@
           <div class="wake-icon-actions"><img id="wake-preview" width="64" height="64" alt="Custom offline icon preview" hidden><button type="button" class="btn sm" id="wake-remove">Remove custom icon</button></div>
         </section>
         <section class="wake-section" aria-labelledby="wake-messages-title"><h3 id="wake-messages-title">Player messages</h3>
-          ${controls(['starting_message', 'unavailable_message'])}
+          ${controls(['legacy_disconnect_colors', 'starting_message', 'unavailable_message'])}
           <div class="wake-note"><b>Text formatting</b><p>Use {server}, {version}, newlines, legacy &amp; codes such as &amp;a, and exact colors such as &amp;#387aff. Colors and styles are sent as Minecraft text components; pre-1.16 clients use the nearest legacy color. Limits count UTF-8 bytes. Very large expanded messages use a safe fallback.</p><p>The online server keeps its own MOTD, icon, and player limit. The server icon is loaded when its offline listener opens.</p></div>
         </section>
       </fieldset>
       <details class="wake-help"><summary>Requirements, troubleshooting, and save behavior</summary><div class="wake-help-grid">
-        <section><h4>Which servers can wake?</h4><p>Recognized Java-protocol servers assigned locally to this node, using an available primary TCP port (1024–65535). Bedrock is not supported. Active, startup-halted, restore-blocked, or conflicting servers are skipped; maintenance operations block starts. Normal Java and isolation requirements still apply.</p><p>The node daemon must stay running and its game ports must be reachable through your firewall/NAT. Configuration is checked roughly once per second. Limits: 1024 listeners, 64 connections, and 12 admitted connections per source IP per 10 seconds.</p></section>
+        <section><h4>Which servers can wake?</h4><p>Only a successful node idle auto-shutdown creates wake eligibility. Both node policies and the server’s join-to-start preference must be enabled. Manual stops, crashes, new servers and maintenance do not qualify. Recognized Java-protocol servers need an available primary TCP port (1024–65535); normal startup and isolation safeguards still apply.</p><p>Users can opt out of join-to-start in server Settings → Startup &amp; resources, but cannot disable node-enforced idle shutdown. Updating does not retroactively mark existing stopped servers as idle-stopped.</p><p>The daemon must stay running. Limits: 1024 listeners, 64 connections, and 12 admitted connections per source IP per 10 seconds.</p></section>
         <section><h4>Worker returns HTTP 405 or 404?</h4><ol><li>Update and restart the affected worker, not only this panel.</li><li>Check its saved node URL points to that daemon.</li><li>Ensure its proxy forwards <code>PUT /api/cluster/wake</code> with authentication.</li><li>Choose <b>Retry saved settings</b> and wait for acceptance.</li></ol><p>A 405 means the method was rejected; it does not prove whether the cause is an old binary, wrong URL, or proxy. 401/403 means check the Node Token / admin API key and access rules.</p></section>
         <section><h4>What do the buttons do?</h4><p><b>Save settings</b> saves this form and attempts delivery. <b>Retry saved settings</b> resends the last saved configuration without using unsaved edits. <b>Refresh status</b> reloads acknowledgement and listener state; it does not retry delivery or test ports from the Internet. <b>Check listeners</b> reads the latest runtime reconciliation and per-server bind state.</p><p>Green means ports are bound on the node with matching settings, not that a player can reach them through a firewall or that the game will boot successfully. Status expires after ten seconds; check again for a fresh report. A pending disable is not a confirmed disable.</p></section>
       </div></details>
