@@ -786,7 +786,7 @@ function syncHeroFromSavedServer(targetSrv) {
     const maxRamMB = S.memMaxMB || getServerMaxRamMB(targetSrv);
     const m = activeStat ? (S.memUsedMB || ((S.ram.at(-1) || 0) / 100) * maxRamMB) : 0;
     const hostAddr = `${srvHost(targetSrv)}:${targetSrv.port || 25565}`;
-    hst.innerHTML = `<button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy server address" aria-label="Copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
+    hst.innerHTML = `${playerAddressButtonHtml(hostAddr)}<span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>`;
   }
 
   updateSettingsCmdPreview();
@@ -2359,6 +2359,10 @@ function applyServerStatsSnapshot(srv, stats, pushSeries = false) {
   if (pushSeries && window.NP && typeof window.NP._emit === 'function') {
     window.NP._emit('stats', { server: srv, stats: srv?.stats || stats });
   }
+}
+
+function playerAddressButtonHtml(address) {
+  return `<button type="button" class="copyable-ip mono mu" data-addr="${esc(address)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy player connection address — not the panel URL" aria-label="Copy player connection address"><span class="pv">${esc(address)}</span> ${ic('copy', 12)}</button>`;
 }
 
 function copyServerAddress(addr, ev) {
@@ -5165,7 +5169,7 @@ function srvh() {
       <div class="srv-connection">
         <span id="srv-hero-engine" class="eng-pill" title="Server software">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
         <div id="hst" class="row hst" style="margin-top: 0;">
-          <button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy player connection address — not the panel URL" aria-label="Copy player connection address">Join: <span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button>
+          ${playerAddressButtonHtml(hostAddr)}
           <span class="mono mu">CPU ${c.toFixed(1)}%</span>
           <span class="mono mu">RAM ${m.toFixed(0)} MiB / ${(maxRamMB / 1024).toFixed(1)} GiB</span>
         </div>
@@ -5285,7 +5289,7 @@ function liveCon() {
   }
 
   if (hst) {
-    hst.innerHTML = `<button type="button" class="copyable-ip mono mu" data-addr="${esc(hostAddr)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Copy server address" aria-label="Copy server address"><span class="pv">${esc(hostAddr)}</span> ${ic('copy', 12)}</button><span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${maxRamGB} GiB</span>`;
+    hst.innerHTML = `${playerAddressButtonHtml(hostAddr)}<span class="mono mu">CPU ${c.toFixed(1)}%</span><span class="mono mu">RAM ${m.toFixed(0)} MiB / ${maxRamGB} GiB</span>`;
   }
 }
 
@@ -6744,7 +6748,7 @@ const V = {
     <h2 style="margin-top:20px">1. Choose Server Engine</h2>
     <div class="grid g4">
       ${CORES.map(([name, desc]) => `
-        <button class="card sel ${sel === name ? 'on' : ''}" onclick="S.sel='${name}'; S.vq=''; S.vf='All Families'; loadVersionsCatalog(); R();">
+        <button type="button" class="card sel ${sel === name ? 'on' : ''}" data-software-choice="${esc(name)}" aria-pressed="${sel === name}" onclick="selectServerSoftware(this.dataset.softwareChoice)">
           <div class="engine-card-head" style="width:100%;">
             <span class="engine-card-title">
               ${engineIcon(name, 16, true)}
@@ -6759,23 +6763,23 @@ const V = {
 
     <div class="card ver-section-card" style="margin-top:22px;">
       <div class="ver-section-head">
-        <h2>2. Select ${esc(sel)} Version</h2>
+        <h2 id="version-choice-title">2. Select ${esc(sel)} Version</h2>
         <span class="mu" style="font-size:12.5px;">Click any release to confirm installation &amp; optional world backup</span>
       </div>
 
       <div class="ver-toolbar" style="justify-content: space-between;">
         <div class="row" style="gap: 10px; flex-wrap: wrap; flex: 1;">
           <div class="ver-search-wrap">
-            <input type="text" placeholder="${isSteelEngine(sel) ? 'Search Steel release tags...' : 'Search Minecraft versions...'}" value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
+            <input id="version-search" type="text" placeholder="${isSteelEngine(sel) ? 'Search Steel release tags...' : 'Search Minecraft versions...'}" value="${esc(S.vq || '')}" oninput="S.vq=this.value; renderVersionRows();" style="padding-left: 34px;">
             <span style="position: absolute; left: 10px; top: 10px; color: var(--tx-muted); pointer-events: none;">${ic('search', 15)}</span>
           </div>
-          ${!isProxy && !isSteelEngine(sel) ? `
-            <select data-searchable="1" onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
+          <div id="version-family-filter" ${isProxy || isSteelEngine(sel) ? 'hidden' : ''}>
+            <select id="version-family" data-searchable="1" onchange="S.vf=this.value; renderVersionRows();" style="width:auto; min-width: 220px;">
               <option value="All Families" ${(S.vf === 'All Families' || S.vf === 'All') ? 'selected' : ''}>All Release Families (1.0 – 26.x)</option>
               <option value="Popular" ${S.vf === 'Popular' ? 'selected' : ''}>Popular / Recommended</option>
               ${FAM.map(f => `<option value="${f[0]}" ${S.vf === f[0] ? 'selected' : ''}>${f[0]} — ${f[1]} (${f[2]})</option>`).join('')}
             </select>
-          ` : ''}
+          </div>
         </div>
         ${renderViewModeToggle('ver', 'list')}
       </div>
@@ -9059,9 +9063,31 @@ function versionRowsHtml() {
   }).join('');
 }
 
+function selectServerSoftware(name) {
+  if (S.view !== 'ver' || !CORES.some(([engine]) => engine === name) || (S.sel || S.core || 'Paper') === name) return;
+  S.sel = name;
+  S.vq = '';
+  S.vf = 'All Families';
+  document.querySelectorAll('[data-software-choice]').forEach(button => {
+    const selected = button.dataset.softwareChoice === name;
+    button.classList.toggle('on', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  const title = $('#version-choice-title');
+  if (title) title.textContent = `2. Select ${name} Version`;
+  const search = $('#version-search');
+  if (search) { search.value = ''; search.placeholder = isSteelEngine(name) ? 'Search Steel release tags...' : 'Search Minecraft versions...'; }
+  const familyFilter = $('#version-family-filter');
+  if (familyFilter) familyFilter.hidden = isSteelEngine(name) || ['Velocity', 'Waterfall', 'BungeeCord'].includes(name);
+  const family = $('#version-family');
+  if (family) { family.value = 'All Families'; family._cselectRebuild?.(); }
+  renderVersionRows();
+  loadVersionsCatalog();
+}
+
 function renderVersionRows() {
   const b = $('#vres');
-  if (b) b.innerHTML = versionRowsHtml();
+  if (b) { b.innerHTML = versionRowsHtml(); applyPermissionControls(b); }
 }
 
 // --- Navigation Render ---
