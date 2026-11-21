@@ -496,7 +496,7 @@ func (h *AccountHandler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 
 	pubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.PublicKey))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid OpenSSH public key format"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Paste a complete OpenSSH public key from a .pub file, including the key type (for example, ssh-ed25519) and its base64 data. Fingerprints, hexadecimal strings, and private keys cannot be used"})
 		return
 	}
 

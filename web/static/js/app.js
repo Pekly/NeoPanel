@@ -8820,10 +8820,13 @@ const V = {
     } else if (t === 2) {
       tabContent = `<div class="card">
         <h2>Add OpenSSH Public Key</h2>
-        <p class="mu" style="font-size:13px; margin-bottom:12px;">Allows passwordless public-key authentication for pure-Go SFTP.</p>
+        <p class="mu" style="font-size:13px; margin-bottom:12px;">Add your SSH <b>public</b> key for passwordless SFTP file transfers. This does not enable SSH shell access to the host.</p>
         <label class="f"><span>Key Label / Name</span><input type="text" id="kn" placeholder="Work Laptop"></label>
-        <label class="f"><span>Public Key</span><textarea id="kk" style="min-height:80px" placeholder="ssh-ed25519 AAAA... or ssh-rsa AAAA..."></textarea></label>
-        <button class="btn pr" onclick="addSSHKey()">${ic('plus', 14)} Add SSH Key</button>
+        <label class="f"><span>OpenSSH public key (.pub file)</span><textarea id="kk" aria-describedby="ssh-key-help ssh-key-error" style="min-height:80px" placeholder="ssh-ed25519 AAAA... your-comment" spellcheck="false" autocomplete="off"></textarea></label>
+        <p id="ssh-key-help" class="mu" style="font-size:12px;">Paste the entire line from your <code>.pub</code> file, including <code>ssh-ed25519</code>, <code>ssh-rsa</code>, or <code>ecdsa-sha2-...</code> at the start. A fingerprint, hexadecimal string, or panel token is not a public key. Never paste your private key.</p>
+        <details style="margin:12px 0;"><summary>How do I get my public key?</summary><p class="mu">If you already have an SSH key, use its matching <code>.pub</code> file. Otherwise run <code>ssh-keygen -t ed25519</code> on your own computer and follow the prompts. Do not overwrite an existing key.</p><p class="mu">Show the default public key with <code>Get-Content "$HOME/.ssh/id_ed25519.pub"</code> in PowerShell, or <code>cat ~/.ssh/id_ed25519.pub</code> on Linux/macOS. Use your chosen filename if different. Keep the private file on your computer and select it in your SFTP client.</p></details>
+        <p id="ssh-key-error" role="alert" class="upload-error" hidden></p>
+        <button type="button" class="btn pr" onclick="addSSHKey()">${ic('plus', 14)} Add SSH Key</button>
       </div>
       <div class="card tw" style="margin-top:14px">
         <table>
@@ -12022,21 +12025,39 @@ async function updatePassword() {
   } catch (e) {}
 }
 
+function sshPublicKeyInputError(key) {
+  if (/-----BEGIN [^-]*PRIVATE KEY-----|PuTTY-User-Key-File-/i.test(key)) return 'That is a private key. Do not upload it. Use the matching .pub file instead.';
+  if (/^[a-f0-9]{32,}$/i.test(key) || /^(?:SHA256:|MD5:|(?:[a-f0-9]{2}:){4})/i.test(key)) return 'That looks like a fingerprint or hexadecimal string, not a public key. Paste the full line from your .pub file, including the key type (for example, ssh-ed25519) and its base64 data.';
+  return '';
+}
+
+function reportSSHKeyError(message) {
+  const error = $('#ssh-key-error');
+  if (error) { error.textContent = message; error.hidden = !message; }
+  if (message) toast(message, 'bad');
+}
+
 async function addSSHKey() {
   const name = $('#kn')?.value.trim();
   const key = $('#kk')?.value.trim();
   if (!name || !key) {
-    toast('Key name and public key string are required', 'error');
+    reportSSHKeyError('Enter a key name and the full public key from your .pub file.');
     return;
   }
+  const inputError = sshPublicKeyInputError(key);
+  if (inputError) { reportSSHKeyError(inputError); return; }
+  reportSSHKeyError('');
   try {
     await api('/api/account/ssh-keys', {
       method: 'POST',
+      suppressToast: true,
       body: JSON.stringify({ name, public_key: key })
     });
     toast('SSH Public Key added successfully!');
     loadAccountData();
-  } catch (e) {}
+  } catch (e) {
+    reportSSHKeyError(/Invalid OpenSSH public key format/i.test(e.message || '') ? 'Paste the full OpenSSH public key line from your .pub file, including its ssh-ed25519, ssh-rsa, or ecdsa-sha2-... prefix. Fingerprints and private keys cannot be used.' : (e.message || 'Could not add the SSH public key. Check your connection and try again.'));
+  }
 }
 
 async function deleteSSHKey(id) {
