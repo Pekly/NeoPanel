@@ -1,25 +1,28 @@
 # NeoPanel
 
-[![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
-[![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
-[![Linux first](https://img.shields.io/badge/focus-Linux-FCC624?logo=linux&logoColor=black)](#install-on-linux)
-[![Windows beta](https://img.shields.io/badge/Windows-beta-0078D4)](https://github.com/Pekly/NeoPanel/tree/windows-desktop-release)
+NeoPanel is a web panel for running Minecraft servers. Start a server, watch its console, edit files, install plugins or mods, and manage backups from your browser. You can keep everything on one machine or connect workers on other hosts.
 
-NeoPanel is a Minecraft server panel written in Go. It ships as one binary with an embedded web interface and SQLite database, so there’s no PHP runtime or Docker stack to set up for the panel.
+The backend is written in Go, with the web interface and a SQLite database built in. You don't need PHP, a separate database server, or Docker to run the panel.
 
-Run servers on the panel’s machine, or connect workers on other hosts. You get a live console, file editor, Java management, plugins and mods, backups, schedules, and team access. It supports the usual Java servers and proxies, including Paper, Fabric, Forge, and Velocity, as well as [Steel](https://steelmc.dev/).
+## What you can do
 
-**Linux is the main focus.** The [Windows desktop branch](https://github.com/Pekly/NeoPanel/tree/windows-desktop-release) is a secondary project and will receive updates occasionally. Don’t expect every Linux update to get an immediate Windows build.
+- Run Paper, Purpur, Fabric, Forge, NeoForge, Vanilla, proxies such as Velocity, and [Steel](https://steelmc.dev/).
+- Manage Java versions, server settings, files, plugins, and mods without leaving the panel.
+- Create backups and schedules, or warn players before a planned restart with a countdown you can cancel.
+- Give friends or teammates access to individual servers, with control over what each person can do.
+- Pin your usual servers, filter console output, and pick up where you left off after refreshing the page.
+
+During panel maintenance, users can still access their servers' power controls and console. Their normal permissions still apply.
 
 ## Install on Linux
 
-Ubuntu 24.04 LTS is the tested installer target. On a machine you control:
+The installer is tested on Ubuntu 24.04 LTS. On your server, run:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash
 ```
 
-The installer builds NeoPanel, installs the required Go/Java tools, configures a systemd service and firewall rules, and can set up Caddy for HTTPS. Review [install.sh](install.sh) before running it as root if you want to see exactly what it changes.
+It builds NeoPanel, installs the required Go and Java tools, sets up the service and firewall rules, and can configure HTTPS with Caddy. You can [read the script](install.sh) first to see what it changes.
 
 For an unattended install:
 
@@ -28,13 +31,13 @@ curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sud
   --install --domain panel.example.com --email you@example.com -y
 ```
 
-Open the address printed by the installer. The first page creates your administrator account; the **Getting started** guide then walks through account security, choosing a host, creating a server, and console/backups. You can skip it and reopen it from the dashboard. Guide progress is saved for your account in that browser, not shared across devices.
+Open the address shown at the end of the install and create your admin account. The getting-started guide will help you create your first server. Choose **Local** if you want to run it on the same machine as the panel; you don't need to set up a separate worker.
 
-The panel’s web address and the Minecraft address are different. Players connect to the **game host and port** shown on the server card.
+Players join using the **Minecraft host and port** shown on the server card, not the panel's web address. Click the address to copy it.
 
 ### Add another host
 
-Create an administrator API key under **Account → API Keys**, then run this on the worker machine:
+Create an administrator API key under **Account → API Keys**, then run this on the Linux worker machine:
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- \
@@ -42,9 +45,15 @@ curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sud
   --api-key neo_your_admin_api_key_here --name eu-node-01 --location "Frankfurt, DE"
 ```
 
-Workers don’t serve a web interface. Keep their APIs behind HTTPS or a trusted private/VPN network. You don’t need a worker just to host on the panel’s own machine—choose **Local**.
+Workers run the game servers; you manage them from the same panel. Use HTTPS or a trusted private/VPN network between the panel and its workers, and keep your API keys private.
 
-### Updates and troubleshooting
+### Hosting on Windows
+
+You can also connect a [Windows worker](docs/windows.md#optional-api-only-windows-worker) to host Minecraft servers on a Windows PC. The guide covers building it, connecting it to the panel, and where it stores your servers. It doesn't require the desktop app.
+
+Windows hosting is for trusted servers: its process and memory controls don't isolate files or network access. For untrusted workloads, use a Linux host with the supported isolation configured.
+
+## Updates and troubleshooting
 
 ```bash
 sudo neopanel-update
@@ -53,54 +62,45 @@ systemctl status neopanel
 journalctl -u neopanel -f
 ```
 
-Configuration lives in `/etc/neopanel/config.yaml`; data and worlds are under `/var/lib/neopanel`. Installer logs are in `/var/lib/neopanel/installer/install.log`.
+Back up your worlds, configuration, and database before updating. Update the panel and workers together so their APIs stay compatible. If you're upgrading an older installation, check the [security upgrade notes](docs/security-upgrade.md).
 
-Back up your database, configuration, and worlds before upgrading. Update the panel and workers together, and read the [security upgrade notes](docs/security-upgrade.md) when updating an older installation.
+On Linux, configuration is in `/etc/neopanel/config.yaml`, server data is under `/var/lib/neopanel`, and installer logs are in `/var/lib/neopanel/installer/install.log`.
 
-## Windows desktop
+## Sharing access and keeping data safe
 
-[Download the portable beta](https://github.com/Pekly/NeoPanel/releases/tag/v1.0.0-windows-beta.1), extract the ZIP, and run `NeoPanel-Desktop.exe`. It opens its own window and needs Microsoft Edge WebView2 Runtime. No Go installation is needed to run the download.
+Admins manage the panel and create servers. Other users can access servers they own or have been invited to. Set account roles in **Admin → Users** and manage each server's permissions from its **Team** page.
 
-Desktop development stays on **`windows-desktop-release`**. It is not the primary focus and gets occasional updates; the published beta may lag behind branch changes. See the [desktop guide on that branch](https://github.com/Pekly/NeoPanel/blob/windows-desktop-release/docs/windows-desktop.md) for building, storage, and safe shutdown. The desktop EXE is the Windows panel edition—there is no separate console/browser package or startup script. An optional [API-only Windows worker](docs/windows.md) can host servers on another PC.
+A few things worth setting up before inviting people:
 
-Minimize the desktop app to keep local servers running. Closing with active local servers asks whether to save/stop them or keep running. Windows local hosting is **trusted-only**: Job Objects manage processes and memory, not filesystem or network isolation.
+- Configure SMTP and the public panel URL if you want invitation and password-reset emails to work.
+- Give each person their own account and only the permissions they need.
+- Stop a server before taking a consistent world backup. Restoring a backup replaces its current files.
+- Don't run two panel instances against the same database or server folders.
+- For untrusted Linux workloads, use Bubblewrap isolation. Resource limits alone aren't a filesystem sandbox.
 
-## Accounts
+More help: [invitations](docs/invitation-account-lifecycle.md), [file previews](docs/file-previews.md), [Trash](internal/trash/README.md), [server deletion](docs/server-deletion.md), and [workspace and console controls](docs/panel-qol.md).
 
-**Admins** manage the panel and create servers. **Users** access their own or shared
-servers. Set their role in **Admin → Users**; team permissions stay per server.
-The getting-started guide is shown only to admins, not normal users.
+## Working on NeoPanel
 
-## Before inviting players
-
-- Use configured Linux isolation for untrusted workloads. The installer requires a successful Bubblewrap preflight; it won’t quietly bypass a failed check. Select **Bubblewrap (`bwrap`)** on the node to require filesystem isolation. Systemd resource limits alone are not a filesystem sandbox.
-- Stop a server before taking a consistent world backup. Restore replaces active files, so keep a separate backup too.
-- Don’t run two panels against the same database or server folders, or remove ownership locks to bypass a running instance.
-- Configure SMTP and the public panel URL before relying on invitation or password-reset emails. Use HTTPS and configure trusted proxies explicitly.
-- Give teammates their own accounts and only the permissions they need. Extensions run with panel-origin access; install only ones you trust.
-
-More details: [invited accounts](docs/invitation-account-lifecycle.md), [file-manager Trash](internal/trash/README.md), [server deletion](docs/server-deletion.md), [file previews](docs/file-previews.md), and [memory limits](internal/runner/MEMORY_POLICY.md).
-
-See [panel quality-of-life controls](docs/panel-qol.md) for workspace recovery, console filters, pinned servers, maintenance access, and cancellable restart countdowns.
-
-## Working on the code
-
-Use Go 1.26 or newer with current security patches. The web UI doesn’t need a bundler or npm install.
+You'll need Go 1.26 or newer. The frontend is plain JavaScript and CSS, so there's no bundler or npm install step. Node.js is used for the frontend tests.
 
 ```bash
 git clone https://github.com/Pekly/NeoPanel.git
 cd NeoPanel
-make build                       # bin/neopanel
+make build                       # writes bin/neopanel
 go test ./...
 go vet ./...
 node --test web/tests/*.test.cjs
+```
+
+On Linux, you can also run the installer checks:
+
+```bash
 bash tests/install-isolation.test.sh
 bash tests/install-build.test.sh
 ```
 
-`main` is the Linux/headless line. The desktop branch keeps Wails in a separate `desktop/go.mod`; Linux install/update checkouts exclude desktop-only files and build the root module. Linux isolation tests need a Linux host—cross-compiling is not a sandbox test.
-
-Found a problem? [Open an issue](https://github.com/Pekly/NeoPanel/issues) with your OS, branch/version, steps to reproduce, and relevant logs. Remove tokens, passwords, and personal data first.
+Found a bug? [Open an issue](https://github.com/Pekly/NeoPanel/issues) with what you were doing, what happened, your OS and version, and any useful logs. Please remove passwords and tokens before posting.
 
 ## License
 
