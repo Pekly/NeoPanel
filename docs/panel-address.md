@@ -1,42 +1,65 @@
-# Changing your panel address
+# Changing your panel domain and HTTPS
 
-Open **Admin → Panel address**. Enter a hostname such as `panel.example.com` and NeoPanel adds `https://` for you. You can also enter a full URL with a custom port.
+Open **Admin → Panel address**. Enter a hostname such as `panel.example.com`; HTTPS is added automatically. The same verified hostname is used for the public panel URL, account-email links, and passkeys.
 
-The preview shows the address that will be saved. **Use this browser address** copies the origin you're currently visiting, without the page path or query. **Open address** opens it in another tab so you can check it before saving. It does not send your current session token to that address.
+## Check, prepare HTTPS, apply
 
-Click **Save panel address** when you're ready. Invitation links, password-reset links, and passkey settings use the new value immediately—no panel restart is needed. You stay on the current page rather than being redirected. **Reset changes** discards an unsaved edit.
+1. Point the new domain's DNS records at the panel or its HTTPS proxy. Keep the old domain working during the move.
+2. Enter the new address. **Use this browser address** copies only your current origin, not its path or query. **Open address** opens it without forwarding your panel session token.
+3. Click **Check domain & HTTPS**. The checklist reports:
+   - **DNS:** all returned addresses must be usable public addresses. Every address is checked so a bad AAAA record cannot hide behind a working A record.
+   - **HTTPS:** a trusted certificate covering this exact hostname. The issuer, expiry, and whether the served certificate is from Let's Encrypt are shown. Other trusted issuers work too; behind a CDN, this is the CDN's public-facing certificate.
+   - **This panel:** the address must return a short-lived proof from this NeoPanel instance, not just any successful web page. Probes send no login tokens or cookies and don't follow redirects.
+   - **Passkeys:** existing keys must be compatible with the proposed hostname. Blocking accounts are listed without exposing credential material.
+4. Resolve any reported issues. On supported installations, **Set up HTTPS** can prepare Caddy and request a Let's Encrypt certificate as described below.
+5. Once the checks pass, click **Apply verified address**. NeoPanel repeats the checks immediately before saving. Email links and the passkey hostname then use the new address without restarting the panel. The current browser tab is not redirected.
 
-The old **Admin → Appearance → Public URL** form still works. Both pages edit the same setting.
+Checks expire after five minutes and belong to the administrator and exact address checked. Editing the address, signing out, or a failed apply requires another check. A concurrent address change by another administrator is not silently overwritten. **Reset changes** discards an unsaved edit.
 
-## If you're moving to a new domain
+**HTTP** is available only for explicit localhost development. Public addresses require HTTPS. Private/LAN-only domain probing is not supported by this public-domain wizard; it is not a general internal-network scanner.
 
-Saving the panel setting doesn't change DNS or your web server. Prepare the new address first:
+The older **Admin → Appearance → Public URL** location opens the same verified form. Email settings and an administrator's passkey settings link directly to this workflow. SMTP delivery remains a separate setting from the URL embedded in account emails. Save email settings before sending a test: the test uses the saved configuration. Verify the sender with your email provider and follow its SPF/DKIM instructions; panel-domain setup does not configure email DNS.
 
-1. Point its DNS record at the machine or proxy serving NeoPanel.
-2. Add the hostname to your reverse proxy and enable HTTPS for it. Keep the old hostname working until you've tested the new one.
-3. Open the new address and check that the panel loads and you can sign in.
-4. Save the new address in **Admin → Panel address**.
-5. Update any bookmarks or external integrations that use the old URL.
+## Automatic Let's Encrypt setup
 
-For a standard Caddy installation, update the site hostname in `/etc/caddy/Caddyfile`. Preserve the existing reverse-proxy target, port, and any other sites. Validate before reloading:
+Automatic setup is offered only for a recognized, installer-compatible **Linux panel with local Caddy**:
+
+- NeoPanel must have the required privilege and use the expected loopback listener behind the standard active Caddy service.
+- The existing `/etc/caddy/Caddyfile` must match the installer template, plus any aliases previously added by this feature. Custom configurations, imports, service overrides, API-managed drift, and unsupported installations are refused rather than rewritten.
+- All DNS records for the new domain must match addresses of the recognized Caddy host. Standard HTTPS port 443 is required. Public ports 80/443 must reach Caddy; NeoPanel doesn't open firewall ports or edit DNS for you.
+
+Enter a certificate contact email, confirm domain ownership and the Let's Encrypt agreement, and enter your administrator password. API keys cannot authorize this privileged operation.
+
+NeoPanel adds a new site with an explicit Let's Encrypt issuer while preserving the old site bytes and upstream. It stages and validates the configuration, keeps a protected backup, and reloads Caddy—never restarts the panel or game servers. Caddy stores and renews its certificates.
+
+**Reload success is not certificate success.** Issuance is asynchronous and subject to DNS, reachability, CA policy, and rate limits. The UI performs a bounded series of rechecks while it waits. The saved panel URL does not change until verification passes and you apply it. If issuance takes longer, use **Check domain & HTTPS** again; repeatedly submitting certificate setup is unnecessary.
+
+If automatic setup is unavailable, the checklist explains why. Configure the hostname/certificate through your existing proxy or hosting provider and rerun the checks. You don't need to reinstall NeoPanel.
+
+### Recovery after an uncertain reload
+
+Protected `/etc/caddy/.neopanel-backup-*` files preserve the previous configuration. An unfinished transaction is recorded in `/etc/caddy/Caddyfile.neopanel-pending`; further automatic edits are blocked until an administrator reconciles it.
+
+A timed-out systemd reload may still finish later. Do not assume it failed, delete the pending record, or blindly restore a backup. Check the reload job, running Caddy configuration, on-disk Caddyfile, and both hostnames first. The new configuration is additive and retains the old hostname. Resolve the service state and validate the intended file before clearing the recovery record.
+
+For a manually managed Caddy configuration, preserve the existing upstream/port and other sites, validate the updated file, then reload only after validation succeeds:
 
 ```bash
 sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Only reload after validation succeeds. If you use another proxy or a hosted proxy service, change its hostname and certificate settings there instead. You don't need to rerun the NeoPanel installer.
+No certificate requests or production proxy changes are made merely by opening the settings page or running domain checks.
 
-## Passkeys
+## Moving passkeys
 
-Passkeys belong to the hostname where they were registered. Before switching hostnames, make sure you can sign in with a password, remove existing passkeys from **every account**, and register new ones after the move. Disabling passkeys alone does not remove them.
+Passkeys belong to the hostname where they were registered; a certificate change alone cannot move them. Before changing hostnames, confirm password sign-in and have the listed accounts remove incompatible keys under **Account → Security**. Register replacements after applying the new address. Disabling passkeys doesn't remove them, and NeoPanel never silently deletes or rewrites users' credentials.
 
-NeoPanel refuses a hostname change while incompatible passkeys exist. This safeguard also applies when you enter a bare hostname through the API.
+Changing only the scheme or port while retaining the hostname doesn't require deleting compatible keys, but the new origin still has to pass the checks. A registration racing the change is handled by the database's atomic hostname guard.
 
-## What this setting changes
+## Scope and API compatibility
 
-- Changes the panel's public URL, not Minecraft game addresses, SFTP hosts, worker API URLs, or the HTTP listening address/port.
-- Saves a database override for `server.public_url`; it does not rewrite your YAML file.
-- Requires HTTPS, except for explicit HTTP localhost development URLs.
-- Accepts a hostname and optional port, not a page path, credentials, query string, or fragment. Use a DNS hostname rather than a public IP address.
-- Cannot be cleared. If a save fails, the existing address stays active and your edit is kept so you can correct it.
+- The setting does not change game/SFTP addresses, worker API URLs, the panel listener, or `config.yaml`. It saves the existing database override for `server.public_url`.
+- The value cannot be cleared. Invalid paths, credentials, query strings, fragments, public IP addresses, and untrusted certificates aren't accepted by the guided flow.
+- `POST /api/admin/panel-url/check`, `/apply`, and `/https` implement the guided administrator workflow. Checks are bounded/rate-limited; apply consumes its verification ticket and rechecks before saving.
+- The existing administrator-only `PUT /api/admin/panel-url` remains a **manual, unverified configuration API** for script compatibility. It still validates the origin and protects passkeys, but does not run network checks. The web form never falls back to it after a failed verification.

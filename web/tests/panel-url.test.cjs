@@ -58,7 +58,7 @@ test('card explains origin requirements, deployment prerequisites, and all-accou
   const { c } = setup();
   configured(c);
   const html = c.renderAdminPanelUrlCard();
-  for (const text of ['passkeys, invitation links, and password-reset links', 'exact HTTPS origin', 'localhost development', 'cannot be cleared', 'SQLite', 'server.public_url', 'does not configure DNS', 'HTTPS certificates', 'reverse proxy', 'Remove all passkeys from every account', 'disabling passkeys does not remove them']) {
+  for (const text of ['passkeys, invitation links, and password-reset links', 'exact HTTPS origin', 'localhost development', 'cannot be cleared', 'SQLite', 'server.public_url', 'DNS records still need to be configured', 'Check domain &amp; HTTPS', 'reverse proxy', 'Remove all passkeys from every account', 'disabling passkeys does not remove them']) {
     assert.ok(html.includes(text), text);
   }
   assert.match(html, /type="text"[^>]*inputmode="url"[^>]*required/);

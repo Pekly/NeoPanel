@@ -86,6 +86,8 @@ func (h *AuthHandler) UpdatePanelURL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, err.Error())
 		return
 	}
+	h.panelURLMu.Lock()
+	defer h.panelURLMu.Unlock()
 	if err := h.db.SetPanelPublicURL(origin, rpID); err != nil {
 		if errors.Is(err, database.ErrPublicURLPasskeys) {
 			writeError(w, 400, err.Error())

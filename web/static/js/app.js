@@ -14822,6 +14822,7 @@ function renderAdminEmailTabHtml() {
           <button type="button" class="btn sm pr" onclick="saveAdminSmtp()">${ic('save', 13)} Save Email Settings</button>
         </div>
       </div>
+      ${globalThis.NPDomain?.renderSettingsLink('email') || ''}
 
       <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:18px;">
         <div class="row sb" style="margin-bottom:8px; align-items:center; flex-wrap:wrap; gap:8px;">
@@ -14829,7 +14830,6 @@ function renderAdminEmailTabHtml() {
           <div style="min-width:260px;">
             <select class="sel" id="admin-smtp-preset" onchange="applySmtpPreset(this.value)">
               <option value="custom">Custom SMTP Server...</option>
-              <option value="cloudflare">Cloudflare Email Routing / Mailchannels</option>
               <option value="gmail">Gmail / Google Workspace (smtp.gmail.com:587)</option>
               <option value="brevo">Brevo / Sendinblue (smtp-relay.brevo.com:587)</option>
               <option value="sendgrid">SendGrid (smtp.sendgrid.net:587)</option>
@@ -14838,7 +14838,7 @@ function renderAdminEmailTabHtml() {
             </select>
           </div>
         </div>
-        <p class="mu" style="font-size:12px; margin:0;">Choose a provider to fill in its connection settings.</p>
+        <p class="mu" style="font-size:12px; margin:0;">Presets fill connection fields only; add your provider credentials and save. Cloudflare Email Routing forwards incoming mail and is not an outgoing SMTP service.</p>
       </div>
 
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px; margin-bottom:18px;">
@@ -14846,7 +14846,7 @@ function renderAdminEmailTabHtml() {
           <label class="lbl" style="font-size:12px;">Email Delivery Active</label>
           <label class="row" style="gap:10px; cursor:pointer; padding:6px 0;">
             <input type="checkbox" id="admin-smtp-enabled" ${smtp.enabled ? 'checked' : ''} style="width:16px; height:16px; accent-color:var(--ac);">
-            <span style="font-size:13px; color:var(--tx);">Enable outgoing emails for password resets</span>
+            <span style="font-size:13px; color:var(--tx);">Enable outgoing emails for invitations and password resets</span>
           </label>
         </div>
         <div>
@@ -14883,6 +14883,7 @@ function renderAdminEmailTabHtml() {
         <div>
           <label class="lbl" style="font-size:12px;">From Display Name</label>
           <input type="text" id="admin-smtp-from-name" class="inp" value="${esc(smtp.from_name || 'NeoPanel')}" placeholder="NeoPanel">
+          <p class="mu" style="font-size:12px; margin:8px 0 0;">Use a sender address or domain verified with your email provider. Follow its SPF/DKIM instructions; changing the panel address does not configure email DNS.</p>
         </div>
       </div>
 
@@ -14890,7 +14891,7 @@ function renderAdminEmailTabHtml() {
         <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx); display:flex; align-items:center; gap:6px;">
           ${ic('mail', 14)} Test Email Delivery
         </h3>
-        <p class="mu" style="font-size:12px; margin:0 0 12px;">Send a test email to check your settings.</p>
+        <p class="mu" style="font-size:12px; margin:0 0 12px;">Save Email Settings first: this test uses the saved configuration, not unsaved fields. After sending, check the recipient's inbox and spam folder.</p>
         <div class="row" style="gap:10px; flex-wrap:wrap;">
           <input type="email" id="admin-smtp-test-email" class="inp mono" style="flex:1 1 260px;" placeholder="Recipient email (e.g. your personal email)" value="${esc(S.user?.email || '')}">
           <button type="button" class="btn" onclick="sendAdminTestEmail(this)">${ic('mail', 13)} Send Test Email</button>
@@ -14908,10 +14909,6 @@ function applySmtpPreset(preset) {
 
   if (preset === 'gmail') {
     if (host) host.value = 'smtp.gmail.com';
-    if (port) port.value = '587';
-    if (enc) enc.value = 'starttls';
-  } else if (preset === 'cloudflare') {
-    if (host) host.value = 'smtp.mailchannels.net';
     if (port) port.value = '587';
     if (enc) enc.value = 'starttls';
   } else if (preset === 'brevo') {
@@ -15090,7 +15087,7 @@ function onBrandInputChange(field, val, srcEl = null) {
 function renderAdminPanelUrlCard() {
   const current = S.adminPanelUrl;
   const draft = S.panelUrlDraft ?? current?.public_url ?? '';
-  const busy = S.panelUrlLoading || S.panelUrlSaving;
+  const busy = S.panelUrlLoading || S.panelUrlSaving || globalThis.NPDomain?.busy();
   const preview = panelAddressDraftState(draft);
   const browserAddress = panelAddressDraftState(globalThis.location?.origin || '');
   const source = { settings: 'Database override', config: 'Configuration fallback', unset: 'Not configured' };
@@ -15102,6 +15099,7 @@ function renderAdminPanelUrlCard() {
     <p class="mu" style="font-size:13px; line-height:1.6; margin:0 0 16px;">
       Change the address used for passkeys, invitation links, and password-reset links. Game and SFTP connection addresses stay unchanged.
     </p>
+      ${globalThis.NPDomain?.protocolControl() || ''}
     <form onsubmit="saveAdminPanelUrl(event)">
       <label class="f" for="adm-panel-url">
         <span>Panel hostname or URL</span>
@@ -15116,14 +15114,15 @@ function renderAdminPanelUrlCard() {
         <a id="panel-url-open" class="btn sm" href="${esc(preview.url || '#')}" target="_blank" rel="noopener noreferrer" ${preview.url ? '' : 'hidden'}>Open address ${ic('external', 13)}</a>
         <button type="button" id="panel-url-reset-btn" class="btn sm" onclick="resetPanelAddressDraft()" ${busy || S.panelUrlDraft == null ? 'disabled' : ''}>Reset changes</button>
       </div>
+      ${globalThis.NPDomain?.render() || ''}
       <details class="np-panel-address-help">
         <summary>Moving to a new domain? Do these first</summary>
         <ol>
           <li>Point the new hostname's DNS record at the machine or proxy serving this panel.</li>
           <li>Add the hostname to your reverse proxy and set up a valid HTTPS certificate. Keep the old address working during the move.</li>
-          <li>Use <b>Open address</b> to check the panel loads at the new address, then save it here.</li>
+          <li>Run <b>Check domain &amp; HTTPS</b>. If supported, use <b>Set up HTTPS</b> to prepare a Let's Encrypt certificate without removing the old hostname.</li>
         </ol>
-        <p>Saving does not configure DNS, HTTPS certificates, or your reverse proxy. It updates the panel's own address immediately; no panel restart is needed.</p>
+        <p>The checks verify DNS, the served certificate, this panel's identity, and passkey compatibility together. Apply only after they pass. DNS records still need to be configured at your provider; custom proxies are never overwritten automatically.</p>
         <p><b>Using passkeys?</b> Remove all passkeys from every account before changing the hostname, then register them again at the new address. Make sure you can sign in with a password first; disabling passkeys does not remove them.</p>
         <p>The saved value is an exact HTTPS origin with no path, credentials, query, or fragment. HTTP is allowed only for localhost development. It is stored in SQLite and overrides <code>server.public_url</code>. The address cannot be cleared.</p>
       </details>
@@ -15132,7 +15131,7 @@ function renderAdminPanelUrlCard() {
         <span class="mu" style="font-size:12px; overflow-wrap:anywhere;">Current address: ${esc(current?.public_url || (current ? 'Not configured' : 'Unavailable'))}</span>
         <div class="row" style="gap:8px;">
           ${!current ? `<button type="button" class="btn" onclick="loadAdminPanelUrl()" ${busy ? 'disabled' : ''}>${ic('refresh', 14)} Retry</button>` : ''}
-          <button type="submit" id="panel-url-save-btn" class="btn pr" ${busy || !current || !preview.url ? 'disabled' : ''}>${ic('check', 14)} ${S.panelUrlSaving ? 'Saving…' : 'Save panel address'}</button>
+          <button type="submit" id="panel-url-save-btn" class="btn pr" ${busy || !current || !preview.url || (globalThis.NPDomain && !globalThis.NPDomain.canApply()) ? 'disabled' : ''}>${ic('check', 14)} ${S.panelUrlSaving ? 'Saving…' : globalThis.NPDomain ? 'Apply verified address' : 'Save panel address'}</button>
         </div>
       </div>
     </form>
@@ -15162,10 +15161,11 @@ function panelAddressDraftState(value) {
 }
 
 function onPanelUrlInputChange(value) {
-  if (S.panelUrlSaving) return;
+  if (S.panelUrlSaving || globalThis.NPDomain?.busy()) return;
   S.panelUrlDraft = value;
   S.panelUrlError = '';
   const error = $('#adm-panel-url-error');
+  globalThis.NPDomain?.invalidate();
   if (error) { error.textContent = ''; error.hidden = true; }
   const preview = panelAddressDraftState(value);
   const output = $('#adm-panel-url-preview');
@@ -15176,10 +15176,11 @@ function onPanelUrlInputChange(value) {
   if (button) button.disabled = S.panelUrlLoading || !S.adminPanelUrl || !preview.url;
   const reset = $('#panel-url-reset-btn');
   if (reset) reset.disabled = S.panelUrlLoading;
+  globalThis.NPDomain?.sync();
 }
 
 function useCurrentPanelAddress() {
-  if (S.panelUrlSaving || S.panelUrlLoading) return;
+  if (S.panelUrlSaving || S.panelUrlLoading || globalThis.NPDomain?.busy()) return;
   const current = panelAddressDraftState(globalThis.location?.origin || '');
   if (!current.url) { S.panelUrlError = current.error; R(); return; }
   onPanelUrlInputChange(current.url);
@@ -15187,9 +15188,10 @@ function useCurrentPanelAddress() {
 }
 
 function resetPanelAddressDraft() {
-  if (S.panelUrlSaving || S.panelUrlLoading) return;
+  if (S.panelUrlSaving || S.panelUrlLoading || globalThis.NPDomain?.busy()) return;
   S.panelUrlDraft = null;
   S.panelUrlError = '';
+  globalThis.NPDomain?.invalidate();
   R();
 }
 
@@ -15215,6 +15217,7 @@ async function loadAdminPanelUrl(skipRender = false) {
 }
 
 async function saveAdminPanelUrl(event) {
+  if (globalThis.NPDomain) return globalThis.NPDomain.apply(event);
   if (event) event.preventDefault();
   if (S.panelUrlSaving || S.panelUrlLoading || !S.adminPanelUrl) return;
   const draft = S.panelUrlDraft ?? S.adminPanelUrl.public_url;
@@ -16926,6 +16929,7 @@ async function logout() {
   window.NPMotion?.resetSession();
   window.NPProgress?.clear();
   window.NPOnboarding?.resetSession();
+  window.NPDomain?.reset();
   window.NPWorkspace?.reset();
   cancelAllUploads();
   QOL.uploads = [];
