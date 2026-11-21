@@ -19,11 +19,12 @@ import (
 )
 
 type AuthHandler struct {
-	db        *database.DB
-	cfg       *config.Config
-	mu        sync.RWMutex
-	jwtSecret []byte
-	expHours  int
+	db         *database.DB
+	cfg        *config.Config
+	mu         sync.RWMutex
+	panelURLMu sync.Mutex // Serializes legacy and verified address changes.
+	jwtSecret  []byte
+	expHours   int
 }
 
 type JWTClaims struct {

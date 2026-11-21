@@ -46,4 +46,4 @@ If countdown status cannot load, the panel shows the HTTP error or compatibility
 
 ## Panel hostname
 
-Use **Admin → Panel address** to change the public panel FQDN. Enter a hostname, preview the HTTPS URL, and save without restarting the panel. The [panel address guide](panel-address.md) covers DNS/proxy preparation and passkeys. Game and SFTP addresses are not changed.
+Use **Admin → Panel address** to change the public panel FQDN. Check DNS, trusted HTTPS, same-panel identity, and passkey compatibility before applying the verified address. Supported installer-managed Linux/Caddy setups can prepare a Let's Encrypt certificate while retaining the old hostname. Email and administrator passkey settings link to the same workflow. The [panel address guide](panel-address.md) covers setup, migration, and recovery. Game and SFTP addresses are not changed.

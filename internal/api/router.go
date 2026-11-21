@@ -28,6 +28,7 @@ type Router struct {
 	mux            *http.ServeMux
 	cfg            *config.Config
 	auth           *AuthHandler
+	panelDomain    *PanelDomainHandler
 	account        *AccountHandler
 	servers        *ServerHandler
 	console        *ConsoleHandler
@@ -101,6 +102,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		embeddedStatic: embeddedStatic,
 	}
 	r.invitations = NewInvitationHandler(r)
+	r.panelDomain = NewPanelDomainHandler(authHandler)
 
 	r.registerRoutes(db)
 	return r
@@ -389,6 +391,10 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/admin/turnstile", r.requireAdmin(r.auth.UpdateTurnstileConfig))
 	r.mux.HandleFunc("GET /api/admin/panel-url", r.requireAdmin(r.auth.GetPanelURL))
 	r.mux.HandleFunc("PUT /api/admin/panel-url", r.requireAdmin(r.auth.UpdatePanelURL))
+	r.mux.HandleFunc("POST /api/admin/panel-url/check", r.requireAdmin(r.panelDomain.Check))
+	r.mux.HandleFunc("POST /api/admin/panel-url/apply", r.requireAdmin(r.panelDomain.Apply))
+	r.mux.HandleFunc("POST /api/admin/panel-url/https", r.requireAdmin(r.panelDomain.SetupHTTPS))
+	r.mux.HandleFunc("GET /api/panel-domain-proof/{nonce}", r.panelDomain.Proof)
 	r.mux.HandleFunc("GET /api/admin/branding", r.requireAdmin(r.branding.GetAdminBranding))
 	r.mux.HandleFunc("PUT /api/admin/branding", r.requireAdmin(r.branding.UpdateAdminBranding))
 	r.mux.HandleFunc("POST /api/admin/branding", r.requireAdmin(r.branding.UpdateAdminBranding))
