@@ -121,11 +121,12 @@ func TestWakePingJoinPortHandoffAndCooldown(t *testing.T) {
 	wakeWait(t, func() bool { return wakeEntry(m, s.ID) != nil })
 	response := wakeRequest(t, s, false)
 	var status struct {
-		Description struct {
-			Text string `json:"text"`
-		} `json:"description"`
+		Description json.RawMessage `json:"description"`
+		Version     struct {
+			Protocol int `json:"protocol"`
+		} `json:"version"`
 	}
-	if err := json.Unmarshal([]byte(response), &status); err != nil || !strings.Contains(status.Description.Text, s.Name) {
+	if err := json.Unmarshal([]byte(response), &status); err != nil || !strings.Contains(string(status.Description), s.Name) || status.Version.Protocol != -1 || !strings.Contains(string(status.Description), `"color"`) {
 		t.Fatal(response, err)
 	}
 	if m.GetStatus(s.ID) != "offline" {

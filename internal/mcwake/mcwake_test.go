@@ -120,9 +120,9 @@ func TestStatusAndPing(t *testing.T) {
 				t.Fatal(err)
 			}
 			want := map[string]any{
-				"version":     map[string]any{"name": "NeoPanel", "protocol": float64(771)},
+				"version":     map[string]any{"name": "NeoPanel", "protocol": float64(-1)},
 				"players":     map[string]any{"max": float64(20), "online": float64(0)},
-				"description": map[string]any{"text": motd},
+				"description": map[string]any{"text": strings.TrimPrefix(motd, "§a"), "color": "green"},
 			}
 			if icon != "" {
 				want["favicon"] = icon
@@ -215,7 +215,7 @@ func TestLoginVersions(t *testing.T) {
 			if err := json.Unmarshal(receiveJSON(t, conn), &component); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(component, map[string]string{"text": message}) {
+			if !reflect.DeepEqual(component, map[string]string{"text": strings.TrimPrefix(message, "§e"), "color": "yellow"}) {
 				t.Fatalf("component=%#v", component)
 			}
 			completed(t, done, false)

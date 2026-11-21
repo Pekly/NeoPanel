@@ -31,10 +31,10 @@ type NodeWakeConfig struct {
 
 func DefaultNodeWakeConfig() NodeWakeConfig {
 	return NodeWakeConfig{
-		OfflineMOTD:  "{server} is sleeping. Join to start!",
-		VersionLabel: "Join to start", MaxPlayers: 20, UseServerIcon: true,
-		StartingMessage:    "{server} is starting. Please reconnect in a moment!",
-		UnavailableMessage: "{server} is unavailable. Please try again later.",
+		OfflineMOTD:  "&9&lNeoPanel &8» &f{server}\n&a&lJOIN TO START &8• &7Your adventure is one click away",
+		VersionLabel: "&cSleeping &8• &aJoin to start", MaxPlayers: 20, UseServerIcon: true,
+		StartingMessage:    "&9&lNeoPanel &8» &f{server}\n\n&a&lWAKE REQUEST ACCEPTED\n&7Your server is starting up.\n&ePlease reconnect in a moment!",
+		UnavailableMessage: "&9&lNeoPanel &8» &f{server}\n\n&6&lNOT READY YET\n&7The server cannot accept a wake request right now.\n&ePlease wait a moment and try again.",
 		CooldownSeconds:    30,
 	}
 }

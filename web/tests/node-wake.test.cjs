@@ -3,8 +3,9 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const source = fs.readFileSync(path.join(__dirname, '../static/js/node-wake.js'), 'utf8');
 const defaults = () => ({ enabled: false, bind_address: '', offline_motd: '{server} sleeps\n&bJoin!', version_label: 'Join to start', max_players: 20, icon_data_url: '', use_server_icon: true, starting_message: 'Reconnect', unavailable_message: 'Unavailable', cooldown_seconds: 30 });
 const envelope = (config = defaults(), applied = true, error = '') => ({ config, applied, error });
-function setup(handler = async () => envelope()) {
-  let root, html = ''; const calls = [];
+const runtimeReport = overrides => ({ checked_at: new Date().toISOString(), enabled: true, coordinator_running: true, config_matches: true, config_hash: 'a'.repeat(64), listeners: 1, servers: [{id:'one', name:'Server one', port:25565, state:'listening', detail:'Listening for Java joins'}], error:'', ...overrides });
+function setup(handler = async () => envelope(), runtimeHandler = async () => runtimeReport({enabled:false,listeners:0,servers:[]})) {
+  let root, html = ''; const calls = [], runtimeCalls = [], timers = [];
   const document = { activeElement: { focus() {} }, querySelector: id => id === '#modal-container' ? container : id === '#wake-modal' ? root : null };
   const container = { set innerHTML(value) {
     html = value; if (root) root.isConnected = false;
@@ -15,10 +16,10 @@ function setup(handler = async () => envelope()) {
     root = { nodes, isConnected: true, querySelector: id => nodes[id], addEventListener() {}, remove() { this.isConnected = false; } };
     this.childNodes = [root];
   }, get innerHTML() { return html; }, childNodes: [], replaceChildren(...nodes) { this.childNodes = nodes; } };
-  const c = { document, TextEncoder, URL, S: { user: { id: 1, role: 'admin' }, token: 'one' }, displayNodeName: () => '<img onerror="bad">', api: async (url, options) => { calls.push({ url, options }); return handler(url, options); } };
+  const c = { document, TextEncoder, URL, setTimeout(fn) { timers.push(fn); return timers.length; }, clearTimeout() {}, S: { user: { id: 1, role: 'admin' }, token: 'one' }, displayNodeName: () => '<img onerror="bad">', api: async (url, options) => { if (url.endsWith('/wake/status')) { runtimeCalls.push({url,options}); return runtimeHandler(url, options); } calls.push({ url, options }); return handler(url, options); } };
   c.window = c;
   vm.runInNewContext(source, c);
-  return { c, calls, ui: c.NPNodeWake, container, node: id => root.nodes['#wake-' + id], submit: () => root.nodes['#wake-form'].onsubmit({ preventDefault() {} }) };
+  return { c, calls, runtimeCalls, timers, ui: c.NPNodeWake, container, node: id => root.nodes['#wake-' + id], submit: () => root.nodes['#wake-form'].onsubmit({ preventDefault() {} }) };
 }
 test('GET defaults are authoritative and names are escaped', async () => {
   const config = { ...defaults(), max_players: 53, cooldown_seconds: 91, offline_motd: '</textarea><script>x</script>' };
@@ -161,7 +162,7 @@ test('separate dialog groups settings horizontally with per-field help and hones
   const h = setup(); await h.ui.open('local'); const html = h.container.innerHTML;
   assert.match(html, /class="card pbox wake-dialog" role="dialog"/);
   assert.equal((html.match(/class="wake-section"/g) || []).length, 3);
-  for (const label of ['Startup behavior', 'Offline appearance', 'Player messages', 'Not tested by this form', 'does not retry delivery or test ports', 'Any unauthenticated Java login']) assert.ok(html.includes(label), label);
+  for (const label of ['Startup behavior', 'Offline appearance', 'Player messages', 'Live join-to-start listeners', 'does not retry delivery or test ports', 'Any unauthenticated Java login']) assert.ok(html.includes(label), label);
   for (const key of Object.keys(defaults()).filter(key => key !== 'icon_data_url')) {
     assert.equal((html.match(new RegExp(`id="wake-${key}"`, 'g')) || []).length, 1);
     assert.ok(html.includes(`aria-describedby="wake-${key}-help"`), key);
@@ -170,4 +171,39 @@ test('separate dialog groups settings horizontally with per-field help and hones
   const css = fs.readFileSync(path.join(__dirname, '../static/css/node-wake.css'), 'utf8');
   assert.match(css, /repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(css, /@media \(max-width: 700px\)/);
+});
+
+test('live indicator distinguishes ready, cooldown, stale, mismatch and bind failure without a start request', async () => {
+  const h = setup(undefined, async () => runtimeReport()); await h.ui.open('remote');
+  assert.match(h.node('runtime-state').textContent, /Ready — 1 listening/);
+  assert.equal(h.node('runtime-state').className, 'wake-runtime-state ready');
+  assert.equal(h.runtimeCalls[0].options.method, 'GET');
+  assert.equal(h.calls.filter(c => c.options.method !== 'GET').length, 0);
+  const now = Date.now(), summary = overrides => h.ui.runtimeSummary(runtimeReport(overrides), now);
+  assert.notEqual(summary({checked_at:new Date(now-11000).toISOString()}).tone, 'ready');
+  assert.notEqual(summary({config_matches:false}).tone, 'ready');
+  assert.notEqual(summary({coordinator_running:false}).tone, 'ready');
+  assert.notEqual(summary({servers:[{state:'cooldown'}]}).tone, 'ready');
+  assert.notEqual(summary({servers:[{state:'busy'}]}).tone, 'ready');
+  assert.match(summary({listeners:0,servers:[{state:'bind_failed'}]}).text, /Needs attention/);
+  assert.ok(h.timers.length > 0, 'ready indication must expire');
+});
+
+test('unsupported or unreachable live status is not mistaken for a working listener', async () => {
+  const h = setup(undefined, async () => {throw Object.assign(Error('Node returned HTTP 405'),{status:502});}); await h.ui.open('remote');
+  assert.match(h.node('runtime-state').textContent,/unavailable/);
+  assert.match(h.node('runtime-note').textContent,/GET \/api\/cluster\/wake\/status/);
+  assert.doesNotMatch(h.node('runtime-state').className,/ready/);
+});
+
+test('branding template replaces only text in the draft, with no save or icon changes', async () => {
+  const preset = {...defaults(),offline_motd:'&#387aff&lNeoPanel\n&aJOIN TO START',version_label:'&cSleeping',starting_message:'&aReady to wake',unavailable_message:'&6Please wait'};
+  const h=setup(async url=>url.endsWith('/preset')?{config:preset,brand_name:'NeoPanel'}:envelope());await h.ui.open('local');
+  h.node('enabled').checked=true;h.node('cooldown_seconds').value='65';h.node('bind_address').value='127.0.0.1';
+  await h.node('preset').onclick();
+  assert.equal(h.node('offline_motd').value,preset.offline_motd);
+  assert.equal(h.node('enabled').checked,true);assert.equal(h.node('cooldown_seconds').value,'65');assert.equal(h.node('bind_address').value,'127.0.0.1');
+  assert.equal(h.calls.filter(c=>c.options.method==='PUT').length,0);
+  assert.match(h.node('draft-note').textContent,/not saved/);
+  await h.submit();assert.equal(JSON.parse(h.calls.find(c=>c.options.method==='PUT').options.body).icon_data_url,'');
 });

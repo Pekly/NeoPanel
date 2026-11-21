@@ -79,7 +79,9 @@ func TestNodeWakeLocalAndAuthorization(t *testing.T) {
 func TestNodeWakeStrictRequests(t *testing.T) {
 	f := newReliabilityFixture(t)
 	c := database.DefaultNodeWakeConfig()
-	good := wakeJSON(c)
+	wireConfig := c
+	wireConfig.VersionLabel = "Join to start" // Stable input for mutation cases, independent of themed defaults.
+	good := wakeJSON(wireConfig)
 	invalid := []string{"", "null", "[]", "{}", good + " {}", good + " trailing", good[:len(good)-1],
 		strings.Replace(good, `"enabled":false`, `"enabled":false,"enabled":true`, 1),
 		strings.Replace(good, `"enabled":false`, `"Enabled":false`, 1),
@@ -313,7 +315,9 @@ func TestNodeWakeDeliveryHonorsContext(t *testing.T) {
 }
 
 func TestNodeWakeUnicodeEscapes(t *testing.T) {
-	good := wakeJSON(database.DefaultNodeWakeConfig())
+	c := database.DefaultNodeWakeConfig()
+	c.VersionLabel = "Join to start"
+	good := wakeJSON(c)
 	for _, escaped := range []string{`\ud800`, `\udfff`, `\ud800x`, `\ud800\u0041`, `\ud800\ud800`} {
 		body := strings.Replace(good, `"version_label":"Join to start"`, `"version_label":"`+escaped+`"`, 1)
 		if _, err := decodeWakeConfig([]byte(body)); err == nil {
