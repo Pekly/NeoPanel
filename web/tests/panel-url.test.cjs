@@ -8,11 +8,12 @@ const source = fs.readFileSync(path.join(__dirname, '../static/js/app.js'), 'utf
 function setup() {
   const elements = {
     '#adm-panel-url-error': { textContent: '', hidden: true },
-    '#panel-url-save-btn': { disabled: false }
+    '#panel-url-save-btn': { disabled: false },
+    '#panel-url-reset-btn': { disabled: true }
   };
   const notices = [];
   const c = vm.createContext({
-    S: {}, api: async () => ({ public_url: '', source: 'unset' }),
+    S: {}, URL, location: { origin: 'https://current.example.com:8443', pathname: '/admin/panel-address', search: '?token=private' }, api: async () => ({ public_url: '', source: 'unset' }),
     $: selector => elements[selector] || null,
     R: () => {}, toast: (...args) => notices.push(args), ic: () => '',
     esc: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;')
@@ -60,7 +61,7 @@ test('card explains origin requirements, deployment prerequisites, and all-accou
   for (const text of ['passkeys, invitation links, and password-reset links', 'exact HTTPS origin', 'localhost development', 'cannot be cleared', 'SQLite', 'server.public_url', 'does not configure DNS', 'HTTPS certificates', 'reverse proxy', 'Remove all passkeys from every account', 'disabling passkeys does not remove them']) {
     assert.ok(html.includes(text), text);
   }
-  assert.match(html, /type="url"[^>]*required/);
+  assert.match(html, /type="text"[^>]*inputmode="url"[^>]*required/);
   assert.match(html, /role="alert"/);
 });
 
@@ -98,7 +99,7 @@ test('PUT saves only public_url, uses normalized server response, and never muta
   c.api = async (endpoint, options) => {
     assert.equal(endpoint, '/api/admin/panel-url');
     assert.equal(options.method, 'PUT');
-    assert.deepEqual(JSON.parse(options.body), { public_url: 'https://PANEL.example.com:443/' });
+    assert.deepEqual(JSON.parse(options.body), { public_url: 'https://panel.example.com' });
     return { public_url: 'https://panel.example.com', source: 'settings' };
   };
   let prevented = false;
@@ -149,12 +150,12 @@ test('validation and passkey-hostname errors remain visible and preserve the dra
   for (const message of ['public_url must be an HTTPS origin', 'Remove all passkeys before changing the hostname']) {
     const { c, elements, notices } = setup();
     configured(c);
-    c.onPanelUrlInputChange('https://new.example.com/path');
+    c.onPanelUrlInputChange('https://new.example.com');
     c.api = async () => { throw Error(message); };
     await c.saveAdminPanelUrl();
     assert.equal(c.S.panelUrlError, message);
     assert.ok(c.renderAdminPanelUrlCard().includes(message));
-    assert.equal(c.S.panelUrlDraft, 'https://new.example.com/path');
+    assert.equal(c.S.panelUrlDraft, 'https://new.example.com');
     assert.equal(c.S.adminPanelUrl.source, 'config');
     assert.equal(c.S.panelUrlSaving, false);
     assert.equal(notices[0][1], 'bad');
@@ -189,4 +190,47 @@ test('server-provided URLs, draft values, and errors are HTML escaped', () => {
   assert.doesNotMatch(html, /<script>|<img|value="" onfocus=/);
   assert.match(html, /&quot; onfocus=&quot;bad/);
   assert.match(html, /&lt;img/);
+});
+
+test('hostname shortcut previews and saves HTTPS without changing game FQDN', async () => {
+  const {c}=setup(); configured(c);
+  c.onPanelUrlInputChange(' NEW.example.com:8443 ');
+  assert.match(c.renderAdminPanelUrlCard(),/Will use: https:\/\/new.example.com:8443/);
+  let payload;c.api=async(url,options)=>{payload=JSON.parse(options.body);return {public_url:payload.public_url,source:'settings'};};
+  await c.saveAdminPanelUrl();assert.equal(payload.public_url,'https://new.example.com:8443');
+});
+test('address normalization accepts explicit localhost HTTP and drops default ports', () => {
+  const {c}=setup();
+  for(const [raw,want] of [['panel.example','https://panel.example'],[' HTTPS://PANEL.example:443/ ','https://panel.example'],['http://localhost:8123','http://localhost:8123'],['http://[::1]:8123','http://[::1]:8123']]) assert.equal(c.normalizePanelAddress(raw),want);
+});
+test('invalid addresses cannot be saved or become clickable links', async () => {
+  const {c,elements}=setup();configured(c);let calls=0;c.api=async()=>calls++;
+  elements['#panel-url-open']={href:'',hidden:false};elements['#adm-panel-url-preview']={textContent:''};
+  for(const raw of ['javascript:alert(1)','https://panel.example/path','panel.example?secret=x','panel.example#','user@panel.example','panel.example\\evil','http://panel.example','https://192.0.2.1','panel.example:0','panel.example:65536','panel.example:', '//evil.example','panel.example.','bad_host.example']) {
+    c.onPanelUrlInputChange(raw);assert.equal(elements['#panel-url-save-btn'].disabled,true,raw);
+    assert.equal(elements['#panel-url-open'].hidden,true,raw);await c.saveAdminPanelUrl();assert.ok(c.S.panelUrlError,raw);
+  }
+  assert.equal(calls,0);
+});
+test('use browser address copies only the origin and does not save automatically', () => {
+  const {c}=setup();configured(c);let calls=0;c.api=async()=>calls++;
+  c.useCurrentPanelAddress();assert.equal(c.S.panelUrlDraft,'https://current.example.com:8443');assert.equal(calls,0);
+  assert.doesNotMatch(c.renderAdminPanelUrlCard(),/token=private/);
+  assert.match(c.renderAdminPanelUrlCard(),/target="_blank" rel="noopener noreferrer"/);
+});
+test('reset changes restores saved address without a request or changing game settings', () => {
+  const {c}=setup();configured(c);c.onPanelUrlInputChange('new.example');c.S.panelUrlError='failed';
+  c.resetPanelAddressDraft();assert.equal(c.S.panelUrlDraft,null);assert.equal(c.S.panelUrlError,'');assert.match(c.renderAdminPanelUrlCard(),/value="https:\/\/panel.example.com"/);
+  c.S.panelUrlSaving=true;c.S.panelUrlDraft='new.example';c.resetPanelAddressDraft();c.useCurrentPanelAddress();assert.equal(c.S.panelUrlDraft,'new.example');
+});
+test('preview and open link follow typing without a full page redraw', () => {
+  const {c,elements}=setup();configured(c);let renders=0;c.R=()=>renders++;
+  elements['#panel-url-open']={href:'',hidden:true};elements['#adm-panel-url-preview']={textContent:''};
+  c.onPanelUrlInputChange('new.example');assert.equal(elements['#panel-url-open'].href,'https://new.example');assert.equal(elements['#panel-url-open'].hidden,false);
+  assert.equal(elements['#adm-panel-url-preview'].textContent,'Will use: https://new.example');assert.equal(renders,0);
+});
+
+test('typing enables Reset without waiting for a rerender', () => {
+  const {c,elements}=setup();configured(c);
+  c.onPanelUrlInputChange('new.example');assert.equal(elements['#panel-url-reset-btn'].disabled,false);
 });

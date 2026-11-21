@@ -1456,7 +1456,7 @@ SLUG_TO_VIEW.stp = 'set';
 SLUG_TO_VIEW.servers = 'dash';
 SLUG_TO_VIEW.subusers = 'team';
 
-const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email'];
+const ADMIN_TAB_SLUGS = ['health', 'nodes', 'servers', 'users', 'branding', 'audit', 'mods', 'email', 'panel-address'];
 const ADMIN_SECTIONS = [
   { label: 'Overview', icon: 'activity', description: 'Panel health, resource usage, and updates.' },
   { label: 'Nodes', icon: 'network', description: 'Connect and manage the machines that run your servers.' },
@@ -1465,7 +1465,8 @@ const ADMIN_SECTIONS = [
   { label: 'Appearance', icon: 'layers', description: 'Customize your branding, theme, and panel defaults.' },
   { label: 'Audit logs', icon: 'clock', description: 'Review activity and changes across your panel.' },
   { label: 'Extensions', icon: 'package', description: 'Add and manage panel extensions.' },
-  { label: 'Email & SMTP', icon: 'mail', description: 'Send invitations and password resets.' }
+  { label: 'Email & SMTP', icon: 'mail', description: 'Send invitations and password resets.' },
+  { label: 'Panel address', icon: 'link', description: 'Change the hostname people use to reach your panel.' }
 ];
 let adminStatusRefreshing = false;
 async function refreshAdminStatus(button) {
@@ -8776,6 +8777,8 @@ const V = {
       content = renderAdminModsTabHtml();
     } else if (t === 7) {
       content = renderAdminEmailTabHtml();
+    } else if (t === 8) {
+      content = renderAdminPanelUrlCard();
     }
     if (t === 4) content = organizeAppearance(content);
 
@@ -15088,38 +15091,74 @@ function renderAdminPanelUrlCard() {
   const current = S.adminPanelUrl;
   const draft = S.panelUrlDraft ?? current?.public_url ?? '';
   const busy = S.panelUrlLoading || S.panelUrlSaving;
+  const preview = panelAddressDraftState(draft);
+  const browserAddress = panelAddressDraftState(globalThis.location?.origin || '');
   const source = { settings: 'Database override', config: 'Configuration fallback', unset: 'Not configured' };
-  return `<div class="card" style="margin-bottom:18px;">
+  return `<div class="card np-panel-address" style="margin-bottom:18px;">
     <div class="row sb" style="gap:10px; flex-wrap:wrap; margin-bottom:6px;">
-      <h2 style="margin:0; color:var(--tx);">${ic('link', 18)} Panel address</h2>
+      <h2 style="margin:0; color:var(--tx);">${ic('link', 18)} Panel address / FQDN</h2>
       <span class="chip">${S.panelUrlLoading ? 'Loading…' : esc(source[current?.source] || 'Unavailable')}</span>
     </div>
     <p class="mu" style="font-size:13px; line-height:1.6; margin:0 0 16px;">
-      The browser-facing address used for passkeys, invitation links, and password-reset links. This is separate from game and SFTP connection addresses.
+      Change the address used for passkeys, invitation links, and password-reset links. Game and SFTP connection addresses stay unchanged.
     </p>
     <form onsubmit="saveAdminPanelUrl(event)">
       <label class="f" for="adm-panel-url">
-        <span>Public panel URL</span>
-        <input type="url" id="adm-panel-url" value="${esc(draft)}" placeholder="https://panel.example.com" required spellcheck="false" autocomplete="url" aria-describedby="adm-panel-url-help adm-panel-url-error" oninput="onPanelUrlInputChange(this.value)" ${busy ? 'disabled' : ''}>
+        <span>Panel hostname or URL</span>
+        <input type="text" inputmode="url" id="adm-panel-url" value="${esc(draft)}" placeholder="panel.example.com" required spellcheck="false" autocomplete="url" aria-describedby="adm-panel-url-help adm-panel-url-preview adm-panel-url-error" oninput="onPanelUrlInputChange(this.value)" ${busy ? 'disabled' : ''}>
       </label>
       <p id="adm-panel-url-help" class="mu" style="font-size:12.5px; line-height:1.6;">
-        Enter an exact HTTPS origin: scheme, hostname, and optional port, with no path, credentials, query, or fragment. HTTP is allowed only for localhost development. The saved address cannot be cleared.
-        Saving applies immediately in SQLite and overrides <code>server.public_url</code>; no restart is needed.
+        Enter your hostname, such as <code>panel.example.com</code>. HTTPS is added automatically. You can also enter a full URL with a port, such as <code>https://panel.example.com:8443</code>.
       </p>
-      <div style="padding:12px 14px; border:1px solid var(--border); border-radius:8px; font-size:12.5px; line-height:1.6;">
-        <b>Prepare the address first.</b> Saving does not configure DNS, HTTPS certificates, or your reverse proxy. Make sure the panel is reachable at this address before saving.
-        <br><b>Moving to a new hostname?</b> Remove all passkeys from every account before changing it, then register new passkeys at the new address. Hostname changes are blocked while any passkeys exist; disabling passkeys does not remove them.
+      <p id="adm-panel-url-preview" class="mono" role="status" style="overflow-wrap:anywhere;">${esc(preview.url ? `Will use: ${preview.url}` : preview.error)}</p>
+      <div class="row" style="gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+        <button type="button" class="btn sm" onclick="useCurrentPanelAddress()" ${busy || !browserAddress.url ? 'disabled' : ''} title="Use this browser's origin, without its path or query">Use this browser address</button>
+        <a id="panel-url-open" class="btn sm" href="${esc(preview.url || '#')}" target="_blank" rel="noopener noreferrer" ${preview.url ? '' : 'hidden'}>Open address ${ic('external', 13)}</a>
+        <button type="button" id="panel-url-reset-btn" class="btn sm" onclick="resetPanelAddressDraft()" ${busy || S.panelUrlDraft == null ? 'disabled' : ''}>Reset changes</button>
       </div>
+      <details class="np-panel-address-help">
+        <summary>Moving to a new domain? Do these first</summary>
+        <ol>
+          <li>Point the new hostname's DNS record at the machine or proxy serving this panel.</li>
+          <li>Add the hostname to your reverse proxy and set up a valid HTTPS certificate. Keep the old address working during the move.</li>
+          <li>Use <b>Open address</b> to check the panel loads at the new address, then save it here.</li>
+        </ol>
+        <p>Saving does not configure DNS, HTTPS certificates, or your reverse proxy. It updates the panel's own address immediately; no panel restart is needed.</p>
+        <p><b>Using passkeys?</b> Remove all passkeys from every account before changing the hostname, then register them again at the new address. Make sure you can sign in with a password first; disabling passkeys does not remove them.</p>
+        <p>The saved value is an exact HTTPS origin with no path, credentials, query, or fragment. HTTP is allowed only for localhost development. It is stored in SQLite and overrides <code>server.public_url</code>. The address cannot be cleared.</p>
+      </details>
       <p id="adm-panel-url-error" role="alert" style="color:var(--red); font-size:13px;" ${S.panelUrlError ? '' : 'hidden'}>${esc(S.panelUrlError)}</p>
       <div class="row sb" style="gap:10px; flex-wrap:wrap; margin-top:18px;">
         <span class="mu" style="font-size:12px; overflow-wrap:anywhere;">Current address: ${esc(current?.public_url || (current ? 'Not configured' : 'Unavailable'))}</span>
         <div class="row" style="gap:8px;">
           ${!current ? `<button type="button" class="btn" onclick="loadAdminPanelUrl()" ${busy ? 'disabled' : ''}>${ic('refresh', 14)} Retry</button>` : ''}
-          <button type="submit" id="panel-url-save-btn" class="btn pr" ${busy || !current || !draft.trim() ? 'disabled' : ''}>${ic('check', 14)} ${S.panelUrlSaving ? 'Saving…' : 'Save panel address'}</button>
+          <button type="submit" id="panel-url-save-btn" class="btn pr" ${busy || !current || !preview.url ? 'disabled' : ''}>${ic('check', 14)} ${S.panelUrlSaving ? 'Saving…' : 'Save panel address'}</button>
         </div>
       </div>
     </form>
   </div>`;
+}
+
+function normalizePanelAddress(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) throw Error('Enter a panel hostname or URL. The saved address cannot be cleared.');
+  const candidate = raw.includes('://') ? raw : `https://${raw}`;
+  const match = candidate.match(/^(https?):\/\/([^/]+)\/?$/i);
+  if (!match || /[\\?#\s]/.test(candidate) || /[^a-z0-9.\-:\[\]]/i.test(match[2]) || match[2].endsWith(':')) throw Error('Use a hostname and optional port, without a path, credentials, query, or fragment.');
+  let url;
+  try { url = new URL(candidate); } catch (_) { throw Error('Enter a valid panel hostname and port (1–65535).'); }
+  const host = url.hostname.toLowerCase();
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(host);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) throw Error('Use HTTPS for your panel. HTTP is allowed only for localhost development.');
+  if (host.length > 253 || host.endsWith('.') || (!local && (/^[\d.]+$/.test(host) || host.includes(':')))) throw Error('Use a panel hostname, such as panel.example.com, rather than a public IP address.');
+  if (!local && host.split('.').some(label => label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) throw Error('Enter a valid panel hostname, such as panel.example.com.');
+  if (url.port && (Number(url.port) < 1 || Number(url.port) > 65535)) throw Error('Use a port between 1 and 65535.');
+  return url.origin;
+}
+
+function panelAddressDraftState(value) {
+  try { return { url: normalizePanelAddress(value), error: '' }; }
+  catch (error) { return { url: '', error: error.message }; }
 }
 
 function onPanelUrlInputChange(value) {
@@ -15128,8 +15167,30 @@ function onPanelUrlInputChange(value) {
   S.panelUrlError = '';
   const error = $('#adm-panel-url-error');
   if (error) { error.textContent = ''; error.hidden = true; }
+  const preview = panelAddressDraftState(value);
+  const output = $('#adm-panel-url-preview');
+  if (output) output.textContent = preview.url ? `Will use: ${preview.url}` : preview.error;
+  const link = $('#panel-url-open');
+  if (link) { link.href = preview.url || '#'; link.hidden = !preview.url; }
   const button = $('#panel-url-save-btn');
-  if (button) button.disabled = S.panelUrlLoading || !S.adminPanelUrl || !value.trim();
+  if (button) button.disabled = S.panelUrlLoading || !S.adminPanelUrl || !preview.url;
+  const reset = $('#panel-url-reset-btn');
+  if (reset) reset.disabled = S.panelUrlLoading;
+}
+
+function useCurrentPanelAddress() {
+  if (S.panelUrlSaving || S.panelUrlLoading) return;
+  const current = panelAddressDraftState(globalThis.location?.origin || '');
+  if (!current.url) { S.panelUrlError = current.error; R(); return; }
+  onPanelUrlInputChange(current.url);
+  R();
+}
+
+function resetPanelAddressDraft() {
+  if (S.panelUrlSaving || S.panelUrlLoading) return;
+  S.panelUrlDraft = null;
+  S.panelUrlError = '';
+  R();
 }
 
 async function loadAdminPanelUrl(skipRender = false) {
@@ -15157,8 +15218,10 @@ async function saveAdminPanelUrl(event) {
   if (event) event.preventDefault();
   if (S.panelUrlSaving || S.panelUrlLoading || !S.adminPanelUrl) return;
   const draft = S.panelUrlDraft ?? S.adminPanelUrl.public_url;
-  if (!draft.trim()) {
-    S.panelUrlError = 'Enter a public panel URL. The saved address cannot be cleared.';
+  let normalized;
+  try { normalized = normalizePanelAddress(draft); }
+  catch (error) {
+    S.panelUrlError = error.message;
     R();
     return;
   }
@@ -15170,7 +15233,7 @@ async function saveAdminPanelUrl(event) {
   try {
     const result = await api('/api/admin/panel-url', {
       method: 'PUT',
-      body: JSON.stringify({ public_url: draft.trim() })
+      body: JSON.stringify({ public_url: normalized })
     });
     S.adminPanelUrl = result;
     S.panelUrlDraft = null;

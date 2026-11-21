@@ -43,3 +43,7 @@ Countdowns continue if you close the browser, but are cancelled if the hosting p
 Update the panel and remote workers together to use countdowns. Remote workers must have synchronized originating accounts and permissions. Master-side permission changes are effective on a worker once synchronized.
 
 If countdown status cannot load, the panel shows the HTTP error or compatibility problem and offers **Retry countdown status**. Unsupported endpoints and denied access pause automatic polling; transient failures back off. Countdown scheduling stays disabled until a valid status response returns. An older backend lacking countdowns does not by itself disable ordinary power controls. Updating frontend files alone is not enough: rebuild/redeploy and restart the hosting backend as well.
+
+## Panel hostname
+
+Use **Admin → Panel address** to change the public panel FQDN. Enter a hostname, preview the HTTPS URL, and save without restarting the panel. The [panel address guide](panel-address.md) covers DNS/proxy preparation and passkeys. Game and SFTP addresses are not changed.

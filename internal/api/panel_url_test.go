@@ -175,3 +175,34 @@ func TestPanelURLRepairsInvalidStartupConfig(t *testing.T) {
 		t.Fatal(settings, err)
 	}
 }
+
+func TestPanelURLAcceptsHostnameShortcut(t *testing.T) {
+	f := newReliabilityFixture(t)
+	for _, tc := range []struct{ input, want string }{
+		{"panel.example", "https://panel.example"},
+		{" PANEL.example:443/ ", "https://panel.example"},
+		{"panel.example:8443", "https://panel.example:8443"},
+		{"localhost:8123", "https://localhost:8123"},
+	} {
+		w := savePanelURL(f, tc.input)
+		if w.Code != 200 {
+			t.Fatalf("%q: %d %s", tc.input, w.Code, w.Body.String())
+		}
+		var result panelURLSettings
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result.PublicURL != tc.want {
+			t.Fatalf("%q: got %+v, error %v", tc.input, result, err)
+		}
+	}
+	for _, input := range []string{"panel.example/path", "panel.example?token=x", "panel.example#fragment", "user@panel.example", "//panel.example", "javascript:alert(1)", "192.0.2.1", "panel.example:0", "panel.example:65536", "panel.example\\evil"} {
+		if w := savePanelURL(f, input); w.Code != 400 {
+			t.Errorf("accepted unsafe hostname %q: %d", input, w.Code)
+		}
+	}
+	user := f.users["owner"]
+	if _, err := f.db.AddPasskey(user.ID, user.PasswordHash, "localhost", "Test", []byte("shortcut-key"), "{}"); err != nil {
+		t.Fatal(err)
+	}
+	if w := savePanelURL(f, "new.example"); w.Code != 400 || !strings.Contains(w.Body.String(), "Remove all") {
+		t.Fatal("hostname shortcut bypassed passkey protection", w.Code, w.Body.String())
+	}
+}
