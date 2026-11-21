@@ -26,7 +26,13 @@ func (m *ServerManager) BeginServerMaintenance(ctx context.Context, id string) (
 	if err != nil {
 		return nil, err
 	}
-	m.releaseWakeListener(id)
+	m.launchMu.Lock()
+	err = m.invalidateIdleWake(id)
+	m.launchMu.Unlock()
+	if err != nil {
+		release()
+		return nil, err
+	}
 	m.mu.Lock()
 	m.cancelRetryLocked(id)
 	m.restorePaused.Store(id, true)

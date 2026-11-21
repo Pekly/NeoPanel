@@ -102,7 +102,8 @@ test('geometry contract overrides inline widths, preserves special layouts, and 
   assert.match(css, /#pal > \.pbox \{ overflow: visible;/);
   assert.match(css, /@media \(max-width: 700px\)/);
   assert.match(css, /repeat\(2, minmax\(0, 1fr\)\)/);
-  assert.doesNotMatch(css, /(?:min-height|overflow-x:\s*hidden|transition:\s*all|grid-auto-flow:\s*dense)/);
+  assert.doesNotMatch(css, /(?:overflow-x:\s*hidden|transition:\s*all|grid-auto-flow:\s*dense)/);
+  assert.doesNotMatch(css, /\.pal\s*>\s*\.pbox[^{]*\{[^}]*\bmin-height:/);
   assert.doesNotMatch(css, /\.pbox\s+\.(?:row|grid|g2)\s*\{/);
 });
 
@@ -126,6 +127,13 @@ test('browser: real form markup fits desktop/mobile, preserves tab order and com
         assert.equal(Math.round(size.width), width === 1440 ? 1024 : width - (width <= 700 ? 24 : 32));
         assert.ok(size.height <= 800 - (width <= 700 ? 32 : 64));
         assert.ok(await box.evaluate(el => el.scrollWidth <= el.clientWidth + 1), `${name} at ${width}: horizontal overflow`);
+        const close = box.locator('button[aria-label^="Close"]').first();
+        if (await close.count()) {
+          const icon = await close.evaluate(el => { const s=getComputedStyle(el), p=getComputedStyle(el,'::before'), r=el.getBoundingClientRect(); return {width:r.width,height:r.height,x:parseFloat(p.left)+parseFloat(s.borderLeftWidth),y:parseFloat(p.top)+parseFloat(s.borderTopWidth),font:s.fontSize}; });
+          assert.equal(icon.width,32); assert.equal(icon.height,32);
+          assert.ok(Math.abs(icon.x-icon.width/2)<0.1 && Math.abs(icon.y-icon.height/2)<0.1, 'X must be centered in the button');
+          assert.equal(icon.font,'0px');
+        }
         const columns = await page.locator('.np-modal-form').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length);
         assert.equal(columns, width <= 700 ? 1 : 2);
         if (width <= 700) for (const fields of await page.locator('.np-modal-fields').all()) {

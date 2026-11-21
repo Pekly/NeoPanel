@@ -130,6 +130,7 @@ func decodeWakeConfig(body []byte) (database.NodeWakeConfig, error) {
 		"max_players": &c.MaxPlayers, "icon_data_url": &c.IconDataURL,
 		"use_server_icon": &c.UseServerIcon, "starting_message": &c.StartingMessage,
 		"unavailable_message": &c.UnavailableMessage, "cooldown_seconds": &c.CooldownSeconds,
+		"legacy_disconnect_colors": &c.LegacyDisconnectColors,
 	})
 	if err == nil {
 		err = database.ValidateNodeWakeConfig(c)

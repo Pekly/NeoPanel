@@ -7757,6 +7757,7 @@ const V = {
           </div>
         </div>
       </div>
+      ${typeof NPServerAutomation !== 'undefined' ? NPServerAutomation.render(srv) : ''}
 
       ${isAdmin ? `
       <!-- Server Ownership & Tenant Assignment (Admin Only) -->
@@ -9374,6 +9375,7 @@ window.R = function() {
     if (typeof restoreFilePreviewMedia === 'function') restoreFilePreviewMedia(retainedPreviewMedia);
     if (S.view === 'set' && !blocked) organizeServerSettings(main);
     applyPermissionControls(main);
+    if (S.view === 'set' && !blocked) window.NPServerAutomation?.mount();
     if (S.view === 'dash') filterServerCards(S.serverFilter || '');
     main.scrollTop = prevMainScroll;
     if (S.view === 'con') {
@@ -12545,7 +12547,7 @@ function openCreateServerModal() {
           <h2 style="font-size:22px; margin:0;">Create Server or Proxy</h2>
           <span class="mu" style="font-size:13px;">Deploy any Minecraft server engine &amp; release version</span>
         </div>
-        <button class="btn sm" onclick="closeModal()">✕</button>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">✕</button>
       </div>
 
       <form class="np-modal-form" onsubmit="handleCreateServer(event)">
@@ -17761,6 +17763,7 @@ function clientRequestPermission(suffix, method = 'GET') {
   const read = ['GET', 'HEAD'].includes(method.toUpperCase());
   const path = suffix.split('?')[0];
   if (path === '/permissions') return '';
+  if (path === '/automation') return read ? '' : 'settings.edit';
   if (path.startsWith('/files')) {
     if (path === '/files/trash' || path.startsWith('/files/trash/')) return 'files.delete';
     if (read) return 'files.view';
@@ -17789,6 +17792,7 @@ function assertClientRequestAccess(endpoint, options = {}) {
   const srv = { id: decodeURIComponent(match[2]), node_id: decodeURIComponent(match[1] || 'local') };
   const permission = clientRequestPermission(match[3], method);
   if (match[3] === '/power/countdown' && method === 'POST' && !hasServerPermission('console.command', srv)) throw Object.assign(new Error('Access restricted: console.command required'), { status: 403 });
+  if (match[3] === '/automation' && method === 'PATCH' && !hasServerPermission('server.power', srv)) throw Object.assign(new Error('Access restricted: server.power required'), { status: 403 });
   if (!['GET', 'HEAD'].includes(method) && (/^\/files\/(rename|move|unzip|extract)$/.test(match[3]) || /^\/files\/trash\/[^/]+\/restore$/.test(match[3])) && !hasServerPermission('files.edit', srv)) throw Object.assign(new Error('Access restricted: files.edit required'), { status: 403 });
   if ((permission && !hasServerPermission(permission, srv)) || (match[3].startsWith('/files') && !hasServerPermission('files.view', srv))) throw Object.assign(new Error('Access restricted: ' + (permission || 'files.view') + ' required'), { status: 403 });
 }
@@ -17937,8 +17941,8 @@ function organizeServerSettings(root) {
   const wrapper = identity.parentElement.parentElement;
   const groups = [
     ['General', [identity, root.querySelector('#prop-motd')?.closest('.card') || root.querySelector('[data-steel-config]')]],
-    ['Startup & resources', [root.querySelector('#prop-java')?.closest('.card'), root.querySelector('#prop-jar')?.closest('.card')]],
-    ['Administration', [...wrapper.children].filter(el => el.classList.contains('card'))]
+    ['Startup & resources', [root.querySelector('#prop-java')?.closest('.card'), root.querySelector('#prop-jar')?.closest('.card'), root.querySelector('#server-automation-settings')]],
+    ['Administration', [...wrapper.children].filter(el => el.classList.contains('card') && el.id !== 'server-automation-settings')]
   ];
   const selected = Math.min(S.serverSettingsSection || 0, 2);
   const nav = document.createElement('div'); nav.className = 'tabs np-settings-tabs'; nav.setAttribute('aria-label', 'Server settings sections');

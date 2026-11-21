@@ -37,6 +37,9 @@ func TestServiceAppliesWakeSettingsForPanelAndWorker(t *testing.T) {
 			if err := service.db.CreateServer(game); err != nil {
 				t.Fatal(err)
 			}
+			if err := service.db.SetNodeIdlePolicy("local", database.NodeIdlePolicy{Enabled: true, TimeoutMinutes: 1}); err != nil {
+				t.Fatal(err)
+			}
 			address := fmt.Sprintf("127.0.0.1:%d", game.Port)
 			// Defaults must not bind an offline game's port.
 			vacant, err := net.Listen("tcp4", address)
@@ -60,6 +63,36 @@ func TestServiceAppliesWakeSettingsForPanelAndWorker(t *testing.T) {
 			response.Body.Close()
 			if response.StatusCode != 200 {
 				t.Fatal(response.StatusCode, string(body))
+			}
+			// Node opt-in alone must not wake a fresh/manual-offline server.
+			observed := false
+			until := time.Now().Add(4 * time.Second)
+			for time.Now().Before(until) {
+				status := service.manager.GetNodeWakeStatus()
+				if status.Enabled && status.ConfigMatches && status.Listeners == 0 {
+					for _, row := range status.Servers {
+						if row.ID == game.ID && row.State == "not_idle_stopped" {
+							observed = true
+						}
+					}
+				}
+				if observed {
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			if !observed {
+				t.Fatal("service did not enforce idle-stop-only eligibility")
+			}
+			vacant, err = net.Listen("tcp4", address)
+			if err != nil {
+				t.Fatal("fresh server got a wake listener", err)
+			}
+			vacant.Close()
+			// Seed the trusted result of a completed idle stop. Runner lifecycle
+			// tests exercise the actual graceful-stop-to-marker path.
+			if err := service.db.SetServerIdleStopped(game.ID, true); err != nil {
+				t.Fatal(err)
 			}
 			var conn net.Conn
 			deadline := time.Now().Add(4 * time.Second)
@@ -128,6 +161,12 @@ func TestServiceBindFailureDoesNotStartWakeListeners(t *testing.T) {
 	wake.Enabled = true
 	wake.BindAddress = "127.0.0.1"
 	if err := db.SetNodeWakeConfig("local", wake); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetNodeIdlePolicy("local", database.NodeIdlePolicy{Enabled: true, TimeoutMinutes: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetServerIdleStopped(game.ID, true); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

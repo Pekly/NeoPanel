@@ -1,0 +1,14 @@
+.server-automation-card { padding: 20px; }
+.server-automation-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.server-automation-heading h2 { font-size: 16px; margin: 0 0 5px; }
+.server-automation-heading p { font-size: 12px; margin: 0; }
+.server-automation-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.server-automation-option { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; }
+.server-automation-option > span:first-child { min-width: 0; }
+.server-automation-option b { display: block; font-size: 13px; }
+.server-automation-option .chip { font-size: 10px; margin-left: 5px; }
+.server-automation-option small { display: block; font-size: 12px; line-height: 1.5; margin-top: 6px; color: var(--tx-muted); }
+.server-automation-option .sw { flex-shrink: 0; }
+.server-automation-option .sw:has(input:disabled) { opacity: .65; cursor: not-allowed; }
+.server-automation-boundary, #server-automation-status, #server-automation-error { font-size: 12px; line-height: 1.5; margin: 12px 0 0; overflow-wrap: anywhere; }
+@media (max-width: 700px) { .server-automation-options { grid-template-columns: minmax(0, 1fr); } }

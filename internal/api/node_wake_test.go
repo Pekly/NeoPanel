@@ -120,6 +120,7 @@ func TestNodeWakeRemoteActualWorkerAndDisable(t *testing.T) {
 	}
 	c := database.DefaultNodeWakeConfig()
 	c.Enabled = true
+	c.LegacyDisconnectColors = true // The compatibility choice must reach the actual worker too.
 	c.VersionLabel = "Wake worker"
 	for _, enabled := range []bool{true, false} {
 		c.Enabled = enabled

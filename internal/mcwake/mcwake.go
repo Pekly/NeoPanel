@@ -34,6 +34,10 @@ type Join struct {
 	Username string
 }
 
+// Options selects an explicit compatibility mode; protocol version cannot
+// distinguish Horizon from a vanilla client using the same protocol.
+type Options struct{ LegacyDisconnectColors bool }
+
 // Handle serves one status exchange or login attempt and always closes conn.
 // status is called only for a valid status request; join is called once only
 // after a valid Login Start. join's result is the login disconnect text.
@@ -41,6 +45,11 @@ type Join struct {
 // A clean EOF after a status response is successful; malformed or truncated
 // input, timeouts and I/O failures return errors without exposing input text.
 func Handle(conn net.Conn, status func(protocol int32) Status, join func(Join) string) error {
+	return HandleWithOptions(conn, Options{}, status, join)
+}
+
+// HandleWithOptions retains the same bounded, join-only protocol behavior.
+func HandleWithOptions(conn net.Conn, options Options, status func(int32) Status, join func(Join) string) error {
 	defer conn.Close()
 	if err := conn.SetDeadline(time.Now().Add(connectionTimeout)); err != nil {
 		return err
@@ -76,7 +85,7 @@ func Handle(conn net.Conn, status func(protocol int32) Status, join func(Join) s
 		if protocol < 4 || (state == 3 && protocol < 766) {
 			return errors.New("mcwake: unsupported login protocol or state")
 		}
-		return handleLogin(conn, protocol, join)
+		return handleLogin(conn, protocol, join, options.LegacyDisconnectColors)
 	default:
 		return errors.New("mcwake: unsupported handshake state")
 	}
@@ -139,7 +148,7 @@ func handleStatus(conn net.Conn, protocol int32, status func(int32) Status) erro
 	return writePacket(conn, 1, timestamp[:], maxStatusBytes)
 }
 
-func handleLogin(conn net.Conn, protocol int32, join func(Join) string) error {
+func handleLogin(conn net.Conn, protocol int32, join func(Join) string, legacy bool) error {
 	id, body, err := readPacket(conn)
 	if err != nil {
 		return err
@@ -172,7 +181,11 @@ func handleLogin(conn net.Conn, protocol int32, join func(Join) string) error {
 	if len(message) > maxMessageBytes {
 		message = fallbackMessage
 	}
-	encoded, err := json.Marshal(formatText(message, protocol))
+	component := formatText(message, protocol)
+	if legacy {
+		component = textComponent{Text: legacyDisconnectText(message)}
+	}
+	encoded, err := json.Marshal(component)
 	if err != nil {
 		return err
 	}

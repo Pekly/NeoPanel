@@ -88,6 +88,12 @@ func TestNodeWakeStatusRemoteRealWorkerAndMismatch(t *testing.T) {
 	if err := master.db.SetNodeWakeConfig("remote", cfg); err != nil {
 		t.Fatal(err)
 	}
+	if err := worker.db.SetNodeIdlePolicy("local", database.NodeIdlePolicy{Enabled: true, TimeoutMinutes: 15}); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.db.SetServerIdleStopped(s.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	worker.manager.StartWakeListeners()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
