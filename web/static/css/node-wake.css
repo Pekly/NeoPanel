@@ -1,0 +1,50 @@
+/* Join-to-start is a standalone dialog, with settings arranged across the page. */
+#wake-modal .wake-dialog { padding: 24px; }
+.wake-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.wake-heading > div { min-width: 0; }
+.wake-heading h2 { margin: 0; font-size: 21px; overflow-wrap: anywhere; }
+.wake-heading p { margin: 5px 0 0; font-size: 13px; }
+.wake-heading > button { flex-shrink: 0; }
+.wake-delivery-grid, .wake-settings-grid, .wake-help-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.wake-delivery-grid { gap: 10px; }
+.wake-delivery-grid > div { min-width: 0; padding: 10px 12px; background: var(--card-inner); border: 1px solid var(--border); border-radius: 8px; }
+.wake-delivery-grid span, .wake-delivery-grid b { display: block; overflow-wrap: anywhere; }
+.wake-delivery-grid span { color: var(--tx-muted); font-size: 11px; margin-bottom: 4px; }
+.wake-delivery-grid b { font-size: 13px; }
+.wake-status, .wake-safety { font-size: 12px; line-height: 1.5; margin: 10px 0; }
+.wake-safety { border-left: 3px solid var(--ac); padding: 8px 12px; background: var(--card-inner); margin-bottom: 18px; }
+#wake-error { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+#wake-fields { min-width: 0; border: 0; padding: 0; margin: 0; }
+.wake-section { min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
+.wake-section h3 { font-size: 15px; margin: 0 0 14px; }
+.wake-section .wake-control { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; min-width: 0; }
+.wake-control > span, .wake-check { font-size: 12px; font-weight: 600; }
+.wake-control small { font-size: 11px; line-height: 1.5; font-weight: 400; color: var(--tx-muted); }
+.wake-check { display: flex; align-items: flex-start; gap: 8px; }
+.wake-check input { flex: 0 0 auto; margin-top: 2px; }
+.wake-control input:not([type=checkbox]), .wake-control textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.wake-control textarea { resize: vertical; min-height: 80px; }
+.wake-control input[type=file] { font-size: 11px; }
+.wake-icon-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.wake-icon-actions img { image-rendering: pixelated; border-radius: 8px; flex-shrink: 0; }
+.wake-note, .wake-help { font-size: 12px; line-height: 1.55; color: var(--tx-muted); overflow-wrap: anywhere; }
+.wake-note p { margin: 8px 0 0; }
+.wake-note ol, .wake-help ol { padding-left: 20px; margin: 8px 0; }
+.wake-help { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-top: 12px; }
+.wake-help summary { cursor: pointer; color: var(--tx); font-weight: 600; }
+.wake-help-grid { padding-top: 12px; }
+.wake-help-grid h4 { margin: 0 0 8px; color: var(--tx); font-size: 13px; }
+.wake-help-grid p { margin: 8px 0; }
+#wake-saved { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0; }
+.wake-actions { position: sticky; bottom: -24px; z-index: 1; background: var(--card-bg-solid); padding: 12px 0 16px; border-top: 1px solid var(--border); margin-top: 16px; }
+.wake-actions > p { margin: 0 0 8px; font-size: 12px; }
+.wake-actions > .row { gap: 8px; flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .wake-settings-grid, .wake-help-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  #wake-modal .wake-dialog { padding: 16px; }
+  .wake-settings-grid, .wake-help-grid, .wake-delivery-grid { grid-template-columns: minmax(0, 1fr); }
+  .wake-heading h2 { font-size: 18px; }
+  .wake-actions { bottom: -16px; }
+}

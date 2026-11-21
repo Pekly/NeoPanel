@@ -12,6 +12,7 @@ Join to start is **off by default**, separately for Local and every connected re
 - Configuration and inventory are reconciled roughly once per second. There are at most 1024 offline listeners, 64 concurrent wake connections, and 12 admitted connections per source IP per 10 seconds. Protocol connections have a five-second deadline; excessive traffic is dropped. Shared/NAT addresses share that connection budget.
 
 Open the settings, wait for the saved configuration to load, edit it, then select **Save settings**. There is no autosave. The GET response supplies authoritative defaults; the browser does not invent defaults when loading fails.
+The separate dialog groups controls into **Startup behavior**, **Offline appearance**, and **Player messages**. Desktop sections sit side by side; small screens stack them. The status cards distinguish the saved panel setting from the worker's last acknowledgement. **Listener / game health: Not tested by this form** is intentional: acceptance is not a connectivity or startup test. Field help explains defaults, limits, and which settings affect only the offline display.
 
 ## What players experience
 
@@ -63,6 +64,17 @@ The abbreviated `config` above is illustrative, not a valid PUT body. **PUT send
 - A **pending disable is not confirmation that wake is disabled**. Do not begin maintenance on that assumption. Verify acceptance on the worker; if it is unreachable, use host/network controls to prevent unwanted starts until it is reachable again.
 - **Refresh status** reloads saved desired settings and acceptance information without discarding edited fields. It is not a substitute for retrying delivery. **Save settings** submits current edits; **Retry saved settings** submits the last confirmed saved configuration, leaving edits untouched.
 - Request failures preserve edited fields. If no valid envelope was received, the UI reports unknown status: a network failure can occur after a save/delivery completed. Refresh before deciding what to resend. Closing and reopening the modal loads saved settings, not the abandoned draft.
+
+### HTTP 405 / 404 from a worker
+
+The panel sends **PUT `/api/cluster/wake`** to the node URL. A 405 means the responding server or proxy does not allow that method; a 404 means that route is unavailable. This can happen when the worker is still running an older binary, the node URL points to the wrong service, or a reverse proxy is not forwarding the route/method. The response alone does not identify which cause applies.
+
+1. Update **the affected worker**, not just the master panel, to a join-to-start capable release and restart its daemon so it runs the new binary.
+2. In the node's Edit dialog, check that its saved URL points to the intended NeoPanel daemon (not a game port, static website, or obsolete URL).
+3. If a proxy fronts that daemon, verify it forwards `PUT /api/cluster/wake` with the normal authentication header. Do not remove authentication or expose the node token to diagnose this.
+4. Open the separate join-to-start dialog and choose **Retry saved settings**. Wait for worker acceptance; **Refresh status** only reloads the last saved delivery result and does not retry it.
+
+HTTP 401/403 instead calls for checking the saved Node Token / administrator API key and proxy access rules. Redirects are intentionally not followed to protect credentials. Pending enable/disable settings are not proof of what is currently active on the worker.
 
 ## Security and maintenance
 
