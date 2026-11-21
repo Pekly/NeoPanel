@@ -104,4 +104,4 @@ Found a bug? [Open an issue](https://github.com/Pekly/NeoPanel/issues) with what
 
 ## License
 
-[MIT](https://opensource.org/license/mit). The Steel logo is supplied by [SteelMC](https://steelmc.dev/), credited upstream to colonthreeing.
+[MIT](https://opensource.org/license/mit).
