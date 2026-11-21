@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Pekly/NeoPanel/internal/rooted"
 )
 
 func init() {
@@ -58,12 +60,17 @@ func TestLinuxWorldLockDetectsLiveOwnerWithoutDeletingFile(t *testing.T) {
 	if !scanner.Scan() || scanner.Text() != "locked" {
 		t.Fatal("lock helper failed")
 	}
-	if err := checkWorldLock(path); err == nil || !strings.Contains(err.Error(), "already in use") {
+	root, err := rooted.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := checkWorldLock(root, "session.lock"); err == nil || !strings.Contains(err.Error(), "already in use") {
 		t.Fatal("live lock not detected", err)
 	}
 	cmd.Process.Kill()
 	cmd.Wait()
-	if err := checkWorldLock(path); err != nil {
+	if err := checkWorldLock(root, "session.lock"); err != nil {
 		t.Fatal("stale file mistaken for active lock", err)
 	}
 	if raw, err := os.ReadFile(path); err != nil || string(raw) != "keep-lock-inode" {

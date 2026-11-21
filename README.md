@@ -1,5 +1,7 @@
 # NeoPanel on Windows
 
+[![Repository size](https://img.shields.io/github/repo-size/Pekly/NeoPanel?style=flat-square)](https://github.com/Pekly/NeoPanel)
+
 Use a Windows PC to host Minecraft servers and manage them from your NeoPanel web panel. This guide sets up the Windows worker, which runs the game servers and connects to an existing panel. The worker doesn't have its own web interface.
 
 ## What you'll need

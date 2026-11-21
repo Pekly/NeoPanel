@@ -21,10 +21,12 @@ var (
 	ErrServerNotStopped = errors.New("server must be stopped before restoring a backup")
 	ErrInvalidArchive   = errors.New("invalid backup archive")
 	ErrRestoreRecovery  = errors.New("restore publication and rollback failed; manual recovery required")
+	ErrRestoreRetention = errors.New("restore recovery limit reached or unsafe recovery entry found; administrator cleanup required before another restore")
 )
 
 const restoreMaxBytes int64 = 100 << 30 // hard ceiling, further bounded by the server disk limit
 const restoreMaxEntries = 100000
+const restoreMaxRetained = 3
 
 func (m *ServerManager) beginOperation(id string) (func(), error) {
 	value, _ := m.operations.LoadOrStore(id, &sync.Mutex{})
@@ -97,6 +99,16 @@ func (m *ServerManager) RestoreBackup(ctx context.Context, srv *database.Server,
 	}
 	base, err = filepath.Abs(base)
 	if err != nil {
+		return result, err
+	}
+	// Count recovery directories before creating another stage, while both the
+	// operation gate and cross-process run lock are held. Never prune old data.
+	parent, err := os.OpenRoot(base)
+	if err != nil {
+		return result, fmt.Errorf("open recovery parent: %w", err)
+	}
+	defer parent.Close()
+	if err := checkRestoreRetention(parent, srv.ID); err != nil {
 		return result, err
 	}
 	live := filepath.Join(base, srv.ID)
@@ -190,6 +202,40 @@ func (m *ServerManager) RestoreBackup(ctx context.Context, srv *database.Server,
 	result.Message = "Backup restored successfully; server remains stopped. Original data retained in safety_copy; remove it manually after verification."
 	result.SafetyCopy = filepath.Join(filepath.Base(stage), "original")
 	return result, nil
+}
+
+// The server parent is daemon-owned. Inspect only this server's recovery prefix,
+// using a pinned directory and Lstat so ambiguous entries never follow links.
+func checkRestoreRetention(parent *os.Root, serverID string) error {
+	f, err := parent.Open(".")
+	if err != nil {
+		return fmt.Errorf("inspect retained restore copies: %w", err)
+	}
+	defer f.Close()
+	prefix := ".restore-" + serverID + "-"
+	count := 0
+	for {
+		names, readErr := f.Readdirnames(128)
+		for _, name := range names {
+			if !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			st, err := parent.Lstat(name)
+			if err != nil || !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("%w: inspect %s", ErrRestoreRetention, name)
+			}
+			count++
+			if count >= restoreMaxRetained {
+				return fmt.Errorf("%w: maximum %d retained recovery directories for server %s", ErrRestoreRetention, restoreMaxRetained, serverID)
+			}
+		}
+		if readErr == io.EOF {
+			return nil
+		}
+		if readErr != nil {
+			return fmt.Errorf("inspect retained restore copies: %w", readErr)
+		}
+	}
 }
 
 func safeBackupComponent(name string) bool {

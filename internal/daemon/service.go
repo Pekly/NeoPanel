@@ -92,6 +92,7 @@ func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 	}
 	log.Printf("[INFO] Initializing server manager with data directory: %s", cfg.Paths.ServersDir)
 	manager := runner.NewServerManager(cfg.Paths.ServersDir, db)
+	manager.SetAllowInsecureGameFallback(cfg.Security.AllowInsecureGameFallback)
 	if cfg.Server.StartupTimeoutSec > 0 {
 		manager.SetStartupTimeout(time.Duration(cfg.Server.StartupTimeoutSec) * time.Second)
 	}
@@ -110,6 +111,7 @@ func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 	}
 	s.http = &http.Server{
 		Addr: addr, Handler: s.guard(router),
+		ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 32 << 10,
 		ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
 	}
 	if cfg.SFTP.Enabled {

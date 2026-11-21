@@ -17,31 +17,32 @@ import (
 )
 
 type ServerManager struct {
-	mu               sync.RWMutex
-	baseDir          string
-	backupDir        string
-	trash            *trash.Store
-	db               *database.DB
-	instances        map[string]*ProcessInstance
-	startupFailures  map[string]int
-	startupHalted    map[string]bool
-	retryCancels     map[string]chan struct{}
-	startupTimeout   time.Duration
-	shutdownCh       chan struct{}
-	shutdownOnce     sync.Once
-	idleWG           sync.WaitGroup
-	launchMu         sync.Mutex // Serializes process launch with the shutdown boundary.
-	wake             wakeCoordinator
-	wakeSuppressed   sync.Map // failed durable invalidations fail closed until repaired
-	recoveryMu       sync.Mutex
-	recoveryOnce     sync.Once
-	recoveryErr      error
-	recoveryEnabled  bool
-	recoveryPending  map[string]bool
-	recoveryStarting map[string]bool
-	operations       sync.Map // server ID -> *sync.Mutex; shared by power, backups and restore
-	restoreBlocked   sync.Map // unrecoverable publication failures block subsequent power operations
-	restorePaused    sync.Map // suppress late crash callbacks until an explicit start
+	mu                        sync.RWMutex
+	baseDir                   string
+	backupDir                 string
+	trash                     *trash.Store
+	db                        *database.DB
+	instances                 map[string]*ProcessInstance
+	startupFailures           map[string]int
+	startupHalted             map[string]bool
+	retryCancels              map[string]chan struct{}
+	startupTimeout            time.Duration
+	allowInsecureGameFallback bool
+	shutdownCh                chan struct{}
+	shutdownOnce              sync.Once
+	idleWG                    sync.WaitGroup
+	launchMu                  sync.Mutex // Serializes process launch with the shutdown boundary.
+	wake                      wakeCoordinator
+	wakeSuppressed            sync.Map // failed durable invalidations fail closed until repaired
+	recoveryMu                sync.Mutex
+	recoveryOnce              sync.Once
+	recoveryErr               error
+	recoveryEnabled           bool
+	recoveryPending           map[string]bool
+	recoveryStarting          map[string]bool
+	operations                sync.Map // server ID -> *sync.Mutex; shared by power, backups and restore
+	restoreBlocked            sync.Map // unrecoverable publication failures block subsequent power operations
+	restorePaused             sync.Map // suppress late crash callbacks until an explicit start
 }
 
 func NewServerManager(baseDir string, db *database.DB) *ServerManager {
@@ -126,6 +127,7 @@ func (m *ServerManager) getOrCreateInstance(srv *database.Server) *ProcessInstan
 		// Update server config reference in case it changed
 		inst.mu.Lock()
 		inst.server = srv
+		inst.allowInsecureGameFallback = m.allowInsecureGameFallback
 		inst.mu.Unlock()
 		return inst
 	}
@@ -151,6 +153,7 @@ func (m *ServerManager) getOrCreateInstance(srv *database.Server) *ProcessInstan
 			m.handleProcessExit(srvID, unexpected, reachedOnline, timedOut, uptime)
 		},
 	)
+	inst.allowInsecureGameFallback = m.allowInsecureGameFallback
 
 	if m.db != nil {
 		nodeID := srv.NodeID

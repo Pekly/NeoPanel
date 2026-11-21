@@ -8256,7 +8256,7 @@ const V = {
       `;
     } else if (t === 3) {
       content = `
-        <input type="file" id="admin-user-avatar-file" accept="image/*" style="display:none;" onchange="onAdminUserAvatarSelected(this)">
+        <input type="file" id="admin-user-avatar-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;" onchange="onAdminUserAvatarSelected(this)">
         <div class="card tw" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:14px; flex-wrap:wrap; gap:12px;">
             <div>
@@ -8758,13 +8758,14 @@ const V = {
       tabContent = `<div class="card prof">
         <div class="banner" style="background-image: url('${esc(getBrand('card_cover_url'))}'), url('/img/banner.jpg'); background-size: cover; background-position: center;">
           <span class="avb">${av(64)}</span>
-          <input type="file" id="my-avatar-upload" accept="image/*" style="display:none;" onchange="uploadMyAvatar(this)">
+          <input type="file" id="my-avatar-upload" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;" onchange="uploadMyAvatar(this)">
           <div class="row" style="gap:8px;">
             <button type="button" class="btn sm" onclick="$('#my-avatar-upload').click()">${ic('image', 13)} Upload Avatar</button>
             <button type="button" class="btn sm" onclick="$('#aem').focus()">Gravatar</button>
           </div>
         </div>
         <div class="pbody">
+          <p class="mu" style="font-size:12px;">Avatars: PNG, JPEG, GIF or WebP, up to 5 MiB and 4 megapixels (4096px per side). Saved as a static PNG, up to 512px. SVG uploads are not accepted.</p>
           <div class="grid g2">
             <label class="f"><span>First name</span><input type="text" id="afn" value="${esc(a.fn || '')}" placeholder="First name"></label>
             <label class="f"><span>Last name</span><input type="text" id="aln" value="${esc(a.ln || '')}" placeholder="Last name"></label>
@@ -9881,7 +9882,7 @@ function openNodeModal(nodeId = null) {
           <label class="f" style="margin-bottom: 0;">
             <span>Process Isolation Engine</span>
             <select id="nm-isolation">
-              <option value="auto" ${existing?.isolation_engine === 'auto' ? 'selected' : ''}>Automatic (Windows: Job Object, no filesystem jail)</option>
+              <option value="auto" ${existing?.isolation_engine === 'auto' ? 'selected' : ''}>Automatic (Linux: bwrap + systemd required; Windows: Job Object, no filesystem jail)</option>
               <option value="bubblewrap" ${(existing?.isolation_engine || 'bubblewrap') === 'bubblewrap' ? 'selected' : ''}>Bubblewrap (bwrap jailed filesystem + systemd slice)</option>
               <option value="none" ${['none', 'process'].includes(existing?.isolation_engine) ? 'selected' : ''}>Host Direct (No filesystem jail; Windows Job Object)</option>
             </select>
@@ -14368,10 +14369,11 @@ function openAddUserModal() {
         <label class="f" style="margin-bottom:20px;">
           <span>Profile Icon (Optional)</span>
           <div class="row np-modal-wrap" style="gap:10px; align-items:center;">
-            <input type="file" id="nu-avatar-file" accept="image/*" style="display:none;" onchange="const n=$('#nu-avatar-name'); if(n) n.textContent=this.files[0]?.name||'No file chosen';">
+            <input type="file" id="nu-avatar-file" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none;" onchange="const n=$('#nu-avatar-name'); if(n) n.textContent=this.files[0]?.name||'No file chosen';">
             <button type="button" class="btn sm" onclick="$('#nu-avatar-file').click()">${ic('image', 14)} Choose Icon...</button>
             <span id="nu-avatar-name" class="mu" style="font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px;">No file chosen</span>
           </div>
+          <small class="mu">Raster images only, up to 5 MiB / 4 megapixels. Normalized to a static PNG; SVG is not accepted.</small>
         </label>
 
         <div class="row np-modal-actions" style="justify-content:flex-end; gap:10px;">

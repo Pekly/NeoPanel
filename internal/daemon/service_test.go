@@ -76,6 +76,9 @@ func TestStartEphemeralPortAndRoutes(t *testing.T) {
 			if s.http.ReadTimeout != 30*time.Second || s.http.WriteTimeout != 60*time.Second || s.http.IdleTimeout != 120*time.Second {
 				t.Fatal("HTTP timeouts changed")
 			}
+			if s.http.ReadHeaderTimeout != 5*time.Second || s.http.MaxHeaderBytes != 32<<10 {
+				t.Fatal("HTTP header security limits missing")
+			}
 			if status, _ := get(t, s.URL()+"/api/auth/status"); status != http.StatusOK {
 				t.Fatalf("auth status API: %d", status)
 			}

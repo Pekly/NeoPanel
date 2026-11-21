@@ -27,7 +27,7 @@ func TestDesktopFramingIsExplicitAndDocumentOnly(t *testing.T) {
 			response.Body.Close()
 			allowed := desktop && (path == "/" || path == "/index.html")
 			if allowed {
-				if response.Header.Get("X-Frame-Options") != "" || response.Header.Get("Content-Security-Policy") != "frame-ancestors http://wails.localhost" {
+				if response.Header.Get("X-Frame-Options") != "" || response.Header.Get("Content-Security-Policy") != "base-uri 'self'; frame-ancestors http://wails.localhost" {
 					t.Fatal(path, response.Header)
 				}
 			} else if response.Header.Get("X-Frame-Options") != "DENY" {

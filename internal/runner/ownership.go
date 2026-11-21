@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Pekly/NeoPanel/internal/rooted"
 )
 
 // Serialize late watchdog/stop requests with final cleanup for this exact run.
@@ -160,25 +162,86 @@ func terminateOwnedCommand(cmd *exec.Cmd, final bool) error {
 	return nil
 }
 
+const startupPropertiesMaxBytes = 1 << 20
+
 func checkServerWorldLocks(dir, serverType string) error {
 	switch strings.ToLower(serverType) {
 	case "velocity", "bungeecord", "waterfall":
 		return nil
 	}
+	root, err := rooted.Open(dir)
+	// Maintenance can recheck a server whose directory was already removed.
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cannot inspect server directory: %w", err)
+	}
+	defer root.Close()
 	name := "world"
-	if raw, err := os.ReadFile(filepath.Join(dir, "server.properties")); err == nil {
+	f, err := root.Open("server.properties")
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("cannot inspect server.properties: %w", err)
+	}
+	if err == nil {
+		raw, readErr := rooted.ReadBounded(f, startupPropertiesMaxBytes)
+		f.Close()
+		if readErr != nil {
+			return fmt.Errorf("cannot inspect server.properties (maximum %d bytes): %w", startupPropertiesMaxBytes, readErr)
+		}
 		for _, line := range strings.Split(string(raw), "\n") {
 			if key, value, ok := strings.Cut(strings.TrimSpace(line), "="); ok && strings.TrimSpace(key) == "level-name" && strings.TrimSpace(value) != "" {
 				name = strings.TrimSpace(value)
 			}
 		}
 	}
+	// Reject traversal components even when cleaning would remain inside root.
+	// Slash-separated nested worlds remain supported on every platform.
+	if !filepath.IsLocal(name) || strings.ContainsAny(name, "\\:\x00") {
+		return fmt.Errorf("invalid level-name: use a local relative world path")
+	}
+	for _, part := range strings.Split(name, "/") {
+		if !safeBackupComponent(part) {
+			return fmt.Errorf("invalid level-name: use a local relative world path")
+		}
+	}
 	for _, world := range []string{name, name + "_nether", name + "_the_end"} {
-		if err := checkWorldLock(filepath.Join(dir, world, "session.lock")); err != nil {
+		if err := checkWorldLock(root, filepath.Join(world, "session.lock")); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Open through the pinned server root, never a tenant-controlled absolute path.
+// Platform flags prevent FIFO waits; the identity check also rejects link swaps.
+func checkWorldLock(root *rooted.Root, path string) error {
+	if err := root.Check(path); err != nil {
+		return fmt.Errorf("cannot inspect world lock %s: %w", path, err)
+	}
+	st, err := root.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("cannot inspect world lock %s: %w", path, err)
+	}
+	if !st.Mode().IsRegular() {
+		return fmt.Errorf("cannot inspect world lock %s: not a regular file", path)
+	}
+	f, err := root.OpenFile(path, os.O_RDWR|worldLockOpenFlags, 0)
+	if err != nil {
+		return fmt.Errorf("cannot inspect world lock %s: %w", path, err)
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("cannot inspect world lock %s: %w", path, err)
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(st, opened) {
+		return fmt.Errorf("cannot inspect world lock %s: file changed or is not regular", path)
+	}
+	return probeWorldLock(f, path)
 }
 
 func scopeStopped(output string) bool {

@@ -7,13 +7,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Pekly/NeoPanel/internal/database"
 	"golang.org/x/crypto/bcrypt"
@@ -161,15 +157,7 @@ func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	newToken, _ := h.auth.GenerateToken(user)
 	if newToken != "" {
-		http.SetCookie(w, &http.Cookie{
-			Name:     "jwt",
-			Value:    newToken,
-			Path:     "/",
-			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
-			Secure:   r.TLS != nil,
-			MaxAge:   86400 * 7,
-		})
+		h.auth.setSessionCookie(w, r, newToken)
 	}
 
 	_ = h.db.LogActivity(user.ID, "profile_update", fmt.Sprintf("Updated account profile: %s (%s)", user.Username, user.Email), extractClientIP(r))
@@ -196,11 +184,14 @@ func (h *AccountHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 
 	avatarURL, err := saveUploadedAvatarFile(r, user.ID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeAvatarError(w, err)
 		return
 	}
 
-	_ = h.db.UpdateUserAvatar(user.ID, avatarURL)
+	if err := h.db.UpdateUserAvatar(user.ID, avatarURL); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update avatar reference")
+		return
+	}
 	_ = h.db.LogActivity(user.ID, "avatar_upload", "Uploaded new profile avatar", extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -225,63 +216,18 @@ func (h *AccountHandler) AdminUploadUserAvatar(w http.ResponseWriter, r *http.Re
 
 	avatarURL, err := saveUploadedAvatarFile(r, user.ID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeAvatarError(w, err)
 		return
 	}
 
-	_ = h.db.UpdateUserAvatar(user.ID, avatarURL)
+	if err := h.db.UpdateUserAvatar(user.ID, avatarURL); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update avatar reference")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":    "User avatar updated",
 		"avatar_url": avatarURL,
 	})
-}
-
-func saveUploadedAvatarFile(r *http.Request, userID int) (string, error) {
-	if err := r.ParseMultipartForm(5 << 20); err != nil {
-		return "", fmt.Errorf("avatar image must be under 5 MB")
-	}
-
-	file, header, err := r.FormFile("avatar")
-	if err != nil {
-		return "", fmt.Errorf("avatar file field is required")
-	}
-	defer file.Close()
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext == "" || (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" && ext != ".gif" && ext != ".svg") {
-		ext = ".png"
-	}
-
-	dir := filepath.Join("data", "avatars")
-	_ = os.MkdirAll(dir, 0755)
-
-	filename := fmt.Sprintf("avatar_%d%s", userID, ext)
-	destPath := filepath.Join(dir, filename)
-
-	dst, err := os.Create(destPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to save avatar image")
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, file); err != nil {
-		return "", fmt.Errorf("failed to write avatar image")
-	}
-
-	return fmt.Sprintf("/api/avatars/%s?t=%d", filename, time.Now().Unix()), nil
-}
-
-func (h *AccountHandler) ServeAvatar(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Path, "/api/avatars/")
-	if len(parts) < 2 || parts[1] == "" {
-		http.NotFound(w, r)
-		return
-	}
-	filename := filepath.Base(parts[1])
-	filePath := filepath.Join("data", "avatars", filename)
-
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	http.ServeFile(w, r, filePath)
 }
 
 func (h *AccountHandler) Generate2FA(w http.ResponseWriter, r *http.Request) {
@@ -470,9 +416,44 @@ func (h *AccountHandler) ListSSHKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, keys)
 }
 
-func (h *AccountHandler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
+// credentialEnrollmentAuth captures the authenticating authority before reading
+// the body. Keep token precedence aligned with requireAuth; never look up the
+// mutable username or replace the JWT's version with the latest user version.
+func credentialEnrollmentAuth(r *http.Request) (database.CredentialEnrollmentAuth, error) {
 	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
-	if !ok || claims == nil {
+	if !ok || claims == nil || claims.UserID <= 0 {
+		return database.CredentialEnrollmentAuth{}, sql.ErrNoRows
+	}
+	auth := database.CredentialEnrollmentAuth{UserID: claims.UserID}
+	if !claims.APIKey {
+		version := claims.AuthVersion
+		auth.AuthVersion = &version
+		return auth, nil
+	}
+	token := ""
+	if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+		token = strings.TrimPrefix(header, "Bearer ")
+	}
+	if token == "" {
+		if cookie, err := r.Cookie("neopanel_token"); err == nil {
+			token = cookie.Value
+		}
+	}
+	if token == "" {
+		token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	token = strings.TrimSpace(token)
+	if !strings.HasPrefix(token, "neo_") {
+		return database.CredentialEnrollmentAuth{}, sql.ErrNoRows
+	}
+	sum := sha256.Sum256([]byte(token))
+	auth.APIKeyHash = hex.EncodeToString(sum[:])
+	return auth, nil
+}
+
+func (h *AccountHandler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
+	auth, err := credentialEnrollmentAuth(r)
+	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
@@ -502,19 +483,17 @@ func (h *AccountHandler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 
 	fingerprint := ssh.FingerprintSHA256(pubKey)
 
-	user, err := h.db.GetUserByUsername(claims.Username)
+	key, err := h.db.AddSSHKeyForAuth(auth, req.Name, fingerprint, req.PublicKey)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
-		return
-	}
-
-	key, err := h.db.AddSSHKey(user.ID, req.Name, fingerprint, req.PublicKey)
-	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Credential revoked"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save SSH key: " + err.Error()})
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "ssh_key_add", fmt.Sprintf("Added SSH key '%s' (%s)", req.Name, fingerprint), extractClientIP(r))
+	_ = h.db.LogActivity(auth.UserID, "ssh_key_add", fmt.Sprintf("Added SSH key '%s' (%s)", req.Name, fingerprint), extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, key)
 }
@@ -577,8 +556,8 @@ func (h *AccountHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AccountHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
-	if !ok || claims == nil {
+	auth, err := credentialEnrollmentAuth(r)
+	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
@@ -593,7 +572,10 @@ func (h *AccountHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 
 	// Generate 32 bytes random key
 	tokenBytes := make([]byte, 32)
-	_, _ = rand.Read(tokenBytes)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to generate API key"})
+		return
+	}
 	rawToken := "neo_" + hex.EncodeToString(tokenBytes)
 
 	// Hash key for storage
@@ -601,19 +583,17 @@ func (h *AccountHandler) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	keyHash := hex.EncodeToString(hash[:])
 	keyPrefix := rawToken[:12] + "..."
 
-	user, err := h.db.GetUserByUsername(claims.Username)
+	apiKey, err := h.db.AddAPIKeyForAuth(auth, strings.TrimSpace(req.Name), keyHash, keyPrefix)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
-		return
-	}
-
-	apiKey, err := h.db.AddAPIKey(user.ID, strings.TrimSpace(req.Name), keyHash, keyPrefix)
-	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Credential revoked"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create API key"})
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "api_key_create", fmt.Sprintf("Created API key '%s' (%s)", req.Name, keyPrefix), extractClientIP(r))
+	_ = h.db.LogActivity(auth.UserID, "api_key_create", fmt.Sprintf("Created API key '%s' (%s)", req.Name, keyPrefix), extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"id":         apiKey.ID,
