@@ -7017,7 +7017,7 @@ const V = {
 
       <!-- Secondary Row: SFTP Access & Common Ports -->
       <div class="grid g2" style="gap: 20px;">
-        <p class="mu">File transfer connections are managed in the dedicated SFTP section.</p>
+        <div style="align-self: start;">${hasServerPermission('sftp.access', srv) ? `<a class="btn" href="${esc(routeUrl('sftp', { srv }))}" onclick="return handleNavClick(event, 'sftp')">${ic('folderUp', 14)} Open SFTP</a>` : `<button type="button" class="btn" disabled title="SFTP access permission is required">${ic('folderUp', 14)} Open SFTP</button>`}</div>
 
         <div class="card" style="padding: 22px;">
           <h2 style="font-size: 16px; margin-bottom: 8px; color: #fff;">Common Plugin Ports</h2>
@@ -7765,7 +7765,6 @@ const V = {
       </div>` : ''}
 
 
-      <p class="mu">Use Network for ports and SFTP for file-transfer access.</p>
 
       ${(isAdmin || isOwner) ? `
       <!-- Reinstall Server Section -->
