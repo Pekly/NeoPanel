@@ -59,9 +59,13 @@ the head's HTTP address.
   network accounting is unavailable; CPU and RAM reporting use host APIs.
 - Java is required for Java servers. Choose a compatible runtime through the head
   and review the Minecraft EULA before starting Minecraft.
-- Stop local servers and the worker before upgrading or moving data. Back up the
-  database, configuration, worlds, credentials, and sibling `servers-trash` folder.
-  Windows does not use the Linux auto-updater: stop, replace the EXE, then restart.
+- Back up the database, configuration, worlds, credentials, and sibling
+  `servers-trash` folder before upgrading. Gracefully stop the worker with Ctrl+C
+  and wait for cleanup, replace the EXE, then restart. With restart recovery
+  installed, previously online local servers resume; manually stopped servers
+  stay off. The first upgrade from an older binary may require manual starts.
+  Stop local servers explicitly before moving data if they should remain offline.
+  Windows does not use the Linux auto-updater.
 - Force-closing a process kills its owned jobs; this is crash cleanup, not a
   guaranteed world save. Windows sleep, logoff, and power loss interrupt hosting.
 - Windows ARM64 cross-builds do not replace testing on ARM64 hardware. Local

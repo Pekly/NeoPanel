@@ -14622,7 +14622,7 @@ async function openApplyUpdateModal() {
         <div><b>Target Branch:</b> <code>${esc(branch)}</code></div>
         <div><b>Current Version:</b> <code>v${esc(S.system?.version || '1.0.0')}</code></div>
       </div>
-      The daemon will pull the latest source code from GitHub, compile the new binary, and restart the NeoPanel service. Running Minecraft servers will remain online.
+      The daemon will pull the latest source code from GitHub, compile the new binary, and restart the NeoPanel service. Local Minecraft servers briefly stop; those online before shutdown start again afterward. Offline servers stay offline. Remote workers are unaffected. Finish backups, restores, and reinstall operations before updating.
     `,
     confirmText: 'Apply Update Now',
     cancelText: 'Cancel',

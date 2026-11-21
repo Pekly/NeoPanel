@@ -120,6 +120,12 @@ func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 			log.Printf("[WARN] Failed to start SFTP server: %v", err)
 		}
 	}
+	// Binding and setup succeeded. Restore once before accepting control requests;
+	// clean shutdown saves the running state through the shared manager.
+	if err := manager.RestoreRunningServers(); err != nil {
+		log.Printf("[WARN] Running-server recovery unavailable: %v", err)
+	}
+
 	if cfg.IsNode() || assets == nil {
 		log.Printf("[SUCCESS] NeoPanel Cluster Node Daemon running at: %s", s.URL())
 	} else {
