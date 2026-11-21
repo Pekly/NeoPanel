@@ -72,6 +72,7 @@ func (m *ServerManager) RestoreBackup(ctx context.Context, srv *database.Server,
 		return result, err
 	}
 	defer unlock()
+	m.releaseWakeListener(srv.ID)
 	if m.GetStatus(srv.ID) != "offline" {
 		return result, ErrServerNotStopped
 	}

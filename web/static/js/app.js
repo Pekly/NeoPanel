@@ -8092,6 +8092,7 @@ const V = {
                   <td><span class="badge ${n.online ? 'online' : 'offline'}"><i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}</span></td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
+                      <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeWake.open(this.dataset.id)">Join to start</button>
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                       ${n.is_local
@@ -8154,6 +8155,7 @@ const V = {
               <div class="row sb" style="margin-top: auto; padding-top: 4px;">
                 <span class="mu mono" style="font-size: 11px;">${n.is_local ? 'id: local' : `key: ${esc(n.token_prefix || 'neo_...')}`}</span>
                 <div class="row" style="gap: 6px;">
+                  <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeWake.open(this.dataset.id)">Join to start</button>
                   <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                   <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                   ${n.is_local

@@ -11,7 +11,11 @@ import (
 // BeginServerOperation excludes restore/power/backup for the entire caller's
 // filesystem and metadata operation. The caller must defer the returned release.
 func (m *ServerManager) BeginServerOperation(id string) (func(), error) {
-	return m.beginOperation(id)
+	release, err := m.beginOperation(id)
+	if err == nil {
+		m.releaseWakeListener(id)
+	}
+	return release, err
 }
 
 // BeginServerMaintenance stops the process before destructive work and retains
@@ -22,6 +26,7 @@ func (m *ServerManager) BeginServerMaintenance(ctx context.Context, id string) (
 	if err != nil {
 		return nil, err
 	}
+	m.releaseWakeListener(id)
 	m.mu.Lock()
 	m.cancelRetryLocked(id)
 	m.restorePaused.Store(id, true)

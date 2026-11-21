@@ -213,6 +213,7 @@ func main() {
 	if err := manager.RestoreRunningServers(); err != nil {
 		log.Printf("[WARN] Running-server recovery unavailable: %v", err)
 	}
+	manager.StartWakeListeners()
 
 	// 6. Start HTTP Server
 	if cfg.IsNode() || staticFS == nil {
