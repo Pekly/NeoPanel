@@ -75,7 +75,13 @@ func (h *AuthHandler) UpdatePanelURL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Enter the public panel URL, for example https://panel.example.com")
 		return
 	}
-	origin, rpID, err := canonicalPasskeyOrigin(strings.TrimSpace(req.PublicURL))
+	// A hostname is enough for the settings form/API; retain strict origin and
+	// passkey checks after adding the secure default scheme.
+	candidate := strings.TrimSpace(req.PublicURL)
+	if !strings.Contains(candidate, "://") {
+		candidate = "https://" + candidate
+	}
+	origin, rpID, err := canonicalPasskeyOrigin(candidate)
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return

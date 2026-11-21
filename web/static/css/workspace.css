@@ -19,3 +19,8 @@
   .np-countdown form > button { width: 100%; }
   .np-maint-banner { flex-wrap: wrap; }
 }
+.np-panel-address [hidden] { display: none; }
+.np-panel-address input { min-width: 0; width: 100%; }
+.np-panel-address-help { padding: 12px 14px; border: 1px solid var(--ln); border-radius: 8px; font-size: 12.5px; line-height: 1.6; }
+.np-panel-address-help summary { cursor: pointer; font-weight: 600; }
+.np-panel-address-help ol { padding-left: 20px; }
