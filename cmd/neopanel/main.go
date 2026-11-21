@@ -208,6 +208,12 @@ func main() {
 		close(shutdownDone)
 	}()
 
+	// Restore only after successful binding/setup; failed startup leaves the
+	// previous snapshot available for a later successful launch.
+	if err := manager.RestoreRunningServers(); err != nil {
+		log.Printf("[WARN] Running-server recovery unavailable: %v", err)
+	}
+
 	// 6. Start HTTP Server
 	if cfg.IsNode() || staticFS == nil {
 		log.Printf("[SUCCESS] NeoPanel Cluster Node Daemon running at: http://%s", addr)

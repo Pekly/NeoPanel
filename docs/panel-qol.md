@@ -54,3 +54,15 @@ Use **Admin → Appearance → Public URL** to change the public panel FQDN. Che
 - Under **Admin → Nodes**, choose **Rename** for any node, including the local host. This changes only its display name, not its addresses, credentials, policies, or running servers.
 - Local node cards distinguish the saved **Panel URL** from the **Game / SFTP host**. A panel-domain change updates the panel label without silently moving game connections. Use the local node's **Edit address** button to open Appearance → Server defaults and change the advertised game/SFTP host. Successful saves refresh cached local server addresses; **Refresh Nodes** reloads both the node details and saved panel URL.
 - The saved panel palette and your selected light/dark/OLED/automatic appearance are applied before the page's styles render. The server supplies the current palette for new browsers; a validated browser cache is the fallback when that response is unavailable.
+
+## Server state after panel updates and restarts
+
+After this version is installed, a clean panel or worker shutdown saves which locally managed servers were online. The next successful startup loads that one-shot snapshot and starts those servers again through the normal process and isolation checks. Servers that were offline, deliberately stopped, stopping, or startup-halted stay off. This is independent of the per-server crash auto-restart option.
+
+- Use the normal updater or a graceful service stop/restart. On Windows, stop the hosting process with Ctrl+C and wait for cleanup before replacing the executable; do not force-kill it.
+- A master-panel update does not restart remote workers or their games. Each worker preserves its own local running state when that worker is updated/restarted.
+- Servers with a conflicting backup/restore/reinstall/deletion operation may be skipped conservatively. Finish those operations before updating. Missing servers and failed launches are logged in the daemon output/activity log and are not replayed on every boot; resolve the error and start them manually.
+- Pending player-warning countdowns are cancelled, not resumed. A server restored from the previous snapshot may still be starting if another shutdown arrives; that pending recovery is carried forward.
+- The snapshot is stored in the existing SQLite database and bound to the server data directory. Forced termination, power loss, corrupt/unwritable storage, and moving to a different data path are not guaranteed recovery paths.
+
+**First-upgrade limitation:** the old running binary must support saving the snapshot. When first upgrading from an older version, note which servers are online and start them manually once after the update. Subsequent clean updates/restarts restore their running state automatically. Back up worlds and configuration before updating.

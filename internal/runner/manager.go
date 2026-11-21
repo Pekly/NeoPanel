@@ -17,21 +17,28 @@ import (
 )
 
 type ServerManager struct {
-	mu              sync.RWMutex
-	baseDir         string
-	backupDir       string
-	trash           *trash.Store
-	db              *database.DB
-	instances       map[string]*ProcessInstance
-	startupFailures map[string]int
-	startupHalted   map[string]bool
-	retryCancels    map[string]chan struct{}
-	startupTimeout  time.Duration
-	shutdownCh      chan struct{}
-	shutdownOnce    sync.Once
-	operations      sync.Map // server ID -> *sync.Mutex; shared by power, backups and restore
-	restoreBlocked  sync.Map // unrecoverable publication failures block subsequent power operations
-	restorePaused   sync.Map // suppress late crash callbacks until an explicit start
+	mu               sync.RWMutex
+	baseDir          string
+	backupDir        string
+	trash            *trash.Store
+	db               *database.DB
+	instances        map[string]*ProcessInstance
+	startupFailures  map[string]int
+	startupHalted    map[string]bool
+	retryCancels     map[string]chan struct{}
+	startupTimeout   time.Duration
+	shutdownCh       chan struct{}
+	shutdownOnce     sync.Once
+	launchMu         sync.Mutex // Serializes process launch with the shutdown boundary.
+	recoveryMu       sync.Mutex
+	recoveryOnce     sync.Once
+	recoveryErr      error
+	recoveryEnabled  bool
+	recoveryPending  map[string]bool
+	recoveryStarting map[string]bool
+	operations       sync.Map // server ID -> *sync.Mutex; shared by power, backups and restore
+	restoreBlocked   sync.Map // unrecoverable publication failures block subsequent power operations
+	restorePaused    sync.Map // suppress late crash callbacks until an explicit start
 }
 
 func NewServerManager(baseDir string, db *database.DB) *ServerManager {
@@ -265,6 +272,8 @@ func (m *ServerManager) waitAndRetryStart(srvID string, attemptNum int, cancelCh
 		}
 	}
 	defer unlock()
+	m.launchMu.Lock()
+	defer m.launchMu.Unlock()
 	m.mu.Lock()
 	curCh, exists := m.retryCancels[srvID]
 	if !exists || curCh != cancelCh {
@@ -318,8 +327,14 @@ func (m *ServerManager) Start(srv *database.Server) error {
 }
 
 func (m *ServerManager) startLocked(srv *database.Server) error {
+	m.launchMu.Lock()
+	defer m.launchMu.Unlock()
+	return m.startWithLaunchLock(srv)
+}
+
+func (m *ServerManager) startWithLaunchLock(srv *database.Server) error {
 	if m.isShuttingDown() {
-		return fmt.Errorf("daemon shutting down")
+		return errDaemonShuttingDown
 	}
 	m.mu.Lock()
 	m.cancelRetryLocked(srv.ID)
@@ -345,10 +360,12 @@ func (m *ServerManager) startLocked(srv *database.Server) error {
 func (m *ServerManager) Stop(serverID string, graceful bool) error {
 	// Explicit stop cancels pending automatic retries even if another operation
 	// currently owns the filesystem gate. No process/files are changed on conflict.
+	m.launchMu.Lock()
 	m.mu.Lock()
 	m.cancelRetryLocked(serverID)
 	m.restorePaused.Store(serverID, true)
 	m.mu.Unlock()
+	m.launchMu.Unlock()
 	unlock, err := m.beginOperation(serverID)
 	if err != nil {
 		return err
@@ -545,34 +562,7 @@ func (m *ServerManager) GetStatsByID(serverID string) (database.ServerStats, boo
 }
 
 func (m *ServerManager) ShutdownAll() {
-	m.shutdownOnce.Do(func() {
-		close(m.shutdownCh)
-		if m.trash != nil {
-			m.trash.Close()
-		}
-	})
-
-	m.mu.Lock()
-	for id := range m.retryCancels {
-		m.cancelRetryLocked(id)
-	}
-	instances := make([]*ProcessInstance, 0, len(m.instances))
-	for _, inst := range m.instances {
-		instances = append(instances, inst)
-	}
-	m.mu.Unlock()
-
-	var wg sync.WaitGroup
-	for _, inst := range instances {
-		wg.Add(1)
-		go func(i *ProcessInstance) {
-			defer wg.Done()
-			if err := i.Stop(true); err != nil {
-				log.Printf("Server process cleanup failed during daemon shutdown: %v", err)
-			}
-		}(inst)
-	}
-	wg.Wait()
+	m.shutdownOnce.Do(m.shutdownAll)
 }
 
 func (m *ServerManager) startIdleWatchdog() {
