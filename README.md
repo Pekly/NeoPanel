@@ -1,106 +1,100 @@
-# NeoPanel
+# NeoPanel on Windows
 
-NeoPanel is a web panel for running Minecraft servers. Start a server, watch its console, edit files, install plugins or mods, and manage backups from your browser. You can keep everything on one machine or connect workers on other hosts.
+Use a Windows PC to host Minecraft servers and manage them from your NeoPanel web panel. This guide sets up the Windows worker, which runs the game servers and connects to an existing panel. The worker doesn't have its own web interface.
 
-The backend is written in Go, with the web interface and a SQLite database built in. You don't need PHP, a separate database server, or Docker to run the panel.
+## What you'll need
 
-## What you can do
+- A Windows PC with enough memory and disk space for your servers.
+- An existing NeoPanel panel and an administrator account on it.
+- [Git for Windows](https://git-scm.com/downloads/win) and [Go 1.26 or newer](https://go.dev/dl/) to build the worker.
+- A Java version compatible with the Minecraft server software you want to run. Steel doesn't need Java.
 
-- Run Paper, Purpur, Fabric, Forge, NeoForge, Vanilla, proxies such as Velocity, and [Steel](https://steelmc.dev/).
-- Manage Java versions, server settings, files, plugins, and mods without leaving the panel.
-- Create backups and schedules, or warn players before a planned restart with a countdown you can cancel.
-- Give friends or teammates access to individual servers, with control over what each person can do.
-- Pin your usual servers, filter console output, and pick up where you left off after refreshing the page.
+Go and Git are only needed for building and updating. You can copy the finished EXE to another Windows PC to run it.
 
-During panel maintenance, users can still access their servers' power controls and console. Their normal permissions still apply.
+## 1. Build the worker
 
-## Install on Linux
+Open PowerShell and run:
 
-The installer is tested on Ubuntu 24.04 LTS. On your server, run:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash
-```
-
-It builds NeoPanel, installs the required Go and Java tools, sets up the service and firewall rules, and can configure HTTPS with Caddy. You can [read the script](install.sh) first to see what it changes.
-
-For an unattended install:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- \
-  --install --domain panel.example.com --email you@example.com -y
-```
-
-Open the address shown at the end of the install and create your admin account. The getting-started guide will help you create your first server. Choose **Local** if you want to run it on the same machine as the panel; you don't need to set up a separate worker.
-
-Players join using the **Minecraft host and port** shown on the server card, not the panel's web address. Click the address to copy it.
-
-### Add another host
-
-Create an administrator API key under **Account → API Keys**, then run this on the Linux worker machine:
-
-```bash
-curl -sSL https://raw.githubusercontent.com/Pekly/NeoPanel/main/install.sh | sudo bash -s -- \
-  --node --master https://panel.example.com \
-  --api-key neo_your_admin_api_key_here --name eu-node-01 --location "Frankfurt, DE"
-```
-
-Workers run the game servers; you manage them from the same panel. Use HTTPS or a trusted private/VPN network between the panel and its workers, and keep your API keys private.
-
-### Hosting on Windows
-
-You can also connect a [Windows worker](docs/windows.md#optional-api-only-windows-worker) to host Minecraft servers on a Windows PC. The guide covers building it, connecting it to the panel, and where it stores your servers. It doesn't require the desktop app.
-
-Windows hosting is for trusted servers: its process and memory controls don't isolate files or network access. For untrusted workloads, use a Linux host with the supported isolation configured.
-
-## Updates and troubleshooting
-
-```bash
-sudo neopanel-update
-sudo neopanel-installer          # reopen the installer menu
-systemctl status neopanel
-journalctl -u neopanel -f
-```
-
-Back up your worlds, configuration, and database before updating. Update the panel and workers together so their APIs stay compatible. If you're upgrading an older installation, check the [security upgrade notes](docs/security-upgrade.md).
-
-On Linux, configuration is in `/etc/neopanel/config.yaml`, server data is under `/var/lib/neopanel`, and installer logs are in `/var/lib/neopanel/installer/install.log`.
-
-## Sharing access and keeping data safe
-
-Admins manage the panel and create servers. Other users can access servers they own or have been invited to. Set account roles in **Admin → Users** and manage each server's permissions from its **Team** page.
-
-A few things worth setting up before inviting people:
-
-- Configure SMTP and the public panel URL if you want invitation and password-reset emails to work.
-- Give each person their own account and only the permissions they need.
-- Stop a server before taking a consistent world backup. Restoring a backup replaces its current files.
-- Don't run two panel instances against the same database or server folders.
-- For untrusted Linux workloads, use Bubblewrap isolation. Resource limits alone aren't a filesystem sandbox.
-
-More help: [invitations](docs/invitation-account-lifecycle.md), [file previews](docs/file-previews.md), [Trash](internal/trash/README.md), [server deletion](docs/server-deletion.md), and [workspace and console controls](docs/panel-qol.md).
-
-## Working on NeoPanel
-
-You'll need Go 1.26 or newer. The frontend is plain JavaScript and CSS, so there's no bundler or npm install step. Node.js is used for the frontend tests.
-
-```bash
-git clone https://github.com/Pekly/NeoPanel.git
+```powershell
+git clone --branch windows-desktop-release --single-branch https://github.com/Pekly/NeoPanel.git
 cd NeoPanel
-make build                       # writes bin/neopanel
-go test ./...
-go vet ./...
-node --test web/tests/*.test.cjs
+New-Item -ItemType Directory -Force .\dist\windows-node | Out-Null
+go build -trimpath -tags node -o .\dist\windows-node\NeoPanel-node.exe .\cmd\neopanel
 ```
 
-On Linux, you can also run the installer checks:
+The executable is now in `dist\windows-node`. Local builds are unsigned.
 
-```bash
-bash tests/install-isolation.test.sh
-bash tests/install-build.test.sh
+## 2. Create the configuration
+
+```powershell
+cd .\dist\windows-node
+.\NeoPanel-node.exe -init
+.\NeoPanel-node.exe node-token --raw
 ```
 
-Found a bug? [Open an issue](https://github.com/Pekly/NeoPanel/issues) with what you were doing, what happened, your OS and version, and any useful logs. Please remove passwords and tokens before posting.
+The `node-token` command prints your worker's connection token. You'll need it when adding the worker to your panel. Keep it private.
+
+By default, the worker stores its configuration and data in `%LOCALAPPDATA%\NeoPanel-node`, not beside the EXE.
+
+## 3. Start the worker
+
+If the panel is on the same PC, use:
+
+```powershell
+.\NeoPanel-node.exe -host 127.0.0.1 -port 8081
+```
+
+If the panel is on another machine, listen on this PC's LAN or VPN address instead. For example, if this PC's address is `192.168.1.50`:
+
+```powershell
+.\NeoPanel-node.exe -host 192.168.1.50 -port 8081
+```
+
+Replace that example address with your own. Allow the panel to reach TCP port `8081` through Windows Firewall, restricting access to the panel's address. Use a trusted private/VPN network or HTTPS; don't expose the worker's unencrypted control API to the internet.
+
+Leave PowerShell open while the worker is running. This command doesn't install a Windows service or configure firewall rules for you.
+
+## 4. Connect it to your panel
+
+1. Open **Admin → Nodes** in NeoPanel and add a node.
+2. Enter the worker's reachable API URL, such as `http://192.168.1.50:8081` on your private network.
+3. Paste the token from step 2.
+4. Choose **Automatic** or **Host Direct** for process management.
+5. Save the node, then select it when creating a Minecraft server.
+
+Use `127.0.0.1` only when the panel and worker are on the same PC. From another machine, it points back to that machine—not to your worker.
+
+Players connect to the Minecraft host and game port shown in the panel, not to port `8081`. Allow the game port through Windows Firewall separately; the usual Java Edition port is TCP `25565`.
+
+## Daily use
+
+Use the panel to start, stop, and restart servers, read the console, edit files, and manage backups. Choose the appropriate Java runtime for each Java server and review the Minecraft EULA before starting it.
+
+To shut down the worker, press **Ctrl+C** in its PowerShell window and wait for it to finish. Don't close the window or end the process in Task Manager while worlds are being saved. Sleep, sign-out, and shutting down the PC interrupt hosting too.
+
+Windows hosting is intended for trusted servers. Process and memory controls are supported, but they don't isolate files, credentials, or network access. CPU quotas, task-count limits, and per-process network accounting aren't available.
+
+## Updating
+
+Stop your game servers, then stop the worker with **Ctrl+C**. Back up `%LOCALAPPDATA%\NeoPanel-node`, along with any server folders you've configured elsewhere.
+
+From your `NeoPanel` source folder, pull the update and rebuild:
+
+```powershell
+git pull --ff-only
+go build -trimpath -tags node -o .\dist\windows-node\NeoPanel-node.exe .\cmd\neopanel
+```
+
+Start the worker again using the same address and port. Update your panel alongside the worker so their APIs stay compatible. Don't run two worker instances against the same data directory.
+
+## Troubleshooting
+
+- **The panel can't reach the worker:** check its listening address, port, firewall rule, and token. Make sure the PC is awake and the worker is still running.
+- **Players can't join:** check the Minecraft port and game address. The worker's API port isn't the game port.
+- **A Java server won't start:** check the selected Java version and the server console for the actual error.
+- **A new panel feature isn't available:** rebuild and restart both the panel and worker; updating the browser files alone isn't enough.
+
+For panel controls, see the [workspace and console guide](docs/panel-qol.md). If you're stuck, [open an issue](https://github.com/Pekly/NeoPanel/issues) with your Windows version, what happened, and relevant logs. Remove tokens and passwords before posting.
 
 ## License
 
