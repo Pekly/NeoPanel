@@ -8092,11 +8092,10 @@ const V = {
                   <td><span class="badge ${n.online ? 'online' : 'offline'}"><i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}</span></td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
-                      <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeWake.open(this.dataset.id)">Join to start</button>
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                       ${n.is_local
-                        ? `<button type="button" class="btn sm" onclick="S.appearanceSection=3;selectAdminTab(4)">Edit address</button>`
+                        ? `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>`
                         : `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                            <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)}</button>`}
                     </div>
@@ -8155,11 +8154,10 @@ const V = {
               <div class="row sb" style="margin-top: auto; padding-top: 4px;">
                 <span class="mu mono" style="font-size: 11px;">${n.is_local ? 'id: local' : `key: ${esc(n.token_prefix || 'neo_...')}`}</span>
                 <div class="row" style="gap: 6px;">
-                  <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeWake.open(this.dataset.id)">Join to start</button>
                   <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                   <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                   ${n.is_local
-                    ? `<button type="button" class="btn sm" onclick="S.appearanceSection=3;selectAdminTab(4)">Edit address</button>`
+                    ? `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>`
                     : `
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                       <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Disconnect</button>
@@ -9747,10 +9745,31 @@ async function loadAdminData(skipRender = false) {
   if (!skipRender) R();
 }
 
+function renderNodeWakeSettings(node) {
+  return `<section style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;">
+    <b>Join to start</b>
+    <p class="mu" style="font-size:12px;margin:6px 0 10px;">Allow player joins to start offline Java servers on this node. Configure the offline MOTD, icon, reconnect messages, and cooldown. Saved separately from node connection settings.</p>
+    <button type="button" class="btn sm" data-id="${esc(node.id)}" onclick="NPNodeWake.open(this.dataset.id, true)">Configure join to start</button>
+  </section>`;
+}
+
 function openNodeModal(nodeId = null) {
   const container = $('#modal-container');
   if (!container) return;
   const existing = nodeId ? getNodeById(nodeId) : null;
+  if (existing?.is_local) {
+    container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+      <div class="card pbox" role="dialog" aria-modal="true" aria-labelledby="local-node-edit-title" style="padding:26px;max-width:540px;max-height:90vh;overflow-y:auto;">
+        <div class="row sb" style="gap:12px;margin-bottom:14px;">
+          <h2 id="local-node-edit-title" style="font-size:20px;margin:0;">Edit Local Node: ${esc(displayNodeName(existing.id, existing.name))}</h2>
+          <button type="button" class="btn sm" onclick="closeModal()" aria-label="Close node settings">&times;</button>
+        </div>
+        ${renderNodeWakeSettings(existing)}
+        <button type="button" class="btn" onclick="closeModal();S.appearanceSection=3;selectAdminTab(4)">Edit address</button>
+      </div>
+    </div>`;
+    return;
+  }
   const isEdit = Boolean(existing && !existing.is_local);
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
@@ -9792,6 +9811,8 @@ function openNodeModal(nodeId = null) {
           <span>Node Auth Token ${isEdit ? '<span class="mu">(leave blank to keep current)</span>' : ''}</span>
           <input type="password" id="nm-token" ${isEdit ? '' : 'required'} autocomplete="new-password" placeholder="${isEdit ? `Saved (${esc(existing.token_prefix || 'neo_...')})` : 'neo_node_... or neo_...'}">
         </label>
+
+        ${isEdit ? renderNodeWakeSettings(existing) : ''}
 
         <!-- Free Node Idle Player Timeout -->
         <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">

@@ -26,8 +26,8 @@ test('local cache updates do not clear remote SFTP details',()=>{
 test('node address output is escaped and unavailable panel settings are not guessed from the browser',()=>{
  const {c,local,remote}=setup();c.S.adminPanelUrl=null;c.S.panelUrlLoading=true;assert.match(c.renderLocalNodeAddresses(local),/Loading/);c.S.panelUrlLoading=false;assert.match(c.renderLocalNodeAddresses(local),/Unavailable/);c.S.adminPanelUrl={public_url:''};assert.match(c.renderLocalNodeAddresses(local),/Not configured/);c.S.adminPanelUrl.public_url='<img src=x>';assert.doesNotMatch(c.renderLocalNodeAddresses(local),/<img/);assert.equal(c.renderLocalNodeAddresses(remote),'');
 });
-test('all local node layouts show labeled addresses and open the network settings section',()=>{
- assert.equal((app.match(/\$\{renderLocalNodeAddresses\(n\)\}/g)||[]).length,2);assert.equal((app.match(/onclick="S.appearanceSection=3;selectAdminTab\(4\)">Edit address/g)||[]).length,2);
+test('all local layouts show labeled addresses and Local Edit retains the network settings shortcut',()=>{
+ assert.equal((app.match(/\$\{renderLocalNodeAddresses\(n\)\}/g)||[]).length,2);assert.equal((app.match(/onclick="closeModal\(\);S.appearanceSection=3;selectAdminTab\(4\)">Edit address/g)||[]).length,1);
  assert.match(section('async function saveBrandingAndDaemon(', 'async function resetBrandingDefaults('),/applyLocalNodeAddress\(S.brandingDaemon\)/);
 });
 test('Refresh Nodes reloads the saved panel URL and local server-address metadata',async()=>{

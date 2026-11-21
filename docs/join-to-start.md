@@ -1,6 +1,6 @@
 # Minecraft Java join to start
 
-Join to start is **off by default**, separately for Local and every connected remote node. In **Admin → Nodes**, choose **Join to start** on the target node (available in both list and card layouts). Enabling it opts in that node’s **entire local Minecraft Java inventory**, not an individual server or every node in the cluster. Bedrock is not supported.
+Join to start is **off by default**, separately for Local and every connected remote node. In **Admin → Nodes**, choose **Edit** on the target node, then **Configure join to start**. This is available for Local and remote nodes in both list and card layouts. **Back** returns to the node settings without discarding unsaved node edits; wake settings are saved separately. Enabling it opts in that node’s **entire local Minecraft Java inventory**, not an individual server or every node in the cluster. Bedrock is not supported.
 
 ## Requirements and setup
 

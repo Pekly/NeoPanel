@@ -13,20 +13,22 @@ function setup(handler = async () => envelope()) {
     // DOM input.value always coerces to string.
     for (const node of Object.values(nodes)) { let value = ''; Object.defineProperty(node, 'value', { get: () => value, set: v => { value = String(v); } }); }
     root = { nodes, isConnected: true, querySelector: id => nodes[id], addEventListener() {}, remove() { this.isConnected = false; } };
-  }, get innerHTML() { return html; } };
+    this.childNodes = [root];
+  }, get innerHTML() { return html; }, childNodes: [], replaceChildren(...nodes) { this.childNodes = nodes; } };
   const c = { document, TextEncoder, URL, S: { user: { id: 1, role: 'admin' }, token: 'one' }, displayNodeName: () => '<img onerror="bad">', api: async (url, options) => { calls.push({ url, options }); return handler(url, options); } };
   c.window = c;
   vm.runInNewContext(source, c);
   return { c, calls, ui: c.NPNodeWake, container, node: id => root.nodes['#wake-' + id], submit: () => root.nodes['#wake-form'].onsubmit({ preventDefault() {} }) };
 }
-test('GET defaults are authoritative, names escaped, and both node layouts expose the control', async () => {
+test('GET defaults are authoritative and names are escaped', async () => {
   const config = { ...defaults(), max_players: 53, cooldown_seconds: 91, offline_motd: '</textarea><script>x</script>' };
   const h = setup(async () => envelope(config)); await h.ui.open('remote/a');
   assert.equal(h.calls[0].url, '/api/admin/nodes/remote%2Fa/wake'); assert.equal(h.calls[0].options.method, 'GET');
   assert.equal(h.node('max_players').value, '53'); assert.equal(h.node('cooldown_seconds').value, '91'); assert.equal(h.node('offline_motd').value, config.offline_motd);
   assert.doesNotMatch(h.container.innerHTML, /<img onerror|<script>x/); assert.match(h.container.innerHTML, /&lt;img/);
   const app = fs.readFileSync(path.join(__dirname, '../static/js/app.js'), 'utf8');
-  assert.equal((app.match(/onclick="NPNodeWake.open\(this.dataset.id\)">Join to start/g) || []).length, 2);
+  assert.doesNotMatch(app.slice(0, app.indexOf('function renderNodeWakeSettings(')), /NPNodeWake\.open/);
+  assert.match(app, /NPNodeWake\.open\(this.dataset.id, true\)/);
   const index = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8'); assert.ok(index.indexOf('/js/node-wake.js') < index.indexOf('/js/app.js'));
 });
 test('save sends config only; remote delivery failures remain visible and preserve drafts', async () => {
@@ -96,4 +98,40 @@ test('late responses cannot populate another node modal or a changed session', a
   let resolve; const h = setup(url => url.includes('/first/') ? new Promise(r => { resolve = r; }) : Promise.resolve(envelope({ ...defaults(), offline_motd: 'second' })));
   const first = h.ui.open('first'); await h.ui.open('second'); resolve(envelope({ ...defaults(), offline_motd: 'stale' })); await first; assert.equal(h.node('offline_motd').value, 'second');
   const pending = h.ui.open('first'); h.c.S.token = 'other'; resolve(envelope()); await pending; assert.equal(h.node('save').disabled, true);
+});
+
+test('Local and remote edit dialogs contain wake settings, but connect-new does not', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../static/js/app.js'), 'utf8');
+  const container = { innerHTML: '' };
+  const local = { id: 'local', is_local: true, name: 'Local <host>' };
+  const remote = { id: 'remote', name: 'Remote', base_url: 'https://node.example' };
+  const c = { $: () => container, getNodeById: id => id === 'local' ? local : remote, esc: value => String(value ?? '').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), displayNodeName: (_, name) => name, ic: () => '', setTimeout() {} };
+  vm.runInNewContext(app.slice(app.indexOf('function renderNodeWakeSettings('), app.indexOf('async function testNodeModalConnection(')), c);
+  c.openNodeModal('local');
+  assert.match(container.innerHTML, /Edit Local Node: Local &lt;host>/);
+  assert.match(container.innerHTML, /data-id="local" onclick="NPNodeWake.open\(this.dataset.id, true\)"/);
+  assert.match(container.innerHTML, /Edit address/);
+  assert.doesNotMatch(container.innerHTML, /submitNodeModal|nm-token/);
+  c.openNodeModal('remote');
+  assert.match(container.innerHTML, /data-id="remote" onclick="NPNodeWake.open\(this.dataset.id, true\)"/);
+  assert.match(container.innerHTML, /submitNodeModal/);
+  c.openNodeModal();
+  assert.doesNotMatch(container.innerHTML, /NPNodeWake.open/);
+});
+
+test('Back restores the actual node form including unsaved values and handlers', async () => {
+  const h = setup(); const form = { value: 'unsaved endpoint', onclick() {} };
+  h.container.childNodes = [form];
+  await h.ui.open('remote', true);
+  assert.match(h.container.innerHTML, /Back to node settings/);
+  h.node('close').onclick();
+  assert.equal(h.container.childNodes[0], form);
+  assert.equal(h.container.childNodes[0].value, 'unsaved endpoint');
+});
+
+test('Back cannot restore a stale node form after a session switch', async () => {
+  const h = setup(); const form = { value: 'private draft' };
+  h.container.childNodes = [form]; await h.ui.open('remote', true);
+  h.c.S.token = 'new-session'; h.node('close').onclick();
+  assert.notEqual(h.container.childNodes[0], form);
 });
