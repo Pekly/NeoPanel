@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/js/onboarding.js'), 'utf8');
 const app = fs.readFileSync(path.join(__dirname, '../static/js/app.js'), 'utf8');
-const admin = {id: 'admin-one', role: 'admin'};
+const admin = {id: 'admin-one', role: 'admin', created_at: new Date(Date.now() - 3600000).toISOString()};
 function guide(storage = new Map(), broken = false) {
   const events = {}, calls = [], root = {innerHTML: '', scrollIntoView() {}}, focus = [];
   const c = {localStorage: {getItem(k) {if (broken) throw Error('blocked'); return storage.get(k);}, setItem(k,v) {if (broken) throw Error('blocked'); storage.set(k,v);}},
@@ -102,5 +102,17 @@ test('normal Linux users never see or open the guide, even with saved admin prog
   assert.equal(g.render({token:'user-session',user}), '');
   g.api.open(); g.click('create'); g.click('security');
   assert.equal(g.root.innerHTML, ''); assert.equal(g.calls.length, 0);
-  assert.match(app, /S\.user\?\.role === 'admin' \? `<button id="np-guide-open"/);
+  assert.match(app, /NPOnboarding\?\.eligible\(S\) \? `<button id="np-guide-open"/);
+});
+test('guide and launcher are unavailable after the admin account is three days old', () => {
+  const g = guide();
+  for (const created_at of [new Date(Date.now() - 3 * 86400000 - 1000).toISOString(), 'bad', undefined, new Date(Date.now() + 86400000).toISOString()]) {
+    const user = {...admin, created_at};
+    g.api.begin(user);
+    assert.equal(g.api.eligible({token:'test', user}), false);
+    assert.equal(g.render({token:'test', user}), '');
+    g.api.open(); g.click('create');
+  }
+  assert.equal(g.calls.length, 0);
+  assert.equal(g.api.eligible({token:'test', user:{...admin, created_at:new Date(Date.now() - 2 * 86400000).toISOString()}}), true);
 });

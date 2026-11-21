@@ -171,6 +171,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 		r.mux.HandleFunc("POST /api/auth/invitations/accept", r.invitations.Accept)
 	}
 	r.mux.HandleFunc("GET /api/branding", r.branding.GetPublicBranding)
+	r.mux.HandleFunc("GET /api/branding/appearance.js", r.branding.AppearanceBootstrap)
 	r.mux.HandleFunc("GET /branding/{filename}", r.branding.ServeBrandingAsset)
 	r.mux.HandleFunc("GET /api/avatars/{filename}", r.account.ServeAvatar)
 	r.mux.HandleFunc("GET /api/mods", r.mods.ListRuntimeMods)
@@ -420,6 +421,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/nodes/test", r.requireAdmin(r.nodes.TestNodePayload))
 	r.mux.HandleFunc("POST /api/nodes/{id}/test", r.requireAdmin(r.nodes.TestNodeByID))
 	r.mux.HandleFunc("PUT /api/nodes/{id}", r.requireAdmin(r.nodes.UpdateNode))
+	r.mux.HandleFunc("PATCH /api/nodes/{id}/name", r.requireAdmin(r.nodes.RenameNode))
 	r.mux.HandleFunc("DELETE /api/nodes/{id}", r.requireAdmin(r.nodes.DeleteNode))
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		r.mux.HandleFunc(method+" /api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.proxyHTTP))
@@ -1004,7 +1006,7 @@ func (r *Router) listClusterServers(w http.ResponseWriter, req *http.Request) {
 			NodeID   string               `json:"node_id"`
 			NodeName string               `json:"node_name"`
 			NodeFQDN string               `json:"node_fqdn"`
-		}{srv, r.servers.manager.GetStats(srv), readServerMOTD(r.servers.manager.GetWorkingDir(srv.ID)), "local", "Local Master Node", r.nodes.resolveLocalFQDN(req.Host)})
+		}{srv, r.servers.manager.GetStats(srv), readServerMOTD(r.servers.manager.GetWorkingDir(srv.ID)), "local", r.nodes.resolveLocalNodeName(), r.nodes.resolveLocalFQDN(req.Host)})
 	}
 	nodes, err := r.auth.db.ListNodes()
 	if err != nil {

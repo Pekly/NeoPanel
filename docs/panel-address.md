@@ -57,6 +57,22 @@ Passkeys belong to the hostname where they were registered; a certificate change
 
 Changing only the scheme or port while retaining the hostname doesn't require deleting compatible keys, but the new origin still has to pass the checks. A registration racing the change is handled by the database's atomic hostname guard.
 
+## Host-side recovery when a web change fails
+
+First resolve the failed checks where possible. If the web panel still cannot save the address, connect to the **panel host**, rerun `sudo neopanel-installer`, and choose **12 — Change panel address / FQDN**. If that shortcut is unavailable, rerun your current `install.sh` and choose the same option. This does not reinstall NeoPanel. Older binaries must be updated before they support recovery.
+
+Configure DNS and trusted HTTPS through your proxy and check the new address in a browser **before** confirming. Recovery is a manual, unverified address change; it does not provision certificates, edit proxy/config files, restart services, change game/node addresses, or bypass incompatible passkeys. Type `CHANGE` to save, or anything else to cancel.
+
+Direct CLI on the host:
+
+```bash
+sudo neopanel -config /etc/neopanel/config.yaml panel-address --url https://panel.example.com
+```
+
+On Windows, run the installed `neopanel.exe -config C:\path\to\config.yaml panel-address --url https://panel.example.com` instead. Use the actual installed configuration, database, and service working directory (especially if Linux paths are relative).
+
+For deliberate unattended recovery, the installer supports `--change-fqdn --panel-url https://panel.example.com --confirm-address`; the CLI uses `--confirm`. Generic `--yes` is not sufficient. `--config` and `--binary` select custom installations. Keep access at the original hostname until affected accounts have removed incompatible passkeys and the new address works.
+
 ## Scope and API compatibility
 
 - The setting does not change game/SFTP addresses, worker API URLs, the panel listener, or `config.yaml`. It saves the existing database override for `server.public_url`.

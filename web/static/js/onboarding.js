@@ -18,9 +18,14 @@
     { label: 'Run and protect', icon: 'terminal', title: 'Know your way around',
       text: 'Open a server to start it and see its console.',
       items: ['Wait until the console says the server is ready, then join.', 'Use Files to change settings or manage plugins.', 'Back up before upgrades. Stop the server for a consistent backup; restoring replaces current files.'],
-      action: 'Back to your servers', target: 'dashboard', note: 'You can reopen this guide anytime.' }
+      action: 'Back to your servers', target: 'dashboard', note: 'This guide is available during your account’s first three days.' }
   ];
-  const eligible = state => Boolean(state?.token && state.user?.id && state.user.role === 'admin');
+  const eligible = state => {
+    if (!state?.token || !state.user?.id || state.user.role !== 'admin') return false;
+    const created = Date.parse(state.user.created_at);
+    const age = Date.now() - created;
+    return Number.isFinite(created) && age >= 0 && age <= 3 * 86400000;
+  };
   const keyFor = user => `neopanel_getting_started_v1_${user.id}`;
   function read(user) {
     const key = keyFor(user);
@@ -87,7 +92,8 @@
     }
   });
   window.NPOnboarding = Object.freeze({
-    begin(user) { if (user?.id && user.role === 'admin') save(user, {step: 0, status: 'active'}); },
+    eligible,
+    begin(user) { if (eligible({token: true, user})) save(user, {step: 0, status: 'active'}); },
     render(state) { context = state; return eligible(state) ? `<div id="np-onboarding-root">${content(state)}</div>` : ''; },
     open() {
       if (!eligible(context)) return;

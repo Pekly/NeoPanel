@@ -38,6 +38,8 @@ func runCLI(defaultConfigPath string, args []string) int {
 	case "version":
 		fmt.Printf("NeoPanel v%s\n", Version)
 		return 0
+	case "panel-address":
+		return cliPanelAddress(defaultConfigPath, rest, os.Stdin, os.Stdout, os.Stderr)
 	case "node-token":
 		return cliNodeToken(defaultConfigPath, rest)
 	case "api-key", "apikey", "key":
@@ -66,6 +68,10 @@ Daemon Flags:
   -node             Shorthand for -role node
 
 CLI Commands:
+  panel-address --url <https://panel.example.com> [--confirm] [--config <path>]
+      Manual host-admin recovery: save the panel address only, after you configure
+      trusted HTTPS. Does not verify HTTPS, change proxy/DNS, or restart services.
+
   node-token [--rotate] [--raw]
       Print (or rotate) this daemon's security.node_token (neo_node_...).
       Use this token on a Master Panel to authenticate this cluster node.
