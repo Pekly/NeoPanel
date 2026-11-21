@@ -1,6 +1,6 @@
 # Changing your panel domain and HTTPS
 
-Open **Admin → Panel address**. Enter a hostname such as `panel.example.com`; HTTPS is added automatically. The same verified hostname is used for the public panel URL, account-email links, and passkeys.
+Open **Admin → Appearance → Public URL**. Enter a hostname such as `panel.example.com`; HTTPS is added automatically. The same verified hostname is used for the public panel URL, account-email links, and passkeys.
 
 ## Check, prepare HTTPS, apply
 
@@ -18,7 +18,7 @@ Checks expire after five minutes and belong to the administrator and exact addre
 
 **HTTP** is available only for explicit localhost development. Public addresses require HTTPS. Private/LAN-only domain probing is not supported by this public-domain wizard; it is not a general internal-network scanner.
 
-The older **Admin → Appearance → Public URL** location opens the same verified form. Email settings and an administrator's passkey settings link directly to this workflow. SMTP delivery remains a separate setting from the URL embedded in account emails. Save email settings before sending a test: the test uses the saved configuration. Verify the sender with your email provider and follow its SPF/DKIM instructions; panel-domain setup does not configure email DNS.
+The public address is managed under **Appearance → Public URL**, without a duplicate sidebar entry. Existing direct panel-address links still work. Email settings and an administrator's passkey settings link directly to the same workflow. SMTP delivery remains a separate setting from the URL embedded in account emails. Save email settings before sending a test: the test uses the saved configuration. Verify the sender with your email provider and follow its SPF/DKIM instructions; panel-domain setup does not configure email DNS.
 
 ## Automatic Let's Encrypt setup
 

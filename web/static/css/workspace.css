@@ -82,3 +82,9 @@
   .np-console-options .np-menu-panel { right: 8px; }
 }
 .np-domain-recovery { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.np-menu-chevron { display: inline-block; flex: 0 0 6px; width: 6px; height: 6px; margin: -3px 2px 0 4px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); transition: transform 120ms ease; }
+.np-compact-menu[open] > summary .np-menu-chevron { transform: rotate(225deg); }
+@media (prefers-reduced-motion: reduce) { .np-menu-chevron { transition: none; } }
+.fly-con-head { position: relative; }
+.fly-con-head .np-console-options { position: static; }
+.fly-con-head .np-console-options .np-menu-panel { left: 12px; right: auto; width: 360px; max-width: calc(100% - 24px); box-sizing: border-box; }

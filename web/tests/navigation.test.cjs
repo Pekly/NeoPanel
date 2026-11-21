@@ -20,6 +20,13 @@ test('admin navigation has one canonical label per preserved route', () => {
   assert.equal(c.sections.length,c.slugs.length);
   assert.match(source,/ADMIN_SECTIONS\.map\(\(section, index\)/);
 });
+test('Panel address is hidden from sidebar navigation while its direct route is preserved', () => {
+  const c=setup();
+  assert.deepEqual(Array.from(c.sections.filter(s=>!s.hiddenFromNav),s=>s.label), ['Overview','Nodes','Servers','Users','Appearance','Audit logs','Extensions','Email & SMTP']);
+  assert.equal(c.slugs[8], 'panel-address');
+  assert.match(source,/section.hiddenFromNav \? '' : `<a class="nav-item/);
+  assert.match(source,/const t = S.adminTab === 8 \? 4 : \(S.adminTab \|\| 0\)/);
+});
 test('admin overview replaces duplicate tabs and unconditional health claim with useful status', () => {
   const c=setup();
   const start=source.indexOf('  admin() {'), end=source.indexOf('  acc() {',start);

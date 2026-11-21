@@ -267,3 +267,14 @@ test('countdown label remains visible while scheduling controls are collapsed', 
   await q.pollCountdown();
   assert.match(elements['np-countdown-label'].textContent,/Restart · \d+s/);
 });
+test('Schedule and Console tools use chevrons driven by the native open state', () => {
+  const {q}=setup();
+  for (const html of [q.consoleTools(), q.consoleTools('fly-log'), q.countdownSection()]) {
+    assert.match(html, /class="np-menu-chevron" aria-hidden="true"/);
+    assert.doesNotMatch(html, / ▾<\/summary>/);
+  }
+  const css=fs.readFileSync(path.join(__dirname,'../static/css/workspace.css'),'utf8');
+  assert.match(css, /\.np-compact-menu\[open\] > summary \.np-menu-chevron\s*\{\s*transform: rotate\(225deg\)/);
+  assert.match(css, /\.fly-con-head \.np-console-options\s*\{\s*position: static/);
+  assert.match(css, /\.fly-con-head \.np-console-options \.np-menu-panel\s*\{[^}]*left: 12px;[^}]*max-width: calc\(100% - 24px\)/);
+});

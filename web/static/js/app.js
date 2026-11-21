@@ -1466,7 +1466,7 @@ const ADMIN_SECTIONS = [
   { label: 'Audit logs', icon: 'clock', description: 'Review activity and changes across your panel.' },
   { label: 'Extensions', icon: 'package', description: 'Add and manage panel extensions.' },
   { label: 'Email & SMTP', icon: 'mail', description: 'Send invitations and password resets.' },
-  { label: 'Panel address', icon: 'link', description: 'Change the hostname people use to reach your panel.' }
+  { label: 'Panel address', icon: 'link', description: 'Change the hostname people use to reach your panel.', hiddenFromNav: true }
 ];
 let adminStatusRefreshing = false;
 async function refreshAdminStatus(button) {
@@ -9129,7 +9129,7 @@ function navHtml() {
 
   // 1. Independent Dedicated Admin Navigation
   if (S.view === 'admin' && S.user?.role === 'admin') {
-    const t = S.adminTab || 0;
+    const t = S.adminTab === 8 ? 4 : (S.adminTab || 0);
     return `
     <a class="brand" href="${esc(brandHref)}" onclick="return handleNavClick(event, 'dash')" style="cursor:pointer; text-decoration:none; color:inherit;">
       ${brandLogoHtml(false)}
@@ -9146,7 +9146,7 @@ function navHtml() {
     </a>
 
     <div class="ng">Admin</div>
-    ${ADMIN_SECTIONS.map((section, index) => `<a class="nav-item ${t === index ? 'on' : ''}" data-admin-section="${index}" href="${esc(routeUrl('admin', { adminTab: index }))}" onclick="return selectAdminTabNav(event, ${index})" ${t === index ? 'aria-current="page"' : ''}>
+    ${ADMIN_SECTIONS.map((section, index) => section.hiddenFromNav ? '' : `<a class="nav-item ${t === index ? 'on' : ''}" data-admin-section="${index}" href="${esc(routeUrl('admin', { adminTab: index }))}" onclick="return selectAdminTabNav(event, ${index})" ${t === index ? 'aria-current="page"' : ''}>
       ${ic(section.icon, 16)}<span>${esc(section.label)}</span>
     </a>`).join('')}
 
