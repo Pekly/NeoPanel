@@ -413,6 +413,9 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/admin/email/test", r.requireAdmin(r.email.HandleTestEmail))
 
 	// Multi-node cluster & proxy routes
+	r.mux.HandleFunc("GET /api/admin/nodes/{id}/idle-policy", r.requireAdmin(r.nodes.GetNodeIdlePolicy))
+	r.mux.HandleFunc("PUT /api/admin/nodes/{id}/idle-policy", r.requireAdmin(r.nodes.PutNodeIdlePolicy))
+	r.mux.HandleFunc("PUT /api/cluster/idle-policy", r.requireAdmin(r.nodes.ApplyClusterIdlePolicy))
 	r.mux.HandleFunc("GET /api/admin/nodes/{id}/wake", r.requireAdmin(r.nodes.GetNodeWake))
 	r.mux.HandleFunc("PUT /api/admin/nodes/{id}/wake", r.requireAdmin(r.nodes.PutNodeWake))
 	r.mux.HandleFunc("PUT /api/cluster/wake", r.requireAdmin(r.nodes.ApplyClusterWake))
