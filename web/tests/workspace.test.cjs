@@ -44,6 +44,17 @@ test('list preferences persist per account, not globally', () => {
   const next=setup(local); assert.equal(next.c.S.serverFilter,'paper'); assert.equal(next.c.S.favouritesOnly,true);
   next.c.S.user.id='u2'; next.q.loadUser(); assert.equal(next.c.S.serverFilter,''); assert.equal(next.c.S.favouritesOnly,false);
 });
+test('Pinned only uses the highlighted style while selected, including restored preferences', () => {
+  const {c,q,local}=setup();
+  assert.match(q.listControls(), /class="btn sm" aria-pressed="false"/);
+  c.S.favouritesOnly=true; q.saveList();
+  assert.match(q.listControls(), /class="btn sm pr" aria-pressed="true"/);
+  const restored=setup(local);
+  assert.match(restored.q.listControls(), /class="btn sm pr" aria-pressed="true"/);
+  restored.c.S.favouritesOnly=false; restored.q.saveList();
+  assert.match(restored.q.listControls(), /class="btn sm" aria-pressed="false"/);
+  assert.doesNotMatch(restored.q.listControls(), /class="btn sm pr"/);
+});
 test('command history and filters are bounded and scoped by account, node and server', () => {
   const {c,q,server,session}=setup();
   for(let i=0;i<110;i++) q.recordCommand('say '+i);

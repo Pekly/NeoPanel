@@ -112,7 +112,7 @@
     });
   }
   function listControls() {
-    return `<select class="sel sm np-server-sort" aria-label="Sort servers" onchange="S.serverSort=this.value;NPWorkspace.saveList();R()">${[['name','Name'],['status','Status'],['node','Location']].map(([v,l]) => `<option value="${v}" ${S.serverSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" aria-pressed="${Boolean(S.favouritesOnly)}" onclick="S.favouritesOnly=!S.favouritesOnly;NPWorkspace.saveList();R()">★ Pinned only</button>`;
+    return `<select class="sel sm np-server-sort" aria-label="Sort servers" onchange="S.serverSort=this.value;NPWorkspace.saveList();R()">${[['name','Name'],['status','Status'],['node','Location']].map(([v,l]) => `<option value="${v}" ${S.serverSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm${S.favouritesOnly ? ' pr' : ''}" aria-pressed="${Boolean(S.favouritesOnly)}" onclick="S.favouritesOnly=!S.favouritesOnly;NPWorkspace.saveList();R()">★ Pinned only</button>`;
   }
   function consoleTools(id = 'log') {
     return `<details class="np-console-options np-compact-menu"><summary class="btn sm">Console tools <span data-console-filter-badge>${consoleState.filter ? '· Filter on' : ''}</span> ▾</summary><div class="np-console-tools np-menu-panel"><label><span>Filter output</span><input type="search" value="${esc(consoleState.filter)}" maxlength="200" aria-label="Filter console output" oninput="NPWorkspace.setFilter(this.value)"></label><button type="button" class="btn sm" data-jump-log="${id}" onclick="NPWorkspace.jump('${id}')">Jump to latest</button><button type="button" class="btn sm" onclick="NPWorkspace.clearHistory()">Clear command history</button></div></details>`;
