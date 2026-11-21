@@ -147,7 +147,7 @@ func (h *NodeHandler) buildLocalNodeView(reqHost string) NodeStatusView {
 	}
 	return NodeStatusView{
 		ID:              "local",
-		Name:            "Local Master Node",
+		Name:            h.resolveLocalNodeName(),
 		BaseURL:         "",
 		FQDN:            h.resolveLocalFQDN(reqHost),
 		Location:        "Primary Host",
@@ -274,6 +274,7 @@ func (h *NodeHandler) ListNodes(w http.ResponseWriter, r *http.Request) {
 
 func (h *NodeHandler) ListClusterServers(w http.ResponseWriter, r *http.Request) {
 	localFQDN := h.resolveLocalFQDN(r.Host)
+	localName := h.resolveLocalNodeName()
 
 	localServers, err := h.db.ListServers()
 	if err != nil {
@@ -297,7 +298,7 @@ func (h *NodeHandler) ListClusterServers(w http.ResponseWriter, r *http.Request)
 			Stats:    h.manager.GetStats(s),
 			MOTD:     readServerMOTD(h.manager.GetWorkingDir(s.ID)),
 			NodeID:   "local",
-			NodeName: "Local Master Node",
+			NodeName: localName,
 			NodeFQDN: localFQDN,
 		})
 	}

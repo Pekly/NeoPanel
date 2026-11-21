@@ -1193,7 +1193,7 @@ window.S = {
   dbCapabilities: null,
   dbRevealIds: new Set(),
   sqlStudio: null,
-  branding: { ...DEFAULT_BRANDING },
+  branding: { ...DEFAULT_BRANDING, ...(window.NPTheme?.initialBranding || {}) },
   brandDraft: null,
   brandingLoaded: false,
   brandingDaemon: {
@@ -1277,7 +1277,7 @@ window.S = {
     un: 'admin',
     em: 'admin@neopanel.internal',
     tab: 0,
-    mode: localStorage.getItem('neopanel_mode') || 'Dark',
+    mode: window.NPTheme?.initialMode || localStorage.getItem('neopanel_mode') || 'Dark',
     compact: localStorage.getItem('neopanel_compact') === 'true',
     sound: localStorage.getItem('neopanel_sound') === 'true',
     priv: localStorage.getItem('neopanel_priv') === 'true',
@@ -2703,75 +2703,7 @@ function brandLogoHtml(forLogin = false, override = null) {
 
 function applyBranding(raw) {
   const b = { ...DEFAULT_BRANDING, ...(raw || {}) };
-  const root = document.documentElement;
-  const isLight = root.dataset.theme === 'light';
-  const isOled = root.classList.contains('oled');
-
-  const acRgb = hexToRgbStr(b.accent_color);
-  if (b.accent_color && acRgb && (b.accent_color.toLowerCase() !== '#387aff' || b.preset !== 'obsidian')) {
-    root.style.setProperty('--ac', b.accent_color);
-    root.style.setProperty('--ac-hover', b.accent_hover || b.accent_color);
-    root.style.setProperty('--ac-glow', `rgba(${acRgb}, 0.25)`);
-    root.style.setProperty('--ac-subtle', `rgba(${acRgb}, 0.12)`);
-    root.style.setProperty('--acs', `rgba(${acRgb}, 0.14)`);
-    root.style.setProperty('--border-accent', `rgba(${acRgb}, 0.42)`);
-  } else {
-    ['--ac', '--ac-hover', '--ac-glow', '--ac-subtle', '--acs', '--border-accent'].forEach(p => root.style.removeProperty(p));
-  }
-
-  if (b.bg_deep && hexToRgbStr(b.bg_deep)) {
-    root.style.setProperty('--bg-deep', b.bg_deep);
-  } else {
-    root.style.removeProperty('--bg-deep');
-  }
-
-  if (b.bg_canvas && hexToRgbStr(b.bg_canvas)) {
-    root.style.setProperty('--bg-canvas', b.bg_canvas);
-  } else {
-    root.style.removeProperty('--bg-canvas');
-  }
-
-  const navRgb = hexToRgbStr(b.nav_bg);
-  if (navRgb) {
-    root.style.setProperty('--nav-bg', `rgba(${navRgb}, 0.88)`);
-  } else {
-    root.style.removeProperty('--nav-bg');
-  }
-
-  if (b.text_color && hexToRgbStr(b.text_color)) {
-    root.style.setProperty('--tx', b.text_color);
-  } else {
-    root.style.removeProperty('--tx');
-  }
-
-  const cardRgb = hexToRgbStr(b.card_bg);
-  const opacityNum = Number(b.card_opacity);
-  const opacityVal = !isNaN(opacityNum) ? Math.max(0.35, Math.min(1, opacityNum / 100)) : 0.72;
-  if (cardRgb) {
-    root.style.setProperty('--card-bg', `rgba(${cardRgb}, ${opacityVal.toFixed(2)})`);
-    root.style.setProperty('--card-bg-solid', b.card_bg);
-  } else if (!isNaN(opacityNum) && Math.round(opacityNum) !== 72) {
-    const fallbackRgb = isLight ? '255, 255, 255' : (isOled ? '8, 10, 14' : '18, 24, 38');
-    root.style.setProperty('--card-bg', `rgba(${fallbackRgb}, ${opacityVal.toFixed(2)})`);
-    root.style.removeProperty('--card-bg-solid');
-  } else {
-    root.style.removeProperty('--card-bg');
-    root.style.removeProperty('--card-bg-solid');
-  }
-
-  const rad = Number(b.border_radius_px);
-  if (!isNaN(rad) && rad >= 0 && rad <= 28) {
-    root.style.setProperty('--np-radius', `${rad}px`);
-  } else {
-    root.style.removeProperty('--np-radius');
-  }
-
-  const blur = Number(b.glass_blur_px);
-  if (!isNaN(blur) && blur >= 0 && blur <= 32) {
-    root.style.setProperty('--np-blur', `${blur}px`);
-  } else {
-    root.style.removeProperty('--np-blur');
-  }
+  window.NPTheme?.applyPalette(b);
 
   const brandName = (b.brand_name || 'NeoPanel').trim() || 'NeoPanel';
   const brandSub = (b.brand_subtitle || 'Minecraft Server Manager').trim();
@@ -2819,6 +2751,7 @@ async function loadPublicBranding() {
     const data = await res.json().catch(() => null);
     if (data && data.branding) {
       S.branding = { ...DEFAULT_BRANDING, ...data.branding };
+      window.NPTheme?.remember(S.branding);
       S.brandingLoaded = true;
       if (data.daemon) {
         S.brandingDaemon = { ...S.brandingDaemon, ...data.daemon };
@@ -4387,13 +4320,13 @@ function renderFlyConsole() {
             <span id="fly-con-buf-count" class="mu mono" style="font-size: 11px;">${S.log.length} lines</span>
           </div>
           <div class="row" style="gap: 6px; flex-wrap: nowrap;">
+            ${window.NPWorkspace?.consoleTools('fly-log') || ''}
             <button type="button" class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');">Clear</button>
             <button type="button" class="btn sm" onclick="toggleFlyConsoleSize()" title="${S.flyConTall ? 'Compact drawer size' : 'Expand drawer size'}">${S.flyConTall ? 'Compact' : 'Expand'}</button>
             <button type="button" class="btn sm" onclick="S.flyConOpen=false; go('con');" title="Open full Console view">Full Page</button>
             <button type="button" class="btn sm" onclick="closeFlyConsole()" aria-label="Minimize live console">&times;</button>
           </div>
         </div>
-        ${window.NPWorkspace?.consoleTools('fly-log') || ''}
         <div class="con fly-con-logs" id="fly-log" role="log" aria-live="polite"></div>
         <div class="cin fly-con-input">
           <span>&raquo;</span>
@@ -5244,6 +5177,7 @@ function srvh() {
       <button class="btn" data-power-btn="restart" onclick="power('restart')" ${on ? '' : 'disabled'}>${ic('refresh', 14)} Restart</button>
       <button class="btn stop" data-power-btn="stop" onclick="power('stop')" ${on || st === 'starting' ? '' : 'disabled'}>Stop</button>
       <button class="btn dg" data-power-btn="kill" onclick="power('kill')" title="Stop immediately; unsaved data may be lost">Force stop</button>
+      ${S.view === 'con' ? (window.NPWorkspace?.countdownSection() || '') : ''}
     </div>
   </div>`;
 }
@@ -5897,10 +5831,10 @@ const V = {
     const totalDiskMB = S.servers.reduce((sum, s, i) => sum + (i === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0)), 0);
     const diskQuotaMB = Math.max(20480, totalCount * 10240);
 
-    const nodesList = Array.isArray(S.nodes) ? S.nodes : [];
+    const locations = dashboardLocations();
     const nodeErrs = S.clusterNodeErrors || {};
     const errEntries = Object.entries(nodeErrs);
-    const activeNodeFilter = S.nodeFilter || 'all';
+    const activeNodeFilter = locations.selected;
 
     const indexedServers = window.NPWorkspace ? window.NPWorkspace.sortServers(S.servers.map((s, origIdx) => ({ s, origIdx }))) : S.servers.map((s, origIdx) => ({ s, origIdx }));
     const visibleServers = activeNodeFilter === 'all'
@@ -5912,27 +5846,24 @@ const V = {
     const gridStyle = '';
 
     return `
-    <div class="row sb np-page-heading">
+    <div class="np-page-heading np-dashboard-heading">
       <div>
         <div class="np-eyebrow">Workspace overview</div>
         <h1>Your servers</h1>
         <span id="dash-running-summary" class="mu">${runningCount} of ${totalCount} servers running</span>
       </div>
-      <div class="row" style="gap: 10px; flex-wrap: wrap; align-items: center;">
-        ${S.user?.role === 'admin' ? `<button id="np-guide-open" type="button" class="btn sm" onclick="window.NPOnboarding?.open()">${ic('book', 14)} Getting started</button>` : ''}
-        <div style="position: relative;">
+      <div class="np-dashboard-toolbar">
+        ${window.NPOnboarding?.eligible(S) ? `<button id="np-guide-open" type="button" class="btn sm" onclick="window.NPOnboarding?.open()">${ic('book', 14)} Getting started</button>` : ''}
+        <div class="np-server-search" style="position: relative;">
           <input type="text" id="srv-filter" aria-label="Filter servers" placeholder="Find a server…" value="${esc(S.serverFilter || '')}" oninput="filterServerCards(this.value)" style="width: 220px; padding-left: 32px; font-size: 13px; height: 36px; border-radius: 8px;">
           <span style="position: absolute; left: 10px; top: 9px; color: var(--tx-muted);">${ic('search', 14)}</span>
         </div>
-        ${nodesList.length > 1 || activeNodeFilter !== 'all' ? `
-          <select class="sel sm" style="width: auto; min-width: 130px; height: 36px;" onchange="setNodeFilter(this.value)">
-            <option value="all" ${activeNodeFilter === 'all' ? 'selected' : ''}>All Locations (${totalCount})</option>
-            ${nodesList.map(n => {
-              const cnt = S.servers.filter(x => (x.node_id || 'local') === n.id).length;
-              return `<option value="${esc(n.id)}" ${activeNodeFilter === n.id ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))} (${cnt})</option>`;
-            }).join('')}
+        <div class="np-server-location">
+          <select class="sel sm" aria-label="Server location" title="${locations.nodes.length > 1 ? 'Filter by server location' : 'Your servers are on this location'}" onchange="setNodeFilter(this.value)" ${locations.nodes.length < 2 ? 'disabled' : ''}>
+            ${locations.nodes.length > 1 ? `<option value="all" ${activeNodeFilter === 'all' ? 'selected' : ''}>All locations (${totalCount})</option>` : ''}
+            ${!locations.nodes.length ? '<option value="all">No server location</option>' : locations.nodes.map(n => `<option value="${esc(n.id)}" ${activeNodeFilter === n.id ? 'selected' : ''}>${esc(displayNodeName(n.id, n.name))} (${n.count})</option>`).join('')}
           </select>
-        ` : ''}
+        </div>
         ${window.NPWorkspace?.listControls() || ''}
         ${renderViewModeToggle('dash', 'tiles')}
         ${canCreateServers() ? `<button class="btn pr" onclick="openCreateServerModal()" style="height: 36px; padding: 0 16px; font-size: 13px;">
@@ -6135,9 +6066,8 @@ const V = {
   },
 
   con() {
-    if (window.NPWorkspace && !hasServerPermission('console.view')) return `${srvh()}${window.NPWorkspace.countdownSection()}<div class="card">Console output is unavailable with your current permissions. Power controls remain available if permitted.</div>`;
+    if (window.NPWorkspace && !hasServerPermission('console.view')) return `${srvh()}<div class="card">Console output is unavailable with your current permissions. Power controls remain available if permitted.</div>`;
     return `${srvh()}
-    ${window.NPWorkspace?.countdownSection() || ''}
     <div class="np-section-heading"><div><h2>Console</h2><p>Live output and server performance.</p></div><span class="np-shortcut-hint">Command history <kbd>↑</kbd> <kbd>↓</kbd></span></div>
     <div class="cgrid">
       <div class="cwrap">
@@ -6153,10 +6083,10 @@ const V = {
             <button type="button" class="con-quick-pill" onclick="runCmd('save-all')" title="Save all worlds to disk (save-all)">${ic('download', 11)} save-all</button>
             <button type="button" class="con-quick-pill" onclick="runCmd('list')" title="List online players (list)">${ic('users', 11)} list</button>
             <button type="button" class="con-quick-pill" onclick="runCmd('tps')" title="Check tick rate &amp; server health (tps)">${ic('activity', 11)} tps</button>
+            ${window.NPWorkspace?.consoleTools() || ''}
             <button type="button" class="btn sm" onclick="S.log=[]; paintLog(); toast('Console buffer cleared');" style="font-size:11px; padding:3px 9px;">Clear</button>
           </div>
         </div>
-        ${window.NPWorkspace?.consoleTools() || ''}
         <div class="con" id="log" role="log" aria-live="polite"></div>
         <div class="cin">
           <span>&raquo;</span>
@@ -8143,6 +8073,7 @@ const V = {
                   <td><span class="badge ${n.online ? 'online' : 'offline'}"><i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}</span></td>
                   <td style="text-align:right">
                     <div class="row" style="justify-content:flex-end; gap:6px;">
+                      <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                       ${n.is_local
                         ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Configure</button>`
@@ -8203,6 +8134,7 @@ const V = {
               <div class="row sb" style="margin-top: auto; padding-top: 4px;">
                 <span class="mu mono" style="font-size: 11px;">${n.is_local ? 'id: local' : `key: ${esc(n.token_prefix || 'neo_...')}`}</span>
                 <div class="row" style="gap: 6px;">
+                  <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                   <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                   ${n.is_local
                     ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Panel settings</button>`
@@ -9524,8 +9456,21 @@ window.onEnterView = function(view) {
   else if (view === 'dash') loadDashboard();
 };
 
+function dashboardLocations() {
+  const nodes = new Map();
+  for (const server of S.servers || []) {
+    const id = server.node_id || 'local';
+    if (!nodes.has(id)) nodes.set(id, {id, name: getNodeById(id)?.name || server.node_name || id, count: 0});
+    nodes.get(id).count++;
+  }
+  const choices = [...nodes.values()].sort((a,b) => a.id.localeCompare(b.id));
+  const selected = choices.length === 1 ? choices[0].id : nodes.has(S.nodeFilter) ? S.nodeFilter : 'all';
+  return { nodes: choices, selected };
+}
+
 function setNodeFilter(nodeId) {
-  S.nodeFilter = nodeId || 'all';
+  const locations = dashboardLocations();
+  S.nodeFilter = locations.nodes.length < 2 ? locations.selected : locations.nodes.some(n => n.id === nodeId) ? nodeId : 'all';
   window.NPWorkspace?.saveList();
   R();
 }
@@ -12124,16 +12069,10 @@ async function deleteAPIKey(id) {
 
 // --- Appearance ---
 function setAppearanceMode(mode, skipRender = false) {
+  if (!['Light', 'Dark', 'Oled', 'Auto'].includes(mode)) return;
   S.acct.mode = mode;
-  localStorage.setItem('neopanel_mode', mode);
-  const d = document.documentElement;
-  d.classList.toggle('oled', mode === 'Oled');
-  if (mode === 'Auto') {
-    const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-    d.dataset.theme = prefersLight ? 'light' : 'dark';
-  } else {
-    d.dataset.theme = mode === 'Light' ? 'light' : 'dark';
-  }
+  try { localStorage.setItem('neopanel_mode', mode); } catch (_) {}
+  window.NPTheme?.mode(mode);
   applyBranding((S.view === 'admin' && (S.adminTab || 0) === 4 && S.brandDraft) ? S.brandDraft : S.branding);
   if (!skipRender) R();
 }
@@ -15295,6 +15234,7 @@ async function saveBrandingAndDaemon() {
       localStorage.setItem('neopanel_admin_cfg', JSON.stringify(S.adminDaemonCfg));
     }
     applyBranding(S.branding);
+    window.NPTheme?.remember(S.branding);
     toast(res?.message || 'Panel look & branding saved globally!', 'ok');
     loadAdminNodes();
     R();
@@ -15327,6 +15267,7 @@ async function resetBrandingDefaults() {
       S.brandDraft = { ...DEFAULT_BRANDING };
     }
     applyBranding(S.branding);
+    window.NPTheme?.remember(S.branding);
     toast(res?.message || 'Panel look reset to factory defaults', 'ok');
     R();
   } catch (err) {

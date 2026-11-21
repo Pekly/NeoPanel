@@ -187,7 +187,7 @@ test('countdown polling is paused while a mutation is in flight', async () => {
 test('removed location filters reset only after authoritative inventory loading', () => {
   const {c,q}=setup(); c.S.nodeFilter='removed'; c.S.nodes=[{id:'local'}]; q.restoreRoute(); assert.equal(c.S.nodeFilter,'removed');
   c.S.serverCatalog={clusterComplete:true}; q.restoreRoute(); assert.equal(c.S.nodeFilter,'all');
-  assert.match(app,/nodesList.length > 1 \|\| activeNodeFilter !== 'all'/);
+  assert.match(app,/const activeNodeFilter = locations.selected/);
 });
 
 test('intentional request cancellation is not reported as a lost connection', () => {
@@ -237,4 +237,22 @@ test('incompatible scheduling responses are not announced as successful', async 
   const {c,q,notices,elements}=setup();const el={textContent:'',closest:()=>null};elements['np-countdown-state']=el;
   c.api=async()=>({});await q.scheduleCountdown(form());
   assert.ok(notices.every(n=>!n.text.includes('Players warned')));assert.match(el.textContent,/incompatible response/);
+});
+test('console tools and power countdown are collapsed dropdowns', () => {
+  const {q} = setup();
+  assert.match(q.consoleTools(), /<details class="np-console-options np-compact-menu">/);
+  assert.match(q.consoleTools(), /<summary class="btn sm">Console tools/);
+  assert.doesNotMatch(q.consoleTools(), /<details[^>]*\sopen/);
+  assert.match(q.countdownSection(), /<summary class="btn"/);
+  assert.doesNotMatch(q.countdownSection(), /class="card np-countdown"/);
+  assert.match(section('function srvh()', 'function toggleCmdMenu()'), /countdownSection/);
+  assert.doesNotMatch(section('  con() {', '  pl() {'), /countdownSection/);
+});
+test('countdown label remains visible while scheduling controls are collapsed', async () => {
+  const {q,c,elements}=setup();
+  elements['np-countdown-label']={textContent:''};
+  elements['np-countdown-state']={closest:()=>null};
+  c.api=async()=>({countdown:{action:'restart',execute_at:new Date(Date.now()+60000).toISOString()}});
+  await q.pollCountdown();
+  assert.match(elements['np-countdown-label'].textContent,/Restart · \d+s/);
 });

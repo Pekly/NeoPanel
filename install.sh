@@ -62,6 +62,12 @@ ARG_API_KEY_NAME=""
 PAIR_INSECURE="false"
 ASSUME_YES="false"
 
+# Address-only recovery overrides; do not affect installation/update paths.
+RECOVERY_CONFIG="${NEOPANEL_CONFIG:-$CONFIG_DIR/config.yaml}"
+RECOVERY_BINARY="${NEOPANEL_BINARY:-$INSTALL_DIR/$BINARY_NAME}"
+RECOVERY_URL=""
+RECOVERY_CONFIRM="false"
+
 # Prevent apt interactive prompts from hanging in background
 export DEBIAN_FRONTEND=noninteractive
 export NEEDRESTART_MODE=a
@@ -1420,6 +1426,86 @@ update_neopanel() {
 # Interactive Menu & CLI Argument Parsing
 # -----------------------------------------------------------------------------
 
+# Host-admin recovery intentionally never calls run_step/eval, step_ssl_caddy,
+# config writers, package installation, or service restart helpers.
+require_panel_address_admin() {
+  if [ "$EUID" -ne 0 ]; then
+    log_error "Panel address recovery requires host-admin access. Re-run with sudo."
+    return 1
+  fi
+}
+
+change_panel_address() {
+  require_panel_address_admin || return 1
+  if [ ! -x "$RECOVERY_BINARY" ] || [ ! -f "$RECOVERY_CONFIG" ]; then
+    log_error "Existing NeoPanel binary and config required. Use --binary /path/neopanel --config /path/config.yaml for a custom installation."
+    return 1
+  fi
+  local support
+  if ! support=$("$RECOVERY_BINARY" -config "$RECOVERY_CONFIG" panel-address --supported 2>/dev/null) || [ "$support" != "neopanel-panel-address-v1" ]; then
+    log_error "Installed NeoPanel does not support panel address recovery. Update NeoPanel first, then rerun the installer and choose 'Change panel address / FQDN'. No address was changed."
+    return 1
+  fi
+  echo "Change panel address / FQDN — manual, address-only recovery"
+  echo "Configure DNS and trusted HTTPS for the new address first; verify access in your browser."
+  echo "This does not provision/verify HTTPS, rewrite config/proxy files, restart services, or change node/game FQDNs."
+  if [ -z "$RECOVERY_URL" ]; then
+    if [ "$RECOVERY_CONFIRM" = true ]; then
+      log_error "--confirm-address requires an explicit --panel-url."
+      return 1
+    fi
+    prompt_user "New panel URL (https://panel.example.com; blank cancels): " RECOVERY_URL
+  fi
+  if [ -z "$RECOVERY_URL" ]; then
+    log_warn "Cancelled; panel address unchanged."
+    return 1
+  fi
+  local -a cmd=("$RECOVERY_BINARY" -config "$RECOVERY_CONFIG" panel-address --url "$RECOVERY_URL")
+  if [ "$RECOVERY_CONFIRM" = true ]; then
+    cmd+=(--confirm)
+    "${cmd[@]}"
+  elif [ -t 0 ]; then
+    "${cmd[@]}"
+  elif [ -e /dev/tty ]; then
+    "${cmd[@]}" </dev/tty
+  else
+    log_error "No terminal for confirmation. Configure trusted HTTPS, then supply --panel-url and --confirm-address explicitly (--yes is not sufficient)."
+    return 1
+  fi
+}
+
+# Recovery has its own strict argument set: never combine it with install/update,
+# legacy SSL actions, --node, or a generic --yes that could imply consent.
+parse_panel_address_args() {
+  ACTION="change-fqdn"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --change-fqdn) shift ;;
+      --panel-url|--config|--binary|--repo|--git-repo|--branch|--git-branch)
+        if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == -* ]]; then
+          log_error "Missing value for $1"; return 1
+        fi
+        case "$1" in
+          --panel-url) RECOVERY_URL="$2" ;;
+          --config) RECOVERY_CONFIG="$2" ;;
+          --binary) RECOVERY_BINARY="$2" ;;
+          --repo|--git-repo) GIT_REPO_URL="$2" ;;
+          --branch|--git-branch) GIT_BRANCH="$2" ;;
+        esac
+        shift 2
+        ;;
+      --panel-url=*) RECOVERY_URL="${1#*=}"; shift ;;
+      --config=*) RECOVERY_CONFIG="${1#*=}"; shift ;;
+      --binary=*) RECOVERY_BINARY="${1#*=}"; shift ;;
+      --repo=*|--git-repo=*) GIT_REPO_URL="${1#*=}"; shift ;;
+      --branch=*|--git-branch=*) GIT_BRANCH="${1#*=}"; shift ;;
+      --confirm-address) RECOVERY_CONFIRM="true"; shift ;;
+      -h|--help) ACTION="help"; shift ;;
+      *) log_error "Unsupported/combined recovery option: $1. Use only --change-fqdn, --panel-url, --config, --binary, and --confirm-address (not --yes)."; return 1 ;;
+    esac
+  done
+}
+
 print_help() {
   cat <<'EOF'
 NeoPanel Installer & Cluster Tooling
@@ -1452,6 +1538,13 @@ Cluster Node & Pairing Flags (combine with --node):
   -y, --yes                 Use defaults for any unspecified interactive prompts
 
 Maintenance & CLI Shortcuts:
+  --change-fqdn             Change panel address / FQDN (manual address-only recovery)
+    --panel-url <origin>    New HTTPS panel origin; HTTP only for localhost
+    --confirm-address       Explicitly confirm save and preconfigured trusted HTTPS
+    --config <path>         Installed config (default: /etc/neopanel/config.yaml)
+    --binary <path>         Installed binary (default: /usr/local/bin/neopanel)
+    Defaults can also use NEOPANEL_CONFIG and NEOPANEL_BINARY. Do not combine
+    recovery with other actions or --yes. No DNS/cert/proxy changes or restarts.
   --connect-node            Launch interactive remote node pairing wizard
   --show-token              Show this host's security.node_token
   --rotate-token            Rotate node_token and restart service
@@ -1477,6 +1570,7 @@ interactive_menu() {
   echo -e "  ${GREEN}[9]${NC}  Configure Cloudflare Turnstile Bot Protection"
   echo -e "  ${GREEN}[10]${NC} Restart NeoPanel Service"
   echo -e "  ${GREEN}[11]${NC} Uninstall NeoPanel"
+  echo -e "  ${GREEN}[12]${NC} Change panel address / FQDN"
   echo -e "  ${RED}[0]${NC}  Exit"
   echo ""
   prompt_user "Enter selection [1]: " choice
@@ -1568,6 +1662,9 @@ interactive_menu() {
         log_success "NeoPanel service and binary removed. (Data kept at $DATA_DIR for safety)"
       fi
       ;;
+    12)
+      change_panel_address
+      ;;
     0)
       exit 0
       ;;
@@ -1579,6 +1676,13 @@ interactive_menu() {
 }
 
 parse_cli_args() {
+  local arg
+  for arg in "$@"; do
+    if [ "$arg" = "--change-fqdn" ]; then
+      parse_panel_address_args "$@"
+      return $?
+    fi
+  done
   while [ $# -gt 0 ]; do
     case "$1" in
       --install|--panel)
@@ -1773,6 +1877,9 @@ if [ $# -eq 0 ]; then
 else
   parse_cli_args "$@"
   case "$ACTION" in
+    change-fqdn)
+      change_panel_address
+      ;;
     install)
       run_full_installation
       ;;

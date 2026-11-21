@@ -112,10 +112,10 @@
     });
   }
   function listControls() {
-    return `<select class="sel sm" aria-label="Sort servers" onchange="S.serverSort=this.value;NPWorkspace.saveList();R()">${[['name','Name'],['status','Status'],['node','Location']].map(([v,l]) => `<option value="${v}" ${S.serverSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" aria-pressed="${Boolean(S.favouritesOnly)}" onclick="S.favouritesOnly=!S.favouritesOnly;NPWorkspace.saveList();R()">★ Pinned only</button>`;
+    return `<select class="sel sm np-server-sort" aria-label="Sort servers" onchange="S.serverSort=this.value;NPWorkspace.saveList();R()">${[['name','Name'],['status','Status'],['node','Location']].map(([v,l]) => `<option value="${v}" ${S.serverSort === v ? 'selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" aria-pressed="${Boolean(S.favouritesOnly)}" onclick="S.favouritesOnly=!S.favouritesOnly;NPWorkspace.saveList();R()">★ Pinned only</button>`;
   }
   function consoleTools(id = 'log') {
-    return `<div class="np-console-tools"><label>Filter output <input type="search" value="${esc(consoleState.filter)}" maxlength="200" aria-label="Filter console output" oninput="NPWorkspace.setFilter(this.value)"></label><button class="btn sm" data-jump-log="${id}" onclick="NPWorkspace.jump('${id}')">Jump to latest</button><button class="btn sm" onclick="NPWorkspace.clearHistory()">Clear command history</button></div>`;
+    return `<details class="np-console-options np-compact-menu"><summary class="btn sm">Console tools <span data-console-filter-badge>${consoleState.filter ? '· Filter on' : ''}</span> ▾</summary><div class="np-console-tools np-menu-panel"><label><span>Filter output</span><input type="search" value="${esc(consoleState.filter)}" maxlength="200" aria-label="Filter console output" oninput="NPWorkspace.setFilter(this.value)"></label><button type="button" class="btn sm" data-jump-log="${id}" onclick="NPWorkspace.jump('${id}')">Jump to latest</button><button type="button" class="btn sm" onclick="NPWorkspace.clearHistory()">Clear command history</button></div></details>`;
   }
   function filterRows(el) {
     const term = consoleState.filter.toLowerCase();
@@ -123,6 +123,7 @@
   }
   function setFilter(value) {
     consoleState.filter = String(value).slice(0, 200); saveConsole();
+    document.querySelectorAll('[data-console-filter-badge]').forEach(el => { el.textContent = consoleState.filter ? '· Filter on' : ''; });
     for (const id of ['log', 'fly-log']) { const el = document.getElementById(id); if (el) { filterRows(el); if (consoleState.follow) el.scrollTop = el.scrollHeight; } }
   }
   function captureConsole() {
@@ -231,11 +232,13 @@
   function countdownSection() {
     const canPower = hasServerPermission('server.power');
     if (!canPower && !hasServerPermission('console.view')) return '';
-    return `<section class="card np-countdown"><div id="np-countdown-state" role="status"></div><button type="button" id="np-countdown-retry" class="btn sm" onclick="NPWorkspace.pollCountdown(true)" hidden>Retry countdown status</button>${canPower && hasServerPermission('console.command') ? `<details><summary>Plan a safe restart or stop</summary><form onsubmit="event.preventDefault();NPWorkspace.scheduleCountdown(this)"><label>Action<select name="action"><option value="restart">Restart</option><option value="stop">Stop</option></select></label><label>Warning countdown (seconds)<input name="seconds" type="number" min="10" max="3600" step="1" value="60" required></label><label>Player message<input name="message" maxlength="200" placeholder="Scheduled server maintenance"></label><p class="mu">Players receive chat warnings. The countdown runs on the host even if you close this tab, but is cancelled if the panel restarts. Requires a server that supports the say command.</p><button class="btn" type="submit">Warn players &amp; schedule</button></form></details>` : ''}</section>`;
+    return `<details class="np-countdown np-compact-menu"><summary class="btn" title="Schedule a restart or stop with player warnings"><span id="np-countdown-label">Schedule</span> ▾</summary><div class="np-menu-panel"><h3>Plan a safe restart or stop</h3><div id="np-countdown-state" role="status"></div><button type="button" id="np-countdown-retry" class="btn sm" onclick="NPWorkspace.pollCountdown(true)" hidden>Retry countdown status</button>${canPower && hasServerPermission('console.command') ? `<form onsubmit="event.preventDefault();NPWorkspace.scheduleCountdown(this)"><label>Action<select name="action"><option value="restart">Restart</option><option value="stop">Stop</option></select></label><label>Countdown (seconds)<input name="seconds" type="number" min="10" max="3600" step="1" value="60" required></label><label class="np-countdown-message">Player message<input name="message" maxlength="200" placeholder="Scheduled server maintenance"></label><p class="mu">Warns players using the say command. Continues if you close this tab; cancelled if the hosting process restarts.</p><button class="btn" type="submit">Warn players &amp; schedule</button></form>` : ''}</div></details>`;
   }
   function paintCountdown() {
     const el = document.getElementById('np-countdown-state'); if (!el) return;
     const id = key(curServer()), item = countdowns.get(id), error = countdownErrors.get(id);
+    const label = document.getElementById('np-countdown-label');
+    if (label) label.textContent = item ? `${item.action === 'stop' ? 'Stop' : 'Restart'} · ${Math.max(0, Math.ceil((Date.parse(item.execute_at) - Date.now()) / 1000))}s` : error ? 'Schedule · !' : 'Schedule';
     if (item) {
       const seconds = Math.max(0, Math.ceil((Date.parse(item.execute_at) - Date.now()) / 1000));
       el.innerHTML = `<div class="row sb"><span><b>${esc(item.action === 'stop' ? 'Stop' : 'Restart')}</b> ${seconds ? `in ${seconds}s` : 'is executing…'} · ${esc(item.message || 'Scheduled maintenance')}</span>${hasServerPermission('server.power') ? '<button class="btn sm" onclick="NPWorkspace.cancelCountdown()">Cancel countdown</button>' : ''}</div>${error ? `<p class="mu">${esc(error.text)}</p>` : ''}`;
@@ -308,6 +311,8 @@
   }
   function reset() { remember(); user = ''; prefs = {}; bootFiles = {}; active = ''; ready = false; failed.clear(); countdowns.clear(); pending.clear(); revisions.clear(); countdownErrors.clear(); S.hist = []; S.hi = 0; }
   window.NPWorkspace = { loadUser, activate, remember, restoreRoute, restoreFile, saveList, sortServers, favouriteButton, toggleFavourite, listControls, consoleTools, captureConsole, bindLog, appended, setFilter, jump, recordCommand, clearHistory, connectionBlocked, syncControls, connectionBanner, retryConnection, requestResult, errorAdvice, maintenanceLimited, maintenanceAllowed, maintenanceBanner, countdownSection, paintCountdown, pollCountdown, scheduleCountdown, cancelCountdown, powerBlocked, afterRender, reset };
+  window.addEventListener('click', event => { document.querySelectorAll('.np-compact-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; }); });
+  window.addEventListener('keydown', event => { if (event.key === 'Escape') document.querySelectorAll('.np-compact-menu[open]').forEach(menu => { menu.open = false; menu.querySelector('summary')?.focus(); }); });
   window.addEventListener('offline', syncControls);
   window.addEventListener('online', () => { if (S.token) retryConnection(); });
   window.addEventListener('beforeunload', () => { captureEditor(); remember(); });
