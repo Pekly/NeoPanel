@@ -34,10 +34,6 @@ type Join struct {
 	Username string
 }
 
-type textComponent struct {
-	Text string `json:"text"`
-}
-
 // Handle serves one status exchange or login attempt and always closes conn.
 // status is called only for a valid status request; join is called once only
 // after a valid Login Start. join's result is the login disconnect text.
@@ -113,9 +109,11 @@ func handleStatus(conn net.Conn, protocol int32, status func(int32) Status) erro
 		} `json:"players"`
 		Description textComponent `json:"description"`
 		Favicon     string        `json:"favicon,omitempty"`
-	}{Description: textComponent{s.MOTD}, Favicon: s.IconDataURL}
+	}{Description: formatText(s.MOTD, protocol), Favicon: s.IconDataURL}
 	response.Version.Name = s.VersionName
-	response.Version.Protocol = protocol
+	// Deliberately incompatible while sleeping: vanilla renders the red X and
+	// configured version label, but joining still sends a normal Login Start.
+	response.Version.Protocol = -1
 	response.Players.Max = s.MaxPlayers
 	encoded, err := json.Marshal(response)
 	if err != nil {
@@ -174,12 +172,12 @@ func handleLogin(conn net.Conn, protocol int32, join func(Join) string) error {
 	if len(message) > maxMessageBytes {
 		message = fallbackMessage
 	}
-	encoded, err := json.Marshal(textComponent{message})
+	encoded, err := json.Marshal(formatText(message, protocol))
 	if err != nil {
 		return err
 	}
 	if len(encoded) > maxMessageBytes {
-		encoded, _ = json.Marshal(textComponent{fallbackMessage})
+		encoded, _ = json.Marshal(textComponent{Text: fallbackMessage})
 	}
 	return writePacket(conn, 0, stringBody(encoded), maxMessageBytes+16)
 }

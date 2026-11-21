@@ -3,7 +3,8 @@
 // It never authenticates a player, establishes a game session, dials a server,
 // or forwards traffic. The handshake host is parsed only, never used for routing.
 //
-// Status requests echo the client's nonnegative protocol number. Login supports
+// Status responses advertise protocol -1 to request vanilla's red-X incompatible
+// ping sprite while still accepting real joins. Login supports
 // release protocols 4 through 758 (1.7.2 through 1.18.2, username only), 759
 // (1.19, optional signature), 760 (1.19.1/2, optional signature and UUID),
 // 761 through 763 (1.19.3 through 1.20.1, optional UUID), and 764 and newer
@@ -25,7 +26,8 @@
 // The complete status response is limited to 128 KiB on the wire. Disconnect
 // JSON strings are limited to 4096 bytes; an oversized callback message is
 // replaced by a short, friendly fallback. Parent-supplied status fields are
-// JSON escaped, with text, newlines and color codes otherwise preserved. Icon
+// JSON escaped; legacy &/section formatting and &#RRGGBB become styled text
+// components (hex colors map to legacy colors before protocol 735). Icon
 // data URLs must be validated by the caller: this package does not fetch URLs
 // or decode images.
 //

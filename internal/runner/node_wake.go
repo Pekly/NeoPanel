@@ -38,6 +38,7 @@ type wakeCoordinator struct {
 	errors    map[string]string
 	slots     chan struct{}
 	wg        sync.WaitGroup
+	status    NodeWakeStatus
 }
 
 // StartWakeListeners is called only after daemon binding and restart recovery.
@@ -120,6 +121,7 @@ func (m *ServerManager) releaseWakeListener(id string) {
 func (m *ServerManager) stopWakeListeners() {
 	w := &m.wake
 	w.mu.Lock()
+	w.started = false
 	for id := range w.listeners {
 		m.closeWakeLocked(id)
 	}
@@ -141,6 +143,7 @@ func (m *ServerManager) reconcileWakeListeners() {
 	if !w.started {
 		return
 	}
+	defer m.captureWakeStatusLocked(cfg, servers, err != nil || listErr != nil)
 	if err != nil || listErr != nil || !cfg.Enabled {
 		for id := range w.listeners {
 			m.closeWakeLocked(id)
@@ -262,6 +265,14 @@ func wakeText(text string, server database.Server) string {
 func (m *ServerManager) acceptWake(e *wakeListener) {
 	w := &m.wake
 	defer w.wg.Done()
+	defer func() {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		if w.listeners[e.server.ID] == e {
+			m.closeWakeLocked(e.server.ID)
+			w.errors[e.server.ID] = "Listener stopped unexpectedly"
+		}
+	}()
 	for {
 		conn, err := e.listener.Accept()
 		if err != nil {

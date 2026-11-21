@@ -18,7 +18,7 @@ func TestNodeWakePersistenceAndDefaults(t *testing.T) {
 	}
 	defer db.Close()
 	defaults := DefaultNodeWakeConfig()
-	if defaults.Enabled || defaults.MaxPlayers != 20 || !defaults.UseServerIcon || defaults.CooldownSeconds != 30 || defaults.OfflineMOTD != "{server} is sleeping. Join to start!" || defaults.VersionLabel != "Join to start" {
+	if defaults.Enabled || defaults.MaxPlayers != 20 || !defaults.UseServerIcon || defaults.CooldownSeconds != 30 || !strings.Contains(defaults.OfflineMOTD, "&9&lNeoPanel") || !strings.Contains(defaults.OfflineMOTD, "&a&lJOIN TO START") || !strings.Contains(defaults.VersionLabel, "&cSleeping") {
 		t.Fatal(defaults)
 	}
 	if got, err := db.GetNodeWakeConfig("local"); err != nil || got != defaults {
@@ -141,5 +141,31 @@ func TestNodeWakeIconFullDecode(t *testing.T) {
 		if ValidateWakeIcon(data) == nil {
 			t.Fatal("accepted invalid image")
 		}
+	}
+}
+
+func TestNodeWakeColoredDefaultsPreserveSavedCustomText(t *testing.T) {
+	db, err := InitDB(filepath.Join(t.TempDir(), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	c := DefaultNodeWakeConfig()
+	if err := ValidateNodeWakeConfig(c); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []string{c.OfflineMOTD, c.StartingMessage, c.UnavailableMessage} {
+		if !strings.Contains(s, "NeoPanel") || !strings.Contains(s, "&") || !strings.Contains(s, "{server}") {
+			t.Fatal("unbranded/uncolored default", s)
+		}
+	}
+	c.OfflineMOTD = "My custom plain MOTD"
+	c.StartingMessage = "My reconnect message"
+	if err := db.SetNodeWakeConfig("local", c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.GetNodeWakeConfig("local")
+	if err != nil || got != c {
+		t.Fatal("custom text overwritten", got, err)
 	}
 }

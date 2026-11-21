@@ -81,6 +81,59 @@
   }
   const el = (ctx, id) => ctx.root.querySelector(`#wake-${id}`);
   const live = ctx => current === ctx && ctx.root.isConnected && admin() && ctx.owner === identity();
+  function runtimeSummary(report, now = Date.now()) {
+    if (!report) return { text: 'Not checked', tone: 'unknown' };
+    const age = now - Date.parse(report.checked_at);
+    if (!Number.isFinite(age) || age < -5000 || age > 10000) return { text: 'Status stale — check listeners', tone: 'unknown' };
+    if (report.error) return { text: 'Listener status needs attention', tone: 'warning' };
+    if (!report.config_matches) return { text: 'Settings not active yet', tone: 'warning' };
+    if (!report.enabled) return { text: 'Disabled', tone: 'unknown' };
+    if (!report.coordinator_running) return { text: 'Wake coordinator not running', tone: 'warning' };
+    if (report.listeners > 0) {
+      const ready = report.servers.some(s => s.state === 'listening');
+      const cooling = report.servers.some(s => s.state === 'cooldown');
+      return { text: ready ? `Ready — ${report.listeners} listening` : `${cooling ? 'Cooldown' : 'Waiting'} — ${report.listeners} ports bound`, tone: ready ? 'ready' : 'warning' };
+    }
+    if (report.servers.some(s => ['bind_failed', 'blocked', 'conflict'].includes(s.state))) return { text: 'Needs attention — no listeners', tone: 'warning' };
+    return { text: 'Standby — no offline listener', tone: 'unknown' };
+  }
+  function validRuntime(r) {
+    return r && typeof r.checked_at === 'string' && ['enabled', 'coordinator_running', 'config_matches'].every(k => typeof r[k] === 'boolean') && typeof r.config_hash === 'string' && typeof r.error === 'string' && Number.isInteger(r.listeners) && r.listeners >= 0 && r.listeners <= 1024 && Array.isArray(r.servers) && r.servers.length <= 1024 && r.servers.every(s => s && ['id', 'name', 'state', 'detail'].every(k => typeof s[k] === 'string') && Number.isInteger(s.port));
+  }
+  async function checkRuntime(ctx) {
+    if (!live(ctx)) return;
+    const sequence = ++ctx.runtimeSequence;
+    clearTimeout(ctx.runtimeTimer);
+    ctx.runtimeBusy = true; ctx.runtimeError = ''; ctx.runtime = null; paint(ctx);
+    try {
+      const result = await api(`/api/admin/nodes/${encodeURIComponent(ctx.id)}/wake/status`, { method: 'GET', suppressToast: true });
+      if (!live(ctx) || sequence !== ctx.runtimeSequence) return;
+      if (!validRuntime(result)) throw Error('Unexpected listener status. Update this panel and worker, then check again.');
+      ctx.runtime = result;
+      const delay = 10001 - (Date.now() - Date.parse(result.checked_at));
+      if (Number.isFinite(delay) && delay > 0 && delay < 16000) ctx.runtimeTimer = setTimeout(() => { if (live(ctx)) paint(ctx); }, delay);
+    } catch (error) {
+      if (live(ctx) && sequence === ctx.runtimeSequence) {
+        ctx.runtimeError = error.message || 'Listener status unavailable';
+        if ([404, 405].includes(error.status) || /HTTP\s+(404|405)\b/.test(ctx.runtimeError)) ctx.runtimeError += '\nUpdate and restart the worker, and check that its proxy forwards GET /api/cluster/wake/status. This check does not apply settings or start a game.';
+      }
+    } finally {
+      if (live(ctx) && sequence === ctx.runtimeSequence) { ctx.runtimeBusy = false; paint(ctx); }
+    }
+  }
+  async function applyBrandingPreset(ctx) {
+    if (!live(ctx) || ctx.busy || !ctx.loaded) return;
+    ctx.busy = true; ctx.error = ''; paint(ctx);
+    try {
+      const result = await api(`/api/admin/nodes/${encodeURIComponent(ctx.id)}/wake/preset`, { method: 'GET', suppressToast: true });
+      if (!live(ctx)) return;
+      const textKeys = ['offline_motd', 'version_label', 'starting_message', 'unavailable_message'];
+      if (!result?.config || !textKeys.every(k => typeof result.config[k] === 'string' && bytes(result.config[k]) <= fields[k][2])) throw Error('Invalid branding template response. Existing text was preserved.');
+      for (const key of textKeys) el(ctx, key).value = result.config[key];
+      ctx.dirty = true;
+    } catch (error) { if (live(ctx)) ctx.error = error.message || 'Could not load branding template'; }
+    finally { if (live(ctx)) { ctx.busy = false; paint(ctx); } }
+  }
   function paint(ctx) {
     el(ctx, 'status').textContent = statusText(ctx.saved, ctx.unknown);
     el(ctx, 'error').textContent = ctx.error;
@@ -94,6 +147,13 @@
     el(ctx, 'save').textContent = ctx.busy ? 'Working…' : 'Save settings';
     el(ctx, 'draft-note').textContent = ctx.dirty ? 'Edited fields are not saved. Refresh status and Retry saved settings do not discard your edits.' : 'Fields show the loaded settings. Changes require Save settings.';
     el(ctx, 'saved').textContent = ctx.saved ? JSON.stringify({ ...ctx.saved.config, icon_data_url: ctx.saved.config.icon_data_url ? '(custom PNG configured)' : '' }, null, 2) : 'Not loaded';
+    const runtime = ctx.runtimeBusy ? { text: 'Checking listeners…', tone: 'unknown' } : ctx.runtimeError ? { text: 'Listener status unavailable', tone: 'warning' } : runtimeSummary(ctx.runtime);
+    el(ctx, 'runtime-state').textContent = runtime.text;
+    el(ctx, 'runtime-state').className = `wake-runtime-state ${runtime.tone}`;
+    el(ctx, 'check').disabled = ctx.busy || ctx.runtimeBusy;
+    el(ctx, 'preset').disabled = ctx.busy || !ctx.loaded;
+    el(ctx, 'runtime-note').textContent = ctx.runtimeError || (ctx.runtime ? `${ctx.runtime.error ? ctx.runtime.error + ' ' : ''}Last reconciliation: ${ctx.runtime.checked_at || 'not available'}. This confirms daemon listener state, not external reachability or successful game startup.` : 'Check listeners reads the node runtime without starting a game.');
+    el(ctx, 'runtime-list').innerHTML = ctx.runtime?.servers.length ? ctx.runtime.servers.map(s => `<div class="wake-runtime-row"><b>${escape(s.name || s.id)} <span class="mu">:${s.port}</span></b><span>${escape(s.state.replaceAll('_', ' '))}</span><small>${escape(s.detail)}</small></div>`).join('') : '<p class="mu">No server listener details available.</p>';
   }
   function preview(ctx) {
     const image = el(ctx, 'preview');
@@ -123,6 +183,7 @@
   async function request(ctx, config) {
     if (!live(ctx) || ctx.busy) return;
     const initial = !ctx.loaded;
+    ++ctx.runtimeSequence; clearTimeout(ctx.runtimeTimer); ctx.runtime = null;
     ctx.busy = true; ctx.error = ''; paint(ctx);
     try {
       const result = await api(`/api/admin/nodes/${encodeURIComponent(ctx.id)}/wake`, { method: config ? 'PUT' : 'GET', ...(config ? { body: JSON.stringify(config) } : {}), suppressToast: true });
@@ -134,7 +195,7 @@
       if (validEnvelope(error.data)) accept(ctx, error.data, initial);
       else { ctx.unknown = true; ctx.error = deliveryError(error.message, error.status); }
     } finally {
-      if (live(ctx)) { ctx.busy = false; paint(ctx); }
+      if (live(ctx)) { ctx.busy = false; paint(ctx); await checkRuntime(ctx); }
     }
   }
   async function upload(ctx, file) {
@@ -168,8 +229,10 @@
       <div class="wake-delivery-grid" aria-label="Configuration delivery status">
         <div><span>Saved on panel</span><b id="wake-panel-state">Not loaded</b></div>
         <div><span>${id === 'local' ? 'Local configuration' : 'Worker acknowledgement'}</span><b id="wake-worker-state">Not loaded</b></div>
-        <div><span>Listener / game health</span><b>Not tested by this form</b></div>
+        <div><span>Live join-to-start listeners</span><b id="wake-runtime-state" class="wake-runtime-state unknown" role="status">Not checked</b></div>
       </div>
+      <div class="wake-runtime-tools"><button type="button" class="btn sm" id="wake-check">Check listeners</button><span class="mu">Read-only check · never starts a game</span></div>
+      <details class="wake-help"><summary>Per-server listener status</summary><p id="wake-runtime-note" class="mu"></p><div id="wake-runtime-list"></div></details>
       <p id="wake-status" class="wake-status" role="status" aria-live="polite"></p><p id="wake-error" class="node-error-note" role="alert" hidden></p>
       <p class="wake-safety"><b>Before enabling:</b> Any unauthenticated Java login can request a start. Pings never wake servers. Disable and confirm worker acceptance for maintenance.</p>
       <form id="wake-form"><fieldset id="wake-fields" class="wake-settings-grid" disabled>
@@ -178,19 +241,21 @@
           <div class="wake-note"><b>Player flow</b><ol><li>See the offline MOTD and icon.</li><li>Join to request startup and receive a disconnect message.</li><li>Reconnect after the real server finishes booting.</li></ol>Early reconnects may fail while the game takes over its normal port. This is not a proxy or a Minecraft 1.21.6 dialog.</div>
         </section>
         <section class="wake-section" aria-labelledby="wake-appearance-title"><h3 id="wake-appearance-title">Offline appearance</h3>
+          <div class="wake-template"><button type="button" class="btn sm" id="wake-preset">Use panel branding template</button><small>Replaces MOTD, version label, and both messages using your saved panel name/accent. Other settings and icons stay untouched. Review and Save settings to apply.</small></div>
           ${controls(['offline_motd', 'version_label', 'max_players', 'use_server_icon'])}
+          <p class="wake-note"><b>Red X ping icon:</b> the sleeping listener advertises an incompatible protocol so vanilla Minecraft shows its red X instead of normal ping bars. The version label and MOTD explain “Join to start”; a real join still requests startup. This is separate from the PNG server icon.</p>
           <label class="f wake-control" for="wake-upload"><span>Custom fallback icon</span><input id="wake-upload" type="file" accept="image/png" aria-describedby="wake-icon-help"><small id="wake-icon-help">Exactly 64×64 PNG. The complete data URL must be ≤64 KiB (file approximately ≤48 KiB). No remote image URLs.</small></label>
           <div class="wake-icon-actions"><img id="wake-preview" width="64" height="64" alt="Custom offline icon preview" hidden><button type="button" class="btn sm" id="wake-remove">Remove custom icon</button></div>
         </section>
         <section class="wake-section" aria-labelledby="wake-messages-title"><h3 id="wake-messages-title">Player messages</h3>
           ${controls(['starting_message', 'unavailable_message'])}
-          <div class="wake-note"><b>Text formatting</b><p>Use {server} for the server name, {version} for its installed version, newlines, and legacy &amp; color codes such as &amp;a. Limits count UTF-8 bytes, not characters. Very large expanded messages use a safe fallback.</p><p>The online server keeps its own MOTD, icon, and player limit. The server icon is loaded when its offline listener opens.</p></div>
+          <div class="wake-note"><b>Text formatting</b><p>Use {server}, {version}, newlines, legacy &amp; codes such as &amp;a, and exact colors such as &amp;#387aff. Colors and styles are sent as Minecraft text components; pre-1.16 clients use the nearest legacy color. Limits count UTF-8 bytes. Very large expanded messages use a safe fallback.</p><p>The online server keeps its own MOTD, icon, and player limit. The server icon is loaded when its offline listener opens.</p></div>
         </section>
       </fieldset>
       <details class="wake-help"><summary>Requirements, troubleshooting, and save behavior</summary><div class="wake-help-grid">
         <section><h4>Which servers can wake?</h4><p>Recognized Java-protocol servers assigned locally to this node, using an available primary TCP port (1024–65535). Bedrock is not supported. Active, startup-halted, restore-blocked, or conflicting servers are skipped; maintenance operations block starts. Normal Java and isolation requirements still apply.</p><p>The node daemon must stay running and its game ports must be reachable through your firewall/NAT. Configuration is checked roughly once per second. Limits: 1024 listeners, 64 connections, and 12 admitted connections per source IP per 10 seconds.</p></section>
         <section><h4>Worker returns HTTP 405 or 404?</h4><ol><li>Update and restart the affected worker, not only this panel.</li><li>Check its saved node URL points to that daemon.</li><li>Ensure its proxy forwards <code>PUT /api/cluster/wake</code> with authentication.</li><li>Choose <b>Retry saved settings</b> and wait for acceptance.</li></ol><p>A 405 means the method was rejected; it does not prove whether the cause is an old binary, wrong URL, or proxy. 401/403 means check the Node Token / admin API key and access rules.</p></section>
-        <section><h4>What do the buttons do?</h4><p><b>Save settings</b> saves this form and attempts delivery. <b>Retry saved settings</b> resends the last saved configuration without using unsaved edits. <b>Refresh status</b> reloads the last stored acknowledgement; it does not retry delivery or test ports.</p><p>Worker acceptance is the last matching acknowledgement, not live health. Inspect node logs for bind/start failures. A pending disable is not a confirmed disable. Wake settings are saved separately from the node connection form.</p></section>
+        <section><h4>What do the buttons do?</h4><p><b>Save settings</b> saves this form and attempts delivery. <b>Retry saved settings</b> resends the last saved configuration without using unsaved edits. <b>Refresh status</b> reloads acknowledgement and listener state; it does not retry delivery or test ports from the Internet. <b>Check listeners</b> reads the latest runtime reconciliation and per-server bind state.</p><p>Green means ports are bound on the node with matching settings, not that a player can reach them through a firewall or that the game will boot successfully. Status expires after ten seconds; check again for a fresh report. A pending disable is not a confirmed disable.</p></section>
       </div></details>
       <details class="wake-help"><summary>Saved configuration details</summary><pre id="wake-saved"></pre></details>
       <div class="wake-actions"><p id="wake-draft-note" class="mu"></p><div class="row">
@@ -198,9 +263,10 @@
       <button type="button" id="wake-retry" class="btn" disabled>Retry saved settings</button>
       <button type="button" id="wake-refresh" class="btn">Refresh status</button></div></div></form>
       </div></div>`;
-    const ctx = { id, owner: identity(), root: document.querySelector('#wake-modal'), saved: null, loaded: false, busy: false, dirty: false, unknown: false, icon: '', error: '', uploadSequence: 0 };
+    const ctx = { id, owner: identity(), root: document.querySelector('#wake-modal'), saved: null, loaded: false, busy: false, dirty: false, unknown: false, icon: '', error: '', uploadSequence: 0, runtime: null, runtimeBusy: false, runtimeError: '', runtimeSequence: 0, runtimeTimer: null };
     current = ctx;
     const close = () => {
+      clearTimeout(ctx.runtimeTimer);
       const restore = previous && live(ctx);
       if (current === ctx) current = null;
       ctx.root.remove();
@@ -208,6 +274,8 @@
       if (ctx.owner === identity()) opener?.focus();
     };
     el(ctx, 'close').onclick = close;
+    el(ctx, 'check').onclick = () => { if (!ctx.busy && !ctx.runtimeBusy) return checkRuntime(ctx); };
+    el(ctx, 'preset').onclick = () => applyBrandingPreset(ctx);
     ctx.root.addEventListener('keydown', event => {
       if (event.key === 'Escape') { event.stopPropagation(); close(); }
       if (event.key !== 'Tab') return;
@@ -229,5 +297,5 @@
     el(ctx, 'close').focus();
     await request(ctx);
   }
-  window.NPNodeWake = { open, validate, validEnvelope, statusText, safeIcon };
+  window.NPNodeWake = { open, validate, validEnvelope, statusText, safeIcon, runtimeSummary, validRuntime };
 })();
