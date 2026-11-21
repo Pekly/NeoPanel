@@ -7,7 +7,7 @@ These features live in the shared web panel. They do not remove or change Window
 - Opening the panel root restores the last server page when that server is still in your authorized inventory. Explicit links take priority. Visiting **Servers** makes the dashboard your saved landing page.
 - Refreshing Files restores the last directory and open text file after checking access. Existing unsaved-draft recovery asks before restoring a draft, including a warning when the server copy changed.
 - Pin servers with the star on their card. Pins sort first; **Pinned only** filters the list. Sort by name, status, or location. Search, location, sorting, and pins are saved for your account in this browser. The location selector lists only hosts containing your servers and stays locked when they are all on one host. Layout buttons keep a stable toolbar position.
-- **Join** in the server header copies the Minecraft player connection address, not the panel URL. Card addresses remain copyable.
+- The address button in the server header copies the Minecraft player connection address, not the panel URL. Its label stays consistent during live updates. Card addresses remain copyable.
 
 ## Console and connection status
 
