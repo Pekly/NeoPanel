@@ -1,5 +1,7 @@
 # NeoPanel
 
+[![Repository size](https://img.shields.io/github/repo-size/Pekly/NeoPanel?style=flat-square)](https://github.com/Pekly/NeoPanel)
+
 NeoPanel is a web panel for running Minecraft servers. Start a server, watch its console, edit files, install plugins or mods, and manage backups from your browser. You can keep everything on one machine or connect workers on other hosts.
 
 The backend is written in Go, with the web interface and a SQLite database built in. You don't need PHP, a separate database server, or Docker to run the panel.

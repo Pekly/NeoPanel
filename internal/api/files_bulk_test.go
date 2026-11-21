@@ -172,7 +172,11 @@ func TestBulkDeleteInvalidRequestPreflight(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			w := f.request("POST", bulkDeleteURL, body, "owner")
 			var result map[string]string
-			if w.Code != 400 || json.Unmarshal(w.Body.Bytes(), &result) != nil || result["error"] == "" {
+			wantStatus := http.StatusBadRequest
+			if name == "oversized path" || name == "oversized whitespace" {
+				wantStatus = http.StatusRequestEntityTooLarge
+			}
+			if w.Code != wantStatus || json.Unmarshal(w.Body.Bytes(), &result) != nil || result["error"] == "" {
 				t.Fatal(w.Code, w.Body.String())
 			}
 			if _, err := os.Stat(filepath.Join(root, "keep.txt")); err != nil {

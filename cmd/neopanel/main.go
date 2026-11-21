@@ -135,6 +135,7 @@ func main() {
 	// 2. Initialize Process / Server Manager
 	log.Printf("[INFO] Initializing server manager with data directory: %s", cfg.Paths.ServersDir)
 	manager := runner.NewServerManager(cfg.Paths.ServersDir, db)
+	manager.SetAllowInsecureGameFallback(cfg.Security.AllowInsecureGameFallback)
 	if cfg.Server.StartupTimeoutSec > 0 {
 		manager.SetStartupTimeout(time.Duration(cfg.Server.StartupTimeoutSec) * time.Second)
 	}
@@ -162,11 +163,13 @@ func main() {
 
 	addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:              addr,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		MaxHeaderBytes:    32 << 10,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {

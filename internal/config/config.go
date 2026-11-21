@@ -54,6 +54,8 @@ type SecurityConfig struct {
 	NodeToken        string          `yaml:"node_token"`             // cluster node authentication token (neo_node_...)
 	Turnstile        TurnstileConfig `yaml:"turnstile"`
 	PasskeysDisabled bool            `yaml:"passkeys_disabled"`
+	// Explicit trusted-host opt-out; never a per-tenant/free/premium setting.
+	AllowInsecureGameFallback bool `yaml:"allow_insecure_game_fallback"`
 	// Empty means socket peers only. For local Caddy explicitly configure
 	// ["127.0.0.1/32", "::1/128"]. Only X-Forwarded-For is accepted.
 	TrustedProxies []string `yaml:"trusted_proxies,omitempty"`

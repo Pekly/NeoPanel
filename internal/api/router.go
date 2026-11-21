@@ -108,20 +108,23 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// Security & CORS headers
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("X-XSS-Protection", "1; mode=block")
-	if !limitAuthBody(w, req) {
+	r.responseSecurityHeaders(w, req)
+	if !limitAPIRequestBody(w, req) || !limitAuthBody(w, req) {
 		return
 	}
 	req = r.clientIPs.request(req)
-
+	dispatch := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/auth/") && !safeHTTPMethod(req.Method) && req.Header.Get("Origin") != "" && !r.auth.sameOriginRequest(req) {
+			writeError(w, http.StatusForbidden, "Cross-origin authentication request rejected")
+			return
+		}
+		r.mux.ServeHTTP(w, req)
+	})
 	if r.globalLimiter != nil {
-		r.globalLimiter.Middleware(r.mux).ServeHTTP(w, req)
+		r.globalLimiter.Middleware(dispatch).ServeHTTP(w, req)
 		return
 	}
-	r.mux.ServeHTTP(w, req)
+	dispatch.ServeHTTP(w, req)
 }
 
 func (r *Router) registerRoutes(db *database.DB) {
@@ -495,6 +498,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		tokenStr := ""
+		cookieAuth := false
 
 		// 1. Check Authorization Bearer header
 		authHeader := req.Header.Get("Authorization")
@@ -506,18 +510,27 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		if tokenStr == "" {
 			if cookie, err := req.Cookie("neopanel_token"); err == nil {
 				tokenStr = cookie.Value
+				cookieAuth = tokenStr != ""
 			}
 		}
 
 		// 3. Check ?token= query fallback (used for browser downloads across proxied nodes)
 		if tokenStr == "" {
 			if qt := strings.TrimSpace(req.URL.Query().Get("token")); qt != "" {
+				if req.Method != http.MethodGet && req.Method != http.MethodHead {
+					writeError(w, http.StatusForbidden, "Use Authorization Bearer, not a query token, for write requests")
+					return
+				}
 				tokenStr = qt
 			}
 		}
 
 		if tokenStr == "" {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized: missing token"})
+			return
+		}
+		if cookieAuth && !safeHTTPMethod(req.Method) && !r.auth.sameOriginRequest(req) {
+			writeError(w, http.StatusForbidden, "Cookie-authenticated writes require a same-origin request; API clients should use Authorization Bearer")
 			return
 		}
 

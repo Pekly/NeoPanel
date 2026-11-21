@@ -50,38 +50,40 @@ const (
 )
 
 type ProcessInstance struct {
-	lifecycleMu      sync.Mutex
-	runDone          chan struct{}
-	owned            *ownedCommand
-	runLock          *os.File
-	cleanupErr       error
-	mu               sync.RWMutex
-	server           *database.Server
-	workingDir       string
-	cmd              *exec.Cmd
-	stdin            io.WriteCloser
-	status           string
-	startedAt        time.Time
-	metrics          *ProcessMetrics
-	logBuffer        []string
-	subscribers      map[chan string]struct{}
-	onlinePlayers    map[string]*OnlinePlayer
-	unlistedPlayers  int // Positive list count without complete names must never look empty.
-	uuidCache        map[string]string
-	zeroPlayersSince time.Time
-	stopExpected     bool
-	reachedOnline    bool
-	timedOut         bool
-	runID            uint64
-	startupTimeout   time.Duration
-	startupStopCh    chan struct{}
-	onReady          func(srvID string)
-	onExit           func(srvID string, unexpected bool, reachedOnline bool, timedOut bool, uptime time.Duration)
-	cachedDiskMB     int64
-	lastDiskCheck    time.Time
-	diskScanning     bool
-	isolationEngine  string
-	tasksMax         int
+	lifecycleMu               sync.Mutex
+	runDone                   chan struct{}
+	owned                     *ownedCommand
+	runLock                   *os.File
+	cleanupErr                error
+	mu                        sync.RWMutex
+	server                    *database.Server
+	workingDir                string
+	cmd                       *exec.Cmd
+	stdin                     io.WriteCloser
+	status                    string
+	startedAt                 time.Time
+	metrics                   *ProcessMetrics
+	logBuffer                 []string
+	logBufferBytes            int
+	subscribers               map[chan string]struct{}
+	onlinePlayers             map[string]*OnlinePlayer
+	unlistedPlayers           int // Positive list count without complete names must never look empty.
+	uuidCache                 map[string]string
+	zeroPlayersSince          time.Time
+	stopExpected              bool
+	reachedOnline             bool
+	timedOut                  bool
+	runID                     uint64
+	startupTimeout            time.Duration
+	startupStopCh             chan struct{}
+	onReady                   func(srvID string)
+	onExit                    func(srvID string, unexpected bool, reachedOnline bool, timedOut bool, uptime time.Duration)
+	cachedDiskMB              int64
+	lastDiskCheck             time.Time
+	diskScanning              bool
+	isolationEngine           string
+	tasksMax                  int
+	allowInsecureGameFallback bool
 }
 
 func NewProcessInstance(server *database.Server, workingDir string, startupTimeout time.Duration, onReady func(string), onExit func(string, bool, bool, bool, time.Duration)) *ProcessInstance {
@@ -548,11 +550,12 @@ func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 	p.mu.RLock()
 	native := downloader.IsNativeSoftware(p.server.Type)
 	p.mu.RUnlock()
-	scanner := bufio.NewScanner(r)
-	// Support very large single-line outputs (up to 1MB) without dropping stream
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Text()
+	reader := bufio.NewReaderSize(r, 32<<10)
+	for {
+		line, ok := readConsoleLine(reader)
+		if !ok {
+			break
+		}
 		if native {
 			var keep bool
 			line, keep = normalizeSteelConsoleLine(line)
@@ -1006,6 +1009,7 @@ func (p *ProcessInstance) stopConditional(graceful bool, condition func() bool) 
 }
 
 func (p *ProcessInstance) broadcast(msg string) {
+	msg = limitConsoleText(msg)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -1014,11 +1018,15 @@ func (p *ProcessInstance) broadcast(msg string) {
 		return
 	}
 
-	// Append to buffer
-	if len(p.logBuffer) >= maxLogBuffer {
+	// Bound retained bytes as well as line count. Clear evicted references so
+	// the old backing array cannot keep oversized tenant output alive.
+	for len(p.logBuffer) > 0 && (len(p.logBuffer) >= maxLogBuffer || p.logBufferBytes+len(msg) > maxConsoleHistoryBytes) {
+		p.logBufferBytes -= len(p.logBuffer[0])
+		p.logBuffer[0] = ""
 		p.logBuffer = p.logBuffer[1:]
 	}
 	p.logBuffer = append(p.logBuffer, msg)
+	p.logBufferBytes += len(msg)
 
 	// Send non-blocking to active subscribers
 	for ch := range p.subscribers {
@@ -1174,19 +1182,15 @@ func syncBungeePort(workingDir string, port int) error {
 }
 
 // buildCommand constructs the execution command for the server process.
-// If bubblewrap (`bwrap`) is installed, it runs within an unprivileged Linux
-// sandbox jailing the filesystem so malicious plugins cannot read host files
-// or traverse into other servers. If `systemd-run` is available, it applies slice
-// resource limits (e.g. TasksMax=512) to thwart fork bombs.
+// Linux auto/bwrap modes require filesystem and systemd resource isolation by
+// default. Only explicit trusted-host configuration permits degraded fallback.
 func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.Cmd, string, error) {
 	p.mu.RLock()
-	isoEngine := p.isolationEngine
+	isoEngine := normalizeIsolationEngine(p.isolationEngine)
+	allowInsecure := p.allowInsecureGameFallback
 	tasksMax := p.tasksMax
 	srv := *p.server
 	p.mu.RUnlock()
-	if isoEngine == "" {
-		isoEngine = "auto"
-	}
 	if runtime.GOOS == "windows" {
 		if isoEngine != "auto" && isoEngine != "process" && isoEngine != "none" {
 			return nil, "", fmt.Errorf("isolation engine %q is unavailable on Windows; use auto/process (Job Object management, no filesystem isolation)", isoEngine)
@@ -1219,6 +1223,9 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 	}
 	if isoEngine != "auto" && isoEngine != "bwrap" && isoEngine != "systemd" {
 		return nil, "", fmt.Errorf("unknown isolation engine %q", isoEngine)
+	}
+	if err := requireLinuxSandboxTools(runtime.GOOS, isoEngine, allowInsecure, bwrapErr == nil && bwrapPath != "", sysErr == nil && systemdPath != ""); err != nil {
+		return nil, "", err
 	}
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {

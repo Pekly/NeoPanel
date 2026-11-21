@@ -382,15 +382,7 @@ func (h *AuthHandler) completeVerifiedLogin(w http.ResponseWriter, r *http.Reque
 
 	logAuditUser(h.db, user.ID, r, "auth_login", fmt.Sprintf("Signed in to NeoPanel (%s)", user.Role))
 
-	// Set HTTP-only cookie as well for easy SPA access
-	http.SetCookie(w, &http.Cookie{
-		Name:     "neopanel_token",
-		Value:    token,
-		Path:     "/",
-		Expires:  time.Now().Add(time.Duration(h.expHours) * time.Hour),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	h.setSessionCookie(w, r, token)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"token": token,
@@ -453,14 +445,7 @@ func (h *AuthHandler) Login2FA(w http.ResponseWriter, r *http.Request) {
 	}
 	logAuditUser(h.db, user.ID, r, "auth_2fa_success", logMsg)
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "neopanel_token",
-		Value:    token,
-		Path:     "/",
-		Expires:  time.Now().Add(time.Duration(h.expHours) * time.Hour),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-	})
+	h.setSessionCookie(w, r, token)
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"token": token,

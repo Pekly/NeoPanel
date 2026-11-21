@@ -194,15 +194,10 @@ func (j *windowsJob) close() error {
 	return errors.Join(errs...)
 }
 
-func checkWorldLock(path string) error {
-	f, err := os.OpenFile(path, os.O_RDWR, 0)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("cannot inspect world lock %s: %w", path, err)
-	}
-	defer f.Close()
+// os.Root rejects escaping links; the common precheck and inode check reject links.
+const worldLockOpenFlags = 0
+
+func probeWorldLock(f *os.File, path string) error {
 	// Java FileChannel.tryLock covers this byte. Never truncate/delete the file.
 	if err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &windows.Overlapped{}); err != nil {
 		return fmt.Errorf("world is in use or its lock cannot be verified (%s); do not delete session.lock: %w", path, err)

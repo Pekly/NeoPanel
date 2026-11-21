@@ -12,6 +12,7 @@ import (
 // Dashboard loads, file browsing and background polls share this allowance.
 // Sensitive authentication routes also have their own stricter limiter.
 const defaultAPIRequestsPerMinute = 600
+const maxRateLimitBuckets = 32768
 
 // clientBucket tracks token-bucket rate limit state for a single client IP.
 type clientBucket struct {
@@ -30,6 +31,7 @@ type IPRateLimiter struct {
 	authRateSec   float64
 	authBurst     float64
 	lastCleanup   time.Time
+	maxBuckets    int
 }
 
 // NewIPRateLimiter creates a rate limiter.
@@ -51,6 +53,7 @@ func NewIPRateLimiter(defaultLimit float64, authLimit float64) *IPRateLimiter {
 		authRateSec:   authLimit / 60.0,
 		authBurst:     authLimit / 3.0, // auth burst (e.g. 5 requests)
 		lastCleanup:   time.Now(),
+		maxBuckets:    maxRateLimitBuckets,
 	}
 }
 
@@ -185,6 +188,13 @@ func (lim *IPRateLimiter) Allow(r *http.Request) bool {
 
 	bucket, exists := targetMap[ip]
 	if !exists {
+		limit := lim.maxBuckets
+		if limit <= 0 {
+			limit = maxRateLimitBuckets
+		}
+		if len(targetMap) >= limit {
+			return false
+		} // Do not reset existing limits by evicting active clients.
 		targetMap[ip] = &clientBucket{
 			tokens:     burst - 1,
 			lastRefill: now,
@@ -194,6 +204,9 @@ func (lim *IPRateLimiter) Allow(r *http.Request) bool {
 
 	// Refill tokens according to elapsed time
 	elapsed := now.Sub(bucket.lastRefill).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
 	bucket.tokens += elapsed * rate
 	if bucket.tokens > burst {
 		bucket.tokens = burst
