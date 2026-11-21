@@ -222,3 +222,8 @@ test('Steel explanation uses its real name, Rust implementation and pre-alpha st
   const css = fs.readFileSync(path.join(__dirname, '../static/css/workbench.css'), 'utf8');
   assert.match(css, /\.srvh\s*\+\s*\.steel-info\s*\{\s*margin-top:\s*20px/);
 });
+test('expanding Steel configuration does not stretch neighboring settings cards', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../static/css/workbench.css'), 'utf8');
+  assert.match(css, /\.np-server-settings-group\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*align-items:\s*start;/);
+  assert.match(css, /@media \(max-width: 900px\)\s*\{\s*\.np-server-settings-group\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+});
