@@ -66,6 +66,7 @@ type ProcessInstance struct {
 	logBuffer        []string
 	subscribers      map[chan string]struct{}
 	onlinePlayers    map[string]*OnlinePlayer
+	unlistedPlayers  int // Positive list count without complete names must never look empty.
 	uuidCache        map[string]string
 	zeroPlayersSince time.Time
 	stopExpected     bool
@@ -227,6 +228,8 @@ func (p *ProcessInstance) Start() error {
 	p.reachedOnline = false
 	p.timedOut = false
 	p.onlinePlayers = make(map[string]*OnlinePlayer)
+	p.unlistedPlayers = 0
+	p.zeroPlayersSince = time.Time{}
 	p.uuidCache = make(map[string]string)
 	p.runID++
 	currentRunID := p.runID
@@ -508,6 +511,8 @@ func (p *ProcessInstance) Start() error {
 		p.stdin = nil
 		close(done)
 		p.onlinePlayers = make(map[string]*OnlinePlayer)
+		p.unlistedPlayers = 0
+		p.zeroPlayersSince = time.Time{}
 		expected := p.stopExpected
 		reached := p.reachedOnline
 		timedOut := p.timedOut
@@ -564,7 +569,7 @@ func (p *ProcessInstance) streamOutput(r io.Reader, runID uint64) {
 			p.status = "online"
 			p.reachedOnline = true
 			p.stopStartupTimerLocked()
-			if len(p.onlinePlayers) == 0 {
+			if len(p.onlinePlayers) == 0 && p.unlistedPlayers == 0 {
 				p.zeroPlayersSince = time.Now()
 			}
 			readyCallback = p.onReady
@@ -709,7 +714,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
-			if len(p.onlinePlayers) == 0 && p.status == "online" {
+			if len(p.onlinePlayers) == 0 && p.unlistedPlayers == 0 && p.status == "online" && p.zeroPlayersSince.IsZero() {
 				p.zeroPlayersSince = time.Now()
 			}
 		}
@@ -722,7 +727,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
-			if len(p.onlinePlayers) == 0 && p.status == "online" {
+			if len(p.onlinePlayers) == 0 && p.unlistedPlayers == 0 && p.status == "online" && p.zeroPlayersSince.IsZero() {
 				p.zeroPlayersSince = time.Now()
 			}
 		}
@@ -735,7 +740,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
-			if len(p.onlinePlayers) == 0 && p.status == "online" {
+			if len(p.onlinePlayers) == 0 && p.unlistedPlayers == 0 && p.status == "online" && p.zeroPlayersSince.IsZero() {
 				p.zeroPlayersSince = time.Now()
 			}
 		}
@@ -748,7 +753,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 		p.mu.Lock()
 		if p.runID == runID && p.onlinePlayers != nil {
 			delete(p.onlinePlayers, low)
-			if len(p.onlinePlayers) == 0 && p.status == "online" {
+			if len(p.onlinePlayers) == 0 && p.unlistedPlayers == 0 && p.status == "online" && p.zeroPlayersSince.IsZero() {
 				p.zeroPlayersSince = time.Now()
 			}
 		}
@@ -757,13 +762,17 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 	}
 
 	if m := reVanillaListLine.FindStringSubmatch(clean); len(m) == 3 {
-		cnt, _ := strconv.Atoi(m[1])
+		cnt, countErr := strconv.Atoi(m[1])
 		rawNames := strings.TrimSpace(m[2])
 		p.mu.Lock()
 		if p.runID == runID {
-			if cnt == 0 || rawNames == "" {
+			if countErr != nil || cnt > 100000 || (cnt == 0 && rawNames != "") {
+				p.unlistedPlayers = 1
+				p.zeroPlayersSince = time.Time{}
+			} else if cnt == 0 {
 				p.onlinePlayers = make(map[string]*OnlinePlayer)
-				if p.status == "online" {
+				p.unlistedPlayers = 0
+				if p.status == "online" && p.zeroPlayersSince.IsZero() {
 					p.zeroPlayersSince = time.Now()
 				}
 			} else {
@@ -789,6 +798,7 @@ func (p *ProcessInstance) trackPlayerLine(rawLine string, runID uint64) {
 					}
 				}
 				p.onlinePlayers = nextMap
+				p.unlistedPlayers = max(0, cnt-len(nextMap))
 			}
 		}
 		p.mu.Unlock()
@@ -921,9 +931,19 @@ func (p *ProcessInstance) WriteInput(cmd string) error {
 }
 
 func (p *ProcessInstance) Stop(graceful bool) error {
+	return p.stopConditional(graceful, nil)
+}
+
+// condition runs under lifecycleMu and mu at the transition to stopping.
+// It must not acquire manager/process locks or perform blocking work.
+func (p *ProcessInstance) stopConditional(graceful bool, condition func() bool) error {
 	p.lifecycleMu.Lock()
 	defer p.lifecycleMu.Unlock()
 	p.mu.Lock()
+	if condition != nil && !condition() {
+		p.mu.Unlock()
+		return nil
+	}
 	if p.cmd == nil {
 		err := p.cleanupErr
 		p.mu.Unlock()
@@ -1331,7 +1351,7 @@ func (p *ProcessInstance) buildCommand(javaBinary string, args []string) (*exec.
 func (p *ProcessInstance) GetIdleDuration() (time.Duration, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if p.status != "online" || len(p.onlinePlayers) > 0 || p.zeroPlayersSince.IsZero() {
+	if p.status != "online" || len(p.onlinePlayers) > 0 || p.unlistedPlayers > 0 || p.zeroPlayersSince.IsZero() {
 		return 0, false
 	}
 	return time.Since(p.zeroPlayersSince), true
@@ -1341,5 +1361,5 @@ func (p *ProcessInstance) GetIdleDuration() (time.Duration, bool) {
 func (p *ProcessInstance) GetPlayerCount() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return len(p.onlinePlayers)
+	return len(p.onlinePlayers) + p.unlistedPlayers
 }

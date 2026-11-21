@@ -9765,9 +9765,19 @@ function openNodeModal(nodeId = null) {
           <button type="button" class="btn sm" onclick="closeModal()" aria-label="Close node settings">&times;</button>
         </div>
         ${renderNodeWakeSettings(existing)}
+        <form id="node-idle-policy" onsubmit="NPNodeIdle.saveLocal(event)" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;">
+          <fieldset id="node-idle-fields" disabled style="border:0;padding:0;margin:0;">
+            <label class="row sb"><b>Idle auto-shutdown</b><input type="checkbox" id="nm-free" onchange="$('#nm-timeout-wrap').style.display=this.checked?'block':'none'"></label>
+            <div id="nm-timeout-wrap" style="display:none;margin-top:10px;"><label class="f"><span>Minutes empty (1–1440, default 15)</span><input type="number" id="nm-idle-timeout" value="15" min="1" max="1440" step="1" required></label></div>
+          </fieldset>
+          <p class="mu" style="font-size:12px;">Gracefully stop online servers after the tracked player count stays at zero. Checks run about every 20 seconds. Player-list refreshes do not reset the timer. Join-to-start, if enabled, can wake them again.</p>
+          <p id="node-idle-status" role="status" class="mu" style="font-size:12px;">Loading idle policy…</p><p id="node-idle-error" class="node-error-note" role="alert" hidden></p>
+          <div class="row" style="gap:8px;flex-wrap:wrap;"><button type="submit" class="btn pr" id="node-idle-save" disabled>Save idle policy</button><button type="button" class="btn sm" id="node-idle-retry" disabled>Retry saved policy</button><button type="button" class="btn sm" id="node-idle-refresh">Refresh policy status</button></div>
+        </form>
         <button type="button" class="btn" onclick="closeModal();S.appearanceSection=3;selectAdminTab(4)">Edit address</button>
       </div>
     </div>`;
+    if (typeof NPNodeIdle !== 'undefined') NPNodeIdle.attach(existing.id, true);
     return;
   }
   const isEdit = Boolean(existing && !existing.is_local);
@@ -9815,11 +9825,11 @@ function openNodeModal(nodeId = null) {
         ${isEdit ? renderNodeWakeSettings(existing) : ''}
 
         <!-- Free Node Idle Player Timeout -->
-        <div class="np-modal-half" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+        <div id="node-idle-policy" class="np-modal-half" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
           <label class="row sb" style="cursor: pointer; margin-bottom: 8px;">
             <div>
-              <b style="color: var(--tx); display: block;">Free Node (Idle Player Auto-Shutdown)</b>
-              <span class="mu" style="font-size: 12px;">Stop the server after it has been empty for this long.</span>
+              <b style="color: var(--tx); display: block;">Idle auto-shutdown</b>
+              <span class="mu" style="font-size: 12px;">Gracefully stop online servers after this many minutes with no tracked players.</span>
             </div>
             <span class="sw">
               <input type="checkbox" id="nm-free" ${existing?.is_free ? 'checked' : ''} onchange="$('#nm-timeout-wrap').style.display = this.checked ? 'block' : 'none'">
@@ -9832,6 +9842,9 @@ function openNodeModal(nodeId = null) {
               <input type="number" id="nm-idle-timeout" value="${existing?.idle_timeout_min || 15}" min="1" max="1440" placeholder="15">
             </label>
           </div>
+          <p class="mu" style="font-size:12px;">Save Node applies this policy to the worker, including disabling it. Checks run about every 20 seconds; player-list refreshes do not restart the idle timer. Join-to-start can wake stopped servers again.</p>
+          <p id="node-idle-status" role="status" class="mu" style="font-size:12px;">${isEdit ? 'Loading idle policy delivery status…' : 'Connect the node to apply this policy.'}</p><p id="node-idle-error" class="node-error-note" role="alert" hidden></p>
+          <div class="row" style="gap:8px;flex-wrap:wrap;"><button type="button" class="btn sm" id="node-idle-retry" disabled>Retry saved policy</button><button type="button" class="btn sm" id="node-idle-refresh" ${isEdit ? '' : 'disabled'}>Refresh policy status</button></div>
         </div>
 
         <!-- Node Permissions Policy -->
@@ -9891,6 +9904,7 @@ function openNodeModal(nodeId = null) {
   </div>`;
 
   setTimeout(() => $('#nm-name')?.focus(), 40);
+  if (isEdit && typeof NPNodeIdle !== 'undefined') NPNodeIdle.attach(existing.id);
 }
 
 async function testNodeModalConnection(nodeId = '') {
@@ -9934,6 +9948,11 @@ async function testNodeModalConnection(nodeId = '') {
 async function submitNodeModal(e, nodeId = '') {
   e.preventDefault();
   const btn = $('#nm-submit-btn');
+  const form = btn?.closest('form');
+  const ownerToken = S.token, ownerUser = S.user?.id;
+  const live = () => form?.isConnected && $('#nm-submit-btn') === btn && S.token === ownerToken && S.user?.id === ownerUser && S.user?.role === 'admin';
+  if (!live()) return;
+  let pendingPolicy = false;
   if (btn) setBtnLoading(btn, true, nodeId ? 'Saving...' : 'Connecting...');
 
   const payload = {
@@ -9956,6 +9975,14 @@ async function submitNodeModal(e, nodeId = '') {
       method: isEdit ? 'PUT' : 'POST',
       body: JSON.stringify(payload)
     });
+    if (!live()) return;
+    if (res?.id && res.idle_policy_applied !== true) {
+      pendingPolicy = true;
+      form.dataset.id = res.id; // A saved new node must not be created again on retry.
+      if (typeof NPNodeIdle !== 'undefined') NPNodeIdle.savedNode(res.id, {enabled:payload.is_free, timeout_minutes:payload.idle_timeout_min}, res);
+      toast('Node saved, but idle auto-shutdown is not confirmed on the worker. See the policy warning and retry.', 'bad');
+      return;
+    }
     closeModal();
     if (res && res.online) {
       toast(`Node "${res.name}" connected (${res.latency_ms ?? 0}ms)!`, 'ok');
@@ -9964,7 +9991,9 @@ async function submitNodeModal(e, nodeId = '') {
     }
     await Promise.all([loadDashboard(), loadAdminNodes()]);
   } catch (err) {
-    if (btn) setBtnLoading(btn, false);
+    // The API helper reports errors; keep this form's edits for retry.
+  } finally {
+    if (btn) { setBtnLoading(btn, false); if (pendingPolicy) btn.textContent = 'Save Node'; }
   }
 }
 

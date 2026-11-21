@@ -30,6 +30,7 @@ type NodeHandler struct {
 	manager    *runner.ServerManager
 	httpClient *http.Client
 	wakeLocks  sync.Map // node ID -> *sync.Mutex; serializes desired config and delivery
+	idleLocks  sync.Map // node ID -> *sync.Mutex; shared by generic and dedicated policy saves
 }
 
 func NewNodeHandler(cfg *config.Config, db *database.DB, auth *AuthHandler, manager *runner.ServerManager) *NodeHandler {
@@ -45,27 +46,29 @@ func NewNodeHandler(cfg *config.Config, db *database.DB, auth *AuthHandler, mana
 }
 
 type NodeStatusView struct {
-	ID              string      `json:"id"`
-	Name            string      `json:"name"`
-	BaseURL         string      `json:"base_url"`
-	FQDN            string      `json:"fqdn"`
-	Location        string      `json:"location"`
-	IsLocal         bool        `json:"is_local"`
-	Online          bool        `json:"online"`
-	Error           string      `json:"error,omitempty"`
-	LatencyMS       int64       `json:"latency_ms"`
-	ServerCount     int         `json:"server_count"`
-	System          *SystemInfo `json:"system,omitempty"`
-	HasToken        bool        `json:"has_token"`
-	TokenPrefix     string      `json:"token_prefix"`
-	IsFree          bool        `json:"is_free"`
-	IdleTimeoutMin  int         `json:"idle_timeout_min"`
-	AllowUserRAM    bool        `json:"allow_user_ram"`
-	AllowUserPorts  bool        `json:"allow_user_ports"`
-	AllowUserJava   bool        `json:"allow_user_java"`
-	IsolationEngine string      `json:"isolation_engine"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	ID                string      `json:"id"`
+	Name              string      `json:"name"`
+	BaseURL           string      `json:"base_url"`
+	FQDN              string      `json:"fqdn"`
+	Location          string      `json:"location"`
+	IsLocal           bool        `json:"is_local"`
+	Online            bool        `json:"online"`
+	Error             string      `json:"error,omitempty"`
+	LatencyMS         int64       `json:"latency_ms"`
+	ServerCount       int         `json:"server_count"`
+	System            *SystemInfo `json:"system,omitempty"`
+	HasToken          bool        `json:"has_token"`
+	TokenPrefix       string      `json:"token_prefix"`
+	IsFree            bool        `json:"is_free"`
+	IdleTimeoutMin    int         `json:"idle_timeout_min"`
+	IdlePolicyApplied *bool       `json:"idle_policy_applied,omitempty"`
+	IdlePolicyError   string      `json:"idle_policy_error,omitempty"`
+	AllowUserRAM      bool        `json:"allow_user_ram"`
+	AllowUserPorts    bool        `json:"allow_user_ports"`
+	AllowUserJava     bool        `json:"allow_user_java"`
+	IsolationEngine   string      `json:"isolation_engine"`
+	CreatedAt         time.Time   `json:"created_at"`
+	UpdatedAt         time.Time   `json:"updated_at"`
 }
 
 func normalizeNodeBaseURL(raw string) (string, error) {
@@ -145,6 +148,11 @@ func (h *NodeHandler) buildLocalNodeView(reqHost string) NodeStatusView {
 		if localNode.IsolationEngine != "" {
 			isoEngine = localNode.IsolationEngine
 		}
+	}
+	if policy, err := h.db.GetNodeIdlePolicy("local"); err == nil {
+		isFree, idleMin = policy.Enabled, policy.TimeoutMinutes
+	} else {
+		isFree, idleMin = false, 15
 	}
 	return NodeStatusView{
 		ID:              "local",
@@ -472,8 +480,8 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 		FQDN            string `json:"fqdn"`
 		Location        string `json:"location"`
 		Upsert          bool   `json:"upsert"`
-		IsFree          bool   `json:"is_free"`
-		IdleTimeoutMin  int    `json:"idle_timeout_min"`
+		IsFree          *bool  `json:"is_free"`
+		IdleTimeoutMin  *int   `json:"idle_timeout_min"`
 		AllowUserRAM    *bool  `json:"allow_user_ram"`
 		AllowUserPorts  *bool  `json:"allow_user_ports"`
 		AllowUserJava   *bool  `json:"allow_user_java"`
@@ -481,6 +489,10 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+	if err := mergeNodeIdlePolicy(nil, req.IsFree, req.IdleTimeoutMin); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 
@@ -513,34 +525,55 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 		if existingList, err := h.db.ListNodes(); err == nil {
 			for _, ex := range existingList {
 				if strings.EqualFold(strings.TrimRight(ex.BaseURL, "/"), baseURL) || strings.EqualFold(ex.Name, req.Name) {
+					lock := h.idleLock(ex.ID)
+					lock.Lock()
+					defer lock.Unlock()
+					ex, err = h.db.GetNode(ex.ID)
+					if err != nil {
+						writeError(w, 404, "Node not found")
+						return
+					}
+					if err := mergeNodeIdlePolicy(ex, req.IsFree, req.IdleTimeoutMin); err != nil {
+						writeError(w, 400, err.Error())
+						return
+					}
 					ex.Name = req.Name
 					ex.BaseURL = baseURL
 					ex.APIToken = apiToken
 					ex.FQDN = fqdn
 					ex.Location = strings.TrimSpace(req.Location)
+					if err := h.pendingIdleDelivery(ex); err != nil {
+						writeError(w, 500, "Failed to persist pending idle delivery")
+						return
+					}
 					if err := h.db.UpdateNode(ex); err != nil {
 						writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update existing node: " + err.Error()})
 						return
 					}
+					idle := h.syncNodeIdlePolicy(r.Context(), ex)
 					online, sys, cnt, latency, probeErr := h.probeRemote(r.Context(), ex.BaseURL, ex.APIToken)
 					hasTok, tokPrefix := maskNodeToken(ex.APIToken)
 					logAudit(h.db, r, "node_update", fmt.Sprintf("Re-paired cluster node '%s' (%s) at %s", ex.Name, ex.ID, ex.BaseURL))
 					writeJSON(w, http.StatusOK, NodeStatusView{
-						ID:          ex.ID,
-						Name:        ex.Name,
-						BaseURL:     ex.BaseURL,
-						FQDN:        ex.FQDN,
-						Location:    ex.Location,
-						IsLocal:     false,
-						Online:      online,
-						Error:       probeErr,
-						LatencyMS:   latency,
-						ServerCount: cnt,
-						System:      sys,
-						HasToken:    hasTok,
-						TokenPrefix: tokPrefix,
-						CreatedAt:   ex.CreatedAt,
-						UpdatedAt:   ex.UpdatedAt,
+						IdlePolicyApplied: &idle.Applied,
+						IdlePolicyError:   idle.Error,
+						IsFree:            ex.IsFree,
+						IdleTimeoutMin:    ex.IdleTimeoutMin,
+						ID:                ex.ID,
+						Name:              ex.Name,
+						BaseURL:           ex.BaseURL,
+						FQDN:              ex.FQDN,
+						Location:          ex.Location,
+						IsLocal:           false,
+						Online:            online,
+						Error:             probeErr,
+						LatencyMS:         latency,
+						ServerCount:       cnt,
+						System:            sys,
+						HasToken:          hasTok,
+						TokenPrefix:       tokPrefix,
+						CreatedAt:         ex.CreatedAt,
+						UpdatedAt:         ex.UpdatedAt,
 					})
 					return
 				}
@@ -551,6 +584,9 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 	idBytes := make([]byte, 3)
 	_, _ = rand.Read(idBytes)
 	nodeID := "node-" + hex.EncodeToString(idBytes)
+	lock := h.idleLock(nodeID)
+	lock.Lock()
+	defer lock.Unlock()
 
 	allowRAM := true
 	if req.AllowUserRAM != nil {
@@ -576,18 +612,25 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 		APIToken:        apiToken,
 		FQDN:            fqdn,
 		Location:        strings.TrimSpace(req.Location),
-		IsFree:          req.IsFree,
-		IdleTimeoutMin:  req.IdleTimeoutMin,
 		AllowUserRAM:    allowRAM,
 		AllowUserPorts:  allowPorts,
 		AllowUserJava:   allowJava,
 		IsolationEngine: isoEngine,
+	}
+	if err := mergeNodeIdlePolicy(node, req.IsFree, req.IdleTimeoutMin); err != nil {
+		writeError(w, 400, err.Error())
+		return
+	}
+	if err := h.pendingIdleDelivery(node); err != nil {
+		writeError(w, 500, "Failed to persist pending idle delivery")
+		return
 	}
 
 	if err := h.db.CreateNode(node); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save node: " + err.Error()})
 		return
 	}
+	idle := h.syncNodeIdlePolicy(r.Context(), node)
 
 	online, sys, cnt, latency, probeErr := h.probeRemote(r.Context(), node.BaseURL, node.APIToken)
 	hasTok, tokPrefix := maskNodeToken(node.APIToken)
@@ -595,27 +638,29 @@ func (h *NodeHandler) CreateNode(w http.ResponseWriter, r *http.Request) {
 	logAudit(h.db, r, "node_add", fmt.Sprintf("Connected cluster node '%s' (%s) at %s", node.Name, node.ID, node.BaseURL))
 
 	writeJSON(w, http.StatusCreated, NodeStatusView{
-		ID:              node.ID,
-		Name:            node.Name,
-		BaseURL:         node.BaseURL,
-		FQDN:            node.FQDN,
-		Location:        node.Location,
-		IsLocal:         false,
-		Online:          online,
-		Error:           probeErr,
-		LatencyMS:       latency,
-		ServerCount:     cnt,
-		System:          sys,
-		HasToken:        hasTok,
-		TokenPrefix:     tokPrefix,
-		IsFree:          node.IsFree,
-		IdleTimeoutMin:  node.IdleTimeoutMin,
-		AllowUserRAM:    node.AllowUserRAM,
-		AllowUserPorts:  node.AllowUserPorts,
-		AllowUserJava:   node.AllowUserJava,
-		IsolationEngine: node.IsolationEngine,
-		CreatedAt:       node.CreatedAt,
-		UpdatedAt:       node.UpdatedAt,
+		IdlePolicyApplied: &idle.Applied,
+		IdlePolicyError:   idle.Error,
+		ID:                node.ID,
+		Name:              node.Name,
+		BaseURL:           node.BaseURL,
+		FQDN:              node.FQDN,
+		Location:          node.Location,
+		IsLocal:           false,
+		Online:            online,
+		Error:             probeErr,
+		LatencyMS:         latency,
+		ServerCount:       cnt,
+		System:            sys,
+		HasToken:          hasTok,
+		TokenPrefix:       tokPrefix,
+		IsFree:            node.IsFree,
+		IdleTimeoutMin:    node.IdleTimeoutMin,
+		AllowUserRAM:      node.AllowUserRAM,
+		AllowUserPorts:    node.AllowUserPorts,
+		AllowUserJava:     node.AllowUserJava,
+		IsolationEngine:   node.IsolationEngine,
+		CreatedAt:         node.CreatedAt,
+		UpdatedAt:         node.UpdatedAt,
 	})
 }
 
@@ -632,6 +677,9 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lock := h.idleLock(nodeID)
+	lock.Lock()
+	defer lock.Unlock()
 	existing, err := h.db.GetNode(nodeID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Node not found"})
@@ -644,8 +692,8 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		APIToken        string `json:"api_token"`
 		FQDN            string `json:"fqdn"`
 		Location        string `json:"location"`
-		IsFree          bool   `json:"is_free"`
-		IdleTimeoutMin  int    `json:"idle_timeout_min"`
+		IsFree          *bool  `json:"is_free"`
+		IdleTimeoutMin  *int   `json:"idle_timeout_min"`
 		AllowUserRAM    *bool  `json:"allow_user_ram"`
 		AllowUserPorts  *bool  `json:"allow_user_ports"`
 		AllowUserJava   *bool  `json:"allow_user_java"`
@@ -653,6 +701,10 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid JSON body"})
+		return
+	}
+	if err := mergeNodeIdlePolicy(existing, req.IsFree, req.IdleTimeoutMin); err != nil {
+		writeError(w, 400, err.Error())
 		return
 	}
 
@@ -677,8 +729,6 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	existing.Location = strings.TrimSpace(req.Location)
-	existing.IsFree = req.IsFree
-	existing.IdleTimeoutMin = req.IdleTimeoutMin
 	if req.AllowUserRAM != nil {
 		existing.AllowUserRAM = *req.AllowUserRAM
 	}
@@ -692,10 +742,15 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 		existing.IsolationEngine = req.IsolationEngine
 	}
 
+	if err := h.pendingIdleDelivery(existing); err != nil {
+		writeError(w, 500, "Failed to persist pending idle delivery")
+		return
+	}
 	if err := h.db.UpdateNode(existing); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update node: " + err.Error()})
 		return
 	}
+	idle := h.syncNodeIdlePolicy(r.Context(), existing)
 
 	online, sys, cnt, latency, probeErr := h.probeRemote(r.Context(), existing.BaseURL, existing.APIToken)
 	hasTok, tokPrefix := maskNodeToken(existing.APIToken)
@@ -703,27 +758,29 @@ func (h *NodeHandler) UpdateNode(w http.ResponseWriter, r *http.Request) {
 	logAudit(h.db, r, "node_update", fmt.Sprintf("Updated cluster node '%s' (%s)", existing.Name, existing.ID))
 
 	writeJSON(w, http.StatusOK, NodeStatusView{
-		ID:              existing.ID,
-		Name:            existing.Name,
-		BaseURL:         existing.BaseURL,
-		FQDN:            existing.FQDN,
-		Location:        existing.Location,
-		IsLocal:         false,
-		Online:          online,
-		Error:           probeErr,
-		LatencyMS:       latency,
-		ServerCount:     cnt,
-		System:          sys,
-		HasToken:        hasTok,
-		TokenPrefix:     tokPrefix,
-		IsFree:          existing.IsFree,
-		IdleTimeoutMin:  existing.IdleTimeoutMin,
-		AllowUserRAM:    existing.AllowUserRAM,
-		AllowUserPorts:  existing.AllowUserPorts,
-		AllowUserJava:   existing.AllowUserJava,
-		IsolationEngine: existing.IsolationEngine,
-		CreatedAt:       existing.CreatedAt,
-		UpdatedAt:       existing.UpdatedAt,
+		IdlePolicyApplied: &idle.Applied,
+		IdlePolicyError:   idle.Error,
+		ID:                existing.ID,
+		Name:              existing.Name,
+		BaseURL:           existing.BaseURL,
+		FQDN:              existing.FQDN,
+		Location:          existing.Location,
+		IsLocal:           false,
+		Online:            online,
+		Error:             probeErr,
+		LatencyMS:         latency,
+		ServerCount:       cnt,
+		System:            sys,
+		HasToken:          hasTok,
+		TokenPrefix:       tokPrefix,
+		IsFree:            existing.IsFree,
+		IdleTimeoutMin:    existing.IdleTimeoutMin,
+		AllowUserRAM:      existing.AllowUserRAM,
+		AllowUserPorts:    existing.AllowUserPorts,
+		AllowUserJava:     existing.AllowUserJava,
+		IsolationEngine:   existing.IsolationEngine,
+		CreatedAt:         existing.CreatedAt,
+		UpdatedAt:         existing.UpdatedAt,
 	})
 }
 

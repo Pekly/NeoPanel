@@ -29,6 +29,7 @@ type ServerManager struct {
 	startupTimeout   time.Duration
 	shutdownCh       chan struct{}
 	shutdownOnce     sync.Once
+	idleWG           sync.WaitGroup
 	launchMu         sync.Mutex // Serializes process launch with the shutdown boundary.
 	wake             wakeCoordinator
 	recoveryMu       sync.Mutex
@@ -576,7 +577,9 @@ func (m *ServerManager) ShutdownAll() {
 
 func (m *ServerManager) startIdleWatchdog() {
 	ticker := time.NewTicker(20 * time.Second)
+	m.idleWG.Add(1)
 	go func() {
+		defer m.idleWG.Done()
 		defer ticker.Stop()
 		for {
 			select {
@@ -592,59 +595,6 @@ func (m *ServerManager) startIdleWatchdog() {
 			}
 		}
 	}()
-}
-
-func (m *ServerManager) checkIdleTimeouts() {
-	if m.db == nil {
-		return
-	}
-	m.mu.RLock()
-	instances := make([]*ProcessInstance, 0, len(m.instances))
-	for _, inst := range m.instances {
-		instances = append(instances, inst)
-	}
-	m.mu.RUnlock()
-
-	for _, inst := range instances {
-		if inst.GetStatus() != "online" {
-			continue
-		}
-		inst.mu.RLock()
-		srv := inst.server
-		inst.mu.RUnlock()
-		if srv == nil {
-			continue
-		}
-
-		nodeID := srv.NodeID
-		if nodeID == "" {
-			nodeID = "local"
-		}
-		node, err := m.db.GetNode(nodeID)
-		if err != nil || node == nil {
-			continue
-		}
-
-		if !node.IsFree && node.IdleTimeoutMin <= 0 {
-			continue
-		}
-
-		timeoutMin := node.IdleTimeoutMin
-		if timeoutMin <= 0 && node.IsFree {
-			timeoutMin = 15 // Default 15 minutes for free node
-		}
-
-		idleDur, isIdle := inst.GetIdleDuration()
-		if !isIdle || idleDur < time.Duration(timeoutMin)*time.Minute {
-			continue
-		}
-
-		// Timeout reached!
-		inst.broadcast(fmt.Sprintf("\x1b[33;1m[NeoPanel] Server idle timeout reached (0 players connected for %d minutes on free node).\x1b[0m", int(idleDur.Minutes())))
-		inst.broadcast("\x1b[33m[NeoPanel] Gracefully stopping server to conserve host resources...\x1b[0m")
-		_ = m.StopServer(srv.ID, false)
-		_ = m.db.CreateAuditLog("system", "server.idle_timeout", fmt.Sprintf("Server %s auto-stopped after %d min idle on free node %s", srv.Name, int(idleDur.Minutes()), node.Name), "")
-	}
 }
 
 func (m *ServerManager) startScheduleRunner() {

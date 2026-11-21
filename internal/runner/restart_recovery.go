@@ -154,6 +154,7 @@ func (m *ServerManager) shutdownAll() {
 	m.launchMu.Lock()
 	close(m.shutdownCh)
 	m.launchMu.Unlock()
+	m.idleWG.Wait() // No watchdog database access may outlive manager shutdown.
 	m.stopWakeListeners()
 	if m.trash != nil {
 		m.trash.Close()
