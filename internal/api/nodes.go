@@ -29,6 +29,7 @@ type NodeHandler struct {
 	auth       *AuthHandler
 	manager    *runner.ServerManager
 	httpClient *http.Client
+	wakeLocks  sync.Map // node ID -> *sync.Mutex; serializes desired config and delivery
 }
 
 func NewNodeHandler(cfg *config.Config, db *database.DB, auth *AuthHandler, manager *runner.ServerManager) *NodeHandler {

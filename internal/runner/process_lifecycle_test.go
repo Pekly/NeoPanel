@@ -25,8 +25,12 @@ func init() {
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	}
-	if mode == "listener" {
-		listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if mode == "listener" || mode == "wake" {
+		address := "127.0.0.1:0"
+		if mode == "wake" {
+			address = os.Getenv("NEOPANEL_WAKE_TEST_ADDRESS")
+		}
+		listener, err := net.Listen("tcp4", address)
 		if err != nil {
 			os.Exit(4)
 		}

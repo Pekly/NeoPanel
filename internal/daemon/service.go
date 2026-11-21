@@ -125,6 +125,7 @@ func start(cfg *config.Config, assets fs.FS, desktop bool) (*Service, error) {
 	if err := manager.RestoreRunningServers(); err != nil {
 		log.Printf("[WARN] Running-server recovery unavailable: %v", err)
 	}
+	manager.StartWakeListeners()
 
 	if cfg.IsNode() || assets == nil {
 		log.Printf("[SUCCESS] NeoPanel Cluster Node Daemon running at: %s", s.URL())

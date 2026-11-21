@@ -30,6 +30,7 @@ type ServerManager struct {
 	shutdownCh       chan struct{}
 	shutdownOnce     sync.Once
 	launchMu         sync.Mutex // Serializes process launch with the shutdown boundary.
+	wake             wakeCoordinator
 	recoveryMu       sync.Mutex
 	recoveryOnce     sync.Once
 	recoveryErr      error
@@ -292,6 +293,7 @@ func (m *ServerManager) waitAndRetryStart(srvID string, attemptNum int, cancelCh
 		return
 	}
 
+	m.releaseWakeListener(srvID)
 	inst := m.getOrCreateInstance(latestSrv)
 	inst.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Executing auto-restart startup attempt %d/%d...\x1b[0m", attemptNum, MaxStartupAttempts))
 
@@ -333,14 +335,21 @@ func (m *ServerManager) startLocked(srv *database.Server) error {
 }
 
 func (m *ServerManager) startWithLaunchLock(srv *database.Server) error {
+	return m.startWithLaunchPolicy(srv, true)
+}
+
+func (m *ServerManager) startWithLaunchPolicy(srv *database.Server, resetFailures bool) error {
 	if m.isShuttingDown() {
 		return errDaemonShuttingDown
 	}
+	m.releaseWakeListener(srv.ID)
 	m.mu.Lock()
 	m.cancelRetryLocked(srv.ID)
 	m.restorePaused.Delete(srv.ID)
-	m.startupFailures[srv.ID] = 0
-	m.startupHalted[srv.ID] = false
+	if resetFailures {
+		m.startupFailures[srv.ID] = 0
+		m.startupHalted[srv.ID] = false
+	}
 	m.mu.Unlock()
 
 	inst := m.getOrCreateInstance(srv)
