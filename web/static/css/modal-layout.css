@@ -1,0 +1,73 @@
+/* Shared modal geometry. Keep the workbench theme, typography, focus and motion.
+   Dialogs expand sideways, never acquire a minimum height or diagonal offsets.
+   Only explicitly opted-in forms/field pairs become grids; specialized editors,
+   schedules, team permissions and the dedicated join-to-start form keep theirs. */
+:root {
+  --np-modal-width: 1024px;
+  --np-modal-gutter: 32px;
+}
+
+/* Equal viewport gutters also apply to the workbench's specialized overlays. */
+html body .pal {
+  padding: var(--np-modal-gutter) 16px;
+  align-items: flex-start;
+}
+
+/* !important replaces legacy inline 440–680px limits, not application state.
+   SQL Studio already has a larger workspace and must not be narrowed. */
+.pal > .pbox:not(.db-studio-modal) {
+  width: 100%;
+  max-width: var(--np-modal-width) !important;
+  min-width: 0;
+  max-height: calc(100vh - 2 * var(--np-modal-gutter)) !important;
+  max-height: calc(100dvh - 2 * var(--np-modal-gutter)) !important;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
+.pal > .db-studio-modal {
+  max-height: calc(100vh - 2 * var(--np-modal-gutter));
+  max-height: calc(100dvh - 2 * var(--np-modal-gutter));
+}
+
+/* The palette owns scrolling in its results list, not in the dialog shell. */
+#pal > .pbox { overflow: visible; }
+
+/* Explicit long-form layout. Full-width notices/actions stay in DOM/tab order;
+   fields and marked sections share a row without dense reordering. */
+.pbox .np-modal-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: 4px;
+  align-items: start;
+}
+.pbox .np-modal-form > * { grid-column: 1 / -1; min-width: 0; }
+.pbox .np-modal-form > .f,
+.pbox .np-modal-form > .np-modal-half { grid-column: auto; }
+.pbox .np-modal-form > .np-modal-wide { grid-column: 1 / -1; }
+.pbox .np-modal-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.pbox .np-modal-fields > *,
+.pbox .np-modal-form :is(input, select, textarea, .cselect) { min-width: 0; max-width: 100%; }
+.pbox .np-modal-wrap { flex-wrap: wrap; }
+.pbox .np-modal-actions { flex-wrap: wrap; gap: 8px; }
+.pbox .np-modal-actions > .row { flex-wrap: wrap; }
+.pbox > .row.sb { gap: 12px; }
+.pbox > .row.sb > :is(h2, h3, div) { min-width: 0; }
+.pbox > .row.sb > button { flex-shrink: 0; }
+.pbox .ui-modal-actions { flex-wrap: wrap; }
+
+@media (max-width: 700px) {
+  :root { --np-modal-gutter: 16px; }
+  html body .pal { padding-inline: 12px; }
+  .pal > .pbox:not(.db-studio-modal) { padding: 16px !important; }
+  #pal > .pbox { padding: 0 !important; }
+  .pbox .np-modal-form,
+  .pbox .np-modal-fields { grid-template-columns: minmax(0, 1fr) !important; }
+  .pbox .np-modal-form > .f,
+  .pbox .np-modal-form > .np-modal-half { grid-column: 1 / -1; }
+}

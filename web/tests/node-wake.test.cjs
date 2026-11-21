@@ -135,3 +135,39 @@ test('Back cannot restore a stale node form after a session switch', async () =>
   h.c.S.token = 'new-session'; h.node('close').onclick();
   assert.notEqual(h.container.childNodes[0], form);
 });
+
+test('wrapped worker 405 retains saved state and gives upgrade, URL, proxy and retry guidance', async () => {
+  const legacy = 'Node returned HTTP 405; configuration delivery pending';
+  const h = setup(async (_, options) => {
+    if (options.method === 'PUT') throw Object.assign(Error('Bad Gateway'), { status: 502, data: envelope(JSON.parse(options.body), false, legacy) });
+    return envelope(defaults(), false, legacy);
+  });
+  await h.ui.open('remote');
+  for (const pattern of [/HTTP 405/, /Update and restart/, /node URL/, /PUT \/api\/cluster\/wake/, /Retry saved settings/]) assert.match(h.node('error').textContent, pattern);
+  h.node('enabled').checked = true; h.node('offline_motd').value = 'Keep this draft'; await h.submit();
+  assert.match(h.node('error').textContent, /HTTP 405/); assert.doesNotMatch(h.node('error').textContent, /Bad Gateway/);
+  assert.equal(h.node('panel-state').textContent, 'Enabled — saved');
+  assert.equal(h.node('worker-state').textContent, 'Pending — not confirmed');
+  assert.equal(h.node('offline_motd').value, 'Keep this draft');
+});
+
+test('existing actionable backend guidance is not duplicated', async () => {
+  const error = 'Node returned HTTP 405 for PUT /api/cluster/wake. Update and restart the worker, then Retry saved settings';
+  const h = setup(async () => envelope(defaults(), false, error)); await h.ui.open('remote');
+  assert.equal(h.node('error').textContent, error);
+});
+
+test('separate dialog groups settings horizontally with per-field help and honest health status', async () => {
+  const h = setup(); await h.ui.open('local'); const html = h.container.innerHTML;
+  assert.match(html, /class="card pbox wake-dialog" role="dialog"/);
+  assert.equal((html.match(/class="wake-section"/g) || []).length, 3);
+  for (const label of ['Startup behavior', 'Offline appearance', 'Player messages', 'Not tested by this form', 'does not retry delivery or test ports', 'Any unauthenticated Java login']) assert.ok(html.includes(label), label);
+  for (const key of Object.keys(defaults()).filter(key => key !== 'icon_data_url')) {
+    assert.equal((html.match(new RegExp(`id="wake-${key}"`, 'g')) || []).length, 1);
+    assert.ok(html.includes(`aria-describedby="wake-${key}-help"`), key);
+  }
+  assert.equal(h.node('worker-state').textContent, 'Stored on this host');
+  const css = fs.readFileSync(path.join(__dirname, '../static/css/node-wake.css'), 'utf8');
+  assert.match(css, /repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(css, /@media \(max-width: 700px\)/);
+});

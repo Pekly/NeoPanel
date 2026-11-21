@@ -2133,7 +2133,7 @@ function uiConfirm(opts, titleFallback) {
           <div class="ui-modal-body">
             ${message}
           </div>
-          <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
+          <div class="row np-modal-actions" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
             <button type="button" class="btn" onclick="closeUiModal(false)">${esc(cancelText)}</button>
             <button type="button" id="ui-modal-confirm-btn" class="${confirmBtnClass}" onclick="closeUiModal(true)">
               ${esc(confirmText)}
@@ -2191,7 +2191,7 @@ function uiPrompt(opts, defaultValFallback, titleFallback) {
             <input type="${esc(inputType)}" id="ui-modal-input" value="${esc(defaultValue)}" placeholder="${esc(placeholder)}"
               autocomplete="off" spellcheck="false"
               class="ui-modal-input">
-            <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 18px;">
+            <div class="row np-modal-actions" style="justify-content: flex-end; gap: 10px; margin-top: 18px;">
               <button type="button" class="btn" onclick="closeUiModal(null)">${esc(cancelText)}</button>
               <button type="submit" id="ui-modal-submit-btn" class="btn pr">${esc(confirmText)}</button>
             </div>
@@ -2911,12 +2911,12 @@ function openCreateDatabaseModal() {
       <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
         Provision an isolated database for <b>${esc(srv.name)}</b> using <b>${esc(caps.engines_label || 'Built-in SQLite')}</b>.
       </p>
-      <form onsubmit="submitCreateDatabase(event)">
+      <form class="np-modal-form" onsubmit="submitCreateDatabase(event)">
         <label class="f" style="margin-bottom:12px;">
           <span>Database Name <span class="mu">(letters, numbers, underscore)</span></span>
           <input type="text" id="db-new-name" required pattern="[A-Za-z][A-Za-z0-9_]{1,40}" value="${esc(suggestedName)}" placeholder="e.g. mc_coreprotect, luckperms_db">
         </label>
-        <div class="grid g2" style="margin-bottom:16px;">
+        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:16px;">
           <label class="f" style="margin-bottom:0;">
             <span>Engine</span>
             <select id="db-new-engine">
@@ -2928,7 +2928,7 @@ function openCreateDatabaseModal() {
             <input type="number" id="db-new-maxconn" min="1" max="500" value="25" required>
           </label>
         </div>
-        <div class="row" style="justify-content:flex-end; gap:10px;">
+        <div class="row np-modal-actions" style="justify-content:flex-end; gap:10px;">
           <button type="button" class="btn" onclick="closeModal()">Cancel</button>
           <button type="submit" id="db-create-btn" class="btn pr">${ic('plus', 14)} Create Database</button>
         </div>
@@ -9785,8 +9785,8 @@ function openNodeModal(nodeId = null) {
         Enter the reachable HTTP/HTTPS URL of your remote NeoPanel daemon along with its Node Token (<code>neo_node_...</code> via <code>sudo neopanel node-token</code> on cluster nodes) or an admin <code>neo_...</code> API key.
       </p>
 
-      <form data-id="${isEdit ? esc(existing.id) : ''}" onsubmit="submitNodeModal(event, this.dataset.id)">
-        <div class="grid g2">
+      <form class="np-modal-form" data-id="${isEdit ? esc(existing.id) : ''}" onsubmit="submitNodeModal(event, this.dataset.id)">
+        <div class="grid g2 np-modal-fields">
           <label class="f">
             <span>Node Name</span>
             <input type="text" id="nm-name" required value="${esc(existing?.name || '')}" placeholder="e.g. EU-Frankfurt-01">
@@ -9807,7 +9807,7 @@ function openNodeModal(nodeId = null) {
           <input type="text" id="nm-fqdn" value="${esc(existing?.fqdn || '')}" placeholder="e.g. eu1.example.com (defaults to URL host)">
         </label>
 
-        <label class="f">
+        <label class="f np-modal-wide">
           <span>Node Auth Token ${isEdit ? '<span class="mu">(leave blank to keep current)</span>' : ''}</span>
           <input type="password" id="nm-token" ${isEdit ? '' : 'required'} autocomplete="new-password" placeholder="${isEdit ? `Saved (${esc(existing.token_prefix || 'neo_...')})` : 'neo_node_... or neo_...'}">
         </label>
@@ -9815,7 +9815,7 @@ function openNodeModal(nodeId = null) {
         ${isEdit ? renderNodeWakeSettings(existing) : ''}
 
         <!-- Free Node Idle Player Timeout -->
-        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+        <div class="np-modal-half" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
           <label class="row sb" style="cursor: pointer; margin-bottom: 8px;">
             <div>
               <b style="color: var(--tx); display: block;">Free Node (Idle Player Auto-Shutdown)</b>
@@ -9835,7 +9835,7 @@ function openNodeModal(nodeId = null) {
         </div>
 
         <!-- Node Permissions Policy -->
-        <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+        <div class="np-modal-half" style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
           <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--tx-muted); margin-bottom: 8px;">Non-Admin Permissions Policy</div>
           <label class="row sb" style="cursor: pointer; margin-bottom: 6px;">
             <span style="font-size: 13px; color: var(--tx);">Allow users to change memory limits</span>
@@ -9875,7 +9875,7 @@ function openNodeModal(nodeId = null) {
 
         <div id="node-modal-test-res" style="margin-bottom: 14px;"></div>
 
-        <div class="row sb" style="gap:10px; margin-top:6px;">
+        <div class="row sb np-modal-actions" style="gap:10px; margin-top:6px;">
           <button type="button" id="nm-test-btn" class="btn" data-id="${isEdit ? esc(existing.id) : ''}" onclick="testNodeModalConnection(this.dataset.id)">
             ${ic('refresh', 14)} Test Connection
           </button>
@@ -12519,9 +12519,9 @@ function openCreateServerModal() {
         <button class="btn sm" onclick="closeModal()">✕</button>
       </div>
 
-      <form onsubmit="handleCreateServer(event)">
+      <form class="np-modal-form" onsubmit="handleCreateServer(event)">
         <!-- Instance Name & Target Node -->
-        <div class="${nodesList.length > 1 ? 'grid g2' : ''}" style="margin-bottom:14px;">
+        <div class="${nodesList.length > 1 ? 'grid g2 np-modal-fields' : ''}" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
             <span>Server name</span>
             <input type="text" id="cs-name" required placeholder="e.g. Survival SMP, Proxy Network, Minigames" value="Survival Server">
@@ -12559,7 +12559,7 @@ function openCreateServerModal() {
         <div id="cs-steel-note" style="display:none; margin-bottom:14px;"></div>
 
         <!-- Version Searchable Catalog + Custom Input + Popular Pills -->
-        <div style="margin-bottom:14px;">
+        <div class="np-modal-half" style="margin-bottom:14px;">
           <div class="row sb" style="margin-bottom:6px; flex-wrap:wrap; gap:6px;">
             <span id="cs-version-label" class="mu" style="font-size:13px; font-weight:600;">Minecraft Version (Recent &amp; Popular)</span>
             <div class="row" style="gap:4px; flex-wrap:wrap;">
@@ -12568,7 +12568,7 @@ function openCreateServerModal() {
               `).join('')}
             </div>
           </div>
-          <div style="display:grid; grid-template-columns: minmax(145px, 185px) 1fr; gap:8px;">
+          <div class="np-modal-fields" style="display:grid; grid-template-columns: minmax(145px, 185px) 1fr; gap:8px;">
             <select id="cs-ver-sel" data-searchable="1" onchange="setCreateVersion(this.value)">
               ${initialVers.map(v => `<option value="${esc(v)}" ${v === '1.21.11' ? 'selected' : ''}>${esc(v)}</option>`).join('')}
             </select>
@@ -12577,7 +12577,7 @@ function openCreateServerModal() {
         </div>
 
         <!-- Custom Port Allocation -->
-        <div class="grid g2" style="margin-bottom:10px;">
+        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:10px;">
           <label class="f" style="margin-bottom:0;">
             <span>Custom Port (1024 - 65535)</span>
             <input type="number" id="cs-port" value="${nextPort}" min="1024" max="65535" required>
@@ -12594,10 +12594,10 @@ function openCreateServerModal() {
         </div>
 
         <!-- Memory Allocation Pills -->
-        <div style="margin-bottom:14px;">
-          <div class="row sb" style="margin-bottom:6px;">
+        <div class="np-modal-half" style="margin-bottom:14px;">
+          <div class="row sb np-modal-wrap" style="margin-bottom:6px;">
             <span class="mu" style="font-size:13px; font-weight:600;">Memory Allocation</span>
-            <div class="row" style="gap:4px;">
+            <div class="row np-modal-wrap" style="gap:4px;">
               <button type="button" class="btn sm ram-pill ${defaultRam === 1024 ? 'pr' : ''}" data-ram="1024" onclick="setCreateRam(1024)">1 GB</button>
               <button type="button" class="btn sm ram-pill ${defaultRam === 2048 ? 'pr' : ''}" data-ram="2048" onclick="setCreateRam(2048)">2 GB</button>
               <button type="button" class="btn sm ram-pill ${defaultRam === 4096 ? 'pr' : ''}" data-ram="4096" onclick="setCreateRam(4096)">4 GB</button>
@@ -12608,9 +12608,9 @@ function openCreateServerModal() {
         </div>
 
         <!-- Resource Limits: CPU Percentage & Storage Allocation -->
-        <div class="grid g2" style="margin-bottom:14px;">
+        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
-            <div class="row sb" style="margin-bottom:4px;">
+            <div class="row sb np-modal-wrap" style="margin-bottom:4px;">
               <span>CPU Limit (%)</span>
               <span class="mu" style="font-size:11.5px;">0% = Unlimited</span>
             </div>
@@ -12622,7 +12622,7 @@ function openCreateServerModal() {
             <input type="number" id="cs-cpu" value="0" min="0" max="3200" step="10" placeholder="0 for unlimited">
           </label>
           <label class="f" style="margin-bottom:0;">
-            <div class="row sb" style="margin-bottom:4px;">
+            <div class="row sb np-modal-wrap" style="margin-bottom:4px;">
               <span>Storage / Disk Limit (MB)</span>
               <span class="mu" style="font-size:11.5px;">0 = Unlimited</span>
             </div>
@@ -12638,9 +12638,9 @@ function openCreateServerModal() {
 
         ${(S.user?.role === 'admin' && Array.isArray(S.adminUsers) && S.adminUsers.length > 0) ? `
         <!-- Server Ownership (Admin Only) -->
-        <div style="margin-bottom:14px;">
+        <div class="np-modal-half" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
-            <span class="row sb">
+            <span class="row sb np-modal-wrap">
               <span>Server Owner</span>
               <span class="mu" style="font-size:11.5px;">Assign server instance ownership</span>
             </span>
@@ -12651,7 +12651,7 @@ function openCreateServerModal() {
         </div>` : ''}
 
         <!-- EULA & Optimization Flags -->
-        <div style="background:var(--pn2); border:1px solid var(--ln); border-radius:8px; padding:12px; margin-bottom:16px;">
+        <div class="np-modal-half" style="background:var(--pn2); border:1px solid var(--ln); border-radius:8px; padding:12px; margin-bottom:16px;">
           <label class="row" style="margin-bottom:8px; cursor:pointer;">
             <input type="checkbox" id="cs-eula" checked style="width:auto; margin-right:8px;">
             <span>Automatically agree to Mojang EULA (<code>eula=true</code>)</span>
@@ -12666,7 +12666,7 @@ function openCreateServerModal() {
           </label>
         </div>
 
-        <div class="row" style="justify-content:flex-end; gap:8px;">
+        <div class="row np-modal-actions" style="justify-content:flex-end; gap:8px;">
           <button type="button" class="btn" onclick="closeModal()">Cancel</button>
           <button type="submit" class="btn pr" id="cs-submit-btn">🚀 Create &amp; Launch Server</button>
         </div>
@@ -13878,7 +13878,7 @@ function openReinstallModal(srvId, nodeId = null) {
         Reinstalls the server executable from official upstream releases (Steel) or mcjarfiles.com (Java engines).
       </p>
 
-      <form id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" data-orig-type="${esc(curType)}" data-selected-type="${esc(curType)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
+      <form class="np-modal-form" id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" data-orig-type="${esc(curType)}" data-selected-type="${esc(curType)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
         <div id="reinst-wipe-warn" style="display:none;"></div>
         <div id="reinst-steel-note" style="display:none; margin-bottom:14px;"></div>
         <label class="f" style="margin-bottom:12px;">
@@ -13904,7 +13904,7 @@ function openReinstallModal(srvId, nodeId = null) {
 
         <div class="f" style="margin-bottom:16px;">
           <span style="display:block; margin-bottom:6px; font-size:13px; color:var(--tx-muted); font-weight:500;">Version</span>
-          <div style="display:grid; grid-template-columns: minmax(145px, 180px) 1fr; gap:8px;">
+          <div class="np-modal-fields" style="display:grid; grid-template-columns: minmax(145px, 180px) 1fr; gap:8px;">
             <select id="reinst-ver-sel" data-searchable="1" onchange="setReinstallVersion(this.value)">
               ${verList.map(v => `<option value="${esc(v)}" ${v === curVer ? 'selected' : ''}>${esc(v)}</option>`).join('')}
             </select>
@@ -13912,7 +13912,7 @@ function openReinstallModal(srvId, nodeId = null) {
           </div>
         </div>
 
-        <div style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
+        <div class="np-modal-half" style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
           <b style="font-size:13px; color:#fff; display:block; margin-bottom:8px;">Preservation Options</b>
           <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-world" checked>
@@ -13928,7 +13928,7 @@ function openReinstallModal(srvId, nodeId = null) {
           </label>
         </div>
 
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 8px; padding: 11px 14px; margin-bottom: 20px;">
+        <div class="np-modal-half" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 8px; padding: 11px 14px; margin-bottom: 20px;">
           <label class="row" style="cursor:pointer; font-size:13px; gap:10px; align-items:flex-start;">
             <input type="checkbox" id="reinst-sync-java" checked style="margin-top:2px;">
             <div>
@@ -13939,7 +13939,7 @@ function openReinstallModal(srvId, nodeId = null) {
         </div>
 
         <div data-operation-progress></div>
-        <div class="row" style="justify-content:flex-end; gap:10px;">
+        <div class="row np-modal-actions" style="justify-content:flex-end; gap:10px;">
           <button type="button" class="btn" onclick="closeModal()">Cancel</button>
           <button type="submit" id="reinst-submit-btn" class="btn pr">
             ${ic('refresh', 14)} Start Reinstallation
@@ -14087,9 +14087,9 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
         Configure server tenant ownership, compute resource limits (CPU &amp; RAM), and disk storage quotas. Moving a server between nodes requires a real stop-and-transfer operation, not a settings change.
       </p>
 
-      <form data-id="${esc(targetId)}" data-node="${esc(targetNodeId)}" onsubmit="submitAdminServerSettings(event, this.dataset.id, this.dataset.node)">
+      <form class="np-modal-form" data-id="${esc(targetId)}" data-node="${esc(targetNodeId)}" onsubmit="submitAdminServerSettings(event, this.dataset.id, this.dataset.node)">
         <!-- Server Owner -->
-        <div style="margin-bottom:14px;">
+        <div class="np-modal-half" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
             <span class="row sb">
               <span>Server Owner</span>
@@ -14102,7 +14102,7 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
         </div>
 
         <!-- Node & Port -->
-        <div class="grid g2" style="margin-bottom:14px;">
+        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
             <span>Node</span>
             <input id="adm-set-node" value="${esc(displayNodeName(curNid))}" disabled aria-label="Hosting node (read-only)">
@@ -14115,9 +14115,9 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
         </div>
 
         <!-- RAM Limit -->
-        <div style="margin-bottom:14px;">
+        <div class="np-modal-half" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
-            <div class="row sb" style="margin-bottom:4px;">
+            <div class="row sb np-modal-wrap" style="margin-bottom:4px;">
               <span>Allocated RAM (MB)</span>
               <span class="mu" style="font-size:11.5px;">${isSteelEngine(targetSrv.type) ? 'Native resource limit (enforced with systemd only)' : '-Xmx memory ceiling'}</span>
             </div>
@@ -14133,9 +14133,9 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
         </div>
 
         <!-- Resource Limits: CPU & Storage -->
-        <div class="grid g2" style="margin-bottom:16px;">
+        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:16px;">
           <label class="f" style="margin-bottom:0;">
-            <div class="row sb" style="margin-bottom:4px;">
+            <div class="row sb np-modal-wrap" style="margin-bottom:4px;">
               <span>CPU Limit (%)</span>
               <span class="mu" style="font-size:11.5px;">0% = Unlimited</span>
             </div>
@@ -14147,7 +14147,7 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
             <input type="number" id="adm-set-cpu" value="${curCpu}" min="0" max="3200" step="10" placeholder="0 for unlimited">
           </label>
           <label class="f" style="margin-bottom:0;">
-            <div class="row sb" style="margin-bottom:4px;">
+            <div class="row sb np-modal-wrap" style="margin-bottom:4px;">
               <span>Storage / Disk Limit (MB)</span>
               <span class="mu" style="font-size:11.5px;">0 = Unlimited</span>
             </div>
@@ -14161,7 +14161,7 @@ async function openAdminServerSettingsModal(srvId, nodeId = null) {
           </label>
         </div>
 
-        <div class="row" style="justify-content:flex-end; gap:8px;">
+        <div class="row np-modal-actions" style="justify-content:flex-end; gap:8px;">
           <button type="button" class="btn" onclick="closeModal()">Cancel</button>
           <button type="submit" class="btn pr" id="adm-set-submit">Save Server Configuration</button>
         </div>
@@ -14299,13 +14299,13 @@ function openAddUserModal() {
         <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
       </div>
 
-      <form id="add-user-form" onsubmit="submitAddUser(event)">
+      <form class="np-modal-form" id="add-user-form" onsubmit="submitAddUser(event)">
         <label class="f" style="margin-bottom:12px;">
           <span>Username / Account Name <b style="color:var(--err); font-size:12px;">*required</b></span>
           <input type="text" id="nu-username" required placeholder="e.g. operator" autocomplete="off">
         </label>
 
-        <div class="grid g2" style="margin-bottom:12px;">
+        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:12px;">
           <label class="f">
             <span>First Name</span>
             <input type="text" id="nu-firstname" placeholder="Optional" autocomplete="off">
@@ -14336,14 +14336,14 @@ function openAddUserModal() {
 
         <label class="f" style="margin-bottom:20px;">
           <span>Profile Icon (Optional)</span>
-          <div class="row" style="gap:10px; align-items:center;">
+          <div class="row np-modal-wrap" style="gap:10px; align-items:center;">
             <input type="file" id="nu-avatar-file" accept="image/*" style="display:none;" onchange="const n=$('#nu-avatar-name'); if(n) n.textContent=this.files[0]?.name||'No file chosen';">
             <button type="button" class="btn sm" onclick="$('#nu-avatar-file').click()">${ic('image', 14)} Choose Icon...</button>
             <span id="nu-avatar-name" class="mu" style="font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px;">No file chosen</span>
           </div>
         </label>
 
-        <div class="row" style="justify-content:flex-end; gap:10px;">
+        <div class="row np-modal-actions" style="justify-content:flex-end; gap:10px;">
           <button type="button" class="btn" onclick="closeModal()">Cancel</button>
           <button type="submit" id="nu-submit-btn" class="btn pr">Create User</button>
         </div>
@@ -14429,13 +14429,13 @@ function openEditUserModal(userId) {
         <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
       </div>
 
-      <form id="edit-user-form" onsubmit="submitEditUser(event, ${u.id})">
+      <form class="np-modal-form" id="edit-user-form" onsubmit="submitEditUser(event, ${u.id})">
         <label class="f" style="margin-bottom:12px;">
           <span>Username / Account Name <b style="color:var(--err); font-size:12px;">*required</b></span>
           <input type="text" id="eu-username" required value="${esc(u.username)}" placeholder="Username" autocomplete="off">
         </label>
 
-        <div class="grid g2" style="margin-bottom:12px;">
+        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:12px;">
           <label class="f">
             <span>First Name</span>
             <input type="text" id="eu-firstname" value="${esc(u.first_name || '')}" placeholder="First name" autocomplete="off">
@@ -14464,7 +14464,7 @@ function openEditUserModal(userId) {
           </select>
         </label>
 
-        <div class="row" style="justify-content:flex-end; gap:10px;">
+        <div class="row np-modal-actions" style="justify-content:flex-end; gap:10px;">
           <button type="button" class="btn" onclick="closeModal()">Cancel</button>
           <button type="submit" id="eu-submit-btn" class="btn pr">Save Changes</button>
         </div>

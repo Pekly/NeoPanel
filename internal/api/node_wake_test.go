@@ -200,6 +200,10 @@ func TestNodeWakeRemoteFailuresRemainPending(t *testing.T) {
 			writeJSON(w, 200, map[string]any{"applied": true, "config": c})
 		case 9:
 			writeJSON(w, 200, NodeWakeView{Config: c, Applied: true, Error: "not really"})
+		case 10:
+			w.WriteHeader(405)
+		case 11:
+			w.WriteHeader(403)
 		}
 	}))
 	defer remote.Close()
@@ -211,11 +215,17 @@ func TestNodeWakeRemoteFailuresRemainPending(t *testing.T) {
 		t.Fatal(v)
 	}
 	c.Enabled = false
-	for i := int32(1); i <= 9; i++ {
+	for i := int32(1); i <= 11; i++ {
 		mode.Store(i)
 		v := wakeView(t, f.request("PUT", path, wakeJSON(c), "admin"), 502)
 		if v.Applied || v.Error == "" || v.Config != c {
 			t.Fatal(i, v)
+		}
+		if (i == 1 || i == 10) && (!strings.Contains(v.Error, "PUT /api/cluster/wake") || !strings.Contains(v.Error, "Update and restart the worker") || !strings.Contains(v.Error, "reverse proxy")) {
+			t.Fatal("unsupported endpoint lacks actionable guidance", v.Error)
+		}
+		if i == 11 && !strings.Contains(v.Error, "Node Token or administrator API key") {
+			t.Fatal("missing authentication guidance", v.Error)
 		}
 		if got := wakeView(t, f.request("GET", path, "", "admin"), 200); got != v {
 			t.Fatal("GET lost pending state", got, v)

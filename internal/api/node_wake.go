@@ -308,6 +308,15 @@ func (h *NodeHandler) deliverNodeWake(ctx context.Context, node *database.Cluste
 		return fmt.Errorf("Node unreachable or request timed out; configuration delivery pending")
 	}
 	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed:
+		return fmt.Errorf("Node returned HTTP %d for PUT /api/cluster/wake. Settings are saved on this panel but worker application is unconfirmed. Update and restart the worker to a join-to-start capable version (updating only the panel is not enough). Check that the node URL targets that daemon and its reverse proxy forwards PUT /api/cluster/wake, then Retry saved settings", resp.StatusCode)
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return fmt.Errorf("Node returned HTTP %d for PUT /api/cluster/wake. Settings are saved on this panel but worker application is unconfirmed. Check the node's saved Node Token or administrator API key and any proxy access rules, then Retry saved settings", resp.StatusCode)
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return fmt.Errorf("Node returned HTTP %d redirect. Settings delivery does not follow redirects, to protect the node token. Set the node URL to the daemon's final HTTP/HTTPS address, then Retry saved settings", resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("Node returned HTTP %d; configuration delivery pending", resp.StatusCode)
 	}
