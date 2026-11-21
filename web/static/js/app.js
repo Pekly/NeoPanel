@@ -2811,6 +2811,22 @@ function srvApiPath(srv, suffix = '') {
   return `/api/nodes/${encodeURIComponent(nid)}/proxy${base}`;
 }
 
+function renderLocalNodeAddresses(node) {
+  if (!node || !(node.is_local || node.id === 'local')) return '';
+  const panel = S.adminPanelUrl ? (S.adminPanelUrl.public_url || 'Not configured') : S.panelUrlLoading ? 'Loading…' : 'Unavailable';
+  const game = node.fqdn || S.brandingDaemon?.fqdn || window.location.hostname;
+  return `<div class="np-local-node-addresses"><div><span class="mu">Panel URL:</span> <span class="mono">${esc(panel)}</span></div><div><span class="mu">Game / SFTP host:</span> <span class="mono">${esc(game)}</span></div></div>`;
+}
+
+function applyLocalNodeAddress(daemon) {
+  if (!daemon || typeof daemon.fqdn !== 'string') return;
+  const host = daemon.fqdn.trim() || window.location.hostname;
+  for (const node of S.nodes || []) if (node.id === 'local') node.fqdn = host;
+  for (const server of S.servers || []) if ((server.node_id || 'local') === 'local') server.node_fqdn = host;
+  // Connection details are loaded afresh the next time the local SFTP page opens.
+  if ((curServer()?.node_id || 'local') === 'local') S.sftp = null;
+}
+
 function srvHost(srv) {
   if (srv?.node_fqdn) return srv.node_fqdn;
   const node = getNodeById(srv?.node_id || 'local');
@@ -8070,7 +8086,7 @@ const V = {
                     </div>
                   </td>
                   <td class="mu">${esc(displayNodeLocation(n))}</td>
-                  <td class="mono">${esc(n.is_local ? 'Internal Direct' : (n.base_url || n.fqdn))}</td>
+                  <td class="mono">${esc(n.is_local ? 'Internal Direct' : (n.base_url || n.fqdn))}${renderLocalNodeAddresses(n)}</td>
                   <td class="mono">${sysInfo.cpus ? `${sysInfo.cpus} vCPU &bull; ${totalGb}` : '—'}</td>
                   <td>${Number(n.server_count) || 0}</td>
                   <td><span class="badge ${n.online ? 'online' : 'offline'}"><i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}</span></td>
@@ -8079,7 +8095,7 @@ const V = {
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                       ${n.is_local
-                        ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Configure</button>`
+                        ? `<button type="button" class="btn sm" onclick="S.appearanceSection=3;selectAdminTab(4)">Edit address</button>`
                         : `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                            <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)}</button>`}
                     </div>
@@ -8105,8 +8121,9 @@ const V = {
                     ${n.is_local ? '<span class="chip" style="font-size:10.5px;">This machine</span>' : ''}
                   </div>
                   <div class="mu mono" style="font-size: 11.5px; margin-top: 3px;">
-                    ${esc(displayNodeLocation(n))} &bull; ${esc(n.fqdn || window.location.hostname)}
+                    ${esc(displayNodeLocation(n))}${n.is_local ? '' : ` &bull; ${esc(n.fqdn || window.location.hostname)}`}
                   </div>
+                  ${renderLocalNodeAddresses(n)}
                 </div>
                 <span class="badge ${n.online ? 'online' : 'offline'}">
                   <i class="dot"></i>${n.online ? `Online${n.is_local ? '' : ` (${n.latency_ms ?? 0}ms)`}` : 'Offline'}
@@ -8140,7 +8157,7 @@ const V = {
                   <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="NPNodeNames.rename(this.dataset.id)">${ic('edit', 12)} Rename</button>
                   <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                   ${n.is_local
-                    ? `<button type="button" class="btn sm" onclick="selectAdminTab(4)">Panel settings</button>`
+                    ? `<button type="button" class="btn sm" onclick="S.appearanceSection=3;selectAdminTab(4)">Edit address</button>`
                     : `
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                       <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Disconnect</button>
@@ -9594,14 +9611,21 @@ async function loadDashboard(skipRender = false, preferredRef = null) {
 }
 
 async function loadAdminNodes(toastOnDone = false) {
+  const token = S.token;
   try {
-    const nodes = await api('/api/nodes');
+    const [nodes] = await Promise.all([
+      api('/api/nodes'),
+      S.user?.role === 'admin' ? loadAdminPanelUrl(true) : Promise.resolve()
+    ]);
+    if (token !== S.token) return;
     if (Array.isArray(nodes)) {
       S.nodes = nodes;
+      const local = nodes.find(node => node.id === 'local');
+      if (local) applyLocalNodeAddress(local);
     }
     if (toastOnDone) toast('Cluster node status refreshed', 'ok');
   } catch (e) {}
-  if (S.view === 'admin' || S.view === 'dash') R();
+  if (token === S.token && (S.view === 'admin' || S.view === 'dash')) R();
 }
 
 function buildClusterNodeInstallCmd() {
@@ -15269,6 +15293,7 @@ async function saveBrandingAndDaemon() {
     if (res && res.daemon) {
       S.brandingDaemon = { ...S.brandingDaemon, ...res.daemon };
       S.daemonDraft = { ...S.brandingDaemon };
+      applyLocalNodeAddress(S.brandingDaemon);
       S.adminDaemonCfg = {
         brandName: S.branding.brand_name || 'NeoPanel',
         fqdn: S.brandingDaemon.fqdn || window.location.hostname || '127.0.0.1',
@@ -15343,6 +15368,7 @@ async function saveAdminDaemonSettings(e) {
     } else {
       S.brandingDaemon = { ...daemonPayload };
     }
+    applyLocalNodeAddress(S.brandingDaemon);
     S.adminDaemonCfg = {
       brandName: S.branding.brand_name || 'NeoPanel',
       fqdn: S.brandingDaemon.fqdn || window.location.hostname || '127.0.0.1',
