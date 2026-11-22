@@ -1,5 +1,5 @@
-/* Installed files remain authoritative. Catalog metadata is opt-in and scoped to
- * an exact session/server/software identity; names never establish provenance. */
+/* Installed files remain authoritative. Automatic identities are display-only;
+ * only explicit catalog scans establish update/source-confirmation authority. */
 (() => {
   'use strict';
   const PAGE = 20, MAX = 1000;
@@ -30,7 +30,7 @@
     const k = key(), n = generation, base = identity(), files = fingerprint(), srv = {...curServer()};
     return {base, srv, live:() => k === key() && n === generation && files === fingerprint() && allowed()};
   }
-  function invalidate() { reset(); }
+  function invalidate() { reset(); window.NPPluginIdentities?.invalidate(); }
   const blocked = () => !!writes.get(identity())?.blocked;
   const pending = () => !!writes.get(identity())?.pending;
   const canUpdate = () => allowed(true) && S.status === 'offline' && !blocked();
@@ -54,6 +54,7 @@
     const st = get();
     if (!allowed() || !active() || st.busy || st.preparing || pending() || (more && (blocked() || !st.more || st.records.size >= MAX))) return;
     const ctx = capture(), offset = more ? st.offset : 0;
+    const resumeIdentities = window.NPPluginIdentities?.pause();
     st.busy = true; st.error = ''; st.review = null; st.selected.clear();
     if (!more) { st.records.clear(); st.scanned = false; st.offset = 0; st.more = false; }
     st.read = new AbortController(); draw();
@@ -69,7 +70,7 @@
       // A successful offset-zero scan takes the backend lease after any old write.
       if (!more && writes.get(ctx.base)?.blocked && !writes.get(ctx.base)?.pending) writes.delete(ctx.base);
     } catch (_) { if (live()) st.error = 'The update check could not finish. Metadata may be unavailable or another operation may still be active. Check for updates again; no update was retried.'; }
-    finally { if (live()) { st.busy = false; st.read = null; draw('npi-check'); } }
+    finally { resumeIdentities?.(); if (live()) { st.busy = false; st.read = null; draw('npi-check'); } }
   }
   function select(filename, checked) {
     const st = get(), r = st.records.get(filename);
@@ -88,6 +89,7 @@
     if (!v || !v.ctx.live() || !allowed(true) || st.preparing || blocked() || !/^[a-f0-9]{128}$/i.test(v.record.sha512 || '')) return;
     const candidate = arr(v.record.candidates).find(p => p.id === v.project);
     if (!candidate?.id) return;
+    const resumeIdentities = window.NPPluginIdentities?.pause();
     st.preparing = true; draw();
     const live = () => v.ctx.live() && state === st && allowed(true) && active();
     let sent = false, success = false;
@@ -106,6 +108,7 @@
         if (sent) { st.records.delete(v.filename); st.selected.delete(v.filename); st.review = null; }
       }
     } finally {
+      resumeIdentities?.();
       st.preparing = false;
       if (live()) { draw(); if (success) await scan(); }
     }
@@ -125,6 +128,7 @@
     if (records.some(r => !eligible(r) || !S.plugins.some(p => p[0] === r.filename && !p[4]))) return;
     const live = () => ctx.live() && state === st && active() && allowed(true);
     const valid = () => live() && S.status === 'offline' && !blocked() && records.every(r => st.records.get(r.filename) === r && st.selected.has(r.filename));
+    const resumeIdentities = window.NPPluginIdentities?.pause();
     st.preparing = true; draw(); let sent = false;
     try {
       const preview = records.map(r => `<li><b>${e(r.filename)}</b><br>${r.match === 'confirmed' ? 'Unverified installed release (descriptor: ' + e(r.installed_version || 'not provided') + ')' : e(r.installed_version || 'Not provided')} → <b>${e(r.latest.version_number || r.latest.name || r.latest.id)}</b><br>Advertised Minecraft: ${e(arr(r.latest.game_versions).join(', ') || 'Not provided')}</li>`).join('');
@@ -149,7 +153,7 @@
         st.notice = err?.status >= 400 && err.status < 500 ? (err.status === 409 ? 'The server or files changed. Nothing was updated. Check for updates again.' : 'The update was rejected before writing. Check permissions and ensure the server is stopped, then check for updates again.') : 'The update outcome is uncertain. Do not repeat it. Check for updates to reconcile the current files first.';
         st.records.clear(); st.scanned = false; st.more = false;
       }
-    } finally { st.preparing = false; if (live()) draw('npi-check'); }
+    } finally { resumeIdentities?.(); st.preparing = false; if (live()) draw('npi-check'); }
   }
   // Only fixed backend diagnostics are shown; never echo arbitrary provider or host errors.
   const safeMessages = new Set([
@@ -184,18 +188,23 @@
     if (!v || v.filename !== r?.filename) return diagnostic(r);
     return `<fieldset class="npi-review"><legend>Review possible sources</legend><p>A similar name is only a suggestion. Choose a source you trust; nothing is linked automatically.</p>${arr(r.candidates).slice(0,20).map((p,i) => `<label class="npi-candidate"><input id="npi-candidate-${i}" type="radio" name="npi-source" value="${e(p.id)}" ${v.project === p.id ? 'checked' : ''} ${st.preparing ? 'disabled' : ''}><span><b>${e(p.title || p.id)}</b><span class="mu">${e(p.description || '')}</span><span class="mu">Project ID: ${e(p.id)}</span></span></label>`).join('') || '<p>No suggestions available. Check again later.</p>'}<div class="npi-actions"><button class="btn pr sm" data-npi="confirm-source" ${!v.project || !allowed(true) || st.preparing ? 'disabled' : ''}>Confirm source</button><button class="btn sm" data-npi="cancel-review" ${st.preparing ? 'disabled' : ''}>Cancel</button></div></fieldset>`;
   }
-  function render() {
+  function render() { return window.NPPluginIdentities ? NPPluginIdentities.batch(renderContent) : renderContent(); }
+  function renderContent() {
+    window.NPPluginIdentities?.sync();
     const st = get(), w = writes.get(identity()), edit = allowed(true), mode = getViewMode('plug_inst','list');
     const rows = arr(S.plugins).map((p,i) => ({p,i})).filter(({p}) => !S.plugFilter || String(p[0]).toLowerCase().includes(S.plugFilter.toLowerCase()));
     const lock = st.busy || st.preparing || blocked();
     const body = rows.map(({p,i}) => {
       const r = st.records.get(p[0]), identified = authoritative(r), project = identified ? r.project : null;
-      const title = project?.title || r?.name || p[0], url = window.NPPlugins?.safeURL(project?.icon_url) || '';
+      const title = project?.title || r?.name || p[0], url = window.NPPluginIdentities?.safeURL(project?.icon_url) || window.NPPlugins?.safeURL(project?.icon_url) || '';
+      const identities = window.NPPluginIdentities;
+      const iconHtml = identities ? `<span ${!r ? `data-npid-icon="${e(p[0])}" data-npid-size="npi-icon"` : ''}>${identities.icon(p[0],'npi-icon',r)}</span>` : url ? `<img class="npi-icon" src="${e(url)}" loading="lazy" referrerpolicy="no-referrer" alt="">` : '<span class="npi-icon" aria-hidden="true">◇</span>';
+      const titleHtml = identities ? `<span ${!r ? `data-npid-installed="${e(p[0])}"` : ''}>${identities.title(p[0],r,true)}</span>` : `${project ? `<button class="npi-project" data-npi="project" data-project="${e(project.slug || project.id)}">${e(title)}</button>` : `<b>${e(title)}</b>`}<span class="mono mu">${e(p[0])}</span>`;
       const chosen = st.selected.has(p[0]);
-      return `<article class="npi-file ${chosen ? 'is-selected' : ''}" style="--npi-item:${Math.min(i,5)}"><div class="npi-file-head"><input id="npi-select-${i}" type="checkbox" data-npi-select="${e(p[0])}" aria-label="Select ${e(p[0])} for update" ${chosen ? 'checked' : ''} ${!eligible(r) || !canUpdate() || lock || p[4] || (!chosen && st.selected.size >= 10) ? 'disabled' : ''}>${url ? `<img class="npi-icon" src="${e(url)}" loading="lazy" referrerpolicy="no-referrer" alt="">` : '<span class="npi-icon" aria-hidden="true">◇</span>'}<div class="npi-copy">${project ? `<button class="npi-project" data-npi="project" data-project="${e(project.slug || project.id)}">${e(title)}</button>` : `<b>${e(title)}</b>`}<span class="mono mu">${e(p[0])}</span><span class="mu">${e(p[1] || 'installed')} · ${p[2] ? 'Enabled' : 'Disabled'}${p[3] ? ` · ${e(formatFileDate(p[3]))}` : ''}</span></div></div><div class="npi-metadata"><span class="npi-status">${status(r)}</span>${identified ? `<dl><dt>${r.match === 'confirmed' ? 'Descriptor (informational)' : 'Installed'}</dt><dd>${e(r.installed_version || 'Not provided')}</dd><dt>Latest for software</dt><dd>${e(r.latest?.version_number || r.latest?.name || (r.latest ? r.latest.id : 'Unavailable'))}</dd></dl><span class="mu">${r.update_available && r.latest ? 'Update available' : r.latest && r.match === 'hash' ? 'No update available' : 'Release comparison unavailable'}</span>` : ''}${r?.match === 'suggested' ? `<button class="btn sm" data-npi="review" data-file="${e(p[0])}" ${lock ? 'disabled' : ''}>Review possible match</button>` : ''}</div><div class="npi-actions"><label class="sw" title="Toggle file state"><input aria-label="Enable ${e(p[0])}" type="checkbox" ${p[2] ? 'checked' : ''} ${p[4] || !edit || lock ? 'disabled' : ''} onchange="togglePlugin(${i}, this.checked)"><i></i></label><button class="btn sm dg" data-plugin="${e(p[0])}" onclick="deletePlugin(this.dataset.plugin)" ${!allowed() || !hasServerPermission('files.delete') || lock ? 'disabled' : ''}>Uninstall</button></div>${renderReview(st,r)}</article>`;
+      return `<article class="npi-file ${chosen ? 'is-selected' : ''}" style="--npi-item:${Math.min(i,5)}"><div class="npi-file-head"><input id="npi-select-${i}" type="checkbox" data-npi-select="${e(p[0])}" aria-label="Select ${e(p[0])} for update" ${chosen ? 'checked' : ''} ${!eligible(r) || !canUpdate() || lock || p[4] || (!chosen && st.selected.size >= 10) ? 'disabled' : ''}>${iconHtml}<div class="npi-copy">${titleHtml}<span class="mu">${e(p[1] || 'installed')} · ${p[2] ? 'Enabled' : 'Disabled'}${p[3] ? ` · ${e(formatFileDate(p[3]))}` : ''}</span></div></div><div class="npi-metadata">${!r && identities ? `<div data-npid-info="${e(p[0])}">${identities.info(p[0])}</div>` : `<span class="npi-status">${status(r)}</span>`}${identified ? `<dl><dt>${r.match === 'confirmed' ? 'Descriptor (informational)' : 'Installed'}</dt><dd>${e(r.installed_version || 'Not provided')}</dd><dt>Latest for software</dt><dd>${e(r.latest?.version_number || r.latest?.name || (r.latest ? r.latest.id : 'Unavailable'))}</dd></dl><span class="mu">${r.update_available && r.latest ? 'Update available' : r.latest && r.match === 'hash' ? 'No update available' : 'Release comparison unavailable'}</span>` : ''}${r?.match === 'suggested' ? `<button class="btn sm" data-npi="review" data-file="${e(p[0])}" ${lock ? 'disabled' : ''}>Review possible match</button>` : ''}</div><div class="npi-actions"><label class="sw" title="Toggle file state"><input aria-label="Enable ${e(p[0])}" type="checkbox" ${p[2] ? 'checked' : ''} ${p[4] || !edit || lock ? 'disabled' : ''} onchange="togglePlugin(${i}, this.checked)"><i></i></label><button class="btn sm dg" data-plugin="${e(p[0])}" onclick="deletePlugin(this.dataset.plugin)" ${!allowed() || !hasServerPermission('files.delete') || lock ? 'disabled' : ''}>Uninstall</button></div>${renderReview(st,r)}</article>`;
     }).join('');
     const results = w?.results ? `<section class="npi-results" aria-label="Update results"><h3>Update results</h3>${w.results.map(r => `<div><b>${e(r.filename)}</b> · ${e(r.status)}${diagnostic(r) || (r.status !== 'updated' ? '<span class="mu">Not updated. Recheck the file and compatibility before a new attempt.</span>' : '')}${backup(r.backup_path) ? `<span class="mu">Backup: <code>${e(backup(r.backup_path))}</code></span>` : ''}</div>`).join('')}<p>${w.restart ? 'Restart required to apply updates. The server was not started automatically.' : 'No automatic restart was performed.'}</p></section>` : '';
-    return `<section id="np-installed" class="npi" aria-label="Installed file metadata"><div class="npi-toolbar"><div><b>Installed sources &amp; updates</b><p class="mu">Check explicitly to identify files by SHA512. Name suggestions need your confirmation.</p></div><button id="npi-check" class="btn" data-npi="check" ${!allowed() || st.busy || st.preparing || pending() ? 'disabled' : ''}>${st.busy ? 'Checking…' : 'Check for updates'}</button></div><div class="npi-bulk"><span>${st.selected.size} / 10 selected</span><button id="npi-update" class="btn pr sm" data-npi="update" ${!canUpdate() || !st.selected.size || lock ? 'disabled' : ''}>Review selected updates</button><button class="btn sm" data-npi="clear" ${!st.selected.size || lock ? 'disabled' : ''}>Clear selection</button><span class="mu">${!edit ? 'Read-only · file editing permission required.' : S.status !== 'offline' ? 'Stop the server before updating. Checking is available while running.' : 'Server stopped · no automatic restart.'}</span></div><div role="status" aria-live="polite" class="npi-feedback">${pending() ? 'Updating metadata or files… Results are available when the operation finishes. Do not repeat this operation.' : blocked() ? 'Previous write outcome is uncertain. Check for updates from the beginning before any new update or source confirmation.' : ''}${st.busy ? ' Scanning up to 20 files…' : ''}${e(st.error || st.notice)}</div>${results}<div class="npi-files npi-${e(mode)}">${S.loading?.plugins ? '<p>Loading installed files…</p>' : body || `<p class="card">${S.plugins.length ? 'No installed files match your filter.' : 'No plugins or mods installed yet. Use Browse Store to install a project.'}</p>`}</div>${st.scanned ? `<div class="npi-pagination"><span class="mu">${st.records.size} of ${st.total} files checked${st.records.size >= MAX ? ' · Scan limit reached (1000 files)' : ''}</span>${st.more ? `<button class="btn sm" data-npi="more" ${st.busy || st.preparing || blocked() ? 'disabled' : ''}>Load more scan</button>` : ''}</div>` : ''}</section>`;
+    return `<section id="np-installed" class="npi" aria-label="Installed file metadata"><div class="npi-toolbar"><div><b>Installed sources &amp; updates</b><p class="mu">Names and icons are identified automatically. Check for updates explicitly; name suggestions never authorize updates.</p></div><button id="npi-check" class="btn" data-npi="check" ${!allowed() || st.busy || st.preparing || pending() ? 'disabled' : ''}>${st.busy ? 'Checking…' : 'Check for updates'}</button></div>${window.NPPluginIdentities?.statusHtml() || ''}<div class="npi-bulk"><span>${st.selected.size} / 10 selected</span><button id="npi-update" class="btn pr sm" data-npi="update" ${!canUpdate() || !st.selected.size || lock ? 'disabled' : ''}>Review selected updates</button><button class="btn sm" data-npi="clear" ${!st.selected.size || lock ? 'disabled' : ''}>Clear selection</button><span class="mu">${!edit ? 'Read-only · file editing permission required.' : S.status !== 'offline' ? 'Stop the server before updating. Checking is available while running.' : 'Server stopped · no automatic restart.'}</span></div><div role="status" aria-live="polite" class="npi-feedback">${pending() ? 'Updating metadata or files… Results are available when the operation finishes. Do not repeat this operation.' : blocked() ? 'Previous write outcome is uncertain. Check for updates from the beginning before any new update or source confirmation.' : ''}${st.busy ? ' Scanning up to 20 files…' : ''}${e(st.error || st.notice)}</div>${results}<div class="npi-files npi-${e(mode)}">${S.loading?.plugins ? '<p>Loading installed files…</p>' : body || `<p class="card">${S.plugins.length ? 'No installed files match your filter.' : 'No plugins or mods installed yet. Use Browse Store to install a project.'}</p>`}</div>${st.scanned ? `<div class="npi-pagination"><span class="mu">${st.records.size} of ${st.total} files checked${st.records.size >= MAX ? ' · Scan limit reached (1000 files)' : ''}</span>${st.more ? `<button class="btn sm" data-npi="more" ${st.busy || st.preparing || blocked() ? 'disabled' : ''}>Load more scan</button>` : ''}</div>` : ''}</section>`;
   }
   document.addEventListener('click', ev => {
     const b = ev.target.closest('[data-npi]'); if (!b || b.disabled || !active()) return;

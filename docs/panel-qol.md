@@ -11,9 +11,12 @@ These features live in the shared web panel. They do not remove or change Window
 
 ## Files and plugin browsing
 
-- Trash is the first navigation item in the root Files listing, outside normal file selection and bulk operations.
+- Trash is the first navigation item in the root Files listing, with a distinct bin icon, outside normal file selection and bulk operations. It is not an upload/drop destination.
 - Open **Files → World tools → Convert world** for world conversion and existing-job monitoring.
-- Plugin results open an in-panel project page; **Load more** extends the search list. Default Install selects the newest release for the actual server software without requiring an exact Minecraft-version tag. Explicit release selection remains available. See the [plugin browser guide](plugin-browser.md) for compatibility caveats and details.
+- Plugin results open an in-panel project page; numbered pages and the **View** selector control the search results. Default Install selects the newest release for the actual server software without requiring an exact Minecraft-version tag. Explicit release selection remains available. See the [plugin browser guide](plugin-browser.md) for compatibility caveats and details.
+- Installed plugins and JARs in the active `plugins/` or `mods/` directory show discovered names/icons automatically while keeping their real filenames. Unknown custom files do not acquire an unconfirmed project's icon. See [installed plugin metadata](installed-plugin-updates.md).
+- Dropped uploads retain the selected folder destination in the upload queue, including retries; navigating elsewhere must not retarget queued files. The compact drop hint names the destination, and the target folder is highlighted.
+- Uploads never silently replace an existing file. A name conflict keeps the original and asks you to resolve the destination before retrying. Changing the signed-in session cancels queued uploads; select the files again in the new session.
 
 ## Text editor
 

@@ -121,6 +121,12 @@ func (h *PluginHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 	if limit == 0 || limit > 20 {
 		limit = 20
 	}
+	metadataMode := r.URL.Query().Get("metadata_only")
+	if metadataMode != "" && metadataMode != "true" && metadataMode != "false" {
+		writeError(w, 400, "Invalid metadata mode")
+		return
+	}
+	metadataOnly := metadataMode == "true"
 	folder, kind := pluginFolder(srv.Type)
 	page := installedCatalog{Items: []installedCatalogItem{}, Offset: offset, Limit: limit, Folder: folder, Kind: kind}
 	release, err := rooted.TryMutation(h.manager.GetWorkingDir(id))
@@ -168,6 +174,7 @@ func (h *PluginHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 	hashes := []string{}
 	for _, name := range names[start:end] {
 		item := installedCatalogItem{InstalledPlugin: InstalledPlugin{Filename: name, Enabled: !strings.HasSuffix(strings.ToLower(name), ".disabled")}, Match: "unknown", Candidates: []installedCandidate{}}
+		item.Name = pluginFilenameQuery(name)
 		hash, st, err := pluginDigest(ctx, dir, name, &remaining)
 		if st != nil {
 			item.Size, item.Modified = st.Size(), st.ModTime()
@@ -181,6 +188,7 @@ func (h *PluginHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 		page.Items = append(page.Items, item)
 	}
 	matches, lookupErr := downloader.LookupModrinthHashes(ctx, hashes)
+	projectCache := make(map[string]*downloader.ModrinthProject)
 	for i := range page.Items {
 		item := &page.Items[i]
 		if item.Match == "error" {
@@ -216,13 +224,28 @@ func (h *PluginHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if projectID != "" {
-			p, err := downloader.GetModrinthProjectContext(ctx, projectID)
-			if err != nil {
+			p := projectCache[projectID]
+			var projectErr error
+			if p == nil {
+				p, projectErr = downloader.GetModrinthProjectContext(ctx, projectID)
+				if projectErr == nil {
+					projectCache[projectID] = p
+				}
+			}
+			if projectErr != nil {
 				itemError(item, "Project metadata unavailable; retry the scan")
 				continue
 			}
 			item.Project = catalogProject(p)
 			item.Name = p.Title
+			if metadataOnly {
+				if item.Match == "confirmed" {
+					item.Message = "User-confirmed project; installed release unverified. Updates not checked."
+				} else {
+					item.Message = "Exact hash identity; updates not checked."
+				}
+				continue
+			}
 			latest, err := downloader.ResolveModrinthVersionContext(ctx, p.ID, srv.Type, "")
 			if err != nil {
 				itemError(item, "Latest compatible release unavailable; retry the scan")
@@ -236,6 +259,10 @@ func (h *PluginHandler) Catalog(w http.ResponseWriter, r *http.Request) {
 			if installed != nil && latest != nil && !item.UpdateAvailable && installed.ID != latest.ID {
 				item.Message = "No verified newer compatible release; automatic downgrade is disabled."
 			}
+			continue
+		}
+		if metadataOnly {
+			item.Message = "Unverified embedded name; check for updates to search possible sources."
 			continue
 		}
 		if !crediblePluginName(item.Name, item.Name, "") {

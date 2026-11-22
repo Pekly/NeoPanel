@@ -1,0 +1,17 @@
+/* File identity is a presentation layer, not a new file/action surface.
+   Use existing semantic theme + Inter/mono; 4/8px rhythm and quiet 8px radii. */
+.npid-icon { display: inline-grid; place-items: center; position: relative; flex: none; width: 32px; height: 32px; border-radius: 8px; background: var(--card-inner); color: var(--ac); font-size: 24px; vertical-align: middle; }
+.npid-icon.md, .npid-icon.npi-icon { width: 40px; height: 40px; }
+.npid-icon.lg { width: 56px; height: 56px; }
+.npid-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: inherit; background: var(--card-bg); }
+.npid-copy, [data-npid-installed], [data-npid-info] { display: grid; gap: 4px; min-width: 0; }
+.npid-name { font-weight: 600; color: var(--tx); }
+.npid-filename { display: block; font-size: 11px; font-weight: 400; line-height: 1.5; }
+.npid-copy, .npid-copy span { white-space: normal; overflow-wrap: anywhere; }
+.vm-file-name:has(.npid-copy) { display: block; -webkit-line-clamp: unset; max-height: none; overflow: visible; }
+.npid-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 12px 0; color: var(--tx-muted); font-size: 12px; line-height: 1.6; }
+.npid-feedback > span { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.npid-feedback button:focus-visible, .np-trash-entry:focus-visible, .np-trash-entry button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+.fi-badge.np-trash-badge { color: var(--tx-muted); background: var(--card-inner); border: 1px solid var(--border); }
+.np-trash-entry:hover .np-trash-badge { color: var(--ac); border-color: var(--ac); }
+.np-trash-entry:active .np-trash-badge { background: var(--ac-subtle); }

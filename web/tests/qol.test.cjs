@@ -314,3 +314,54 @@ test('late content loads cannot enter a new account or session', async () => {
     assert.equal(c.qol.editor, null);
   }
 });
+
+test('upload destinations and leases are immutable across navigation and retries', async () => {
+  const { c, requests, server } = setup();
+  const pending = c.enqueueUploads([{ name: 'one' }, { name: 'two' }], '世界/My folder');
+  const item = c.qol.uploads[1];
+  assert.equal(Reflect.set(item, 'dir', 'wrong'), false);
+  assert.equal(Reflect.set(item.server, 'node_id', 'wrong'), false);
+  server.node_id = 'changed'; c.S.currentDir = 'elsewhere';
+  requests[0].finish(200); await tick();
+  assert.equal(requests[1].url, '/nodes/local/servers/a/files/upload');
+  assert.equal(requests[1].body.values.path, '世界/My folder');
+  requests[1].finish(409, 'Exists'); await pending;
+  c.retryUpload(item.id);
+  assert.equal(requests[2].body.values.path, '世界/My folder'); requests[2].finish(200); await tick();
+});
+test('queued uploads and retries fail closed for changed accounts, tokens and permissions', async () => {
+  for (const mutate of [c => { c.S.token = 'other'; }, c => { c.S.user.id = 'other'; }, c => { c.S.user.username = 'other'; }, c => { c.hasServerPermission = () => false; }]) {
+    const { c, requests } = setup();
+    const pending = c.enqueueUploads([{ name: 'one' }, { name: 'two' }], 'nested');
+    mutate(c); requests[0].finish(500, 'failed'); await pending;
+    assert.equal(requests.filter(r => r.body).length, 1);
+    assert.equal(c.qol.uploads[1].status, 'cancelled');
+    c.retryUpload(1); c.retryUpload(2); await tick();
+    assert.equal(requests.filter(r => r.body).length, 1);
+  }
+});
+test('upload path validation never falls back to root; legitimate root remains explicit', async () => {
+  const { c, requests } = setup();
+  for (const dir of [null, '../bad', '/absolute', 'a/../b', 'a\\b', 'a\x00b']) c.enqueueUploads([{ name: 'one' }], dir);
+  c.enqueueUploads([{ name: 'folder-file', webkitRelativePath: 'folder/file' }], 'nested');
+  assert.equal(requests.length, 0);
+  const pending = c.enqueueUploads([{ name: 'root-file' }], '');
+  assert.equal(requests[0].body.values.path, ''); requests[0].finish(200); await pending;
+});
+
+test('queued uploads retain original grants across real server-access navigation and retries', async () => {
+  const {c,requests,server}=setup();
+  const extract=(a,b)=>app.slice(app.indexOf(a),app.indexOf(b,app.indexOf(a)));
+  vm.runInContext(extract('function accessIdentity(', 'function resetServerAccess(')+extract('function hasServerPermission(', 'function canServerPage('),c);
+  c.S.serverAccess={key:c.accessIdentity(server),status:'ready',data:{is_owner:false,is_admin:false,permissions:['files.view','files.edit']}};
+  c.assertClientRequestAccess=()=>{assert.ok(c.hasServerPermission('files.edit',server));};
+  const promise=c.enqueueUploads([{name:'first.jar'},{name:'second.jar'}],'plugins');
+  assert.equal(c.uploadsPendingFor(server,'plugins'),true);
+  c.S.servers=[{id:'other',node_id:'remote'}];c.S.serverAccess=null;
+  requests[0].finish(200);await tick();
+  assert.equal(requests.length,2);assert.match(requests[1].url,/nodes\/local\/servers\/a\/files\/upload$/);
+  assert.equal(requests[1].body.values.path,'plugins');requests[1].finish(500,'retry');await promise;
+  c.retryUpload(2);assert.equal(requests.length,3);assert.equal(requests[2].body.values.path,'plugins');requests[2].finish(200);await tick();
+  assert.equal(c.uploadsPendingFor(server,'plugins'),false);
+  c.S.user.role='changed';assert.equal(c.uploadAccessAllowed(c.qol.uploads[0]),false);
+});

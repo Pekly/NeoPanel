@@ -264,3 +264,9 @@ test('pending page reads are single flight, abort on size/filter changes and nev
   c.handler=()=>new Promise(r=>resolve=r);const old=c.NPPlugins.goPage(3);c.S.q='new';c.NPPlugins.debounce();assert.equal(calls.at(-1).o.signal.aborted,true);
   resolve({hits:[hit(999)],total_hits:250});await old;assert.equal(c.S.lastModrinthHits.length,0);
 });
+
+test('pending project renders a safe clicked-result preview and skeleton, never loaded release facts',async()=>{
+  const {c}=harness();let resolve;c.S.lastModrinthHits=[{slug:'project-0',title:'<img onerror=evil()>',description:'Demo preview <script>evil</script>',icon_url:'https://user:pass@example.com/icon.png'}];c.handler=()=>new Promise(r=>resolve=r);
+  const pending=c.NPPlugins.open('project-0');const html=c.NPPlugins.render();assert.match(html,/np-project-loading/);assert.match(html,/aria-busy="true"/);assert.match(html,/role="status"/);assert.match(html,/aria-hidden="true"/);assert.match(html,/&lt;img/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img|<script|user:pass|data-np-install|downloads|followers/);assert.equal(c.NPPlugins.isOpen(),true);
+  resolve(project());await pending;assert.doesNotMatch(c.NPPlugins.render(),/np-project-loading/);assert.match(c.NPPlugins.render(),/data-np-install/);
+});
