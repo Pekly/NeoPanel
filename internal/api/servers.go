@@ -165,9 +165,10 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 type CreateServerRequest struct {
 	Name            string `json:"name"`
 	Description     string `json:"description"`
-	Type            string `json:"type"`       // paper, purpur, vanilla, fabric, custom
-	Version         string `json:"version"`    // e.g. 1.20.4, 1.21
-	Port            int    `json:"port"`       // default 25565
+	Type            string `json:"type"`    // paper, purpur, vanilla, fabric, custom
+	Version         string `json:"version"` // e.g. 1.20.4, 1.21
+	Port            int    `json:"port"`    // default 25565
+	PortsAllowed    int    `json:"ports_allowed"`
 	MemoryMinMB     int    `json:"memory_min"` // e.g. 1024
 	MemoryMaxMB     int    `json:"memory_max"` // e.g. 2048
 	JavaArgs        string `json:"java_args"`  // custom flags
@@ -242,6 +243,14 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	if req.OwnerID > 0 && claims != nil && claims.Role == "admin" {
 		ownerID = req.OwnerID
 	}
+	if req.PortsAllowed != 0 && (claims == nil || claims.Role != "admin") {
+		writeError(w, http.StatusForbidden, "Only administrators can set the port allowance")
+		return
+	}
+	if req.PortsAllowed < 0 || req.PortsAllowed > 64512 {
+		writeError(w, http.StatusBadRequest, "Port allowance must be between 1 and 64512")
+		return
+	}
 
 	server := &database.Server{
 		ID:              srvID,
@@ -251,6 +260,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		Version:         req.Version,
 		JarFile:         downloader.ServerFileName(req.Type),
 		Port:            req.Port,
+		PortsAllowed:    req.PortsAllowed,
 		MemoryMinMB:     req.MemoryMinMB,
 		MemoryMaxMB:     req.MemoryMaxMB,
 		JavaArgs:        req.JavaArgs,
@@ -266,12 +276,17 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create server directory"})
 		return
 	}
+	saved := false
+	defer func() {
+		if !saved {
+			_ = os.RemoveAll(workingDir)
+		}
+	}()
 
 	if downloader.IsNativeSoftware(req.Type) {
 		// Native installs are synchronous so failures are visible and start cannot race a download.
 		if req.AutoDownload {
 			if err := downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile); err != nil {
-				_ = os.RemoveAll(workingDir)
 				writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Steel installation failed: " + err.Error()})
 				return
 			}
@@ -282,13 +297,11 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if proxyconfig.Supported(req.Type) {
 		if _, err := proxyconfig.Ensure(workingDir, req.Type, req.Port); err != nil {
-			_ = os.RemoveAll(workingDir)
 			writeServerOperationError(w, err)
 			return
 		}
 		if req.AutoDownload {
 			if err := downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile); err != nil {
-				_ = os.RemoveAll(workingDir)
 				writeError(w, http.StatusBadGateway, "Proxy installation failed: "+err.Error())
 				return
 			}
@@ -315,21 +328,19 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Auto-download jar if requested and flavor is not custom
-		if req.AutoDownload && req.Type != "custom" {
-			go func() {
-				_ = downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile)
-			}()
-		}
+		// Downloads begin only after the server and primary allocation commit.
 	}
 
 	if err := h.db.CreateServer(server); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to save server: " + err.Error()})
 		return
 	}
+	saved = true
 
-	// Record default primary port allocation in database
-	_, _ = h.db.AddServerPort(server.ID, server.Port, "tcp/udp", "Primary Game Port", true)
+	// CreateServer atomically records the primary allocation; errors are never ignored.
+	if req.AutoDownload && req.Type != "custom" && !downloader.IsNativeSoftware(req.Type) && !proxyconfig.Supported(req.Type) {
+		go func() { _ = downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile) }()
+	}
 
 	logAudit(h.db, r, "server_create", fmt.Sprintf("Created server '%s' (%s %s, port %d, %d MiB RAM)", server.Name, server.Type, server.Version, server.Port, server.MemoryMaxMB))
 
@@ -356,6 +367,7 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 		AutoRestart     *bool   `json:"auto_restart"`
 		CPULimitPercent *int    `json:"cpu_limit_percent"`
 		DiskLimitMB     *int64  `json:"disk_limit_mb"`
+		PortsAllowed    *int    `json:"ports_allowed"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request body"})
@@ -364,6 +376,10 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 
 	user := getUserFromContext(r)
 	isAdmin := user != nil && user.Role == "admin"
+	if req.PortsAllowed != nil && *req.PortsAllowed != server.PortsAllowed {
+		writeError(w, http.StatusForbidden, "Use the administrator port allowance endpoint to change the allowance")
+		return
+	}
 	if req.NodeID != "" {
 		currentNode := server.NodeID
 		if currentNode == "" {
@@ -399,15 +415,30 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if req.Port != 0 && req.Port != server.Port {
+		writeError(w, http.StatusConflict, "Change the primary port through the port allocation endpoint while the server is stopped")
+		return
+	}
+	// Serialize the metadata write with primary changes, but only after policy
+	// validation: denied requests must not release an idle-wake listener.
+	release, err := h.manager.BeginServerOperation(serverID)
+	if err != nil {
+		writeServerOperationError(w, err)
+		return
+	}
+	defer release()
+	current, err := h.db.GetServer(serverID)
+	if err != nil || !current.UpdatedAt.Equal(server.UpdatedAt) || current.Port != server.Port {
+		writeError(w, http.StatusConflict, "Server settings changed; reload before saving")
+		return
+	}
+	server = current
 
 	if strings.TrimSpace(req.Name) != "" {
 		server.Name = strings.TrimSpace(req.Name)
 	}
 	if req.Description != nil {
 		server.Description = *req.Description
-	}
-	if req.Port > 0 {
-		server.Port = req.Port
 	}
 	if req.Type != "" {
 		server.Type = req.Type
@@ -586,6 +617,16 @@ func (h *ServerHandler) SendCommand(w http.ResponseWriter, r *http.Request) {
 
 func (h *ServerHandler) ListServerPorts(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	if !h.requirePortAccess(w, r, serverID, "settings.view") {
+		return
+	}
+	server, err := h.db.GetServer(serverID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Server not found")
+		return
+	}
+	w.Header().Set("X-Ports-Used", strconv.Itoa(server.PortsUsed))
+	w.Header().Set("X-Ports-Allowed", strconv.Itoa(server.PortsAllowed))
 	ports, err := h.db.ListServerPorts(serverID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -617,6 +658,9 @@ func (h *ServerHandler) serverUserPolicy(r *http.Request, server *database.Serve
 
 // Check policy before decoding or performing any database, file or firewall mutation.
 func (h *ServerHandler) requirePortPolicy(w http.ResponseWriter, r *http.Request, serverID string) bool {
+	if !h.requirePortAccess(w, r, serverID, "settings.edit") {
+		return false
+	}
 	server, err := h.db.GetServer(serverID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Server not found")
@@ -644,34 +688,33 @@ func (h *ServerHandler) AddServerPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Port < 1024 || req.Port > 65535 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Port number must be between 1024 and 65535"})
-		return
+	user := getUserFromContext(r)
+	random := user == nil || user.Role != "admin"
+	var port *database.ServerPort
+	allocate := func(apply database.PortConfigApply) error {
+		var err error
+		port, err = h.db.AllocateServerPort(serverID, req.Port, req.Protocol, req.Notes, req.IsPrimary, random, apply)
+		return err
 	}
-
-	port, err := h.db.AddServerPort(serverID, req.Port, req.Protocol, req.Notes, req.IsPrimary)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
-	// If set as primary, also update server.properties and in-memory instance
+	var err error
 	if req.IsPrimary {
-		if err := h.updateServerPropertiesPort(serverID, req.Port); err != nil {
-			writeServerOperationError(w, err)
-			return
-		}
-		if srv, err := h.db.GetServer(serverID); err == nil {
-			h.manager.UpdateInstanceServer(srv)
-		}
+		err = h.withPrimaryPortChange(r, serverID, allocate)
+	} else {
+		err = allocate(nil)
 	}
-
-	// Open port in host Linux firewall if UFW is active
-	h.allowPort(req.Port, req.Protocol)
-
-	logAudit(h.db, r, "port_add", fmt.Sprintf("Assigned port %d (%s) to %s", req.Port, port.Protocol, auditServerLabel(h.db, serverID)))
-
-	writeJSON(w, http.StatusCreated, port)
+	if err != nil {
+		writePortError(w, err)
+		return
+	}
+	if h.allowPort != nil {
+		h.allowPort(port.Port, port.Protocol)
+	}
+	logAudit(h.db, r, "port_add", fmt.Sprintf("Assigned port %d (%s) to %s", port.Port, port.Protocol, auditServerLabel(h.db, serverID)))
+	writeJSON(w, http.StatusCreated, struct {
+		*database.ServerPort
+		Message            string `json:"message"`
+		ListenerConfigured bool   `json:"listener_configured"`
+	}{port, portAllocationMessage(req.IsPrimary), req.IsPrimary})
 }
 
 func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request) {
@@ -701,7 +744,7 @@ func (h *ServerHandler) DeleteServerPort(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if portNum > 0 {
+	if portNum > 0 && h.removePort != nil {
 		h.removePort(portNum)
 	}
 
@@ -722,27 +765,21 @@ func (h *ServerHandler) SetPrimaryPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newPort, err := h.db.SetPrimaryServerPort(serverID, portID)
+	var newPort int
+	err = h.withPrimaryPortChange(r, serverID, func(apply database.PortConfigApply) error {
+		var err error
+		newPort, err = h.db.ChangePrimaryServerPort(serverID, portID, apply)
+		return err
+	})
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writePortError(w, err)
 		return
-	}
-
-	// Update server.properties with the new primary port
-	if err := h.updateServerPropertiesPort(serverID, newPort); err != nil {
-		writeServerOperationError(w, err)
-		return
-	}
-
-	// Live sync in-memory server instance
-	if srv, err := h.db.GetServer(serverID); err == nil {
-		h.manager.UpdateInstanceServer(srv)
 	}
 
 	logAudit(h.db, r, "port_primary", fmt.Sprintf("Set port %d as primary game port on %s", newPort, auditServerLabel(h.db, serverID)))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message": "Primary port updated",
+		"message": portAllocationMessage(true),
 		"port":    newPort,
 	})
 }
@@ -778,6 +815,14 @@ func (h *ServerHandler) updateServerPropertiesPort(serverID string, port int) er
 	srv, err := h.db.GetServer(serverID)
 	if err != nil {
 		return err
+	}
+	return h.updatePrimaryPortConfig(srv, port)
+}
+
+func (h *ServerHandler) updatePrimaryPortConfig(srv *database.Server, port int) error {
+	serverID := srv.ID
+	if downloader.IsNativeSoftware(srv.Type) {
+		return runner.SyncSteelPort(h.manager.GetWorkingDir(serverID), port)
 	}
 	if proxyconfig.Supported(srv.Type) {
 		if _, err := proxyconfig.Ensure(h.manager.GetWorkingDir(serverID), srv.Type, port); err != nil {
@@ -1185,6 +1230,12 @@ func (h *ServerHandler) UpdateQuickConfigs(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	workDir := h.manager.GetWorkingDir(serverID)
+	release, err := rooted.TryMutation(workDir)
+	if err != nil {
+		writeError(w, http.StatusConflict, "Files are busy with another server operation; retry when it finishes")
+		return
+	}
+	defer release()
 	root, err := rooted.Open(workDir)
 	if err != nil {
 		writeError(w, 400, err.Error())

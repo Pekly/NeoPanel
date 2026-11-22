@@ -9,14 +9,14 @@ import (
 func TestCreateServerUsesJava25Default(t *testing.T) {
 	f := newReliabilityFixture(t)
 	f.cfg.Java.DefaultPath = `C:\Program Files\Java\bin\java.exe`
-	for _, tc := range []struct{ name, engine, javaPath, want string }{
+	for i, tc := range []struct{ name, engine, javaPath, want string }{
 		{"default", "custom", "", "25"},
 		{"explicit", "custom", "java-override", "java-override"},
 		{"legacy-runtime", "paper", "17", "17"},
 		{"native", "steel", "java-ignored", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body, _ := json.Marshal(map[string]any{"name": tc.name, "type": tc.engine, "java_path": tc.javaPath, "auto_download": false})
+			body, _ := json.Marshal(map[string]any{"name": tc.name, "type": tc.engine, "java_path": tc.javaPath, "auto_download": false, "port": 30000 + i})
 			w := f.request("POST", "/api/servers", string(body), "admin")
 			if w.Code != 201 {
 				t.Fatalf("%d: %s", w.Code, w.Body.String())

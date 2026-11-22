@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/Pekly/NeoPanel/internal/rooted"
 )
 
 var ErrProxyConfigRunning = errors.New("stop the proxy before changing its configuration")
@@ -16,6 +18,13 @@ func (m *ServerManager) BeginProxyConfigOperation(ctx context.Context, id string
 	if err != nil {
 		return nil, err
 	}
+	releaseFiles, err := rooted.TryExclusiveMutation(m.GetWorkingDir(id))
+	if err != nil {
+		release()
+		return nil, fmt.Errorf("%w: %v", ErrServerOperation, err)
+	}
+	releaseOperation := release
+	release = func() { releaseFiles(); releaseOperation() }
 	m.launchMu.Lock()
 	switch {
 	case m.isShuttingDown():

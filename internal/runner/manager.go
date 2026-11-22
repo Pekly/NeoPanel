@@ -32,7 +32,7 @@ type ServerManager struct {
 	shutdownOnce              sync.Once
 	idleWG                    sync.WaitGroup
 	importWG                  sync.WaitGroup // Registered under launchMu; shutdown joins transfers before DB close.
-	launchMu                  sync.Mutex // Serializes process launch with the shutdown boundary.
+	launchMu                  sync.Mutex     // Serializes process launch with the shutdown boundary.
 	wake                      wakeCoordinator
 	wakeSuppressed            sync.Map // failed durable invalidations fail closed until repaired
 	recoveryMu                sync.Mutex
@@ -659,6 +659,9 @@ func (m *ServerManager) StartSchedule(sched *database.ServerSchedule) error {
 var ErrScheduleRunning = fmt.Errorf("schedule is already running or was already triggered this minute")
 
 func (m *ServerManager) startSchedule(sched *database.ServerSchedule, now time.Time, scheduled bool) error {
+	if sched == nil || !m.db.FeatureEnabled(sched.ServerID, "schedules") {
+		return fmt.Errorf("schedules are disabled")
+	}
 	if _, err := database.ParseCron(sched.CronExpr); err != nil {
 		return err
 	}
@@ -709,6 +712,12 @@ func (m *ServerManager) executeClaimedSchedule(sched *database.ServerSchedule, t
 }
 
 func (m *ServerManager) executeScheduleAction(sched *database.ServerSchedule) (runErr error) {
+	if !m.db.FeatureEnabled(sched.ServerID, "schedules") {
+		return fmt.Errorf("schedules are disabled")
+	}
+	if sched.Action == "backup" && !m.db.FeatureEnabled(sched.ServerID, "backups") {
+		return fmt.Errorf("new backups are disabled")
+	}
 	switch sched.Action {
 	case "command":
 		if strings.TrimSpace(sched.Payload) == "" {

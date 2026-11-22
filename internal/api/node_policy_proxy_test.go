@@ -26,6 +26,12 @@ func TestRemoteNodePolicyEnforcedWithoutWorkerPolicyRow(t *testing.T) {
 				if err := worker.db.UpdateServerSubuser("alpha", subs[0].ID, []string{"settings.edit"}); err != nil {
 					t.Fatal(err)
 				}
+				if err := worker.db.SetServerPortAllowance("alpha", 3); err != nil {
+					t.Fatal(err)
+				}
+				if err := worker.db.SetPortPool(database.PortPool{Start: 30001, End: 30001}); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := worker.db.AddServerPort("alpha", 25565, "tcp", "primary", true); err != nil {
 					t.Fatal(err)
 				}
@@ -66,6 +72,7 @@ func TestRemoteNodePolicyEnforcedWithoutWorkerPolicyRow(t *testing.T) {
 					body = `{"java_path":"java-new"}`
 				case "port":
 					body = `{"port":25567}`
+					success = http.StatusConflict // Generic PUT cannot change ports, even for admins.
 				case "add":
 					method, path, body, success = "POST", path+"/ports", `{"port":25567,"protocol":"tcp","is_primary":true}`, 201
 				case "delete":
@@ -98,8 +105,12 @@ func TestRemoteNodePolicyEnforcedWithoutWorkerPolicyRow(t *testing.T) {
 				default:
 					t.Fatal("request never reached worker")
 				}
-				if want == 403 {
-					if !strings.Contains(w.Body.String(), "Node policy") {
+				if want >= 400 {
+					wantReason := "Node policy"
+					if want == http.StatusConflict {
+						wantReason = "port allocation endpoint"
+					}
+					if !strings.Contains(w.Body.String(), wantReason) {
 						t.Fatal("denied for wrong reason", w.Body.String())
 					}
 					afterServer, _ := worker.db.GetServer("alpha")
@@ -107,6 +118,16 @@ func TestRemoteNodePolicyEnforcedWithoutWorkerPolicyRow(t *testing.T) {
 					data, err := os.ReadFile(properties)
 					if err != nil || string(data) != "server-port=25565\n" || !reflect.DeepEqual(beforeServer, afterServer) || !reflect.DeepEqual(beforePorts, afterPorts) || firewallCalls != 0 {
 						t.Fatal("denied mutation changed state", err, firewallCalls)
+					}
+				}
+				if operation == "add" && want == http.StatusCreated {
+					server, err := worker.db.GetServer("alpha")
+					wantPort := 25567
+					if allow {
+						wantPort = 30001
+					}
+					if err != nil || server.Port != wantPort || server.PortsUsed != 3 {
+						t.Fatal("wrong forwarded explicit/random allocation", server, err)
 					}
 				}
 			})

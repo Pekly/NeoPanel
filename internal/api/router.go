@@ -12,6 +12,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
@@ -25,33 +26,35 @@ type contextKey string
 const contextUserKey contextKey = "user"
 
 type Router struct {
-	mux            *http.ServeMux
-	cfg            *config.Config
-	auth           *AuthHandler
-	panelDomain    *PanelDomainHandler
-	account        *AccountHandler
-	servers        *ServerHandler
-	console        *ConsoleHandler
-	files          *FileHandler
-	sftpImports    *sftpImportHandler
-	plugins        *PluginHandler
-	backups        *BackupHandler
-	players        *PlayerHandler
-	software       *SoftwareHandler
-	branding       *BrandingHandler
-	mods           *ModsHandler
-	databases      *DatabaseHandler
-	nodes          *NodeHandler
-	subdomains     *SubdomainHandler
-	subusers       *SubuserHandler
-	schedules      *ScheduleHandler
-	clientAPI      *ClientAPIHandler
-	email          *EmailHandler
-	invitations    *InvitationHandler
-	globalLimiter  *IPRateLimiter
-	authLimiter    *IPRateLimiter
-	clientIPs      *clientIPPolicy
-	embeddedStatic fs.FS
+	featureMu        sync.Mutex
+	mux              *http.ServeMux
+	cfg              *config.Config
+	auth             *AuthHandler
+	panelDomain      *PanelDomainHandler
+	account          *AccountHandler
+	servers          *ServerHandler
+	console          *ConsoleHandler
+	files            *FileHandler
+	sftpImports      *sftpImportHandler
+	worldConversions *worldConversionHandler
+	plugins          *PluginHandler
+	backups          *BackupHandler
+	players          *PlayerHandler
+	software         *SoftwareHandler
+	branding         *BrandingHandler
+	mods             *ModsHandler
+	databases        *DatabaseHandler
+	nodes            *NodeHandler
+	subdomains       *SubdomainHandler
+	subusers         *SubuserHandler
+	schedules        *ScheduleHandler
+	clientAPI        *ClientAPIHandler
+	email            *EmailHandler
+	invitations      *InvitationHandler
+	globalLimiter    *IPRateLimiter
+	authLimiter      *IPRateLimiter
+	clientIPs        *clientIPPolicy
+	embeddedStatic   fs.FS
 }
 
 func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManager, embeddedStatic fs.FS) *Router {
@@ -76,31 +79,32 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	emailHandler.assets = embeddedStatic
 
 	r := &Router{
-		mux:            http.NewServeMux(),
-		cfg:            cfg,
-		auth:           authHandler,
-		account:        accountHandler,
-		servers:        serverHandler,
-		console:        consoleHandler,
-		files:          fileHandler,
-		sftpImports:    newSFTPImportHandler(cfg, db, manager),
-		plugins:        pluginHandler,
-		backups:        backupHandler,
-		players:        playerHandler,
-		software:       softwareHandler,
-		branding:       brandingHandler,
-		mods:           modsHandler,
-		databases:      databaseHandler,
-		nodes:          nodeHandler,
-		subdomains:     subdomainHandler,
-		subusers:       subuserHandler,
-		schedules:      scheduleHandler,
-		clientAPI:      clientAPIHandler,
-		email:          emailHandler,
-		globalLimiter:  NewIPRateLimiter(defaultAPIRequestsPerMinute, defaultAPIRequestsPerMinute),
-		authLimiter:    NewIPRateLimiter(1, 15),
-		clientIPs:      newClientIPPolicy(cfg.Security.TrustedProxies),
-		embeddedStatic: embeddedStatic,
+		mux:              http.NewServeMux(),
+		cfg:              cfg,
+		auth:             authHandler,
+		account:          accountHandler,
+		servers:          serverHandler,
+		console:          consoleHandler,
+		files:            fileHandler,
+		sftpImports:      newSFTPImportHandler(cfg, db, manager),
+		worldConversions: newWorldConversionHandler(cfg, db, manager),
+		plugins:          pluginHandler,
+		backups:          backupHandler,
+		players:          playerHandler,
+		software:         softwareHandler,
+		branding:         brandingHandler,
+		mods:             modsHandler,
+		databases:        databaseHandler,
+		nodes:            nodeHandler,
+		subdomains:       subdomainHandler,
+		subusers:         subuserHandler,
+		schedules:        scheduleHandler,
+		clientAPI:        clientAPIHandler,
+		email:            emailHandler,
+		globalLimiter:    NewIPRateLimiter(defaultAPIRequestsPerMinute, defaultAPIRequestsPerMinute),
+		authLimiter:      NewIPRateLimiter(1, 15),
+		clientIPs:        newClientIPPolicy(cfg.Security.TrustedProxies),
+		embeddedStatic:   embeddedStatic,
 	}
 	r.invitations = NewInvitationHandler(r)
 	r.panelDomain = NewPanelDomainHandler(authHandler)
@@ -193,6 +197,12 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/servers", r.requireAuth(r.servers.ListServers))
 	r.mux.HandleFunc("POST /api/servers", r.requireAuth(r.servers.CreateServer))
 	r.mux.HandleFunc("GET /api/servers/{id}", r.requireAuth(r.servers.GetServer))
+	r.mux.HandleFunc("GET /api/features", r.requireAuth(r.getFeatures))
+	r.mux.HandleFunc("GET /api/admin/features", r.requireAdmin(r.getFeatures))
+	r.mux.HandleFunc("PUT /api/admin/features", r.requireAdmin(r.putFeatures))
+	r.mux.HandleFunc("PUT /api/cluster/features", r.requireAdmin(r.putFeatures))
+	r.mux.HandleFunc("GET /api/servers/{id}/features", r.requireAuth(r.getFeatures))
+	r.mux.HandleFunc("PUT /api/servers/{id}/features", r.requireAdmin(r.putFeatures))
 	r.mux.HandleFunc("PUT /api/servers/{id}", r.requireAuth(r.servers.UpdateServer))
 	r.mux.HandleFunc("DELETE /api/servers/{id}", r.requireAuth(r.servers.DeleteServer))
 	r.mux.HandleFunc("POST /api/servers/{id}/power", r.requireAuth(r.servers.PowerAction))
@@ -238,6 +248,10 @@ func (r *Router) registerRoutes(db *database.DB) {
 
 	// Port allocations routes
 	r.mux.HandleFunc("GET /api/servers/{id}/ports", r.requireAuth(r.servers.ListServerPorts))
+	r.mux.HandleFunc("GET /api/servers/{id}/ports/summary", r.requireAuth(r.servers.GetServerPortSummary))
+	r.mux.HandleFunc("PUT /api/servers/{id}/ports/allowance", r.requireAdmin(r.servers.SetServerPortAllowance))
+	r.mux.HandleFunc("GET /api/admin/port-pool", r.requireAdmin(r.servers.GetPortPool))
+	r.mux.HandleFunc("PUT /api/admin/port-pool", r.requireAdmin(r.servers.SetPortPool))
 	r.mux.HandleFunc("POST /api/servers/{id}/ports", r.requireAuth(r.servers.AddServerPort))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/ports/{portId}", r.requireAuth(r.servers.DeleteServerPort))
 	r.mux.HandleFunc("POST /api/servers/{id}/ports/{portId}/primary", r.requireAuth(r.servers.SetPrimaryPort))
@@ -265,6 +279,10 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp/host-key", r.requireAuth(r.sftpImports.hostKey))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp/test", r.requireAuth(r.sftpImports.probe))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files/import-sftp/{jobId}", r.requireAuth(r.sftpImports.cancelJob))
+	r.mux.HandleFunc("GET /api/servers/{id}/world-conversion", r.requireAuth(r.worldConversions.Status))
+	r.mux.HandleFunc("POST /api/servers/{id}/world-conversion", r.requireAuth(r.worldConversions.Start))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/world-conversion/{jobId}", r.requireAuth(r.worldConversions.Cancel))
+	r.mux.HandleFunc("POST /api/servers/{id}/world-conversion/{jobId}/replace", r.requireAuth(r.worldConversions.Replace))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/download", r.requireAuth(r.files.Download))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/rename", r.requireAuth(r.files.Rename))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/move", r.requireAuth(r.files.Move))
@@ -566,6 +584,9 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
+		if !r.featureAllowed(w, req) {
+			return
+		}
 
 		ctx := context.WithValue(req.Context(), contextUserKey, claims)
 		next(w, req.WithContext(ctx))
@@ -648,7 +669,7 @@ func serverActionPermission(method, suffix string) string {
 			return "settings.edit"
 		}
 		return "owner"
-	case "permissions", "icon":
+	case "permissions", "icon", "features":
 		if read {
 			return ""
 		}
@@ -675,6 +696,14 @@ func serverActionPermission(method, suffix string) string {
 			}
 		}
 		return "server.power"
+	case "world-conversion":
+		if read {
+			return "files.view"
+		}
+		if strings.HasSuffix(suffix, "/replace") {
+			return "files.view+files.edit+backup.manage"
+		}
+		return "files.view+files.edit"
 	case "files":
 		if len(parts) > 1 && parts[1] == "import-sftp" {
 			return sftpImportPermission
@@ -869,6 +898,9 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	if err := r.checkProxyIdentity(req, node, claims); err != nil {
 		writeError(w, 502, err.Error())
+		return
+	}
+	if !r.syncProxyFeatures(w, req, node) {
 		return
 	}
 	q := req.URL.Query()

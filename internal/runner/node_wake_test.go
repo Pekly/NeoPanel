@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -316,7 +317,31 @@ func TestWakeDisabledDefaultAndLocalJavaInventory(t *testing.T) {
 	_ = m.db.SetNodeWakeConfig("local", cfg)
 	conflict := *s
 	conflict.ID = "port-conflict"
+	conflict.Port = 0
 	if err := m.db.CreateServer(&conflict); err != nil {
+		t.Fatal(err)
+	}
+	// Reproduce a pre-migration collision without weakening new allocation rules.
+	raw, err := sql.Open("sqlite", filepath.Join(filepath.Dir(m.baseDir), "panel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	tx, err := raw.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var trigger string
+	if err := tx.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='ports_primary_update'`).Scan(&trigger); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{`DROP TRIGGER ports_primary_update`, fmt.Sprintf(`UPDATE servers SET port=%d WHERE id='port-conflict'`, s.Port), trigger} {
+		if _, err := tx.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	m.reconcileWakeListeners()

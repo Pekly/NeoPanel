@@ -77,6 +77,9 @@ func (c *powerCountdownCoordinator) cancelLocked(id string) {
 // promoted since scheduling cannot acquire admin authority for this job.
 // ID zero is the existing authenticated node-daemon (not a human account).
 func (c *powerCountdownCoordinator) authorized(id string, p *pendingPowerCountdown) bool {
+	if !c.db.FeatureEnabled(id, "countdowns") {
+		return false
+	}
 	fresh := p.origin
 	if fresh.UserID > 0 {
 		user, err := c.db.GetUserByID(fresh.UserID)
