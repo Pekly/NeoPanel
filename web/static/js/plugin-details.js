@@ -65,7 +65,7 @@
   }
   function hitsHtml(hits) {
     const st = search?.key === queryKey() ? search : null;
-    const list = st ? arr(st.shown?.hits) : arr(hits), mode = getViewMode('plug_store', 'list');
+    const list = st ? arr(st.shown?.hits) : arr(hits), mode = getViewMode('plug_store', 'tiles');
     // No results yet: a bounded shape, not empty space. Keep previous pages usable on refresh.
     if (st?.busy && !st.shown && window.NPLoading) return window.NPLoading.html('plugins', `Loading page ${st.page}…`, mode);
     const cards = list.map((h, i) => {

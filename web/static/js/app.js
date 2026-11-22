@@ -6543,8 +6543,8 @@ const V = {
     const filteredInstalled = S.plugins
       .map((p, i) => ({ p, i }))
       .filter(({ p }) => !instFilter || String(p[0] || '').toLowerCase().includes(instFilter));
-    const storeVm = getViewMode('plug_store', 'list');
-    const instVm = getViewMode('plug_inst', 'list');
+    const storeVm = getViewMode('plug_store', 'tiles');
+    const instVm = getViewMode('plug_inst', 'tiles');
     const storeVersions = getAllMcVersions(S.plugLoader || '');
     const verChoices = (S.plugVer && !storeVersions.includes(S.plugVer)) ? [S.plugVer, ...storeVersions] : storeVersions;
 
@@ -6678,7 +6678,7 @@ const V = {
           </select>
 
           ${NPPlugins.sizeControl()}
-          ${renderViewModeToggle('plug_store', 'list')}
+          ${renderViewModeToggle('plug_store', 'tiles')}
         </div>
 
         <div class="row sb" style="margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
@@ -6700,7 +6700,7 @@ const V = {
             <span style="position: absolute; left: 11px; top: 10px; color: var(--tx-muted);">${ic('search', 15)}</span>
           </div>
           <div class="row" style="gap: 8px; flex-wrap: wrap;">
-            ${renderViewModeToggle('plug_inst', 'list')}
+            ${renderViewModeToggle('plug_inst', 'tiles')}
             <button class="btn sm" onclick="loadPluginsList()">${ic('refresh', 13)} Refresh</button>
             <button class="btn sm pr" onclick="setPlugTab('browse')">${ic('plus', 13)} Install More</button>
           </div>

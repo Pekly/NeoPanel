@@ -191,7 +191,7 @@
   function render() { return window.NPPluginIdentities ? NPPluginIdentities.batch(renderContent) : renderContent(); }
   function renderContent() {
     window.NPPluginIdentities?.sync();
-    const st = get(), w = writes.get(identity()), edit = allowed(true), mode = getViewMode('plug_inst','list');
+    const st = get(), w = writes.get(identity()), edit = allowed(true), mode = getViewMode('plug_inst','tiles');
     const rows = arr(S.plugins).map((p,i) => ({p,i})).filter(({p}) => !S.plugFilter || String(p[0]).toLowerCase().includes(S.plugFilter.toLowerCase()));
     const lock = st.busy || st.preparing || blocked();
     const loading = S.loading?.plugins && !S.plugins.length;
