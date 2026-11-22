@@ -77,34 +77,30 @@ func (db *DB) ResetUserPassword(token, newHash string) error {
 	return tx.Commit()
 }
 
-// UpdateUserProfileForSession checks revocation at the write, including the optional
-// avatar mutation. A nil expectedVersion is reserved for API-key authentication,
-// whose credentials are not revoked by password changes.
-func (db *DB) UpdateUserProfileForSession(id int, expectedVersion *int64, username, firstName, lastName, email string, avatarURL *string) error {
+// UpdateUserProfileForAuth checks the actual credential in the profile write,
+// including the optional avatar. RETURNING binds the token snapshot to this write:
+// a later password reset cannot upgrade a stale JWT to the new auth version.
+func (db *DB) UpdateUserProfileForAuth(auth CredentialEnrollmentAuth, username, firstName, lastName, email string, avatarURL *string) (*User, error) {
+	predicate, authArgs, err := auth.predicate()
+	if err != nil {
+		return nil, err
+	}
 	query := `UPDATE users SET username = ?, first_name = ?, last_name = ?, email = ?`
 	args := []interface{}{strings.TrimSpace(username), strings.TrimSpace(firstName), strings.TrimSpace(lastName), strings.TrimSpace(email)}
 	if avatarURL != nil {
 		query += `, avatar_url = ?`
 		args = append(args, strings.TrimSpace(*avatarURL))
 	}
-	query += ` WHERE id = ?`
-	args = append(args, id)
-	if expectedVersion != nil {
-		query += ` AND auth_version = ?`
-		args = append(args, *expectedVersion)
-	}
-	res, err := db.conn.Exec(query, args...)
+	query += ` WHERE ` + predicate + ` RETURNING id, username, COALESCE(first_name, ''), COALESCE(last_name, ''), COALESCE(email, ''), password_hash, role, COALESCE(avatar_url, ''), COALESCE(two_factor_enabled, 0), COALESCE(two_factor_secret, ''), COALESCE(recovery_codes, ''), created_at, auth_version, invitation_created`
+	args = append(args, authArgs...)
+	user := &User{}
+	var tfa int
+	err = db.conn.QueryRow(query, args...).Scan(&user.ID, &user.Username, &user.FirstName, &user.LastName, &user.Email, &user.PasswordHash, &user.Role, &user.AvatarURL, &tfa, &user.TwoFactorSecret, &user.RecoveryCodes, &user.CreatedAt, &user.AuthVersion, &user.InvitationCreated)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n != 1 {
-		return sql.ErrNoRows
-	}
-	return nil
+	user.TwoFactorEnabled = tfa == 1
+	return user, nil
 }
 
 // ConsumeUserRecoveryCode commits a previously verified recovery-code removal
