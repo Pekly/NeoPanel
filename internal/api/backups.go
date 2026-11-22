@@ -202,9 +202,38 @@ func (h *BackupHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, os.ErrNotExist):
 			status = http.StatusNotFound
 		}
-		writeError(w, status, "Restore failed: "+err.Error())
+		writeError(w, status, restoreErrorForViewer(r, err))
 		return
 	}
-	logAudit(h.db, r, "backup_restore", fmt.Sprintf("Restored backup %q for %s; safety copy %s", req.Name, srv.ID, result.SafetyCopy))
-	writeJSON(w, http.StatusOK, result)
+	logAudit(h.db, r, "backup_restore", fmt.Sprintf("Restored backup %q for %s", req.Name, srv.ID))
+	if user := getUserFromContext(r); user == nil || user.Role != "admin" {
+		result.Message = "Backup restored. Check your server settings before starting. Previous files were kept for recovery."
+		result.SafetyCopy = ""
+	}
+	writeJSON(w, http.StatusOK, struct {
+		runner.RestoreResult
+		PreviousFilesPreserved bool `json:"previous_files_preserved"`
+	}{result, true})
+}
+
+func restoreErrorForViewer(r *http.Request, err error) string {
+	if user := getUserFromContext(r); user != nil && user.Role == "admin" {
+		return "Restore failed: " + err.Error()
+	}
+	switch {
+	case errors.Is(err, runner.ErrRestoreRecovery):
+		return "Restore could not finish safely. Keep the server stopped and contact support before changing files."
+	case errors.Is(err, runner.ErrRestoreRetention):
+		return "Restore is temporarily unavailable for this server. Contact support."
+	case errors.Is(err, runner.ErrServerNotStopped):
+		return "Stop your server before restoring a backup."
+	case errors.Is(err, runner.ErrServerOperation):
+		return "Another server action is in progress. Wait for it to finish before restoring."
+	case errors.Is(err, runner.ErrInvalidArchive):
+		return "This backup cannot be restored. Choose another backup or contact support."
+	case errors.Is(err, os.ErrNotExist):
+		return "This backup is unavailable. Refresh the backup list before trying again."
+	default:
+		return "Could not restore the backup. Contact support before trying again."
+	}
 }

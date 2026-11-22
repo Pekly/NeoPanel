@@ -34,13 +34,14 @@ const sftpImportHistoryLimit = 128
 // Credentials belong to the transfer goroutine, never to the retained job record.
 type sftpImportJob struct {
 	sftpimport.Progress
-	ID         string    `json:"id"`
-	ServerID   string    `json:"server_id"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
-	Message    string    `json:"message"`
-	Error      string    `json:"error"`
-	SafetyCopy string    `json:"safety_copy"`
+	ID          string    `json:"id"`
+	ServerID    string    `json:"server_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Message     string    `json:"message"`
+	UserMessage string    `json:"user_message,omitempty"`
+	Error       string    `json:"error"`
+	SafetyCopy  string    `json:"safety_copy"`
 }
 
 type sftpImportRecord struct {
@@ -108,12 +109,12 @@ func importByteLimit(srv *database.Server) int64 {
 // Eligibility is informational; the runner repeats the checks under its operation gate.
 func (h *sftpImportHandler) eligibility(id string) (bool, string) {
 	if h.manager.GetStatus(id) != "offline" {
-		return false, "Stop the server before importing files. The importer never stops it for you."
+		return false, "Stop your server before importing files."
 	}
 	dir := h.manager.GetWorkingDir(id)
 	info, err := os.Lstat(dir)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return false, "The server needs an existing, regular file directory."
+		return false, "Server files are unavailable. Contact support."
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -127,7 +128,7 @@ func (h *sftpImportHandler) eligibility(id string) (bool, string) {
 	defer f.Close()
 	names, err := f.Readdirnames(1)
 	if len(names) != 0 || err != io.EOF {
-		return false, "The destination must be empty, including generated eula.txt and server.properties. Back up and move or remove existing files deliberately; nothing is deleted automatically."
+		return false, "Your server still has files. Back up and move or remove them before importing."
 	}
 	return true, "Ready to import into this empty, stopped server."
 }
@@ -150,7 +151,7 @@ func (h *sftpImportHandler) status(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.pruneLocked()
 	if rec := h.jobs[srv.ID]; rec != nil {
-		copy := rec.job
+		copy := importJobForViewer(r, rec.job)
 		job = &copy
 		if importActive(copy.State) {
 			eligible, reason = false, "An import is already in progress."
@@ -199,7 +200,7 @@ func (h *sftpImportHandler) options(w http.ResponseWriter, r *http.Request, srv 
 	}
 	opts, err := sftpimport.Validate(opts)
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, importErrorForViewer(r, err.Error()))
 		return opts, false
 	}
 	return opts, true
@@ -240,7 +241,7 @@ func (h *sftpImportHandler) hostKey(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	info, err := sftpimport.HostKey(ctx, req.Host, req.Port, h.cfg.Security.SFTPImportAllowedHosts)
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, importErrorForViewer(r, err.Error()))
 		return
 	}
 	writeJSON(w, 200, info)
@@ -273,7 +274,7 @@ func (h *sftpImportHandler) probe(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	preview, err := sftpimport.Probe(ctx, opts, h.cfg.Security.SFTPImportAllowedHosts)
 	if err != nil {
-		writeError(w, 400, err.Error())
+		writeError(w, 400, importErrorForViewer(r, err.Error()))
 		return
 	}
 	writeJSON(w, 200, preview)
@@ -430,7 +431,7 @@ func (h *sftpImportHandler) start(w http.ResponseWriter, r *http.Request) {
 	if active >= sftpImportMaxJobs {
 		h.mu.Unlock()
 		cancel()
-		writeError(w, 429, "This node is already running two imports")
+		writeError(w, 429, "Imports are busy. Please try again shortly.")
 		return
 	}
 	if len(h.jobs) >= sftpImportHistoryLimit && h.jobs[srv.ID] == nil {
@@ -454,7 +455,7 @@ func (h *sftpImportHandler) start(w http.ResponseWriter, r *http.Request) {
 	logAudit(h.db, r, "file_import_sftp", fmt.Sprintf("Started SFTP file import for server %s (job %s)", srv.ID, job.ID))
 	allowed := append([]string(nil), h.cfg.Security.SFTPImportAllowedHosts...)
 	go h.run(ctx, rec, srv, opts, allowed, authority)
-	writeJSON(w, http.StatusAccepted, job)
+	writeJSON(w, http.StatusAccepted, importJobForViewer(r, job))
 }
 
 func (h *sftpImportHandler) run(ctx context.Context, rec *sftpImportRecord, srv *database.Server, opts sftpimport.Options, allowed []string, authority importAuthority) {
@@ -538,5 +539,5 @@ func (h *sftpImportHandler) cancelJob(w http.ResponseWriter, r *http.Request) {
 		rec.job.Message = "Cancellation requested; waiting for the transfer to stop."
 		rec.job.UpdatedAt = time.Now().UTC()
 	}
-	writeJSON(w, 200, rec.job)
+	writeJSON(w, 200, importJobForViewer(r, rec.job))
 }
