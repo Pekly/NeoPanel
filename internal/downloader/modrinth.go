@@ -154,17 +154,36 @@ func CompatibleModrinthVersions(project, loader, mcVersion string) ([]ModrinthVe
 }
 
 func CompatibleModrinthVersionsContext(ctx context.Context, project, loader, mcVersion string) ([]ModrinthVersion, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := modrinthMetadataContext(ctx)
 	defer cancel()
 	p, err := fetchModrinthProject(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	versions, err := fetchModrinthVersions(ctx, p.ID)
+	versions, truncated, err := fetchModrinthVersions(ctx, p.ID, modrinthLoaders(loader))
 	if err != nil {
 		return nil, err
 	}
-	return filterCompatibleVersions(versions, loader, mcVersion), nil
+	eligible := filterCompatibleVersions(versions, loader, mcVersion)
+	if truncated && len(eligible) == 0 {
+		return nil, fmt.Errorf("Modrinth eligible releases unknown within the version scan limit; choose an explicit version or retry later")
+	}
+	return eligible, nil
+}
+
+// Keep upstream filtering aligned with the local installation policy.
+func modrinthLoaders(loader string) []string {
+	loader = strings.ToLower(strings.TrimSpace(loader))
+	switch loader {
+	case "paper", "purpur", "leaf", "leafmc":
+		return []string{"paper", "spigot", "bukkit"}
+	case "spigot":
+		return []string{"spigot", "bukkit"}
+	case "waterfall":
+		return []string{"bungeecord"}
+	default:
+		return []string{loader}
+	}
 }
 
 func filterCompatibleVersions(versions []ModrinthVersion, loader, mcVersion string) []ModrinthVersion {
@@ -228,22 +247,33 @@ func DownloadModrinthPluginRoot(project string, root *rooted.Root, loader, mcVer
 	return DownloadModrinthPluginRootContext(context.Background(), project, root, loader, mcVersion, versionID)
 }
 
+// ResolveModrinthVersionContext resolves only the requested installation target,
+// without making unrelated history pages a prerequisite for confirmation.
+func ResolveModrinthVersionContext(ctx context.Context, project, loader, versionID string) (*ModrinthVersion, error) {
+	if versionID != "" && !ValidModrinthIdentifier(versionID) {
+		return nil, fmt.Errorf("invalid Modrinth version identifier")
+	}
+	ctx, cancel := modrinthMetadataContext(ctx)
+	defer cancel()
+	p, err := fetchModrinthProject(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	if versionID != "" {
+		return selectedModrinthVersion(ctx, p.ID, loader, versionID)
+	}
+	return latestModrinthVersion(ctx, p.ID, loader)
+}
+
 func DownloadModrinthPluginRootContext(ctx context.Context, project string, root *rooted.Root, loader, mcVersion, versionID string) (string, error) {
 	if versionID != "" && !ValidModrinthIdentifier(versionID) {
 		return "", fmt.Errorf("invalid Modrinth version identifier")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	versions, err := CompatibleModrinthVersionsContext(ctx, project, loader, mcVersion)
+	chosen, err := ResolveModrinthVersionContext(ctx, project, loader, versionID)
 	if err != nil {
 		return "", err
-	}
-	var chosen *ModrinthVersion
-	for i := range versions {
-		if versionID == "" || versions[i].ID == versionID {
-			chosen = &versions[i]
-			break
-		}
 	}
 	if chosen == nil {
 		return "", fmt.Errorf("no installable release for this project and server software (%s); choose a version supporting this loader", loader)

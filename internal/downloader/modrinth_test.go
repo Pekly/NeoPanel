@@ -57,6 +57,9 @@ func TestPluginDownloadPublication(t *testing.T) {
 		if strings.Contains(r.URL.Path, "/version") {
 			data = `[{"id":"release","project_id":"project","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"plugin.jar","url":"https://cdn.modrinth.com/plugin.jar","size":8,"primary":true}]}]`
 		}
+		if strings.HasPrefix(r.URL.Path, "/v2/version/") {
+			data = strings.TrimSuffix(strings.TrimPrefix(data, "["), "]")
+		}
 		if r.URL.Path == "/v2/project/project" {
 			data = `{"id":"project","slug":"project"}`
 		}

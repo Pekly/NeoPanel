@@ -1,0 +1,18 @@
+{
+  "package": "dompurify",
+  "version": "3.4.18",
+  "registry": "https://registry.npmjs.org/",
+  "integrity": "sha512-ofe3wI/uNm68HInABYFJYqQxRw1EaKAjNdrFVKqjUY+UZurvNd2L/HuQe097s/4RivWiZyP6tT7aoT8atjfhwg==",
+  "files": [
+    {
+      "source": "dist/purify.min.js",
+      "file": "purify.min.js",
+      "sha256": "8053ee2a6a09f9d50f7fcd6fb7f07072f52c7f3fa9aa12147cab4feaf65ee970"
+    },
+    {
+      "source": "LICENSE",
+      "file": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  ]
+}

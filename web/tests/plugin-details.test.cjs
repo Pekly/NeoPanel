@@ -16,15 +16,16 @@ function harness() {
   c.window=c;c.scrollY=0;c.scrollTo=()=>{};c.api=async(url,o={})=>{calls.push({url,o});return c.handler?c.handler(url,o):url.includes('/project?')?project():url.includes('/versions?')?project():url.includes('/search?')?{hits:[hit(0)],total_hits:1}:{};};
   vm.runInNewContext(source,c);return{c,calls,timers};
 }
-test('safe bounded Markdown: raw HTML stays text; only http(s) links and images',()=>{
+test('missing Markdown module falls back to bounded escaped text',()=>{
   const {c}=harness(), render=c.NPPlugins.markdown;
   const html=render('# title\n<script>alert(1)</script>\n[x](javascript:alert) ![x](data:image/svg+xml,test) [safe](https://example.com/)\n**bold** `code`');
-  assert.doesNotMatch(html,/<script|href="javascript:|src="data:/);assert.match(html,/&lt;script&gt;/);assert.match(html,/rel="noopener noreferrer"/);assert.match(html,/<strong>bold/);assert.match(render('x'.repeat(200000)),/Content shortened/);
+  assert.doesNotMatch(html,/<script|href="javascript:|src="data:/);assert.match(html,/&lt;script&gt;/);assert.match(html,/np-markdown-fallback/);assert.match(render('x'.repeat(200000)),/Content shortened/);
   for(const bad of ['javascript:alert(1)','data:text/html,x','file:///x','//example.com','https://user:pass@example.com']) assert.equal(c.NPPlugins.safeURL(bad),'');
 });
 test('default install omits version id; explicit selected version stays explicit; software not MC gates release',async()=>{
   const {c,calls}=harness();await c.NPPlugins.install('project-0','Title');await c.NPPlugins.install('project-0','Title',null,'v-old');
   assert.deepEqual(calls.filter(x=>x.o.method==='POST').map(x=>JSON.parse(x.o.body)),[{slug:'project-0'},{slug:'project-0',version_id:'v-old'}]);
+  const preflights=calls.filter(x=>x.url.includes('/versions?'));assert.match(preflights[0].url,/latest=true/);assert.match(preflights[1].url,/version_id=v-old/);
   await c.NPPlugins.install('project-0','Title',null,'v-other');assert.equal(calls.filter(x=>x.o.method==='POST').length,3,'versions endpoint is the software eligibility authority');
 });
 test('confirmation, preflight and mutation completion reject server/node/account/token/permission/feature changes',async()=>{
@@ -80,6 +81,7 @@ test('Chrome: actual Plugins and Files renderers, theme, navigation, tabs, pagin
         window.api=async(url,o={})=>{calls.push({url,...o});if(url.includes('/search?')){const q=new URL(url,'http://demo').searchParams,offset=Number(q.get('offset'));if(offset&&failAppend)throw Error('offline');return{hits:demoHits.slice(offset,offset+24),total_hits:demoHits.length};}if(url.includes('/project?'))return structuredClone(demoData);if(url.includes('/versions?'))return{...structuredClone(demoData),versions:demoData.versions.filter(v=>demoData.installable_version_ids.includes(v.id))};return{};};
         window.R=()=>{NPPlugins.sync();document.getElementById('main').innerHTML=views[S.view]();};
       },{data:project(),hits:Array.from({length:48},(_,i)=>hit(i))});
+      for (const asset of ['vendor/marked-18.2.1/marked.umd.js','vendor/dompurify-3.4.18/purify.min.js','js/project-markdown.js']) await page.addScriptTag({content:fs.readFileSync(path.join(root,asset),'utf8')});
       await page.addScriptTag({content:source});await page.addScriptTag({content:renderers});assert.deepEqual(errors,[]);await page.evaluate(async()=>{R();await NPPlugins.search();});
       const options=await page.locator('select[aria-label="Browse by loader"] option').allTextContents();assert.equal(options[0],'Loader: Auto (All)');assert.match(options[1],/Paper — Your server/);assert.equal(options.filter(x=>x.startsWith('Paper')).length,1);
       assert.equal(await page.locator('[data-project-card]').count(),24);
@@ -160,4 +162,19 @@ test('Network guidance describes simultaneous protocol-specific listeners',()=>{
   assert.match(app,/Multiple ports can serve this server simultaneously/);
   assert.match(app,/Java on 25565\/TCP and Geyser on 19132\/UDP/);
   assert.doesNotMatch(app,/Extra ports are reservations/);
+});
+
+test('partial catalogs retain description and report unknown latest instead of claiming no eligible release',async()=>{
+  const {c}=harness(), data=project();
+  data.latest_version_status='unknown';data.members=[];data.warnings=[{section:'members',message:'<script>unsafe-provider-message</script>'},{section:'latest_version'},{section:'versions'}];
+  c.handler=async()=>data;await c.NPPlugins.open('project-0');
+  const html=c.NPPlugins.render();assert.match(html,/Authentication/);assert.match(html,/Version check unavailable/);assert.match(html,/Retry missing data/);
+  assert.doesNotMatch(html,/No eligible release|unsafe-provider-message|data-np-install/);
+  data.latest_version_status='available';await c.NPPlugins.open('project-0',true);assert.match(c.NPPlugins.render(),/Install latest/);
+});
+
+test('catalog errors identify Modrinth without exposing raw provider messages or blaming the server connection',async()=>{
+  const {c}=harness();c.handler=async()=>{throw Object.assign(Error('<script>private</script>'),{status:502,data:{code:'plugin_catalog_unavailable'}});};
+  await c.NPPlugins.open('project-0');const html=c.NPPlugins.render();
+  assert.match(html,/Modrinth could not provide this project/);assert.match(html,/separate from your server connection/);assert.doesNotMatch(html,/Check your connection|private|<script>/);
 });

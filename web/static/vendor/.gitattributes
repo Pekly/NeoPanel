@@ -1,0 +1,3 @@
+# Preserve upstream bytes used by the project Markdown checksum tests.
+marked-18.2.1/* -text
+dompurify-3.4.18/* -text

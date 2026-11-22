@@ -38,10 +38,8 @@ func catalogVersion(id, project, loader, mc, date string) ModrinthVersion {
 
 func mockProjectCatalog(t *testing.T, versions []ModrinthVersion) {
 	t.Helper()
-	data, err := json.Marshal(versions)
-	if err != nil {
-		t.Fatal(err)
-	}
+	versions = append([]ModrinthVersion(nil), versions...)
+	sortModrinthVersions(versions)
 	mockModrinth(t, func(r *http.Request) (*http.Response, error) {
 		if _, ok := r.Context().Deadline(); !ok {
 			t.Fatal("missing deadline")
@@ -52,11 +50,23 @@ func mockProjectCatalog(t *testing.T, versions []ModrinthVersion) {
 		if r.URL.Scheme != "https" || r.URL.Host != "api.modrinth.com" {
 			t.Fatalf("unexpected URL %s", r.URL)
 		}
+		if strings.HasPrefix(r.URL.Path, "/v2/version/") {
+			id := strings.TrimPrefix(r.URL.Path, "/v2/version/")
+			for _, v := range versions {
+				if v.ID == id {
+					data, _ := json.Marshal(v)
+					return modrinthResponse(string(data)), nil
+				}
+			}
+			response := modrinthResponse(`{}`)
+			response.StatusCode = 404
+			return response, nil
+		}
 		switch r.URL.Path {
 		case "/v2/project/example", "/v2/project/P1":
 			return modrinthResponse(`{"id":"P1","slug":"example","title":"Example","body":"# Untrusted <script>alert(1)</script>","team":"T1","license":{"id":"MIT","name":"MIT","url":null},"private_token":"private-secret"}`), nil
 		case "/v2/project/P1/version":
-			return modrinthResponse(string(data)), nil
+			return mockVersionPage(t, r, versions), nil
 		case "/v2/team/T1/members":
 			return modrinthResponse(`[{"user":{"username":"author","name":"Author","avatar_url":"https://example.invalid/avatar","email":"private-secret","payout_data":{"balance":100}},"role":"Owner","payouts_split":100,"permissions":65535,"accepted":true}]`), nil
 		default:
@@ -64,6 +74,44 @@ func mockProjectCatalog(t *testing.T, versions []ModrinthVersion) {
 			return nil, fmt.Errorf("unexpected request")
 		}
 	})
+}
+
+func mockVersionPage(t *testing.T, r *http.Request, versions []ModrinthVersion) *http.Response {
+	t.Helper()
+	q := r.URL.Query()
+	limit, e1 := strconv.Atoi(q.Get("limit"))
+	offset, e2 := strconv.Atoi(q.Get("offset"))
+	if e1 != nil || e2 != nil || limit != modrinthVersionPageSize || offset < 0 || offset >= maxModrinthVersions || q.Has("game_versions") {
+		t.Fatalf("unbounded or MC-filtered request: %s", r.URL)
+	}
+	var loaders []string
+	if q.Has("loaders") {
+		if err := json.Unmarshal([]byte(q.Get("loaders")), &loaders); err != nil {
+			t.Fatal(err)
+		}
+	}
+	filtered := make([]ModrinthVersion, 0)
+	for _, v := range versions {
+		matched := len(loaders) == 0
+		for _, l := range loaders {
+			for _, vl := range v.Loaders {
+				matched = matched || l == vl
+			}
+		}
+		if matched {
+			filtered = append(filtered, v)
+		}
+	}
+	sortModrinthVersions(filtered)
+	if offset > len(filtered) {
+		offset = len(filtered)
+	}
+	end := offset + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	data, _ := json.Marshal(filtered[offset:end])
+	return modrinthResponse(string(data))
 }
 
 func TestModrinthLatestAndExplicitIgnoreMinecraftVersion(t *testing.T) {
@@ -177,21 +225,46 @@ func TestModrinthProjectDetailCapAfterSorting(t *testing.T) {
 }
 
 func TestModrinthProjectCapKeepsLatestSoftwareRelease(t *testing.T) {
-	versions := make([]ModrinthVersion, 510)
+	versions := make([]ModrinthVersion, 3736)
 	for i := range versions {
 		loader := "fabric"
 		if i < 2 {
 			loader = "paper"
 		}
 		versions[i] = catalogVersion("v"+strconv.Itoa(i), "P1", loader, "different", time.Date(2020, 1, 1, 0, i, 0, 0, time.UTC).Format(time.RFC3339))
+		versions[i].Changelog = strings.Repeat("release notes ", 160)
+	}
+	fullCatalog, _ := json.Marshal(versions)
+	if len(fullCatalog) <= 4<<20 {
+		t.Fatal("fixture does not reproduce oversized catalog")
 	}
 	mockProjectCatalog(t, versions)
+	transport := httpClient.Transport
+	calls := 0
+	httpClient.Transport = modrinthTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		return transport.RoundTrip(r)
+	})
 	detail, err := GetModrinthProjectDetail(context.Background(), "P1", "paper", "1.20")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !detail.VersionsTruncated || len(detail.Versions) != 500 || detail.Versions[499].ID != "v1" || !reflect.DeepEqual(detail.InstallableVersionIDs, []string{"v1"}) {
 		t.Fatalf("latest software release hidden by cap: %+v", detail)
+	}
+	if calls != 13 || detail.LatestVersionStatus != "available" || detail.LatestVersionID != "v1" || len(detail.Warnings) != 0 {
+		t.Fatalf("not bounded: calls=%d status=%s warnings=%v", calls, detail.LatestVersionStatus, detail.Warnings)
+	}
+	for _, tc := range []struct{ id, want string }{{"", "v1.jar"}, {"v0", "v0.jar"}, {"v3735", ""}} {
+		calls = 0
+		name, err := DownloadModrinthPlugin("P1", t.TempDir(), "paper", "unrelated-mc", tc.id)
+		if tc.want == "" {
+			if err == nil || calls != 2 {
+				t.Fatalf("invalid explicit selection accepted: %q %v calls=%d", name, err, calls)
+			}
+		} else if err != nil || name != tc.want || calls != 3 {
+			t.Fatalf("selection: %q %v calls=%d", name, err, calls)
+		}
 	}
 }
 
@@ -276,22 +349,35 @@ func TestModrinthDetailBoundsAndCancellationAtEachRequest(t *testing.T) {
 					switch r.URL.Path {
 					case "/v2/project/example":
 						return modrinthResponse(`{"id":"P1","slug":"example","team":"T1"}`), nil
-					case "/v2/project/P1/version":
+					case "/v2/project/P1/version", "/v2/team/T1/members":
 						return modrinthResponse(`[]`), nil
 					default:
 						t.Fatalf("unexpected path: %s", r.URL.Path)
 						return nil, nil
 					}
 				})
-				_, err := GetModrinthProjectDetail(ctx, "example", "paper", "1.21")
-				if err == nil || strings.Contains(err.Error(), "private-secret") {
-					t.Fatal("missing or unsafe error", err)
-				}
-				if mode == "cancel" && !errors.Is(err, context.Canceled) {
-					t.Fatal(err)
-				}
-				if mode == "oversize" && !strings.Contains(err.Error(), "size limit") {
-					t.Fatal(err)
+				detail, err := GetModrinthProjectDetail(ctx, "example", "paper", "1.21")
+				if target == "/v2/project/example" || mode == "cancel" {
+					if err == nil || strings.Contains(err.Error(), "private-secret") {
+						t.Fatal("missing or unsafe error", err)
+					}
+					if mode == "cancel" && !errors.Is(err, context.Canceled) {
+						t.Fatal(err)
+					}
+					if mode == "oversize" && !strings.Contains(err.Error(), "size limit") {
+						t.Fatal(err)
+					}
+				} else {
+					if err != nil || detail == nil || len(detail.Warnings) == 0 {
+						t.Fatalf("lost partial detail: %+v %v", detail, err)
+					}
+					encoded, _ := json.Marshal(detail)
+					if strings.Contains(string(encoded), "private-secret") {
+						t.Fatal("unsafe warning")
+					}
+					if target == "/v2/project/P1/version" && detail.LatestVersionStatus != "unknown" {
+						t.Fatal("unknown catalog reported as absent")
+					}
 				}
 			})
 		}
@@ -311,7 +397,12 @@ func TestModrinthUntrustedProjectIdentifiers(t *testing.T) {
 				return nil, nil
 			}
 		})
-		if _, err := GetModrinthProjectDetail(context.Background(), "example", "paper", ""); err == nil {
+		detail, err := GetModrinthProjectDetail(context.Background(), "example", "paper", "")
+		if strings.Contains(raw, "T1%2f") {
+			if err != nil || len(detail.Warnings) != 1 || detail.Warnings[0].Section != "members" {
+				t.Fatalf("missing team warning: %+v %v", detail, err)
+			}
+		} else if err == nil {
 			t.Fatal("accepted unsafe project metadata")
 		}
 	}
@@ -333,5 +424,112 @@ func TestModrinthSafeJar(t *testing.T) {
 	}
 	if !safeModrinthJar("plugin.jar", "https://cdn.modrinth.com/data/P1/versions/v1/plugin.jar", 200<<20) {
 		t.Fatal("rejected valid jar")
+	}
+}
+
+func TestModrinthPartialSections(t *testing.T) {
+	versions := make([]ModrinthVersion, 120)
+	for i := range versions {
+		versions[i] = catalogVersion(fmt.Sprint("v", i), "P1", "paper", "different", time.Date(2024, 1, 1, 0, i, 0, 0, time.UTC).Format(time.RFC3339))
+	}
+	for _, section := range []string{"members", "latest_version", "versions"} {
+		t.Run(section, func(t *testing.T) {
+			mockProjectCatalog(t, versions)
+			transport := httpClient.Transport
+			httpClient.Transport = modrinthTransport(func(r *http.Request) (*http.Response, error) {
+				q := r.URL.Query()
+				fail := section == "members" && strings.Contains(r.URL.Path, "/team/") || section == "latest_version" && q.Has("loaders") || section == "versions" && !q.Has("loaders") && q.Get("offset") == "50"
+				if fail {
+					response := modrinthResponse("private-secret")
+					response.StatusCode = 429
+					return response, nil
+				}
+				return transport.RoundTrip(r)
+			})
+			detail, err := GetModrinthProjectDetail(context.Background(), "P1", "paper", "1.20")
+			if err != nil || detail.Project.Body == "" || len(detail.Warnings) != 1 || detail.Warnings[0].Section != section {
+				t.Fatalf("partial: %+v %v", detail, err)
+			}
+			if section == "versions" && (len(detail.Versions) != 50 || !detail.VersionsTruncated) {
+				t.Fatal("discarded successful pages")
+			}
+			if section == "latest_version" {
+				if detail.LatestVersionStatus != "unknown" || detail.LatestVersionID != "" || len(detail.Versions) != 120 {
+					t.Fatal("false latest certainty")
+				}
+			} else if detail.LatestVersionStatus != "available" || detail.LatestVersionID != "v119" {
+				t.Fatal("lost latest release")
+			}
+		})
+	}
+}
+
+func TestModrinthLatestScanBudgetIsUnknownNotAbsent(t *testing.T) {
+	versions := make([]ModrinthVersion, 600)
+	for i := range versions {
+		versions[i] = catalogVersion(fmt.Sprint("v", i), "P1", "paper", "different", time.Date(2024, 1, 1, 0, i, 0, 0, time.UTC).Format(time.RFC3339))
+		if i > 0 {
+			versions[i].Files[0].Filename = "unsafe.zip"
+		}
+	}
+	mockProjectCatalog(t, versions)
+	transport := httpClient.Transport
+	calls := 0
+	httpClient.Transport = modrinthTransport(func(r *http.Request) (*http.Response, error) { calls++; return transport.RoundTrip(r) })
+	detail, err := GetModrinthProjectDetail(context.Background(), "P1", "paper", "")
+	if err != nil || detail.LatestVersionStatus != "unknown" || !detail.VersionsTruncated || len(detail.InstallableVersionIDs) != 0 || len(detail.Warnings) != 1 || calls != 22 {
+		t.Fatalf("scan not bounded/unknown: calls=%d detail=%+v err=%v", calls, detail, err)
+	}
+	calls = 0
+	if _, err := CompatibleModrinthVersions("P1", "paper", ""); err == nil || calls != 11 {
+		t.Fatalf("false absence: %v calls=%d", err, calls)
+	}
+	calls = 0
+	if _, err := DownloadModrinthPlugin("P1", t.TempDir(), "paper", "", ""); err == nil || !strings.Contains(err.Error(), "scan limit") || calls != 11 {
+		t.Fatalf("unsafe latest: %v calls=%d", err, calls)
+	}
+	calls = 0
+	if name, err := DownloadModrinthPlugin("P1", t.TempDir(), "paper", "", "v0"); err != nil || name != "v0.jar" || calls != 3 {
+		t.Fatalf("explicit version unreachable: %s %v", name, err)
+	}
+}
+
+func TestModrinthTotalMetadataBudget(t *testing.T) {
+	calls := 0
+	mockModrinth(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		return modrinthResponse(`[]` + strings.Repeat(" ", (4<<20)-2)), nil
+	})
+	ctx, cancel := modrinthMetadataContext(context.Background())
+	defer cancel()
+	for i := 0; i < 4; i++ {
+		var out []ModrinthVersion
+		if err := modrinthMetadata(ctx, "/project/P1/version?limit=50&offset=0", &out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out []ModrinthVersion
+	if err := modrinthMetadata(ctx, "/project/P1/version?limit=50&offset=0", &out); err == nil || !strings.Contains(err.Error(), "total size limit") || calls != 4 {
+		t.Fatalf("total limit: %v calls=%d", err, calls)
+	}
+}
+
+func TestModrinthRejectsIgnoredPagination(t *testing.T) {
+	versions := make([]ModrinthVersion, 51)
+	for i := range versions {
+		versions[i] = catalogVersion(fmt.Sprint("v", i), "P1", "paper", "", "2025-01-01T00:00:00Z")
+	}
+	mockProjectCatalog(t, versions)
+	transport := httpClient.Transport
+	httpClient.Transport = modrinthTransport(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/version") {
+			data, _ := json.Marshal(versions)
+			return modrinthResponse(string(data)), nil
+		}
+		return transport.RoundTrip(r)
+	})
+	detail, err := GetModrinthProjectDetail(context.Background(), "P1", "paper", "")
+	if err != nil || detail.LatestVersionStatus != "unknown" || len(detail.Warnings) != 2 || detail.Project.Body == "" {
+		t.Fatalf("ignored pagination: %+v %v", detail, err)
 	}
 }
