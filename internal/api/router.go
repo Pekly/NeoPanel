@@ -311,6 +311,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("DELETE /api/servers/{id}/plugins", r.requireAuth(r.plugins.Delete))
 	r.mux.HandleFunc("POST /api/servers/{id}/plugins/toggle", r.requireAuth(r.plugins.Toggle))
 	r.mux.HandleFunc("GET /api/servers/{id}/plugins/versions", r.requireAuth(r.plugins.Versions))
+	r.mux.HandleFunc("GET /api/servers/{id}/plugins/project", r.requireAuth(r.plugins.Project))
 
 	// Backups routes
 	r.mux.HandleFunc("GET /api/servers/{id}/backups", r.requireAuth(r.backups.List))

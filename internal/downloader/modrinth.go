@@ -2,18 +2,23 @@ package downloader
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/Pekly/NeoPanel/internal/rooted"
 )
 
 type ModrinthSearchResult struct {
 	Hits      []ModrinthPluginHit `json:"hits"`
 	TotalHits int                 `json:"total_hits"`
+	Offset    int                 `json:"offset"`
+	Limit     int                 `json:"limit"`
 }
 
 type ModrinthPluginHit struct {
@@ -30,12 +35,16 @@ type ModrinthPluginHit struct {
 }
 
 type ModrinthVersion struct {
-	ID            string   `json:"id"`
-	ProjectID     string   `json:"project_id"`
-	Name          string   `json:"name"`
-	VersionNumber string   `json:"version_number"`
-	GameVersions  []string `json:"game_versions"`
-	Loaders       []string `json:"loaders"`
+	ID            string               `json:"id"`
+	ProjectID     string               `json:"project_id"`
+	Name          string               `json:"name"`
+	VersionNumber string               `json:"version_number"`
+	GameVersions  []string             `json:"game_versions"`
+	Loaders       []string             `json:"loaders"`
+	DatePublished string               `json:"date_published"`
+	VersionType   string               `json:"version_type"`
+	Changelog     string               `json:"changelog"`
+	Dependencies  []ModrinthDependency `json:"dependencies"`
 	Files         []struct {
 		URL      string `json:"url"`
 		Filename string `json:"filename"`
@@ -56,9 +65,15 @@ func IsModdedSoftware(software string) bool {
 
 // SearchModrinthPlugins queries the Modrinth API for Minecraft plugins or mods with optional loader, version, sort, and project_type filters.
 func SearchModrinthPlugins(query string, limit int, loader string, mcVersion string, sortBy string, projectType ...string) (*ModrinthSearchResult, error) {
-	if limit <= 0 || limit > 50 {
-		limit = 20
-	}
+	return SearchModrinthPluginsPage(context.Background(), query, limit, 0, loader, mcVersion, sortBy, projectType...)
+}
+
+// SearchModrinthPluginsPage keeps pagination bounded independently of the upstream.
+func SearchModrinthPluginsPage(ctx context.Context, query string, limit, offset int, loader, mcVersion, sortBy string, projectType ...string) (*ModrinthSearchResult, error) {
+	limit, offset = BoundModrinthPage(limit, offset)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	facet := func(value string) string { b, _ := json.Marshal([]string{value}); return string(b) }
 
 	var facetGroups []string
 	loaderLow := strings.ToLower(strings.TrimSpace(loader))
@@ -91,20 +106,20 @@ func SearchModrinthPlugins(query string, limit int, loader string, mcVersion str
 		switch loaderLow {
 		case "", "any", "all", "vanilla", "custom":
 			// All plugins
-		case "paper", "purpur", "leaf", "leafmc", "folia":
+		case "paper", "purpur", "leaf", "leafmc":
 			facetGroups = append(facetGroups, `["categories:paper","categories:spigot","categories:bukkit"]`)
 		case "spigot", "bukkit":
 			facetGroups = append(facetGroups, `["categories:spigot","categories:bukkit"]`)
-		case "velocity", "waterfall", "bungeecord":
-			facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+		case "waterfall":
+			facetGroups = append(facetGroups, facet("categories:bungeecord"))
 		default:
-			facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+			facetGroups = append(facetGroups, facet("categories:"+loaderLow))
 		}
 	}
 
 	verTrim := strings.TrimSpace(mcVersion)
 	if verTrim != "" && !strings.EqualFold(verTrim, "any") {
-		facetGroups = append(facetGroups, fmt.Sprintf(`["versions:%s"]`, verTrim))
+		facetGroups = append(facetGroups, facet("versions:"+verTrim))
 	}
 
 	index := "relevance"
@@ -114,25 +129,39 @@ func SearchModrinthPlugins(query string, limit int, loader string, mcVersion str
 	}
 
 	facets := "[" + strings.Join(facetGroups, ",") + "]"
-	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/search?query=%s&facets=%s&index=%s&limit=%d",
-		url.QueryEscape(query), url.QueryEscape(facets), url.QueryEscape(index), limit)
+	apiPath := fmt.Sprintf("/search?query=%s&facets=%s&index=%s&limit=%d&offset=%d",
+		url.QueryEscape(query), url.QueryEscape(facets), url.QueryEscape(index), limit, offset)
 
 	var result ModrinthSearchResult
-	if err := metadataJSON(apiURL, &result); err != nil {
+	if err := modrinthMetadata(ctx, apiPath, &result); err != nil {
 		return nil, err
 	}
 
+	result.Limit, result.Offset = limit, offset
+	if len(result.Hits) > limit {
+		result.Hits = result.Hits[:limit]
+	}
+	if result.Hits == nil {
+		result.Hits = []ModrinthPluginHit{}
+	}
 	return &result, nil
 }
 
-// CompatibleModrinthVersions returns only releases explicitly supporting this server.
+// CompatibleModrinthVersions returns releases supporting the actual server loader.
+// Minecraft versions are informational, not an installation restriction.
 func CompatibleModrinthVersions(project, loader, mcVersion string) ([]ModrinthVersion, error) {
-	if strings.TrimSpace(project) == "" || strings.TrimSpace(mcVersion) == "" {
-		return nil, fmt.Errorf("project and server Minecraft version are required")
+	return CompatibleModrinthVersionsContext(context.Background(), project, loader, mcVersion)
+}
+
+func CompatibleModrinthVersionsContext(ctx context.Context, project, loader, mcVersion string) ([]ModrinthVersion, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	p, err := fetchModrinthProject(ctx, project)
+	if err != nil {
+		return nil, err
 	}
-	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version", url.PathEscape(project))
-	var versions []ModrinthVersion
-	if err := metadataJSON(apiURL, &versions); err != nil {
+	versions, err := fetchModrinthVersions(ctx, p.ID)
+	if err != nil {
 		return nil, err
 	}
 	return filterCompatibleVersions(versions, loader, mcVersion), nil
@@ -148,12 +177,7 @@ func filterCompatibleVersions(versions []ModrinthVersion, loader, mcVersion stri
 	}
 	result := make([]ModrinthVersion, 0)
 	for _, v := range versions {
-		versionOK, loaderOK, jarOK := false, false, false
-		for _, ver := range v.GameVersions {
-			if ver == strings.TrimSpace(mcVersion) {
-				versionOK = true
-			}
-		}
+		loaderOK, jarOK := false, false
 		for _, l := range v.Loaders {
 			l = strings.ToLower(l)
 			if l == loader || (loader == "paper" && (l == "spigot" || l == "bukkit")) || (loader == "spigot" && l == "bukkit") {
@@ -161,20 +185,29 @@ func filterCompatibleVersions(versions []ModrinthVersion, loader, mcVersion stri
 			}
 		}
 		for _, f := range v.Files {
-			if validPluginJarName(f.Filename) {
+			if safeModrinthJar(f.Filename, f.URL, f.Size) {
 				jarOK = true
 			}
 		}
 		// Folia must be explicitly tagged; Paper compatibility alone is not sufficient.
-		if versionOK && loaderOK && jarOK {
+		if loaderOK && jarOK {
 			result = append(result, v)
 		}
 	}
+	sortModrinthVersions(result)
 	return result
 }
 
 func validPluginJarName(name string) bool {
-	return name != "" && !strings.ContainsAny(name, "/\\:") && !strings.Contains(name, "..") && strings.HasSuffix(strings.ToLower(name), ".jar")
+	if name == "" || strings.ContainsAny(name, "/\\:") || strings.Contains(name, "..") || !strings.HasSuffix(strings.ToLower(name), ".jar") {
+		return false
+	}
+	for _, c := range name {
+		if c < 32 || c == 127 {
+			return false
+		}
+	}
+	return true
 }
 
 // DownloadModrinthPlugin revalidates the selected release against the server, then
@@ -192,7 +225,16 @@ func DownloadModrinthPlugin(project, destDir, loader, mcVersion, versionID strin
 }
 
 func DownloadModrinthPluginRoot(project string, root *rooted.Root, loader, mcVersion, versionID string) (string, error) {
-	versions, err := CompatibleModrinthVersions(project, loader, mcVersion)
+	return DownloadModrinthPluginRootContext(context.Background(), project, root, loader, mcVersion, versionID)
+}
+
+func DownloadModrinthPluginRootContext(ctx context.Context, project string, root *rooted.Root, loader, mcVersion, versionID string) (string, error) {
+	if versionID != "" && !ValidModrinthIdentifier(versionID) {
+		return "", fmt.Errorf("invalid Modrinth version identifier")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	versions, err := CompatibleModrinthVersionsContext(ctx, project, loader, mcVersion)
 	if err != nil {
 		return "", err
 	}
@@ -204,11 +246,11 @@ func DownloadModrinthPluginRoot(project string, root *rooted.Root, loader, mcVer
 		}
 	}
 	if chosen == nil {
-		return "", fmt.Errorf("no compatible release for %s on Minecraft %s (%s)", project, mcVersion, loader)
+		return "", fmt.Errorf("no installable release for this project and server software (%s); choose a version supporting this loader", loader)
 	}
 	fileIndex := -1
 	for i, f := range chosen.Files {
-		if validPluginJarName(f.Filename) && (fileIndex < 0 || f.Primary) {
+		if safeModrinthJar(f.Filename, f.URL, f.Size) && (fileIndex < 0 || f.Primary) {
 			fileIndex = i
 			if f.Primary {
 				break
@@ -227,13 +269,13 @@ func DownloadModrinthPluginRoot(project string, root *rooted.Root, loader, mcVer
 			return "", err
 		}
 	}
-	resp, err := httpGet(f.URL)
+	resp, err := modrinthGet(ctx, f.URL)
 	if err != nil {
-		return "", err
+		return "", modrinthRequestError(ctx, "download")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("download returned status %s", resp.Status)
+		return "", fmt.Errorf("Modrinth download returned HTTP %d; retry later", resp.StatusCode)
 	}
 	dir, stage, err := root.TempDir()
 	if err != nil {
@@ -245,7 +287,7 @@ func DownloadModrinthPluginRoot(project string, root *rooted.Root, loader, mcVer
 	if err != nil {
 		return "", err
 	}
-	n, copyErr := rooted.Copy(context.Background(), tmp, resp.Body, 200<<20)
+	n, copyErr := rooted.Copy(ctx, tmp, resp.Body, 200<<20)
 	closeErr := tmp.Close()
 	if copyErr != nil {
 		return "", copyErr
