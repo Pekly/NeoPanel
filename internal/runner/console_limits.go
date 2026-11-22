@@ -16,9 +16,8 @@ func limitConsoleText(text string) string {
 	return strings.ToValidUTF8(text[:maxConsoleLineBytes-len(consoleTruncated)], "") + consoleTruncated
 }
 
-// Drain oversized lines in fixed chunks instead of bufio.Scanner abandoning
-// the stream. A tenant must not disable later readiness/player tracking with a
-// large stdout line, nor allocate its full line in the panel process.
+// readConsoleLine drains oversized lines in bounded chunks. Unlike Scanner's
+// token limit, this keeps later readiness and player events readable.
 func readConsoleLine(reader *bufio.Reader) (string, bool) {
 	var line []byte
 	truncated := false

@@ -113,8 +113,7 @@ func saveUploadedAvatarFile(r *http.Request, userID int) (string, error) {
 	}
 	defer root.Close()
 	name := "avatar_" + strconv.Itoa(userID) + ".png"
-	// Replacing an inode avoids truncating a tenant-planted hardlink. Root checks
-	// reject symlink targets; only the normalized PNG is published after validation.
+	// Replace the inode so an existing hardlink cannot redirect the write.
 	if err := root.WriteFile(name, encoded.Bytes(), 0644); err != nil {
 		return "", fmt.Errorf("Could not safely save avatar")
 	}
@@ -148,8 +147,7 @@ func (h *AccountHandler) ServeAvatar(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	if strings.HasSuffix(name, ".svg") {
-		// Do not silently delete older SVG uploads, but never offer them as an active
-		// panel-origin document. Users can replace these with a new raster avatar.
+		// Keep legacy SVGs downloadable without executing them on the panel origin.
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Cache-Control", "no-store")
