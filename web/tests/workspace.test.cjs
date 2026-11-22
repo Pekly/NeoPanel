@@ -154,7 +154,7 @@ test('late countdown results do not populate a different account', async () => {
 test('countdown errors remain visible across timer paints', async () => {
   const {c,q,elements}=setup(); const el={textContent:'',closest:()=>null}; elements['np-countdown-state']=el;
   c.api=async()=>{throw Object.assign(Error('not found'),{status:404});};
-  await q.pollCountdown(); q.paintCountdown(); assert.match(el.textContent,/Update and restart/);
+  await q.pollCountdown(); q.paintCountdown(); assert.match(el.textContent,/Contact support/);
 });
 test('actionable errors distinguish permission, connectivity, conflicts and Java failures', () => {
   const {q}=setup();
@@ -215,8 +215,8 @@ test('unsupported countdown APIs stop automatic polling without disabling normal
     elements['np-countdown-state']=el; elements['np-countdown-retry']=retry;
     c.api=async()=>{calls++;throw Object.assign(Error('unsupported'),{status});};
     await q.pollCountdown(); await q.pollCountdown();
-    assert.equal(calls,1); assert.match(el.textContent,new RegExp(`HTTP ${status}`));
-    assert.match(el.textContent,/Update and restart/); assert.doesNotMatch(el.textContent,/Reconnect/);
+    assert.equal(calls,1); assert.doesNotMatch(el.textContent,/HTTP|backend|worker|Update and restart/);
+    assert.match(el.textContent,/Contact support/); assert.doesNotMatch(el.textContent,/Reconnect/);
     assert.equal(q.powerBlocked(),false); assert.equal(submit.disabled,true); assert.equal(retry.hidden,false); assert.equal(retry.disabled,false);
     await q.scheduleCountdown(form()); assert.equal(calls,1);
     c.api=async()=>{calls++;return {countdown:null};}; await q.pollCountdown(true);
@@ -227,12 +227,12 @@ test('permission errors are actionable and do not cause a reconnect loop', async
   const {c,q,elements}=setup(); const el={textContent:'',closest:()=>null}; elements['np-countdown-state']=el;
   let calls=0;c.api=async()=>{calls++;throw Object.assign(Error('denied'),{status:403});};
   await q.pollCountdown();await q.pollCountdown();assert.equal(calls,1);
-  assert.match(el.textContent,/access denied.*HTTP 403/);assert.match(el.textContent,/permissions/);assert.equal(q.connectionBlocked(),false);
+  assert.match(el.textContent,/access denied/);assert.doesNotMatch(el.textContent,/HTTP/);assert.match(el.textContent,/permissions/);assert.equal(q.connectionBlocked(),false);
 });
 test('malformed countdown responses do not masquerade as no pending action', async () => {
   for(const response of [{},[],null,{countdown:{action:'restart',execute_at:'invalid'}},{countdown:{action:'kill',execute_at:new Date().toISOString()}}]) {
     const {c,q,elements}=setup(); const el={textContent:'',closest:()=>null}; elements['np-countdown-state']=el;
-    c.api=async()=>response;await q.pollCountdown();assert.match(el.textContent,/incompatible response/);
+    c.api=async()=>response;await q.pollCountdown();assert.match(el.textContent,/Could not confirm countdown status/);
     assert.doesNotMatch(el.textContent,/No scheduled/);
   }
 });
@@ -241,13 +241,13 @@ test('temporary countdown errors retain the cause and back off before retrying',
   let now=1000,calls=0;c.Date={now:()=>now,parse:Date.parse};
   c.api=async()=>{calls++;throw Object.assign(Error('worker unavailable'),{status:503});};
   await q.pollCountdown();await q.pollCountdown(true);assert.equal(calls,1);assert.equal(retry.disabled,true);
-  assert.match(el.textContent,/HTTP 503.*worker unavailable/);
+  assert.match(el.textContent,/Try again shortly/);assert.doesNotMatch(el.textContent,/HTTP|worker unavailable/);
   now+=15001;c.api=async()=>({countdown:null});await q.pollCountdown();assert.equal(retry.hidden,true);
 });
 test('incompatible scheduling responses are not announced as successful', async () => {
   const {c,q,notices,elements}=setup();const el={textContent:'',closest:()=>null};elements['np-countdown-state']=el;
   c.api=async()=>({});await q.scheduleCountdown(form());
-  assert.ok(notices.every(n=>!n.text.includes('Players warned')));assert.match(el.textContent,/incompatible response/);
+  assert.ok(notices.every(n=>!n.text.includes('Players warned')));assert.match(el.textContent,/Could not confirm countdown status/);
 });
 test('console tools and power countdown are collapsed dropdowns', () => {
   const {q} = setup();
@@ -277,4 +277,20 @@ test('Schedule and Console tools use chevrons driven by the native open state', 
   assert.match(css, /\.np-compact-menu\[open\] > summary \.np-menu-chevron\s*\{\s*transform: rotate\(225deg\)/);
   assert.match(css, /\.fly-con-head \.np-console-options\s*\{\s*position: static/);
   assert.match(css, /\.fly-con-head \.np-console-options \.np-menu-panel\s*\{[^}]*left: 12px;[^}]*max-width: calc\(100% - 24px\)/);
+});
+
+test('countdown diagnostics remain available to administrators',async()=>{
+  for(const status of [404,503]) {
+    const {c,q,elements}=setup();c.S.user.role='admin';const el={textContent:'',closest:()=>null};elements['np-countdown-state']=el;
+    c.api=async()=>{throw Object.assign(Error('worker unavailable'),{status});};await q.pollCountdown();
+    assert.match(el.textContent,new RegExp(`HTTP ${status}`));assert.match(el.textContent,status===404?/Update and restart/:/worker unavailable/);
+  }
+});
+
+test('user error advice avoids operator maintenance while retaining uncertainty and lifecycle warnings',()=>{
+  const {q}=setup();
+  assert.doesNotMatch(q.errorAdvice({status:404,message:'missing'}),/worker|node|up to date/);
+  assert.doesNotMatch(q.errorAdvice({status:503,message:'offline'}),/node availability/);
+  assert.match(q.errorAdvice({status:503,message:'offline'}),/may already/);
+  assert.match(q.countdownSection(),/Continues if you close this tab; cancelled if the hosting service restarts/);
 });

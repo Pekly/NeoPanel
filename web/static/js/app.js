@@ -167,11 +167,11 @@ function steelConfigNotice(showLink = true) {
       <div><h3>Plugins and mods</h3><p>Bukkit/Spigot plugins and Forge/Fabric mods are not compatible.</p></div>
     </div>
     <details class="steel-info-details">
-      <summary>Configuration &amp; resource limits in NeoPanel</summary>
+      <summary>Configuration and memory</summary>
       <dl>
         <div><dt>Configuration</dt><dd>Edit <code>config/config.toml</code> in the File Manager. Steel does not use Java <code>server.properties</code>.</dd></div>
         <div><dt>Port &amp; saves</dt><dd>NeoPanel applies your assigned port to <code>server_port</code> in the <code>[server]</code> section on startup. Worlds are stored in <code>saves/</code>.</dd></div>
-        <div><dt>Memory limit</dt><dd>Hard RAM caps require systemd, including Bubblewrap + Systemd. Without it, no hard RAM cap is applied. Check the console's Isolation line.</dd></div>
+        <div><dt>Memory limit</dt><dd>${S.user?.role === 'admin' ? "Hard RAM caps require systemd, including Bubblewrap + Systemd. Without it, no hard RAM cap is applied. Check the console's Isolation line." : 'A hard memory limit applies only if your host supports it. Otherwise, memory use is not capped. Contact support to confirm.'}</dd></div>
       </dl>
     </details>
     <div class="steel-info-actions">
@@ -273,10 +273,7 @@ function launchSftpClient() {
   } catch (e) {
     window.location.href = d.launchUri;
   }
-  const passMsg = d.isRemote
-    ? 'Use the remote node token or your panel password when prompted.'
-    : 'Use your NeoPanel account login password (or SSH key) when prompted.';
-  toast(`Launching SFTP (${d.host}:${d.port}). ${passMsg}`);
+  toast('Opening SFTP. Sign in with your NeoPanel password or SSH key.');
 }
 
 function downloadFileZillaProfile() {
@@ -287,9 +284,7 @@ function downloadFileZillaProfile() {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
   const siteName = `NeoPanel - ${d.serverName}`;
-  const comment = d.isRemote
-    ? 'Remote Node SFTP: enter the remote node token or local account password on connect.'
-    : 'SFTP Password: enter your NeoPanel account login password on connect.';
+  const comment = 'Enter your NeoPanel account password or configure your SSH key in FileZilla.';
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <FileZilla3 version="3.67.0" platform="*">
   <Servers>
@@ -336,11 +331,11 @@ function renderSftpCardHtml(srv, compact = false) {
   return `<div class="card" style="padding: ${compact ? '18px 20px' : '22px'};">
     <div class="row sb" style="margin-bottom: 8px; gap: 10px; flex-wrap: wrap;">
       <h2 style="font-size: 16px; margin: 0; color: var(--tx); display:flex; align-items:center; gap:8px;">
-        ${ic('lock', 15)} SFTP Management Endpoint
+        ${ic('lock', 15)} Connection details
       </h2>
       ${statusPill}
     </div>
-    <p class="mu" style="font-size: 13px; margin-bottom: 12px;">Pure-Go jailed SFTP daemon for WinSCP, FileZilla, Cyberduck, or OpenSSH.</p>
+    <p class="mu" style="font-size: 13px; margin-bottom: 12px;">Transfer files with WinSCP, FileZilla, or another SFTP client.</p>
     <div class="mono" style="background: rgba(0, 0, 0, 0.36); border: 1px solid var(--border); padding: 11px 14px; border-radius: 8px; font-size: 12.5px; line-height: 1.8; margin-bottom: 12px; overflow-wrap: anywhere;">
       <div class="row sb" style="gap: 8px;">
         <span><span class="mu">Connection:</span> <b style="color: var(--tx);">sftp://${esc(d.host)}:${d.port}</b></span>
@@ -352,7 +347,8 @@ function renderSftpCardHtml(srv, compact = false) {
       </div>
     </div>
     <div class="sftp-pass-callout" style="margin-bottom: 14px;">
-      <b>SFTP password:</b> Use your <b>NeoPanel account password</b> (or add an SSH key under Account).${d.isRemote ? ' Remote nodes also accept their <code>node_token</code> (<code>sudo neopanel node-token</code>).' : ''}
+      Sign in with your <b>NeoPanel account password</b> or an SSH key added in Account.
+      ${d.isRemote && S.user?.role === 'admin' ? '<details><summary>Administrator connection options</summary><p>Remote nodes also accept their <code>node_token</code> (<code>sudo neopanel node-token</code>).</p></details>' : ''}
     </div>
     <div class="row" style="gap: 8px; flex-wrap: wrap;">
       <button type="button" class="btn pr sm" onclick="launchSftpClient()">${ic('external', 13)} Launch SFTP Client</button>
@@ -7625,9 +7621,9 @@ const V = {
           <label class="f" style="margin-bottom: 8px;">
             <span class="row sb">
               <span>Java Runtime Version</span>
-              ${isJavaLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked by Node Policy</span>' : ''}
+              ${isJavaLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Managed by your host</span>' : ''}
             </span>
-            <select id="prop-java" ${isJavaLocked ? 'disabled title="Java runtime changes are restricted by node policy."' : 'onchange="onPropJavaChange(this.value)"'}>
+            <select id="prop-java" ${isJavaLocked ? 'disabled title="Your host manages the Java version."' : 'onchange="onPropJavaChange(this.value)"'}>
               ${renderJavaSelectOptions(rawJava, true, srv?.version, srv?.type, srv?.node_id || 'local')}
             </select>
           </label>
@@ -7661,7 +7657,7 @@ const V = {
                 <span>Server Game Port</span>
                 ${isPortsLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked</span>' : ''}
               </span>
-              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}" ${isPortsLocked ? 'disabled title="Port changes are restricted by node policy."' : 'oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()"'} >
+              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}" ${isPortsLocked ? 'disabled title="Your host manages the server port."' : 'oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()"'} >
             </label>
             <label class="f">
               <span>Max Players</span>
@@ -7689,11 +7685,11 @@ const V = {
           <div class="grid g2">
             <label class="f">
               <span class="row sb">
-                <span>${native ? 'Memory Resource Limit (systemd only)' : 'Allocated Memory (-Xmx)'}</span>
-                ${isRamLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked by Node Policy</span>' : ''}
+                <span>Memory allocation</span>
+                ${isRamLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Managed by your host</span>' : ''}
               </span>
               ${isRamLocked ? `
-                <select id="prop-ram" disabled title="Memory allocation is managed by cluster administrators on this node.">
+                <select id="prop-ram" disabled title="Your host manages the memory allocation.">
                   <option value="${curMem}" selected>${curMem >= 1024 ? (curMem/1024) + ' GB' : curMem + ' MB'} (${curMem} MB)</option>
                 </select>
               ` : `
@@ -10531,7 +10527,7 @@ function openMoveFilesModal(pathsArg = null) {
         <label class="f" style="margin-bottom:10px;">
           <span>Destination Folder (relative to server root)</span>
           <div class="move-path-input-wrap">
-            <span class="move-path-prefix mono">/home/container/</span>
+            <span class="move-path-prefix mono">Server files /</span>
             <input type="text" id="move-dest-input" value="${esc(defaultDest)}" placeholder="e.g. plugins, backups/old, or leave blank for root" autocomplete="off" spellcheck="false" oninput="const e=$('#move-modal-err');if(e)e.style.display='none';">
           </div>
         </label>
@@ -10543,7 +10539,7 @@ function openMoveFilesModal(pathsArg = null) {
               ${chips.slice(0, 10).map(c => `<button type="button" class="dest-chip" data-dest="${esc(c.dest)}" onclick="setMoveModalDest(this.dataset.dest)">${ic('folder', 12)} ${esc(c.label)}</button>`).join('')}
             </div>
           </div>
-        ` : `<p class="mu" style="font-size:12px; margin-bottom:14px;">Type a folder name (missing folders are created automatically) or leave empty for <code>/home/container/</code>.</p>`}
+        ` : `<p class="mu" style="font-size:12px; margin-bottom:14px;">Leave blank for the server root. Missing folders are created.</p>`}
 
         <label class="row" style="cursor:pointer; gap:9px; font-size:13px; margin-bottom:14px;">
           <input type="checkbox" id="move-overwrite">
@@ -10655,7 +10651,7 @@ function openCompressFilesModal(pathsArg = null) {
   const maxPreview = 6;
   const shown = paths.slice(0, maxPreview);
   const extraCount = Math.max(0, paths.length - maxPreview);
-  const folderLabel = curDir ? `/home/container/${curDir}/` : '/home/container/';
+  const folderLabel = curDir ? `Server files / ${curDir}/` : 'Server files';
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:540px; border:1px solid var(--border-light);">
@@ -10967,7 +10963,7 @@ async function deleteSelectedFiles() {
         const result = await api(srvApiPath(srv, '/files/delete-bulk'), {
           method: 'POST', body: JSON.stringify({ paths: chunk, permanent: choice.permanent }), suppressToast: true
         });
-        if (!Array.isArray(result.deleted) || !Array.isArray(result.failed)) throw new Error('Invalid bulk-delete response. Update the panel and worker node together.');
+        if (!Array.isArray(result.deleted) || !Array.isArray(result.failed)) throw new Error(S.user?.role === 'admin' ? 'Invalid bulk-delete response. Update the panel and worker node together.' : 'Could not confirm deletion. Refresh the file list before retrying. Contact support if this continues.');
         const completed = new Set(result.deleted);
         for (const path of chunk) {
           if (completed.has(path)) { selection.delete(path); deleted++; }
@@ -17820,7 +17816,7 @@ function applyPermissionControls(root) {
   }
   window.NPWorkspace?.syncControls();
 }
-V.sftp = () => `${srvh()}<div class="np-section-heading"><div><h2>SFTP</h2><p>One place for external file transfer connections.</p></div></div>${S.sftpLoading ? '<div class="card" role="status">Loading connection details…</div>' : S.sftp ? renderSftpCardHtml(curServer()) : `<div class="card" role="status">${esc(S.sftpError || 'Connection details are not loaded.')} <button class="btn sm" onclick="loadSFTPDetails()">Retry</button></div>`}`;
+V.sftp = () => `${srvh()}<div class="np-section-heading"><div><h2>SFTP</h2></div></div>${S.sftpLoading ? '<div class="card" role="status">Loading connection details…</div>' : S.sftp ? renderSftpCardHtml(curServer()) : `<div class="card" role="status">${esc(S.sftpError || 'Connection details are not loaded.')} <button class="btn sm" onclick="loadSFTPDetails()">Retry</button></div>`}`;
 V.create = () => canCreateServers() ? '<section class="card"><h1>Create server</h1><p class="mu">Choose a node and configure your Minecraft server.</p><button class="btn pr" onclick="openCreateServerModal()">Configure server</button></section>' : renderAccessRestricted(false);
 
 

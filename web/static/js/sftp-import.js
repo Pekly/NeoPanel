@@ -5,6 +5,7 @@
   const activeStates = new Set(['queued', 'scanning', 'transferring', 'publishing']);
   const states = new Set([...activeStates, 'completed', 'failed', 'cancelled']);
   const GiB = 1073741824;
+  const progressLabels = {queued:'Waiting', scanning:'Checking files', transferring:'Copying files', publishing:'Finishing', completed:'Import complete', failed:'Import failed', cancelled:'Import cancelled'};
   let dispose = null;
   const allowed = srv => !!srv?.id && permissions.every(p => hasServerPermission(p, srv));
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -18,42 +19,43 @@
     return value;
   }
   function validateJob(job, server) {
-    if (!job || typeof job.id !== 'string' || !job.id || String(job.server_id) !== String(server.id) || !states.has(job.state) || !['files_total','files_done','bytes_total','bytes_done'].every(k => Number.isSafeInteger(job[k]) && job[k] >= 0) || (job.current_path != null && typeof job.current_path !== 'string')) throw Error('Unexpected import job response. Refresh target to check status.');
+    if (!job || typeof job.id !== 'string' || !job.id || String(job.server_id) !== String(server.id) || !states.has(job.state) || !['files_total','files_done','bytes_total','bytes_done'].every(k => Number.isSafeInteger(job[k]) && job[k] >= 0) || !['current_path','user_message'].every(k => job[k] == null || typeof job[k] === 'string')) throw Error('Unexpected import job response. Refresh to check status.');
     return job;
   }
   const field = (id, title, type = 'text', extra = '') => `<label class="f"><span>${title}</span><input id="sfi-${id}" type="${type}" ${extra}></label>`;
   function markup(server) {
     return `<div class="pal" id="sfi-overlay"><section class="pbox sfi-modal" role="dialog" aria-modal="true" aria-labelledby="sfi-title" aria-describedby="sfi-intro" tabindex="-1">
       <header class="sfi-row"><div><div class="np-eyebrow">Files / Remote transfer</div><h2 id="sfi-title">Import from SFTP</h2></div><button type="button" class="btn sm" id="sfi-close" aria-label="Close SFTP importer">×</button></header>
-      <p id="sfi-intro" class="mu">Copy into the root of <strong>${escape(server.name || server.id)}</strong> · node ${escape(server.node_id || 'local')}. The source is never changed or removed.</p>
-      <section class="sfi-notice" aria-label="Destination requirements"><div class="sfi-row"><strong>Stopped server. Strictly empty root.</strong><button type="button" class="btn sm" id="sfi-refresh">Refresh target</button></div><p id="sfi-target" role="status">Checking destination…</p><p>New servers generate server.properties and eula.txt. Deliberately move or clear existing files via Files first. This importer never clears, overwrites or starts the server.</p></section>
+      <p id="sfi-intro" class="mu">Copy files directly into <strong>${escape(server.name || server.id)}</strong>.</p>
+      <section class="sfi-notice" aria-label="Destination requirements"><div class="sfi-row"><strong>Use an empty, stopped server</strong><button type="button" class="btn sm" id="sfi-refresh">Refresh</button></div><p id="sfi-target" role="status">Checking your server…</p><details><summary>Why does my new server already have files?</summary><p>New servers include server.properties and eula.txt. Back up and move or remove existing files in Files before importing. Nothing is overwritten.</p></details></section>
       <section id="sfi-job" class="sfi-job" hidden aria-label="Import progress"><h3 id="sfi-job-state" role="status"></h3><progress id="sfi-progress" max="100" aria-label="Bytes transferred"></progress><p id="sfi-counts"></p><p id="sfi-current" class="mono"></p><p id="sfi-job-message" role="status"></p><button type="button" class="btn" id="sfi-cancel" hidden>Cancel import</button></section>
       <form id="sfi-form" autocomplete="off" novalidate>
         <fieldset id="sfi-settings"><legend class="sfi-sr">Source and copy options</legend>
           <section class="sfi-section"><h3>1. Connect to the source</h3><div class="sfi-grid">
             ${field('host','SFTP host','text','required placeholder="sftp.example.com" spellcheck="false"')}
             ${field('port','Port','number','required value="22" min="1" max="65535" step="1"')}
-          </div><div class="sfi-row"><button type="button" class="btn sm" id="sfi-fetch">Fetch host key</button><span class="mu" id="sfi-key-note">Fetch sends only host and port, never credentials.</span></div>
-          ${field('fingerprint','Expected host fingerprint (SHA256)','text','required placeholder="SHA256:…" spellcheck="false" aria-describedby="sfi-verify-note"')}
-          <p id="sfi-verify-note" class="mu">A fetched fingerprint is unverified. Compare it with your provider or another trusted, out-of-band source.</p>
-          <label class="sfi-check"><input type="checkbox" id="sfi-confirm"><span>I compared this fingerprint independently and trust this host.</span></label>
+          </div><div class="sfi-row"><button type="button" class="btn sm" id="sfi-fetch">Get fingerprint</button><span class="mu" id="sfi-key-note">No login details are sent yet.</span></div>
+          ${field('fingerprint','Host fingerprint (SHA256)','text','required placeholder="SHA256:…" spellcheck="false" aria-describedby="sfi-verify-note"')}
+          <p id="sfi-verify-note" class="mu">Compare this fingerprint with the one from your provider before continuing.</p>
+          <label class="sfi-check"><input type="checkbox" id="sfi-confirm"><span>I verified the fingerprint with my provider or another trusted source.</span></label>
           <div class="sfi-grid">${field('username','Username','text','required spellcheck="false" autocomplete="off"')}<label class="f"><span>Authentication</span><select id="sfi-auth"><option value="password">Password</option><option value="key">Private key</option></select></label></div>
           <div id="sfi-password-wrap">${field('password','Password','password','autocomplete="new-password"')}</div>
           <div id="sfi-key-wrap" hidden><label class="f"><span>Load a local private key (optional, up to 64 KiB)</span><input id="sfi-key-file" type="file" accept=".key,.pem,text/plain"></label><label class="f"><span>Private key (PEM / OpenSSH)</span><textarea id="sfi-private-key" rows="4" spellcheck="false" autocomplete="off"></textarea></label>${field('passphrase','Key passphrase (if encrypted)','password','autocomplete="new-password"')}</div>
-          <p class="mu">SFTP only — no FTP or shell commands. Private hosts require the node operator’s host allowlist configuration.</p></section>
-          <section class="sfi-section"><h3>2. Choose what to copy</h3>${field('remote-path','Remote root','text','value="." required spellcheck="false"')}
-          <div class="sfi-row"><button type="button" class="btn" id="sfi-test" disabled>Test & preview</button><span class="mu">Testing does not change either server.</span></div>
-          <div id="sfi-preview" class="sfi-preview" aria-label="Remote directory preview"><p class="mu">Verify the host key, then test to preview and select files. No selection means copy everything under the remote root.</p></div>
-          <details><summary>Advanced copy options</summary><p class="mu">Include/exclude paths are exact relative files or subtrees, not wildcard patterns. Unchecked preview entries are still copied when nothing is selected.</p><label class="f"><span>Exclude paths (one per line)</span><textarea id="sfi-excludes" rows="3" placeholder="logs&#10;backups" spellcheck="false"></textarea></label>
+          <p class="mu">Use the SFTP connection details from your current host.</p></section>
+          <section class="sfi-section"><h3>2. Choose what to copy</h3>${field('remote-path','Source folder','text','value="." required spellcheck="false"')}
+          <div class="sfi-row"><button type="button" class="btn" id="sfi-test" disabled>Test connection</button><span class="mu">Preview files without changing them.</span></div>
+          <div id="sfi-preview" class="sfi-preview" aria-label="Remote directory preview"><p class="mu">Test the connection to see your files. Leave all unchecked to copy everything.</p></div>
+          <details><summary>Advanced copy options</summary><p class="mu">Enter file or folder paths relative to the source folder. Wildcards are not supported.</p><label class="f"><span>Exclude paths (one per line)</span><textarea id="sfi-excludes" rows="3" placeholder="logs&#10;backups" spellcheck="false"></textarea></label>
           <div class="sfi-row sfi-presets"><span>Also exclude:</span>${['logs','backups','cache'].map(p => `<label class="sfi-check"><input type="checkbox" data-exclude="${p}"><span>${p}/</span></label>`).join('')}</div>
           <div class="sfi-grid"><label class="sfi-check"><input id="sfi-hidden" type="checkbox"><span>Skip hidden files and folders</span></label><label class="sfi-check"><input id="sfi-times" type="checkbox" checked><span>Preserve modification times</span></label>
           ${field('max','Maximum copy size (GiB)','number','min="0" step="any" value="10" required aria-describedby="sfi-limits"')}
           ${field('bandwidth','Bandwidth (MiB/s; 0 = unlimited)','number','value="0" min="0" max="1024" step="any" required')}
-          ${field('timeout','Timeout (minutes)','number','value="60" min="1" max="240" step="1" required')}</div><p class="mu" id="sfi-limits">Waiting for node limits…</p></details></section>
+          ${field('timeout','Timeout (minutes)','number','value="60" min="1" max="240" step="1" required')}</div><p class="mu" id="sfi-limits">Checking transfer limits…</p></details></section>
         </fieldset>
-        <section class="sfi-notice"><strong>Before you import</strong><p>Stop the source server for a consistent copy; copying a running source is not a snapshot. Files stage first and publish all-or-nothing. The prior empty root is retained as a safety copy, with at most 3 copies shared with restore retention; cleanup is administrator-only.</p><p>After import, verify the startup JAR, runtime and assigned ports before starting manually.</p></section>
+        <section class="sfi-notice"><strong>Before you import</strong><p>Stop the source server for a consistent copy. Its files will not be changed, and this server will not start automatically.</p></section>
+        ${S.user?.role === 'admin' ? `<details class="sfi-notice"><summary>Operator details</summary><p>Hosting node: ${escape(server.node_id || 'local')}. Private sources require the node's SFTP allowlist. Imports use staging and share the three-copy restore retention limit. Jobs do not resume after a service restart.</p></details>` : ''}
         <p id="sfi-error" role="alert" class="sfi-error" tabindex="-1" hidden></p><p id="sfi-status" role="status" class="mu"></p>
-        <footer class="sfi-row"><p class="mu">Closing does not cancel an import. Reopen to check its latest status. Node restarts lose status; there is no durable resume.</p><button type="submit" class="btn pr" id="sfi-start" disabled aria-describedby="sfi-start-reason">Start import</button></footer><p id="sfi-start-reason" class="mu">Checking destination and host verification…</p>
+        <footer class="sfi-row"><p class="mu">Closing does not cancel the import. Reopen this window to check progress.</p><button type="submit" class="btn pr" id="sfi-start" disabled aria-describedby="sfi-start-reason">Start import</button></footer><p id="sfi-start-reason" class="mu">Checking your server and source verification…</p>
       </form></section></div>`;
   }
 
@@ -65,6 +67,7 @@
     const server = {...current};
     const base = srvApiPath(server, '/files/import-sftp');
     const token = S.token, user = S.user, userId = S.user?.id;
+    const isAdmin = S.user?.role === 'admin';
     const route = window.location.href;
     const trigger = document.activeElement;
     const container = document.querySelector('#modal-container');
@@ -122,9 +125,9 @@
     function sync() {
       const active = activeStates.has(job?.state);
       const verified = el('confirm').checked && fingerprintOK(el('fingerprint').value.trim());
-      const reason = unknown ? 'Start status is unknown. Refresh target; do not submit again.' : active ? 'An import is already in progress.' : checking ? 'Checking destination…' : !eligible ? (el('target').textContent || 'Destination is not eligible.') : !limits ? 'Node limits are unavailable.' : limits.max_bytes < 1 ? 'No space is available within the node import limit.' : !verified ? 'Independently verify and confirm the host fingerprint first.' : busy ? 'Wait for the current request.' : '';
+      const reason = unknown ? 'Start status is unknown. Refresh before trying again.' : active ? 'An import is already in progress.' : checking ? 'Checking your server…' : !eligible ? (el('target').textContent || 'Your server is not ready to import.') : !limits ? 'Transfer limits are unavailable. Refresh to try again.' : limits.max_bytes < 1 ? 'No storage is available for this import. Contact support.' : !verified ? 'Verify and confirm the source fingerprint first.' : busy ? 'Wait for the current request.' : '';
       el('start').disabled = !!reason;
-      el('start-reason').textContent = reason || 'Ready to import into the empty, stopped destination root.';
+      el('start-reason').textContent = reason || 'Ready to import.';
       el('test').disabled = busy || checking || !verified || active;
       el('fetch').disabled = busy || checking || active;
       el('settings').disabled = busy || active || unknown;
@@ -142,19 +145,25 @@
         const response = await api(base + suffix, {method, ...(body ? {body:JSON.stringify(body)} : {}), signal:controller.signal, suppressToast:true});
         if (!live()) throw Error('Dialog closed');
         return response;
+      } catch (err) {
+        if (!isAdmin && err.status >= 500) {
+          throw Object.assign(new Error('The service is unavailable. Refresh to check progress before trying again, or contact support.'), {status:err.status});
+        }
+        throw err;
       } finally { clearTimeout(timer); requests.delete(controller); }
     }
     function showJob(next) {
       job = next;
       el('job').hidden = !job;
       if (!job) return;
-      el('job-state').textContent = `${job.state[0].toUpperCase()}${job.state.slice(1)}`;
+      el('job-state').textContent = progressLabels[job.state];
       if (job.bytes_total > 0) el('progress').value = Math.min(100, job.bytes_done / job.bytes_total * 100);
       else if (job.state === 'completed') el('progress').value = 100;
       else el('progress').removeAttribute('value');
       el('counts').textContent = `${job.files_done.toLocaleString()} / ${job.files_total.toLocaleString()} files · ${(job.bytes_done / GiB).toFixed(3)} / ${(job.bytes_total / GiB).toFixed(3)} GiB`;
       el('current').textContent = job.current_path || '';
-      el('job-message').textContent = [job.error, job.message, job.safety_copy ? `Safety copy: ${job.safety_copy}` : '', job.state === 'completed' ? 'Import complete. Verify startup JAR, runtime and ports; the server remains stopped.' : ''].filter(Boolean).join(' ');
+      const message = job.user_message || (job.state === 'completed' ? 'Files imported. Review your server settings before starting.' : job.state === 'failed' ? 'Import failed. Check your connection details or contact support.' : job.state === 'cancelled' ? 'Import cancelled. No files were imported.' : '');
+      el('job-message').textContent = [message, isAdmin ? job.error : '', isAdmin && job.safety_copy ? `Recovery copy: ${job.safety_copy}` : ''].filter(Boolean).join(' ');
       if (!activeStates.has(job.state)) cancelPending = false;
     }
     function schedule() {
@@ -172,15 +181,15 @@
         if (!limits) el('max').value = String(Math.min(data.limits.max_bytes, data.limits.default_bytes || 10 * GiB) / GiB);
         limits = data.limits;
         el('max').max = String(limits.max_bytes / GiB);
-        el('limits').textContent = `Node maximum: ${limits.max_bytes / GiB} GiB · ${limits.max_entries.toLocaleString()} entries · ${limits.max_active} active imports maximum. This is an import limit, not an OS quota.`;
-        el('target').textContent = eligible ? 'Destination is empty and stopped. Eligibility is checked again when starting.' : data.reason || 'Destination must be strictly empty and stopped.';
+        el('limits').textContent = `Up to ${limits.max_bytes / GiB} GiB per import.` + (isAdmin ? ` ${limits.max_entries.toLocaleString()} entries; ${limits.max_active} active imports per node. This does not enforce host disk quotas.` : '');
+        el('target').textContent = eligible ? 'Your server is ready to import.' : data.reason || 'Stop your server and clear its files before importing.';
         if (unknown && next && next.id !== previousJob) { unknown = false; clearSecrets(); el('status').textContent = 'Import found after the unconfirmed start.'; }
         showJob(next);
         if (!unknown && !busy) error();
       } catch (err) {
         if (!live()) return;
         eligible = false;
-        el('target').textContent = [404,405].includes(err.status) ? 'SFTP import is unavailable. Ask the operator to update this node.' : 'Could not confirm destination eligibility. Refresh target to retry.';
+        el('target').textContent = [404,405].includes(err.status) ? (isAdmin ? 'SFTP import is unavailable. Update the hosting node.' : 'Import is not available right now. Contact support.') : 'Could not check your server. Refresh to try again.';
         error([404,405].includes(err.status) ? el('target').textContent : err.name === 'AbortError' ? 'Status request timed out. Refresh target to retry.' : err.message);
       } finally {
         if (live()) { checking = false; sync(); schedule(); }
@@ -234,13 +243,13 @@
         if (kind === 'fetch') {
           if (!fingerprintOK(data?.fingerprint) || typeof data.algorithm !== 'string') throw Error('Unexpected host key response. No fingerprint was trusted.');
           el('fingerprint').value = data.fingerprint; el('confirm').checked = false;
-          el('key-note').textContent = `Unverified · ${data.algorithm}. Compare independently before confirming.`;
-          el('status').textContent = 'Host key fetched, not verified.';
+          el('key-note').textContent = 'Unverified — compare with your provider before confirming.';
+          el('status').textContent = 'Fingerprint received. Verify it before continuing.';
         } else if (kind === 'test') {
           if (!data || typeof data.remote_path !== 'string' || typeof data.truncated !== 'boolean' || !Array.isArray(data.entries) || !data.entries.every(e => e && typeof e.name === 'string' && typeof e.path === 'string' && typeof e.is_dir === 'boolean' && Number.isSafeInteger(e.size) && e.size >= 0)) throw Error('Unexpected remote preview response. Test again.');
           for (const entry of data.entries) relativePath(entry.name);
-          el('preview').innerHTML = `<p><strong>Remote root:</strong> ${escape(data.remote_path)}</p><p class="mu">Select exact paths to include; leave all unchecked to copy all.</p><div class="sfi-entries">${data.entries.map(e => `<label class="sfi-entry"><input type="checkbox" data-include="${escape(e.name)}"><span>${escape(e.name)}${e.is_dir ? '/' : ''}</span><small class="mu">${e.is_dir ? 'Folder' : e.size.toLocaleString() + ' B'}</small></label>`).join('')}</div><p class="mu">${data.entries.length ? data.truncated ? 'Preview truncated. No selection still copies all paths, including those not shown.' : 'Preview loaded. Edit the remote root above to browse another folder.' : 'This remote folder is empty.'}</p>`;
-          el('status').textContent = 'Connection verified. Preview ready; credentials remain in this form for Start.';
+          el('preview').innerHTML = `<p><strong>Source folder:</strong> ${escape(data.remote_path)}</p><p class="mu">Select files to copy, or leave all unchecked to copy everything.</p><div class="sfi-entries">${data.entries.map(e => `<label class="sfi-entry"><input type="checkbox" data-include="${escape(e.name)}"><span>${escape(e.name)}${e.is_dir ? '/' : ''}</span><small class="mu">${e.is_dir ? 'Folder' : e.size.toLocaleString() + ' B'}</small></label>`).join('')}</div><p class="mu">${data.entries.length ? data.truncated ? 'Preview truncated. Copying everything includes files not shown here.' : 'Change the source folder above to view another folder.' : 'This folder is empty.'}</p>`;
+          el('status').textContent = 'Connected. Choose your files, then start the import.';
           el('preview').scrollIntoView({block:'nearest'});
         } else {
           const next = validateJob(data, server);
@@ -248,15 +257,15 @@
           showJob(next);
           if (kind === 'start') clearSecrets();
           else cancelPending = activeStates.has(next.state);
-          el('status').textContent = kind === 'start' ? 'Import accepted. Credentials cleared from this form.' : 'Cancellation requested. Wait for the final job state; publication may already be in progress.';
+          el('status').textContent = kind === 'start' ? 'Import started. Login details cleared from this form.' : 'Cancelling… wait for confirmation.';
           el('job').scrollIntoView({block:'nearest'});
         }
       } catch (err) {
         if (!live()) return;
         if (kind === 'start' && (!err.status || err.status >= 500 || err.status === 408)) {
           unknown = true; resolveUnknown = true;
-          error('Start was not confirmed. It may have been accepted. Checking status; never retrying the start automatically.', true);
-          el('status').textContent = 'If no job appears, ask the operator to check before attempting another import.';
+          error('Start is unconfirmed. Checking progress before you try again.', true);
+          el('status').textContent = 'If no import appears, contact support before retrying.';
         } else {
           if (kind === 'start') { eligible = false; el('target').textContent = 'Start was rejected. Correct the issue, then refresh target. ' + err.message; }
           el('status').textContent = 'Request failed. No success was confirmed.';

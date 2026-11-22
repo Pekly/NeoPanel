@@ -68,7 +68,7 @@ test('status uses captured node, masks secrets, and never stores credentials', a
 
 test('invalid status and old nodes fail closed with actionable feedback', async () => {
   for(const response of [{},status({job:{state:'completed'}}),status({limits:{max_bytes:-1}})]) {const h=harness(async()=>response);h.open();await flush();assert.equal(h.nodes.start.disabled,true);assert.match(h.nodes.error.textContent,/Unexpected/);}
-  for(const code of [404,405]) {const h=harness(async()=>{throw Object.assign(Error('old'),{status:code});});h.open();await flush();assert.match(h.nodes.target.textContent,/update this node/);}
+  for(const code of [404,405]) {const h=harness(async()=>{throw Object.assign(Error('old'),{status:code});});h.open();await flush();assert.match(h.nodes.target.textContent,/Contact support/);assert.doesNotMatch(h.nodes.target.textContent,/node|worker|update/i);}
 });
 
 test('ineligible destination blocks Start, not a verified connection test', async () => {
@@ -107,7 +107,7 @@ test('invalid values and invalid preview cannot be reported as success', async (
 test('Start spamming is guarded; accepted jobs clear secrets and cancellation pins encoded job ID', async () => {
   let resolve;const h=harness(async(url,o)=>o.method==='GET'?status():o.method==='DELETE'?job({message:'Cancellation requested'}):new Promise(r=>resolve=r));h.open();await flush();h.fill();h.submit();h.submit();assert.equal(h.calls.length,2);
   resolve(job());await flush();assert.equal(h.nodes.password.value,'');assert.equal(h.nodes.start.disabled,true);assert.ok([...h.timers.values()].some(t=>t.ms===1500));
-  await h.nodes.cancel.onclick();assert.equal(h.calls[2].url,'/api/nodes/worker/proxy/api/servers/server/files/import-sftp/job%2Fone');assert.equal(h.calls[2].options.method,'DELETE');assert.equal(h.nodes.cancel.disabled,true);assert.equal(h.nodes['job-state'].textContent,'Queued');
+  await h.nodes.cancel.onclick();assert.equal(h.calls[2].url,'/api/nodes/worker/proxy/api/servers/server/files/import-sftp/job%2Fone');assert.equal(h.calls[2].options.method,'DELETE');assert.equal(h.nodes.cancel.disabled,true);assert.equal(h.nodes['job-state'].textContent,'Waiting');
 });
 
 test('unknown Start and malformed acceptance never auto-retry POST; GET resolves a newly found job', async () => {
@@ -135,7 +135,7 @@ test('close, navigation, server/node/session/user changes abort requests and rej
 
 test('hidden tabs close and clear secrets; reopened completed status never restarts or polls', async () => {
   const h=harness(async()=>status({job:job({state:'completed',files_done:2,bytes_done:1000})}));h.open();await flush();h.nodes.password.value='secret';h.c.document.hidden=true;h.events.visibilitychange();assert.equal(h.nodes.password.value,'');assert.equal(h.intervals.size,0);
-  h.c.document.hidden=false;h.open();await flush();assert.equal(h.nodes['job-state'].textContent,'Completed');assert.equal(h.calls.filter(c=>c.options.method==='POST').length,0);assert.equal([...h.timers.values()].filter(t=>t.ms===1500).length,0);
+  h.c.document.hidden=false;h.open();await flush();assert.equal(h.nodes['job-state'].textContent,'Import complete');assert.equal(h.calls.filter(c=>c.options.method==='POST').length,0);assert.equal([...h.timers.values()].filter(t=>t.ms===1500).length,0);
 });
 
 test('native modal layout is responsive, focus-visible, reduced-motion aware and independently loaded', () => {
@@ -158,4 +158,31 @@ test('late local key reads cannot repopulate cleared secrets after Start or clos
 test('explicit rejected Start preserves editable settings and shows the backend reason', async () => {
   const h=harness(async(_,o)=>{if(o.method==='POST')throw Object.assign(Error('Destination is no longer empty'),{status:409});return status();});h.open();await flush();h.fill();h.submit();await flush();
   assert.match(h.nodes.error.textContent,/no longer empty/);assert.equal(h.nodes.settings.disabled,false);assert.equal(h.calls.length,2);
+});
+
+test('ordinary import UI keeps safety instructions without host implementation details', async () => {
+  const h=harness(async()=>status({job:job({state:'failed',error:'C:/private/host/path failed',safety_copy:'.restore-server-secret/original',message:'internal staging error'})}));
+  h.open();await flush();
+  const copy=h.container.innerHTML.replace(/<[^>]*>/g,' ');
+  assert.doesNotMatch(copy,/Hosting node|allowlist|staging|retention|durable|worker|OS quota/i);
+  assert.match(copy,/empty, stopped server/);assert.match(copy,/fingerprint with.*provider/);assert.match(copy,/Stop the source server/);assert.match(copy,/will not be changed/);
+  assert.doesNotMatch(h.nodes['job-message'].textContent,/private\/host|\.restore-|staging/);assert.match(h.nodes['job-message'].textContent,/contact support/);
+  assert.equal(h.nodes.limits.textContent,'Up to 20 GiB per import.');
+});
+
+test('admin import UI retains collapsed operator help and recovery diagnostics', async () => {
+  const h=harness(async()=>status({job:job({state:'failed',error:'private staging failure',safety_copy:'.restore-server/original',user_message:'Contact support.'})}));
+  h.c.S.user.role='admin';h.open();await flush();
+  assert.match(h.container.innerHTML,/<details[^>]*><summary>Operator details/);assert.match(h.container.innerHTML,/Hosting node: worker/);
+  assert.match(h.nodes['job-message'].textContent,/private staging failure/);assert.match(h.nodes['job-message'].textContent,/\.restore-server\/original/);
+});
+
+test('failed import connections do not show proxy addresses to users', async () => {
+  for (const role of ['user','admin']) {
+    const h=harness(async()=>{throw Object.assign(Error('dial tcp private-worker:8080: refused'),{status:502});});
+    h.c.S.user.role=role;h.open();await flush();
+    if(role==='admin') assert.match(h.nodes.error.textContent,/private-worker:8080/);
+    else {assert.doesNotMatch(h.nodes.error.textContent,/private-worker|dial tcp/);assert.match(h.nodes.error.textContent,/Refresh.*progress/);}
+    assert.equal(h.nodes.start.disabled,true);
+  }
 });

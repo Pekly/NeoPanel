@@ -25,11 +25,13 @@ Files land at the server root, not the folder currently open in Files. Remote ow
 
 ## Completion and recovery
 
-NeoPanel downloads to a private staging directory. The live destination is checked again before publication. Failure or cancellation before publication leaves it unchanged, and staged files are removed. If publication and rollback both fail, the server is blocked pending administrator recovery; the error identifies the retained data.
+NeoPanel downloads to a private staging directory. The live destination is checked again before publication. Failure or cancellation before publication leaves it unchanged, and staged files are removed. If publication and rollback both fail, the server is blocked pending administrator recovery. Users receive a support message; administrators receive the diagnostic details and retained-data path.
 
 A successful import leaves the server **stopped**. Review the startup JAR/executable, Java/runtime version and assigned game/query ports before starting. The importer does not migrate panel accounts, allocations, schedules or startup settings. It never deletes or changes source files.
 
 The previous empty destination is retained as a recovery copy, so late writes through already-open file handles are not silently discarded. Imports and restores share a limit of three retained recovery directories per server. An administrator must inspect and remove or archive older copies before another import/restore at that limit.
+
+The user dialog shows short status messages and next steps. Node identifiers, allowlist guidance, recovery paths and low-level diagnostics are reserved for administrators. Import API job responses omit recovery paths and raw errors for non-admin callers, including through worker proxies.
 
 Progress is in memory, not a durable job queue. Completed summaries expire after an hour, with at most 128 summaries retained per node. A node shutdown cancels active imports; jobs do not resume automatically after a restart. If a start request times out, refresh status before retrying rather than assume it failed.
 

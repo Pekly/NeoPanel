@@ -195,13 +195,13 @@
   }
   function errorAdvice(error) {
     const text = String(error?.message || '').toLowerCase();
-    if (!error?.status && /fetch|network|abort|timeout|connection/.test(text) || [502,503,504].includes(error?.status)) return 'Check your connection and node availability, then refresh status before retrying. The request may already have reached the server.';
+    if (!error?.status && /fetch|network|abort|timeout|connection/.test(text) || [502,503,504].includes(error?.status)) return 'Check your connection and refresh status before retrying. The request may already have reached the server.';
     if (error?.status === 403 || /permission|forbidden|access denied/.test(text)) return 'Ask the server owner or administrator to check your permissions, then refresh access.';
     if (error?.status === 409) return 'Refresh server status and wait for the current operation, or cancel its countdown before trying again.';
     if (error?.status === 429) return 'Too many requests. Wait before trying again; do not repeatedly click the action.';
-    if (/disk|space|quota/.test(text)) return 'Check the host’s free disk space and quota. Free space safely, then retry.';
-    if (/java|runtime/.test(text)) return 'Check the installed Java runtime in Settings → Startup and inspect the console for details.';
-    if (error?.status === 404) return 'Refresh the panel and check that the server, file, or feature still exists and the worker is up to date.';
+    if (/disk|space|quota/.test(text)) return S.user?.role === 'admin' ? 'Check the host’s free disk space and quota. Free space safely, then retry.' : 'Check your storage usage. Remove unneeded files safely, or contact support for more space.';
+    if (/java|runtime/.test(text)) return 'Check your Java version in Settings → Startup and inspect the console for details.';
+    if (error?.status === 404) return S.user?.role === 'admin' ? 'Refresh the panel and check that the item exists and the worker is up to date.' : 'Refresh the page. If the item is still unavailable, contact the server owner or support.';
     return 'Inspect the server console for details, then refresh status before retrying.';
   }
   function maintenanceLimited() { return Boolean(S.branding?.maintenance_enabled && S.user?.role !== 'admin'); }
@@ -220,19 +220,20 @@
   }
   function countdownFailure(error) {
     const status = Number(error?.status) || 0;
-    const http = status ? ` (HTTP ${status})` : '';
-    if ([404, 405, 501].includes(status)) return { pause: true, text: `Countdowns are not supported by this hosting backend${http}. Update and restart the panel and hosting worker, then retry.` };
-    if (error?.code === 'COUNTDOWN_RESPONSE') return { pause: true, text: 'The countdown API returned an incompatible response. Update and restart the hosting backend, then retry.' };
-    if ([401, 403].includes(status)) return { pause: true, text: `Countdown access denied${http}. Refresh your server permissions or ask the server owner for access.` };
-    if (status === 429) return { retryAfter: Date.now() + 30000, text: 'Countdown status is rate-limited (HTTP 429). Wait 30 seconds before retrying.' };
-    if (error?.name === 'AbortError') return { retryAfter: Date.now() + 15000, text: 'The countdown status request timed out. Retry when the hosting backend responds.' };
+    const admin = S.user?.role === 'admin';
+    const http = admin && status ? ` (HTTP ${status})` : '';
+    if ([404, 405, 501].includes(status)) return { pause: true, text: admin ? `Countdowns are not supported by this hosting backend${http}. Update and restart the panel and hosting worker, then retry.` : 'Scheduled power actions are unavailable for this server. Contact support.' };
+    if (error?.code === 'COUNTDOWN_RESPONSE') return { pause: true, text: admin ? 'The countdown API returned an incompatible response. Update and restart the hosting backend, then retry.' : 'Could not confirm countdown status. Contact support before scheduling another action.' };
+    if ([401, 403].includes(status)) return { pause: true, text: `Countdown access denied${http}. Refresh your permissions or ask the server owner for access.` };
+    if (status === 429) return { retryAfter: Date.now() + 30000, text: 'Too many countdown requests. Wait 30 seconds before retrying.' };
+    if (error?.name === 'AbortError') return { retryAfter: Date.now() + 15000, text: 'Countdown status timed out. Try again shortly.' };
     const detail = String(error?.message || 'Check the hosting node connection.').slice(0, 180);
-    return { retryAfter: Date.now() + 15000, text: `Countdown status is unavailable${http}: ${detail} Retry after checking the hosting backend.` };
+    return { retryAfter: Date.now() + 15000, text: admin ? `Countdown status is unavailable${http}: ${detail} Retry after checking the hosting backend.` : 'Could not refresh countdown status. Try again shortly.' };
   }
   function countdownSection() {
     const canPower = hasServerPermission('server.power');
     if (!canPower && !hasServerPermission('console.view')) return '';
-    return `<details class="np-countdown np-compact-menu"><summary class="btn" title="Schedule a restart or stop with player warnings"><span id="np-countdown-label">Schedule</span><span class="np-menu-chevron" aria-hidden="true"></span></summary><div class="np-menu-panel"><h3>Plan a safe restart or stop</h3><div id="np-countdown-state" role="status"></div><button type="button" id="np-countdown-retry" class="btn sm" onclick="NPWorkspace.pollCountdown(true)" hidden>Retry countdown status</button>${canPower && hasServerPermission('console.command') ? `<form onsubmit="event.preventDefault();NPWorkspace.scheduleCountdown(this)"><label>Action<select name="action"><option value="restart">Restart</option><option value="stop">Stop</option></select></label><label>Countdown (seconds)<input name="seconds" type="number" min="10" max="3600" step="1" value="60" required></label><label class="np-countdown-message">Player message<input name="message" maxlength="200" placeholder="Scheduled server maintenance"></label><p class="mu">Warns players using the say command. Continues if you close this tab; cancelled if the hosting process restarts.</p><button class="btn" type="submit">Warn players &amp; schedule</button></form>` : ''}</div></details>`;
+    return `<details class="np-countdown np-compact-menu"><summary class="btn" title="Schedule a restart or stop with player warnings"><span id="np-countdown-label">Schedule</span><span class="np-menu-chevron" aria-hidden="true"></span></summary><div class="np-menu-panel"><h3>Schedule a restart or stop</h3><div id="np-countdown-state" role="status"></div><button type="button" id="np-countdown-retry" class="btn sm" onclick="NPWorkspace.pollCountdown(true)" hidden>Refresh countdown</button>${canPower && hasServerPermission('console.command') ? `<form onsubmit="event.preventDefault();NPWorkspace.scheduleCountdown(this)"><label>Action<select name="action"><option value="restart">Restart</option><option value="stop">Stop</option></select></label><label>Countdown (seconds)<input name="seconds" type="number" min="10" max="3600" step="1" value="60" required></label><label class="np-countdown-message">Player message<input name="message" maxlength="200" placeholder="Scheduled server maintenance"></label><p class="mu">Warns players before the action. Continues if you close this tab; cancelled if the hosting service restarts.</p><button class="btn" type="submit">Warn players &amp; schedule</button></form>` : ''}</div></details>`;
   }
   function paintCountdown() {
     const el = document.getElementById('np-countdown-state'); if (!el) return;
@@ -290,7 +291,7 @@
     } catch (error) {
       if (token === S.token) {
         if (error?.code === 'COUNTDOWN_RESPONSE') countdownErrors.set(id, countdownFailure(error));
-        toast(`${error.message} ${errorAdvice(error)}`, 'bad');
+        toast(S.user?.role === 'admin' ? `${error.message} ${errorAdvice(error)}` : countdownFailure(error).text, 'bad');
       }
     } finally { clearTimeout(timer); pending.delete(id); if (token === S.token && id === key(curServer())) { paintCountdown(); await pollCountdown(); } }
   }
