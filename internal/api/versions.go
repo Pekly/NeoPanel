@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -18,9 +19,11 @@ type MinecraftVersionsCatalog struct {
 }
 
 var (
-	versionsMu        sync.RWMutex
-	versionsCached    *MinecraftVersionsCatalog
-	versionsExpiresAt time.Time
+	versionsMu           sync.RWMutex
+	versionsCached       *MinecraftVersionsCatalog
+	versionsExpiresAt    time.Time
+	versionsLoading      chan struct{}
+	versionsRefreshAfter time.Time
 )
 
 const versionsCacheTTL = 30 * time.Minute
@@ -63,23 +66,11 @@ func filterRecentAndPopular(versions []string) []string {
 }
 
 func HandleGetMinecraftVersions(w http.ResponseWriter, r *http.Request) {
-	forceRefresh := r.URL.Query().Get("refresh") == "1"
-
-	versionsMu.RLock()
-	if !forceRefresh && versionsCached != nil && time.Now().Before(versionsExpiresAt) {
-		cat := versionsCached
-		versionsMu.RUnlock()
-		writeJSON(w, http.StatusOK, cat)
+	cat, err := cachedVersionsCatalog(r.Context(), r.URL.Query().Get("refresh") == "1")
+	if err != nil {
+		writeError(w, http.StatusRequestTimeout, "Version lookup was cancelled")
 		return
 	}
-	versionsMu.RUnlock()
-
-	cat := buildVersionsCatalog(r.Context())
-
-	versionsMu.Lock()
-	versionsCached = cat
-	versionsExpiresAt = time.Now().Add(versionsCacheTTL)
-	versionsMu.Unlock()
 
 	writeJSON(w, http.StatusOK, cat)
 }
@@ -228,7 +219,9 @@ func versionGetJSON(ctx context.Context, targetURL string, out interface{}) bool
 	if resp.StatusCode != http.StatusOK {
 		return false
 	}
-	return json.NewDecoder(resp.Body).Decode(out) == nil
+	const limit = 4 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	return err == nil && len(data) <= limit && json.Unmarshal(data, out) == nil
 }
 
 func fetchMojangReleases(ctx context.Context) []string {
