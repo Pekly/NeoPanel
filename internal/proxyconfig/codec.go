@@ -174,7 +174,7 @@ func listener(m object, builder bool) (object, error) {
 		return nil, errConfig
 	}
 	if builder && len(a) > 1 {
-		return nil, errors.New("Multiple listeners: edit config.yml in Files")
+		return nil, errListeners
 	}
 	// Validate every entry, but only edit the primary listener.
 	for _, v := range a {
@@ -240,7 +240,12 @@ func settings(kind string, m object) (Settings, error) {
 	for host, v := range forced {
 		var refs []string
 		if kind == "velocity" {
-			refs = d.strings(v)
+			// Velocity accepts a single server string as well as an ordered list.
+			if value, ok := v.(string); ok {
+				refs = []string{value}
+			} else {
+				refs = d.strings(v)
+			}
 		} else {
 			value, ok := v.(string)
 			if !ok {
@@ -259,8 +264,15 @@ func settings(kind string, m object) (Settings, error) {
 	if err := checkPorts(kind, m); err != nil {
 		return s, err
 	}
-	if err := validate(kind, s, false); err != nil {
+	// Keep shape and resource bounds strict, but retain editable invalid values.
+	// Read reports validation separately; Save still validates every new value.
+	if len(s.Backends) > 128 || len(s.Try) > 128 || len(s.ForcedHosts) > 128 {
 		return s, errConfig
+	}
+	for _, h := range s.ForcedHosts {
+		if len(h.Servers) > 128 {
+			return s, errConfig
+		}
 	}
 	return s, nil
 }
@@ -364,13 +376,15 @@ func apply(kind string, m object, s Settings) {
 func starter(kind string, port int) object {
 	m := object{}
 	if kind == "velocity" {
-		m["config-version"] = "2.7"
+		m["config-version"] = "2.8"
 		m["bind"] = net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
 		m["forwarding-secret-file"] = "forwarding.secret"
 		m["prevent-client-proxy-connections"] = false
 		m["announce-forge"] = false
 		m["kick-existing-players"] = false
 		m["enable-player-address-logging"] = true
+		m["sample-players-in-ping"] = false
+		m["packet-limiter"] = object{"interval": 7, "packets-per-second": -1, "bytes-per-second": -1, "decompressed-bytes-per-second": 5242880}
 		m["advanced"] = object{"compression-threshold": 256, "compression-level": -1, "login-ratelimit": 3000, "connection-timeout": 5000, "read-timeout": 30000, "haproxy-protocol": false, "tcp-fast-open": false, "bungee-plugin-message-channel": true, "show-ping-requests": false, "failover-on-unexpected-server-disconnect": true, "announce-proxy-commands": true, "log-command-executions": false, "log-player-connections": true, "accepts-transfers": false, "enable-reuse-port": false, "command-rate-limit": 50, "forward-commands-if-rate-limited": true, "kick-after-rate-limited-commands": 0, "tab-complete-rate-limit": 10, "kick-after-rate-limited-tab-completes": 0}
 		m["query"] = object{"enabled": false, "port": port, "map": "Velocity", "show-plugins": false}
 	} else {

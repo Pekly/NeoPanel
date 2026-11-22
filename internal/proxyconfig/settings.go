@@ -2,6 +2,11 @@
 // semantic settings, but serializers may reformat files and discard comments.
 // Callers must serialize operations with their runner operation gate. The package
 // also serializes its own calls; revision checks are not a cross-process lock.
+// Velocity accepts forced-host strings or string lists and case-insensitive file
+// modes. Bungee YAML supports one listener and ordinary string-key maps, not
+// aliases, anchors, merges, custom tags, duplicate keys or multiple documents.
+// Reads retain type-correct editable invalid values with ValidationError; saves
+// require valid settings. Syntax, shape, resource and path failures remain errors.
 package proxyconfig
 
 import (
@@ -14,11 +19,27 @@ import (
 )
 
 var (
-	ErrConflict = errors.New("proxy configuration changed; reload before saving")
-	ErrMissing  = errors.New("proxy configuration is missing; initialize it first")
-	errConfig   = errors.New("Invalid proxy configuration; edit the configuration in Files")
-	errSecret   = errors.New("Invalid or unsafe forwarding secret file")
+	ErrConflict  = errors.New("proxy configuration changed; reload before saving")
+	ErrMissing   = errors.New("proxy configuration is missing; initialize it first")
+	errConfig    = errors.New("Invalid proxy configuration; edit the configuration in Files")
+	errSecret    = errors.New("Invalid or unsafe forwarding secret file")
+	errListeners = errors.New("Multiple listeners: edit config.yml in Files")
 )
+
+// ErrorCode distinguishes unsupported documents from inaccessible files without
+// exposing parser input, filesystem paths, or secret contents to API clients.
+func ErrorCode(err error) string {
+	switch {
+	case errors.Is(err, errConfig), errors.Is(err, errListeners):
+		return "unsupported_config"
+	case errors.Is(err, errIO):
+		return "file_unavailable"
+	case errors.Is(err, errSecret):
+		return "unsafe_secret"
+	default:
+		return "validation_failed"
+	}
+}
 
 type Backend struct {
 	Name       string `json:"name"`
@@ -44,11 +65,12 @@ type Settings struct {
 	ForcedHosts            []ForcedHost `json:"forced_hosts"`
 }
 type Snapshot struct {
-	Type     string   `json:"type"`
-	File     string   `json:"file"`
-	Exists   bool     `json:"exists"`
-	Revision string   `json:"revision"`
-	Config   Settings `json:"config"`
+	Type            string   `json:"type"`
+	File            string   `json:"file"`
+	Exists          bool     `json:"exists"`
+	Revision        string   `json:"revision"`
+	Config          Settings `json:"config"`
+	ValidationError string   `json:"validation_error,omitempty"`
 }
 
 func Supported(kind string) bool { return FileName(kind) != "" }

@@ -92,7 +92,7 @@ func TestStarter(t *testing.T) {
 			}
 			m := doc(t, dir, kind)
 			if kind == "velocity" {
-				if m["bind"] != "0.0.0.0:25590" || m["config-version"] != "2.7" || m["forwarding-secret-file"] != "forwarding.secret" {
+				if m["bind"] != "0.0.0.0:25590" || m["config-version"] != "2.8" || m["forwarding-secret-file"] != "forwarding.secret" {
 					t.Fatal(m)
 				}
 				q := m["query"].(object)

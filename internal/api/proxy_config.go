@@ -65,25 +65,33 @@ func (h *ServerHandler) proxyView(r *http.Request, srv *database.Server, snapsho
 
 func writeProxyConfigError(w http.ResponseWriter, r *http.Request, err error) {
 	status, message := http.StatusBadRequest, err.Error()
+	code := proxyconfig.ErrorCode(err)
 	switch {
 	case errors.Is(err, proxyconfig.ErrConflict):
+		code = "revision_conflict"
 		status, message = 409, "The config changed since you opened it. Refresh before saving."
 	case errors.Is(err, proxyconfig.ErrMissing):
+		code = "config_missing"
 		status, message = 409, "Create the proxy config first."
 	case errors.Is(err, runner.ErrProxyConfigRunning), errors.Is(err, runner.ErrServerProcessAlive):
+		code = "server_running"
 		status, message = 409, "Stop the proxy before saving its settings."
 	case errors.Is(err, runner.ErrServerOperation):
+		code = "operation_busy"
 		status, message = 409, "Another server action is in progress. Try again when it finishes."
+	case code == "file_unavailable":
+		status, message = 409, "The config file cannot be accessed safely. Ask the administrator to check file permissions, size and server path links, then retry."
 	default:
 		var pathError *os.PathError
 		if errors.As(err, &pathError) {
+			code = "file_unavailable"
 			status = http.StatusConflict
 			if user := getUserFromContext(r); user == nil || user.Role != "admin" {
-				message = "The configuration file is unavailable. Check it in Files or contact support."
+				message = "The configuration file is unavailable. Ask the administrator to check access and retry."
 			}
 		}
 	}
-	writeError(w, status, message)
+	writeJSON(w, status, map[string]string{"error": message, "code": code})
 }
 
 func decodeProxyConfig(w http.ResponseWriter, r *http.Request, dst any) bool {

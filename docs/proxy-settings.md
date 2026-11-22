@@ -45,6 +45,12 @@ Edit advanced multi-listener configs in **Files**; the builder does not flatten 
 - **Preserve config** during reinstall also preserves proxy configs and Velocity's configured relative secret path. If that path is nested, its top-level directory is retained. A destructive reinstall without config preservation can create a new forwarding secret, which must be copied to the backends again.
 - Invalid, oversized or unsafe files are rejected, not automatically replaced. Config reads are limited to 1 MiB, secret reads to 4 KiB. Symlinks, special files and paths outside the server directory are not accepted.
 
+## Builder recovery
+
+Velocity hostname routes accept a single backend string or a list. Advertised slots support the same 0–2147483647 range in the form and API. Invalid editable fields remain in the builder for correction instead of forcing a manual-file fallback.
+
+Connection, worker, permission and busy-server failures offer the appropriate retry or access guidance. **Create config** appears only after a confirmed missing file, never after a failed request. Unsupported structures, unsafe paths and malformed files still require correction in Files or administrator assistance; they are not reset. New Velocity starter files use schema 2.8; existing files and forwarding secrets are preserved.
+
 ## Access and limits
 
 Reading the editor requires `settings.view`; saving and initialization require `settings.edit`. Showing the forwarding secret additionally requires `files.view`. Owners and admins retain their normal access. Worker requests use the same permissions as local requests. Host-managed port, Java and memory restrictions still apply.

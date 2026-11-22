@@ -109,7 +109,11 @@ func snapshot(kind string, raw []byte, m object) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{Type: kind, File: FileName(kind), Exists: true, Revision: revision(raw), Config: s}, nil
+	result := Snapshot{Type: kind, File: FileName(kind), Exists: true, Revision: revision(raw), Config: s}
+	if err := Validate(kind, s); err != nil {
+		result.ValidationError = err.Error()
+	}
+	return result, nil
 }
 func Read(dir, kind string, port int) (Snapshot, error) {
 	operations.Lock()

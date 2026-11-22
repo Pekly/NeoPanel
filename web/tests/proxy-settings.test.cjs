@@ -41,7 +41,7 @@ test('incomplete, mismatched and incompatible views fail closed, with no initial
     const h = setup('velocity', async () => view); await h.ui.mount(); await h.click('save'); await h.click('initialize');
     assert.equal(h.calls.length, 1); assert.match(h.root.innerHTML, /Could not confirm/); assert.doesNotMatch(h.root.innerHTML, /data-action="initialize"/);
   }
-  const h = setup('waterfall', async () => {throw Object.assign(Error('internal machine name'), {status:400});}); await h.ui.mount();
+  const h = setup('waterfall', async () => {throw Object.assign(Error('internal machine name'), {status:400, data:{code:'unsupported_config'}});}); await h.ui.mount();
   assert.match(h.root.innerHTML, /Open config.yml in Files/); assert.doesNotMatch(h.root.innerHTML, /internal machine/);
 });
 test('readonly and running views retain readable config but cannot mutate, initialize or save', async () => {
@@ -177,9 +177,56 @@ test('transient duplicate names while typing never steal another backend’s ref
   assert.equal(ui.validate(c, 'velocity'), '');
 });
 test('failed or partial save never claims success, keeps draft and prevents an automatic retry', async () => {
-  for (const response of [null, {}]) {
+  for (const response of [null, {}, fixture('velocity', {ready:false}), fixture('velocity', {exists:false}), fixture('velocity', {validation_error:'Invalid forwarding mode'})]) {
     const h = setup('velocity', async (_, o) => {if(o.method === 'PUT') {if(response === null) throw Error('offline'); return response;} return fixture();});
     await h.ui.mount(); h.input({field:'motd'}, 'keep me'); await h.click('save'); await h.click('save');
     assert.equal(h.calls.length, 2); assert.match(h.root.innerHTML, /value="keep me"/); assert.doesNotMatch(h.root.innerHTML, /Proxy config saved/);
+  }
+});
+
+test('API-supported displayed slot bounds load and save instead of falling back to Files', async () => {
+  for (const max_players of [0, 100001, 2147483647]) {
+    const view = fixture(); view.config.max_players = max_players;
+    const h = setup('velocity', async () => view); await h.ui.mount();
+    assert.equal(h.ui.valid(view, 'velocity'), true);
+    assert.equal(h.ui.validate(view.config, 'velocity'), '');
+    assert.match(h.root.innerHTML, /Displayed slots/);
+    assert.doesNotMatch(h.root.innerHTML, /Open velocity.toml in Files/);
+    h.input({field:'motd'}, 'changed'); await h.click('save');
+    assert.equal(JSON.parse(h.calls.at(-1).body).config.max_players, max_players);
+    assert.match(h.root.innerHTML, /Proxy config saved/);
+  }
+});
+test('network and missing worker API failures offer Retry, not a misleading Files fallback', async () => {
+  for (const status of [0, 401, 403, 404, 405, 502, 503]) {
+    let fail = true;
+    const h = setup('velocity', async () => {if (fail) throw Object.assign(Error('private machine detail'), {status}); return fixture();});
+    await h.ui.mount();
+    assert.match(h.root.innerHTML, /Retry/);
+    assert.doesNotMatch(h.root.innerHTML, /Open velocity.toml in Files|private machine detail|data-action="initialize"/);
+    fail = false; await h.click('refresh'); assert.match(h.root.innerHTML, /Displayed slots/);
+  }
+});
+
+test('recoverable field errors retain their values and can be corrected without Files', async () => {
+  for (const [field, value, fix, message] of [
+    ['max_players', -1, 0, /Displayed slots must/],
+    ['forwarding_mode', 'TYPO', 'NONE', /valid player forwarding/],
+    ['ping_passthrough', 'TYPO', 'ALL', /valid server-list ping/]
+  ]) {
+    const view = fixture('velocity', {ready:false}); view.config[field] = value;
+    const h = setup('velocity', async (_, o) => o.method === 'PUT' ? {...fixture(), config:JSON.parse(o.body).config} : view);
+    await h.ui.mount(); assert.match(h.root.innerHTML, message); assert.doesNotMatch(h.root.innerHTML, /Open velocity.toml in Files/);
+    assert.match(h.root.innerHTML, new RegExp(`value="${value}"`));
+    h.input({field:'motd'}, 'changed'); await h.click('save'); assert.equal(h.calls.length, 1);
+    h.input({field}, fix); await h.click('save'); assert.equal(h.calls.length, 2); assert.match(h.root.innerHTML, /Proxy config saved/);
+  }
+});
+test('structured failures distinguish unsafe files, unsupported config, busy state and missing config', async () => {
+  for (const [code, expected] of [['file_unavailable', /permissions, file size and server path links/], ['unsafe_secret', /without replacing an existing secret/], ['operation_busy', /Another server action/], ['server_running', /Stop the proxy/], ['config_missing', /Create config is offered only/], ['unsupported_config', /Open velocity.toml in Files/]]) {
+    const h = setup('velocity', async () => {throw Object.assign(Error('private detail'), {status:400, data:{code}});});
+    await h.ui.mount(); assert.match(h.root.innerHTML, expected); assert.match(h.root.innerHTML, /Retry/);
+    assert.doesNotMatch(h.root.innerHTML, /private detail|data-action="initialize"/);
+    assert.equal(h.root.innerHTML.includes('data-action="files"'), code === 'unsupported_config');
   }
 });
