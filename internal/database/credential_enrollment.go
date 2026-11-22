@@ -5,10 +5,9 @@ import (
 	"time"
 )
 
-// CredentialEnrollmentAuth identifies the authority that may enroll a human
-// credential. Supply exactly one of AuthVersion (JWT) or APIKeyHash (API key).
-// API keys are independent of password changes, but must still exist at insert.
-// UserID is the authenticated immutable ID, never resolved from a username.
+// CredentialEnrollmentAuth holds the credentials captured when the request was
+// authenticated. Use the immutable user ID and exactly one of AuthVersion or
+// APIKeyHash; enrollment checks that those credentials are still valid.
 type CredentialEnrollmentAuth struct {
 	UserID      int
 	AuthVersion *int64
@@ -28,9 +27,8 @@ func (a CredentialEnrollmentAuth) predicate() (string, []interface{}, error) {
 	return "", nil, sql.ErrNoRows
 }
 
-// AddSSHKeyForAuth checks revocation and inserts in a single database write.
-// sql.ErrNoRows means authority was revoked or is not a human credential.
-// AddSSHKey remains available for trusted internal callers.
+// AddSSHKeyForAuth checks revocation and inserts the key in one database write.
+// It returns sql.ErrNoRows for revoked or non-user credentials.
 func (db *DB) AddSSHKeyForAuth(auth CredentialEnrollmentAuth, name, fingerprint, publicKey string) (*SSHKey, error) {
 	predicate, args, err := auth.predicate()
 	if err != nil {
@@ -50,9 +48,9 @@ func (db *DB) AddSSHKeyForAuth(auth CredentialEnrollmentAuth, name, fingerprint,
 	return &SSHKey{ID: int(id), UserID: auth.UserID, Name: name, Fingerprint: fingerprint, PublicKey: publicKey, CreatedAt: now}, nil
 }
 
-// AddAPIKeyForAuth has the same atomic revocation contract as AddSSHKeyForAuth.
-// Only the hash is stored; the caller must not return a secret on any error.
-// AddAPIKey remains available for trusted internal callers.
+// AddAPIKeyForAuth checks revocation and inserts the key hash in one database
+// write. It returns sql.ErrNoRows for revoked or non-user credentials. The caller
+// must not return the plaintext key if enrollment fails.
 func (db *DB) AddAPIKeyForAuth(auth CredentialEnrollmentAuth, name, keyHash, keyPrefix string) (*APIKey, error) {
 	predicate, args, err := auth.predicate()
 	if err != nil {

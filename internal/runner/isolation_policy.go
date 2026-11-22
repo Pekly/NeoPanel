@@ -26,8 +26,8 @@ func requireLinuxSandboxTools(goos, engine string, allowInsecure, bwrap, systemd
 	return nil
 }
 
-// SetAllowInsecureGameFallback is host configuration, not tenant preference.
-// Existing processes retain their current sandbox; this controls future starts.
+// SetAllowInsecureGameFallback sets the host-wide policy for future starts.
+// It does not change running processes or expose a per-server override.
 func (m *ServerManager) SetAllowInsecureGameFallback(allow bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

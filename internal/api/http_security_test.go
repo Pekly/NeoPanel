@@ -9,40 +9,43 @@ import (
 	"time"
 )
 
-func TestSecurityCookieWritesRejectSiblingOrigin(t *testing.T) {
+func TestSecurityCookieWriteOrigins(t *testing.T) {
 	f := newReliabilityFixture(t)
 	for _, tc := range []struct {
-		origin, site string
-		bearer       bool
-		want         int
+		name, origin, site string
+		bearer             bool
+		want               int
 	}{
-		{"https://evil.example.com", "same-site", false, 403},
-		{"https://panel.example.com:8443", "same-site", false, 403},
-		{"null", "cross-site", false, 403},
-		{"", "", false, 403},
-		{"https://panel.example.com", "same-origin", false, 200},
-		{"", "", true, 200},
+		{"sibling domain", "https://evil.example.com", "same-site", false, http.StatusForbidden},
+		{"different port", "https://panel.example.com:8443", "same-site", false, http.StatusForbidden},
+		{"opaque origin", "null", "cross-site", false, http.StatusForbidden},
+		{"missing origin", "", "", false, http.StatusForbidden},
+		{"same origin", "https://panel.example.com", "same-origin", false, http.StatusOK},
+		{"bearer client", "", "", true, http.StatusOK},
 	} {
-		req := httptest.NewRequest("POST", "https://panel.example.com/api/servers/alpha/files/create", strings.NewReader(`{"path":"created","is_dir":true}`))
-		if tc.bearer {
-			req.Header.Set("Authorization", "Bearer "+f.tokens["owner"])
-		} else {
-			req.AddCookie(&http.Cookie{Name: "neopanel_token", Value: f.tokens["owner"]})
-		}
-		if tc.origin != "" {
-			req.Header.Set("Origin", tc.origin)
-		}
-		if tc.site != "" {
-			req.Header.Set("Sec-Fetch-Site", tc.site)
-		}
-		req.Header.Set("Content-Type", "text/plain")
-		w := httptest.NewRecorder()
-		f.router.ServeHTTP(w, req)
-		if w.Code != tc.want {
-			t.Fatal(tc, w.Code, w.Body.String())
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "https://panel.example.com/api/servers/alpha/files/create", strings.NewReader(`{"path":"created","is_dir":true}`))
+			if tc.bearer {
+				req.Header.Set("Authorization", "Bearer "+f.tokens["owner"])
+			} else {
+				req.AddCookie(&http.Cookie{Name: "neopanel_token", Value: f.tokens["owner"]})
+			}
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.site != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.site)
+			}
+			req.Header.Set("Content-Type", "text/plain")
+			w := httptest.NewRecorder()
+			f.router.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+		})
 	}
 }
+
 func TestSecurityQueryTokensCannotAuthorizeWrites(t *testing.T) {
 	f := newReliabilityFixture(t)
 	r := httptest.NewRequest("POST", "/api/servers/alpha/files/create?token="+f.tokens["owner"], strings.NewReader(`{"path":"query-write","is_dir":true}`))
@@ -58,6 +61,7 @@ func TestSecurityQueryTokensCannotAuthorizeWrites(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 }
+
 func TestSecuritySessionCookieTransportAndLegacyCleanup(t *testing.T) {
 	f := newReliabilityFixture(t)
 	for _, tc := range []struct {
@@ -107,6 +111,7 @@ func TestSecuritySessionCookieTransportAndLegacyCleanup(t *testing.T) {
 		})
 	}
 }
+
 func TestSecurityControlBodyBoundsAndUploadExceptions(t *testing.T) {
 	for _, tc := range []struct {
 		path string
@@ -157,6 +162,7 @@ func TestSecurityControlBodyBoundsAndUploadExceptions(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestSecurityRateLimiterStateIsBounded(t *testing.T) {
 	lim := NewIPRateLimiter(600, 15)
 	lim.maxBuckets = 2
@@ -179,6 +185,7 @@ func TestSecurityRateLimiterStateIsBounded(t *testing.T) {
 		t.Fatal("stale buckets not reclaimed")
 	}
 }
+
 func TestSecurityBrowserHeaders(t *testing.T) {
 	f := newReliabilityFixture(t)
 	for _, scheme := range []string{"http", "https"} {
