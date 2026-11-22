@@ -16,6 +16,7 @@ func TestCreateServerLatestDefaultsAndExplicitChoices(t *testing.T) {
 		return nil, fmt.Errorf("network disabled")
 	})
 	t.Cleanup(func() { http.DefaultTransport = old })
+	port := 30000
 	for _, kind := range []string{"", "paper", "purpur", "leaf", "leafmc", "folia", "fabric", "forge", "neoforge", "vanilla", "velocity", "waterfall", "bungeecord", "steel", "custom"} {
 		for _, explicit := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/explicit=%v", kind, explicit), func(t *testing.T) {
@@ -28,7 +29,8 @@ func TestCreateServerLatestDefaultsAndExplicitChoices(t *testing.T) {
 				if kind == "steel" {
 					wantJava = ""
 				}
-				body, _ := json.Marshal(map[string]any{"name": "defaults test", "type": kind, "version": version, "java_path": javaPath, "auto_download": false})
+				port++ // Each creation reserves a distinct node-local primary port.
+				body, _ := json.Marshal(map[string]any{"name": "defaults test", "type": kind, "version": version, "java_path": javaPath, "auto_download": false, "port": port})
 				w := f.request("POST", "/api/servers", string(body), "admin")
 				if w.Code != 201 {
 					t.Fatalf("%d: %s", w.Code, w.Body.String())

@@ -23,10 +23,12 @@ type Server struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
 	Description     string    `json:"description"`
-	Type            string    `json:"type"`       // "paper", "purpur", "vanilla", "fabric", "spigot", "custom"
-	Version         string    `json:"version"`    // e.g. "1.20.4", "1.21.1"
-	JarFile         string    `json:"jar_file"`   // e.g. "server.jar"
-	Port            int       `json:"port"`       // e.g. 25565
+	Type            string    `json:"type"`     // "paper", "purpur", "vanilla", "fabric", "spigot", "custom"
+	Version         string    `json:"version"`  // e.g. "1.20.4", "1.21.1"
+	JarFile         string    `json:"jar_file"` // e.g. "server.jar"
+	Port            int       `json:"port"`     // e.g. 25565
+	PortsAllowed    int       `json:"ports_allowed"`
+	PortsUsed       int       `json:"ports_used"`
 	MemoryMinMB     int       `json:"memory_min"` // e.g. 1024
 	MemoryMaxMB     int       `json:"memory_max"` // e.g. 2048
 	JavaArgs        string    `json:"java_args"`  // custom JVM flags

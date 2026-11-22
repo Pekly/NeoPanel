@@ -62,6 +62,10 @@ func InitDB(dbPath string) (*DB, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("server wake migration failed: %w", err)
 	}
+	if err := db.migratePorts(); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("port migration failed: %w", err)
+	}
 	return db, nil
 }
 
@@ -446,7 +450,7 @@ func (db *DB) ListServersForUser(userID int, role string) ([]*Server, error) {
 	if role == "admin" || userID == 0 {
 		return db.ListServers()
 	}
-	query := `SELECT s.id, s.name, s.description, s.type, s.version, s.jar_file, s.port, s.memory_min, s.memory_max, s.java_args, s.java_path, s.auto_restart, COALESCE(s.icon_url, ''), COALESCE(s.owner_id, 1), COALESCE(s.node_id, 'local'), COALESCE(s.cpu_limit_percent, 0), COALESCE(s.disk_limit_mb, 0), s.created_at, s.updated_at 
+	query := `SELECT s.id, s.name, s.description, s.type, s.version, s.jar_file, s.port, s.memory_min, s.memory_max, s.java_args, s.java_path, s.auto_restart, COALESCE(s.icon_url, ''), COALESCE(s.owner_id, 1), COALESCE(s.node_id, 'local'), COALESCE(s.cpu_limit_percent, 0), COALESCE(s.disk_limit_mb, 0), s.created_at, s.updated_at, s.ports_allowed, (SELECT COUNT(*) FROM server_ports p WHERE p.server_id=s.id)
 	FROM servers s 
 	LEFT JOIN server_subusers su ON s.id = su.server_id AND su.user_id = ?
 	WHERE s.owner_id = ? OR su.user_id IS NOT NULL
@@ -467,7 +471,7 @@ func (db *DB) ListServersForUser(userID int, role string) ([]*Server, error) {
 		if err := rows.Scan(
 			&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 			&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-			&autoRestart, &iconURL, &ownerID, &nodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt,
+			&autoRestart, &iconURL, &ownerID, &nodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt, &s.PortsAllowed, &s.PortsUsed,
 		); err != nil {
 			return nil, err
 		}
@@ -484,7 +488,7 @@ func (db *DB) ListServersForUser(userID int, role string) ([]*Server, error) {
 }
 
 func (db *DB) ListServers() ([]*Server, error) {
-	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), COALESCE(cpu_limit_percent, 0), COALESCE(disk_limit_mb, 0), created_at, updated_at FROM servers ORDER BY created_at DESC`)
+	rows, err := db.conn.Query(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), COALESCE(cpu_limit_percent, 0), COALESCE(disk_limit_mb, 0), created_at, updated_at, ports_allowed, (SELECT COUNT(*) FROM server_ports p WHERE p.server_id=servers.id) FROM servers ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -497,7 +501,7 @@ func (db *DB) ListServers() ([]*Server, error) {
 		err := rows.Scan(
 			&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 			&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-			&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt,
+			&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt, &s.PortsAllowed, &s.PortsUsed,
 		)
 		if err != nil {
 			return nil, err
@@ -515,13 +519,13 @@ func (db *DB) ListServers() ([]*Server, error) {
 }
 
 func (db *DB) GetServer(id string) (*Server, error) {
-	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), COALESCE(cpu_limit_percent, 0), COALESCE(disk_limit_mb, 0), created_at, updated_at FROM servers WHERE id = ?`, id)
+	row := db.conn.QueryRow(`SELECT id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, COALESCE(icon_url, ''), COALESCE(owner_id, 1), COALESCE(node_id, 'local'), COALESCE(cpu_limit_percent, 0), COALESCE(disk_limit_mb, 0), created_at, updated_at, ports_allowed, (SELECT COUNT(*) FROM server_ports p WHERE p.server_id=servers.id) FROM servers WHERE id = ?`, id)
 	s := &Server{}
 	var autoRestart int
 	err := row.Scan(
 		&s.ID, &s.Name, &s.Description, &s.Type, &s.Version, &s.JarFile,
 		&s.Port, &s.MemoryMinMB, &s.MemoryMaxMB, &s.JavaArgs, &s.JavaPath,
-		&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt,
+		&autoRestart, &s.IconURL, &s.OwnerID, &s.NodeID, &s.CPULimitPercent, &s.DiskLimitMB, &s.CreatedAt, &s.UpdatedAt, &s.PortsAllowed, &s.PortsUsed,
 	)
 	if err != nil {
 		return nil, err
@@ -545,9 +549,15 @@ func (db *DB) CreateServer(s *Server) error {
 		s.OwnerID = 1
 	}
 
-	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, icon_url, owner_id, node_id, cpu_limit_percent, disk_limit_mb, created_at, updated_at) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.CPULimitPercent, s.DiskLimitMB, s.CreatedAt, s.UpdatedAt)
+	if s.PortsAllowed == 0 {
+		s.PortsAllowed = 1
+	}
+	_, err := db.conn.Exec(`INSERT INTO servers (id, name, description, type, version, jar_file, port, memory_min, memory_max, java_args, java_path, auto_restart, icon_url, owner_id, node_id, cpu_limit_percent, disk_limit_mb, created_at, updated_at, ports_allowed)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.CPULimitPercent, s.DiskLimitMB, s.CreatedAt, s.UpdatedAt, s.PortsAllowed)
+	if err == nil && s.Port > 0 {
+		s.PortsUsed = 1
+	}
 	return err
 }
 
@@ -564,9 +574,39 @@ func (db *DB) UpdateServer(s *Server) error {
 		s.OwnerID = 1
 	}
 
-	_, err := db.conn.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, icon_url = ?, owner_id = ?, node_id = ?, cpu_limit_percent = ?, disk_limit_mb = ?, updated_at = ? WHERE id = ?`,
+	// Internal metadata callers historically replace primary ports here. Keep
+	// that path collision-safe and coherent; the public generic PUT rejects it.
+	tx, err := beginPortTx(db, s.ID)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var oldPort, assigned int
+	if err = tx.QueryRow(`SELECT port FROM servers WHERE id=?`, s.ID).Scan(&oldPort); err != nil {
+		return err
+	}
+	if s.Port != oldPort {
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM server_ports WHERE server_id=? AND port=?`, s.ID, s.Port).Scan(&assigned); err != nil {
+			return err
+		}
+		if assigned == 0 {
+			if _, err = tx.Exec(`DELETE FROM server_ports WHERE server_id=? AND port=?`, s.ID, oldPort); err != nil {
+				return err
+			}
+			if _, err = tx.Exec(`INSERT INTO server_ports(server_id,port,protocol,notes,is_primary,created_at) VALUES(?,?,'tcp/udp','Primary Game Port',1,?)`, s.ID, s.Port, s.UpdatedAt); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.Exec(`UPDATE server_ports SET is_primary=(port=?) WHERE server_id=?`, s.Port, s.ID); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(`UPDATE servers SET name = ?, description = ?, type = ?, version = ?, jar_file = ?, port = ?, memory_min = ?, memory_max = ?, java_args = ?, java_path = ?, auto_restart = ?, icon_url = ?, owner_id = ?, node_id = ?, cpu_limit_percent = ?, disk_limit_mb = ?, updated_at = ? WHERE id = ?`,
 		s.Name, s.Description, s.Type, s.Version, s.JarFile, s.Port, s.MemoryMinMB, s.MemoryMaxMB, s.JavaArgs, s.JavaPath, autoRestart, s.IconURL, s.OwnerID, s.NodeID, s.CPULimitPercent, s.DiskLimitMB, s.UpdatedAt, s.ID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *DB) UpdateServerOwner(serverID string, ownerID int) error {
@@ -842,26 +882,8 @@ func (db *DB) ListServerPorts(serverID string) ([]*ServerPort, error) {
 		ports = append(ports, p)
 	}
 
-	// Backwards compatibility: if no ports in server_ports, populate from servers table
-	if len(ports) == 0 {
-		srv, err := db.GetServer(serverID)
-		if err == nil && srv.Port > 0 {
-			now := time.Now().UTC()
-			res, err := db.conn.Exec("INSERT OR IGNORE INTO server_ports (server_id, port, protocol, notes, is_primary, created_at) VALUES (?, ?, 'tcp/udp', 'Primary Game Port', 1, ?)",
-				serverID, srv.Port, now)
-			if err == nil {
-				id, _ := res.LastInsertId()
-				ports = append(ports, &ServerPort{
-					ID:        int(id),
-					ServerID:  serverID,
-					Port:      srv.Port,
-					Protocol:  "tcp/udp",
-					Notes:     "Primary Game Port",
-					IsPrimary: true,
-					CreatedAt: now,
-				})
-			}
-		}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 
 	if ports == nil {
@@ -871,93 +893,23 @@ func (db *DB) ListServerPorts(serverID string) ([]*ServerPort, error) {
 }
 
 func (db *DB) AddServerPort(serverID string, port int, protocol, notes string, isPrimary bool) (*ServerPort, error) {
-	if port < 1024 || port > 65535 {
-		return nil, fmt.Errorf("port must be between 1024 and 65535")
-	}
-	if protocol == "" {
-		protocol = "tcp/udp"
-	}
-	if notes == "" {
-		if isPrimary {
-			notes = "Primary Game Port"
-		} else {
-			notes = "Additional Allocation"
-		}
-	}
-
-	// Check if port is already allocated on another server
-	var otherServerID string
-	err := db.conn.QueryRow("SELECT server_id FROM server_ports WHERE port = ? AND server_id != ?", port, serverID).Scan(&otherServerID)
-	if err == nil && otherServerID != "" {
-		return nil, fmt.Errorf("port %d is already allocated to another server (%s)", port, otherServerID)
-	}
-
-	// Also check servers table for legacy entries
-	var srvID string
-	err = db.conn.QueryRow("SELECT id FROM servers WHERE port = ? AND id != ?", port, serverID).Scan(&srvID)
-	if err == nil && srvID != "" {
-		return nil, fmt.Errorf("port %d is already used as the primary port of server %s", port, srvID)
-	}
-
-	if isPrimary {
-		// Set all other ports for this server as non-primary
-		_, _ = db.conn.Exec("UPDATE server_ports SET is_primary = 0 WHERE server_id = ?", serverID)
-		// Update servers table
-		_, _ = db.conn.Exec("UPDATE servers SET port = ? WHERE id = ?", port, serverID)
-	}
-
-	now := time.Now().UTC()
-	primaryInt := 0
-	if isPrimary {
-		primaryInt = 1
-	}
-
-	res, err := db.conn.Exec("INSERT INTO server_ports (server_id, port, protocol, notes, is_primary, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-		serverID, port, protocol, notes, primaryInt, now)
-	if err != nil {
-		return nil, fmt.Errorf("port %d is already assigned to this server", port)
-	}
-
-	id, _ := res.LastInsertId()
-	return &ServerPort{
-		ID:        int(id),
-		ServerID:  serverID,
-		Port:      port,
-		Protocol:  protocol,
-		Notes:     notes,
-		IsPrimary: isPrimary,
-		CreatedAt: now,
-	}, nil
+	return db.AllocateServerPort(serverID, port, protocol, notes, isPrimary, false, nil)
 }
 
 func (db *DB) DeleteServerPort(serverID string, portID int) error {
-	var isPrimary int
-	err := db.conn.QueryRow("SELECT is_primary FROM server_ports WHERE id = ? AND server_id = ?", portID, serverID).Scan(&isPrimary)
+	res, err := db.conn.Exec(`DELETE FROM server_ports WHERE id=? AND server_id=? AND is_primary=0 AND port != (SELECT port FROM servers WHERE id=?)`, portID, serverID, serverID)
 	if err != nil {
-		return fmt.Errorf("port allocation not found")
+		return err
 	}
-	if isPrimary == 1 {
-		return fmt.Errorf("cannot delete the primary game port. Assign another port as primary first.")
+	n, err := res.RowsAffected()
+	if err == nil && n == 0 {
+		return fmt.Errorf("port allocation not found or is the primary game port")
 	}
-
-	_, err = db.conn.Exec("DELETE FROM server_ports WHERE id = ? AND server_id = ?", portID, serverID)
 	return err
 }
 
 func (db *DB) SetPrimaryServerPort(serverID string, portID int) (int, error) {
-	var port int
-	err := db.conn.QueryRow("SELECT port FROM server_ports WHERE id = ? AND server_id = ?", portID, serverID).Scan(&port)
-	if err != nil {
-		return 0, fmt.Errorf("port allocation not found")
-	}
-
-	_, _ = db.conn.Exec("UPDATE server_ports SET is_primary = 0 WHERE server_id = ?", serverID)
-	_, err = db.conn.Exec("UPDATE server_ports SET is_primary = 1 WHERE id = ? AND server_id = ?", portID, serverID)
-	if err != nil {
-		return 0, err
-	}
-	_, _ = db.conn.Exec("UPDATE servers SET port = ? WHERE id = ?", port, serverID)
-	return port, nil
+	return db.ChangePrimaryServerPort(serverID, portID, nil)
 }
 
 func (db *DB) DeleteAllServerPorts(serverID string) error {

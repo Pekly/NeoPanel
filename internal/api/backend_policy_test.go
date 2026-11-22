@@ -84,6 +84,12 @@ func TestPortMutationNodePolicy(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/allow=%v", operation, allow), func(t *testing.T) {
 				f := newReliabilityFixture(t)
 				setBackendPolicy(t, f, allow)
+				if err := f.db.SetServerPortAllowance("alpha", 3); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.db.SetPortPool(database.PortPool{Start: 30001, End: 30001}); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := f.db.AddServerPort("alpha", 25565, "tcp/udp", "primary", true); err != nil {
 					t.Fatal(err)
 				}
@@ -128,6 +134,16 @@ func TestPortMutationNodePolicy(t *testing.T) {
 				}
 				if w := f.request(method, path, body, user); w.Code != success {
 					t.Fatal(user, w.Code, w.Body.String())
+				}
+				if operation == "add" {
+					server, err := f.db.GetServer("alpha")
+					wantPort := 25567
+					if allow {
+						wantPort = 30001
+					}
+					if err != nil || server.Port != wantPort || server.PortsUsed != 3 {
+						t.Fatal("wrong explicit/random allocation", server, err)
+					}
 				}
 			})
 		}

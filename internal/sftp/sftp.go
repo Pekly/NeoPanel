@@ -21,6 +21,7 @@ import (
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
@@ -146,6 +147,9 @@ func (s *SFTPServer) findServer(targetServer string) *database.Server {
 }
 
 func (s *SFTPServer) authorize(userID int, serverID, permission string) error {
+	if !s.db.FeatureEnabled(serverID, "sftp") {
+		return os.ErrPermission
+	}
 	u, err := s.db.GetUserByID(userID)
 	if err != nil || u == nil || serverID == "" {
 		return os.ErrPermission
@@ -593,6 +597,12 @@ func (f *guardedFile) WriteAt(p []byte, off int64) (int, error) {
 	if !f.writable {
 		return 0, sftp.ErrSSHFxPermissionDenied
 	}
+	// Acquire on every WRITE, not just OPEN: handles may predate maintenance.
+	release, err := rooted.TryMutation(f.h.rootDir)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	if err := f.check("files.edit"); err != nil {
 		return 0, err
 	}
@@ -624,6 +634,11 @@ func (h *chrootHandler) openFileInternal(r *sftp.Request) (*guardedFile, error) 
 		return nil, err
 	}
 	if writes {
+		release, err := rooted.TryMutation(h.rootDir)
+		if err != nil {
+			return nil, err
+		}
+		defer release() // includes create/truncate, but does not pin idle handles
 		if err := h.check("files.edit"); err != nil {
 			return nil, err
 		}
@@ -676,6 +691,11 @@ func (h *chrootHandler) Filecmd(r *sftp.Request) error {
 			return err
 		}
 	}
+	release, err := rooted.TryMutation(h.rootDir)
+	if err != nil {
+		return err
+	}
+	defer release()
 	return h.fsCommand(r)
 }
 

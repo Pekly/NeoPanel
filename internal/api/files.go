@@ -154,11 +154,17 @@ func (h *FileHandler) GetContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnsupportedMediaType, "Only UTF-8 text files can be edited")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"path": reqPath, "content": string(content)})
+	writeJSON(w, http.StatusOK, map[string]string{"path": reqPath, "content": string(content), "modified_at": info.ModTime().UTC().Format(time.RFC3339Nano)})
 }
 
 func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	var req struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
@@ -221,11 +227,21 @@ func (h *FileHandler) SaveContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	logAudit(h.db, r, "file_save", fmt.Sprintf("Saved file '%s' on %s (%s)", req.Path, auditServerLabel(h.db, serverID), formatBytesAudit(int64(len(req.Content)))))
-	writeJSON(w, http.StatusOK, map[string]string{"message": "File saved successfully"})
+	response := map[string]string{"message": "File saved successfully"}
+	if saved, statErr := root.Stat(name); statErr == nil {
+		response["modified_at"] = saved.ModTime().UTC().Format(time.RFC3339Nano)
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *FileHandler) Create(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -274,6 +290,12 @@ func (h *FileHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -316,6 +338,12 @@ type bulkDeleteFailure struct {
 // duplicates and overlapping directories remain idempotent in either mode.
 func (h *FileHandler) DeleteBulk(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -392,6 +420,12 @@ func parseUploadForm(w http.ResponseWriter, r *http.Request, limit int64) error 
 
 func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -471,6 +505,12 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -505,6 +545,12 @@ func (h *FileHandler) Rename(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -736,6 +782,12 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -1055,6 +1107,12 @@ func buildTarGzArchive(root *rooted.Root, outFile io.Writer, sources []archiveSo
 
 func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())

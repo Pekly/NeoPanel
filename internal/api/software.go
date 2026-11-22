@@ -160,6 +160,12 @@ func (h *SoftwareHandler) SaveProperties(w http.ResponseWriter, r *http.Request)
 	if rejectUnsupportedJavaConfig(h.db, serverID, w) {
 		return
 	}
+	release, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, "Files are busy with another server operation; retry when it finishes")
+		return
+	}
+	defer release()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
