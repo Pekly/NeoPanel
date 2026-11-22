@@ -269,7 +269,7 @@ func TestModrinthProjectCapKeepsLatestSoftwareRelease(t *testing.T) {
 }
 
 func TestModrinthSearchPaginationAndFacets(t *testing.T) {
-	for _, tc := range []struct{ limit, offset, wantLimit, wantOffset int }{{24, 24, 24, 24}, {100, 20000, 50, 10000}, {-1, -10, 20, 0}} {
+	for _, tc := range []struct{ limit, offset, wantLimit, wantOffset int }{{20, 20, 20, 20}, {50, 50, 50, 50}, {100, 20000, 100, 10000}, {999, 0, 100, 0}, {-1, -10, 20, 0}} {
 		mockModrinth(t, func(r *http.Request) (*http.Response, error) {
 			if r.URL.Host != "api.modrinth.com" || r.URL.Path != "/v2/search" {
 				t.Fatal(r.URL)
@@ -291,6 +291,27 @@ func TestModrinthSearchPaginationAndFacets(t *testing.T) {
 		if err != nil || result.Offset != tc.wantOffset || result.Limit != tc.wantLimit || result.TotalHits != 72 {
 			t.Fatalf("page: %+v %v", result, err)
 		}
+	}
+}
+
+func TestModrinthSearchArtworkBoundedWithoutDetailRequests(t *testing.T) {
+	calls := 0
+	mockModrinth(t, func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Path != "/v2/search" {
+			t.Fatal("artwork caused an extra request", r.URL)
+		}
+		return modrinthResponse(`{"hits":[{"project_id":"P1","featured_gallery":"https://cdn.modrinth.com/featured.webp","gallery":["https://cdn.modrinth.com/first.webp","2","3","4","5","6","7","8","9"]},{"project_id":"P2","featured_gallery":null,"gallery":null}],"total_hits":2}`), nil
+	})
+	result, err := SearchModrinthPluginsPage(context.Background(), "", 20, 0, "", "", "relevance")
+	if err != nil || calls != 1 || len(result.Hits) != 2 {
+		t.Fatal(result, err, calls)
+	}
+	if result.Hits[0].FeaturedGallery != "https://cdn.modrinth.com/featured.webp" || len(result.Hits[0].Gallery) != 8 || result.Hits[0].Gallery[0] != "https://cdn.modrinth.com/first.webp" {
+		t.Fatal(result.Hits[0])
+	}
+	if result.Hits[1].FeaturedGallery != "" || result.Hits[1].Gallery == nil || len(result.Hits[1].Gallery) != 0 {
+		t.Fatal(result.Hits[1])
 	}
 }
 

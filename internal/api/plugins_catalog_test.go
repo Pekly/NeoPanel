@@ -27,7 +27,7 @@ func TestPluginSearchPageBounds(t *testing.T) {
 		limit, offset int
 		bad           bool
 	}{
-		{"", 24, 0, false}, {"limit=50&offset=10000", 50, 10000, false}, {"limit=999&offset=10001", 50, 10000, false},
+		{"", 24, 0, false}, {"limit=50&offset=10000", 50, 10000, false}, {"limit=999&offset=10001", 100, 10000, false},
 		{"limit=-2&offset=-3", 24, 0, false}, {"limit=1&offset=24", 1, 24, false}, {"offset=abc", 0, 0, true}, {"limit=999999999999999999999999", 0, 0, true},
 	} {
 		req := httptest.NewRequest("GET", "/api/plugins/search?"+tc.query, nil)
@@ -70,10 +70,10 @@ func TestPluginCatalogAPIContract(t *testing.T) {
 			}
 			switch r.URL.Path {
 			case "/v2/search":
-				if r.URL.Query().Get("offset") != "48" || r.URL.Query().Get("limit") != "50" {
+				if r.URL.Query().Get("offset") != "48" || r.URL.Query().Get("limit") != "99" {
 					t.Fatal(r.URL)
 				}
-				data = `{"hits":[{"project_id":"P1","slug":"example"}],"total_hits":123}`
+				data = `{"hits":[{"project_id":"P1","slug":"example","featured_gallery":"https://cdn.modrinth.com/banner.webp","gallery":["https://cdn.modrinth.com/gallery.webp"]}],"total_hits":123}`
 			case "/v2/project/example":
 				data = `{"id":"P1","slug":"example","team":"T1","body":"# Example","license":{"id":"MIT"}}`
 			case "/v2/project/P1/version", "/v2/version/old", "/v2/version/fabric", "/v2/version/foreign":
@@ -111,8 +111,11 @@ func TestPluginCatalogAPIContract(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	} else {
 		var page downloader.ModrinthSearchResult
-		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || page.Offset != 48 || page.Limit != 50 || page.TotalHits != 123 || len(page.Hits) != 1 {
+		if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || page.Offset != 48 || page.Limit != 99 || page.TotalHits != 123 || len(page.Hits) != 1 {
 			t.Fatalf("page %+v %v", page, err)
+		}
+		if page.Hits[0].FeaturedGallery != "https://cdn.modrinth.com/banner.webp" || len(page.Hits[0].Gallery) != 1 {
+			t.Fatal("missing search artwork", page.Hits[0])
 		}
 	}
 	for _, suffix := range []string{"project", "versions"} {

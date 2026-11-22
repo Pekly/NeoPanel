@@ -6676,8 +6676,8 @@ const V = {
 
       ${isBrowse ? `
         <!-- Browse Modrinth Filter & Search Bar -->
-        <div class="row" style="gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
-          <div style="position: relative; flex: 1; min-width: 240px;">
+        <div class="row np-store-toolbar" style="gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+          <div style="position: relative; flex: 1; min-width: min(240px, 100%);">
             <input type="text" id="store-search" aria-label="Search Modrinth projects" placeholder="${isMod ? 'Search mods on Modrinth (e.g. Lithium, FerriteCore, Simple Voice Chat)...' : 'Search plugins on Modrinth (e.g. EssentialsX, LuckPerms, WorldEdit)...'}" value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 40px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
             <span style="position: absolute; left: 12px; top: 11px; color: var(--tx-muted);">${ic('search', 16)}</span>
           </div>
@@ -6691,13 +6691,14 @@ const V = {
             ${verChoices.map(v => `<option value="${esc(v)}" ${S.plugVer === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
           </select>
 
-          <select style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugSort=this.value; searchModrinth();">
+          <select aria-label="Sort projects" style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugSort=this.value; searchModrinth();">
             <option value="relevance" ${(S.plugSort || 'relevance') === 'relevance' ? 'selected' : ''}>Sort: Relevance</option>
             <option value="downloads" ${S.plugSort === 'downloads' ? 'selected' : ''}>Sort: Downloads</option>
             <option value="follows" ${S.plugSort === 'follows' ? 'selected' : ''}>Sort: Follows</option>
             <option value="newest" ${S.plugSort === 'newest' ? 'selected' : ''}>Sort: Newest</option>
           </select>
 
+          ${NPPlugins.sizeControl()}
           ${renderViewModeToggle('plug_store', 'list')}
         </div>
 

@@ -43,13 +43,51 @@ test('duplicate project installs are single-flight across slug and project id',a
   const {c,calls}=harness();c.S.lastModrinthHits=[hit(0)];let resolve;c.handler=()=>new Promise(r=>resolve=r);
   const pending=c.NPPlugins.install('project-0','Title');await c.NPPlugins.install('id0','Title');assert.equal(calls.length,1);resolve({versions:[]});await pending;
 });
-test('pagination deduplicates, preserves results on failure, retries same offset and resets filters',async()=>{
+function catalog(url, total=83) {
+  const q=new URL(url,'http://demo').searchParams,offset=Number(q.get('offset')),size=Number(q.get('limit'));
+  return {hits:Array.from({length:Math.max(0,Math.min(size,total-offset))},(_,i)=>hit(offset+i)),total_hits:total};
+}
+test('numbered pages replace results; failure labels old page and retries intended offset',async()=>{
   const {c,calls}=harness();let fail=true;
-  c.handler=async url=>{const q=new URL(url,'http://demo').searchParams,offset=Number(q.get('offset'));if(offset&&fail)throw Error('offline');return{hits:Array.from({length:24},(_,i)=>hit(offset?i+20:i)),total_hits:80};};
-  await c.NPPlugins.search();await c.NPPlugins.search(false,true);assert.equal(c.S.lastModrinthHits.length,24);assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/Retry/);
-  fail=false;await c.NPPlugins.search(false,true);assert.equal(c.S.lastModrinthHits.length,44);assert.ok(calls[1].url.includes('offset=24'));assert.ok(calls[2].url.includes('offset=24'));
-  c.S.plugLoader='fabric';await c.NPPlugins.search();assert.equal(c.S.lastModrinthHits.length,24);assert.match(calls.at(-1).url,/offset=0/);
-  c.server.type='fabric';c.S.plugLoader='';await c.NPPlugins.search();assert.match(calls.at(-1).url,/loader=&/);
+  c.handler=async url=>{if(new URL(url,'http://demo').searchParams.get('offset')!=='0'&&fail)throw Error('offline');return catalog(url);};
+  await c.NPPlugins.search();assert.equal(c.S.lastModrinthHits.length,20);await c.NPPlugins.goPage(2);
+  let html=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);assert.match(html,/1–20 of 83/);assert.match(html,/Page 2 could not be loaded/);assert.match(html,/aria-current="page"/);
+  fail=false;await c.NPPlugins.search();assert.equal(c.S.lastModrinthHits.length,20);assert.equal(c.S.lastModrinthHits[0].project_id,'id20');
+  assert.match(calls[1].url,/offset=20/);assert.equal(calls[1].url,calls[2].url);
+  await c.NPPlugins.goPage(5);assert.equal(c.S.lastModrinthHits.length,3);assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/81–83 of 83/);
+  const before=calls.length;await c.NPPlugins.goPage(6);await c.NPPlugins.goPage(0);await c.NPPlugins.goPage(5);assert.equal(calls.length,before);
+});
+test('page sizes, filter and identity resets, and detail Back preserve browsing state',async()=>{
+  const {c,calls}=harness();c.handler=async url=>url.includes('/project?')?project():catalog(url,257);
+  await c.NPPlugins.search();
+  for(const size of [10,50,100,20]) {
+    await c.NPPlugins.setPageSize(size);assert.match(calls.at(-1).url,new RegExp(`limit=${size}&offset=0`));
+    await c.NPPlugins.goPage(2);assert.equal(c.S.lastModrinthHits.length,size);assert.equal(c.S.lastModrinthHits[0].project_id,'id'+size);
+    const before=calls.length;await c.NPPlugins.open('project-'+size);c.NPPlugins.back();assert.equal(calls.length,before+1);assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/Page 2 of/);assert.match(c.NPPlugins.sizeControl(),new RegExp(`value="${size}" selected`));
+  }
+  for(const field of ['q','plugLoader','plugVer','plugSort']) {c.S[field]='changed';await c.NPPlugins.search();assert.match(calls.at(-1).url,/offset=0/);await c.NPPlugins.goPage(2);}
+  c.server.id='b';await c.NPPlugins.search();assert.match(calls.at(-1).url,/offset=0/);
+  const before=calls.length;for(const value of [-1,0,24,1000,'evil'])await c.NPPlugins.setPageSize(value);assert.equal(calls.length,before);
+});
+test('size failure retains old size range and retry uses new size; empty and shrinking catalogs',async()=>{
+  const {c,calls}=harness();c.handler=async url=>catalog(url);await c.NPPlugins.search();await c.NPPlugins.goPage(4);
+  c.handler=async()=>{throw Error('offline');};await c.NPPlugins.setPageSize(50);assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/61–80 of 83 projects · Page 4 of 5/);
+  const before=calls.length;await c.NPPlugins.goPage(2);assert.equal(calls.length,before,'old page controls cannot navigate with the failed new size');
+  assert.ok([...c.NPPlugins.hitsHtml(c.S.lastModrinthHits).matchAll(/<button[^>]*data-np-page="\d+"[^>]*>/g)].every(m=>m[0].includes('disabled')));
+  c.handler=async url=>catalog(url);await c.NPPlugins.search();assert.match(calls.at(-1).url,/limit=50&offset=0/);
+  c.handler=async url=>catalog(url,3);await c.NPPlugins.goPage(2);assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/1–3 of 3/);
+  c.handler=async url=>catalog(url,0);c.S.q='empty';await c.NPPlugins.search();assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/0–0 of 0/);assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/No matching/);
+});
+test('artwork prefers safe featured then first safe gallery; no active URL or attribute injection',()=>{
+  const {c}=harness();
+  for(const bad of ['javascript:alert(1)','data:image/svg+xml,bad','file:///x','//evil.test','https://user:pass@evil.test']) {
+    const html=c.NPPlugins.hitsHtml([{...hit(0),featured_gallery:bad,gallery:[bad,'https://demo.test/fallback?a=1&b=2']}]);
+    assert.match(html,/src="https:\/\/demo.test\/fallback\?a=1&amp;b=2"/);assert.doesNotMatch(html,/src="(?:javascript|data|file):/);
+  }
+  const h={...hit(0),featured_gallery:'https://demo.test/featured',gallery:['https://demo.test/other']};
+  assert.match(c.NPPlugins.hitsHtml([h]),/src="https:\/\/demo.test\/featured" alt="" aria-hidden="true" loading="lazy" referrerpolicy="no-referrer"/);
+  h.featured_gallery='https://demo.test/" onerror="evil';assert.doesNotMatch(c.NPPlugins.hitsHtml([h]),/ onerror=/);
+  c.getViewMode=()=> 'icons';assert.doesNotMatch(c.NPPlugins.hitsHtml([h]),/np-project-banner/);
 });
 test('search requests and detail responses never commit stale identity or query; duplicate loads are ignored',async()=>{
   for(const change of ['query','loader','server','node','account','token']) {
@@ -68,6 +106,7 @@ test('Chrome: actual Plugins and Files renderers, theme, navigation, tabs, pagin
   try {
     for(const width of [1440,390,320]) for(const theme of ['dark','light']) {
       const page=await browser.newPage({viewport:{width,height:900}}),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.emulateMedia({reducedMotion:'reduce'});
+      await page.route('https://demo-art.test/**',route=>route.request().url().includes('broken')?route.abort():route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="900" height="240"><rect width="900" height="240" fill="#6694ac"/><path d="M0 220L150 60 260 140 460 20 680 160 900 40V240H0" fill="#285745"/><path d="M0 230L200 170 400 210 630 90 900 200V240H0" fill="#a7cc75"/></svg>'}));
       await page.setContent(`<html data-theme="${theme}"><head><style>${styles}</style></head><body><main id="main"></main><div id="modal-container"></div></body></html>`);
       await page.evaluate(({data,hits})=>{
         window.S={view:'plug',plugTab:'browse',plugins:[],lastModrinthHits:[],q:'',plugLoader:'',plugVer:'',plugSort:'relevance',loading:{},skipPlugConfirm:true,user:{id:1,role:'admin'},token:'demo',fileList:[{name:'world',path:'world',is_dir:true},{name:'server.properties',path:'server.properties',is_dir:false}],files:{},selectedFiles:new Set(),fileSort:{by:'name'},currentDir:''};
@@ -78,16 +117,48 @@ test('Chrome: actual Plugins and Files renderers, theme, navigation, tabs, pagin
         window.loadPluginsList=async()=>{};window.toast=(...a)=>toasts.push(a);window.uiConfirm=()=>new Promise(r=>confirmResolve=r);window.uiAlert=async()=>{};window.srvApiPath=(s,p)=>`/api/nodes/${s.node_id}/servers/${s.id}${p}`;
         window.sortFileItems=a=>a;window.fileListIconHtml=()=>'<span>▤</span>';window.getFileExtension=()=>'';window.formatFileSize=()=>'';window.formatFileDate=()=>'';window.renderFileBulkBarHtml=()=>'';window.openFileTrash=()=>window.trashOpened=true;window.NPWorldConversion={open:()=>window.conversionOpened=true};
         window.toggleSelectAllFiles=checked=>{S.selectedFiles=new Set(checked?S.fileList.map(f=>f.path):[]);};
-        window.api=async(url,o={})=>{calls.push({url,...o});if(url.includes('/search?')){const q=new URL(url,'http://demo').searchParams,offset=Number(q.get('offset'));if(offset&&failAppend)throw Error('offline');return{hits:demoHits.slice(offset,offset+24),total_hits:demoHits.length};}if(url.includes('/project?'))return structuredClone(demoData);if(url.includes('/versions?'))return{...structuredClone(demoData),versions:demoData.versions.filter(v=>demoData.installable_version_ids.includes(v.id))};return{};};
+        window.api=async(url,o={})=>{calls.push({url,...o});if(url.includes('/search?')){const q=new URL(url,'http://demo').searchParams,offset=Number(q.get('offset')),size=Number(q.get('limit'));if(offset&&failAppend)throw Error('offline');return{hits:demoHits.slice(offset,offset+size),total_hits:demoHits.length};}if(url.includes('/project?'))return structuredClone(demoData);if(url.includes('/versions?'))return{...structuredClone(demoData),versions:demoData.versions.filter(v=>demoData.installable_version_ids.includes(v.id))};return{};};
         window.R=()=>{NPPlugins.sync();document.getElementById('main').innerHTML=views[S.view]();};
-      },{data:project(),hits:Array.from({length:48},(_,i)=>hit(i))});
+      },{data:project(),hits:Array.from({length:48},(_,i)=>({...hit(i),featured_gallery:i===1?'https://demo-art.test/broken':'',gallery:['javascript:bad','https://demo-art.test/banner.svg']}))});
       for (const asset of ['vendor/marked-18.2.1/marked.umd.js','vendor/dompurify-3.4.18/purify.min.js','js/project-markdown.js']) await page.addScriptTag({content:fs.readFileSync(path.join(root,asset),'utf8')});
       await page.addScriptTag({content:source});await page.addScriptTag({content:renderers});assert.deepEqual(errors,[]);await page.evaluate(async()=>{R();await NPPlugins.search();});
       const options=await page.locator('select[aria-label="Browse by loader"] option').allTextContents();assert.equal(options[0],'Loader: Auto (All)');assert.match(options[1],/Paper — Your server/);assert.equal(options.filter(x=>x.startsWith('Paper')).length,1);
-      assert.equal(await page.locator('[data-project-card]').count(),24);
+      assert.equal(await page.locator('[data-project-card]').count(),20);
       await page.locator('[data-np-install]').first().click();await page.waitForFunction(()=>calls.some(x=>x.method==='POST'));
       assert.equal(await page.locator('.np-project').count(),0);assert.deepEqual(await page.evaluate(()=>JSON.parse(calls.find(x=>x.method==='POST').body)),{slug:'project-0'});
-      await page.locator('[data-np-search="more"]').click();assert.equal(await page.locator('[data-project-card]').count(),24);await page.evaluate(()=>failAppend=false);await page.getByRole('button',{name:'Retry',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===48);
+      await page.getByRole('button',{name:'Page 2',exact:true}).click();assert.equal(await page.locator('[data-project-card]').count(),20);assert.match(await page.locator('.np-project-page-status').textContent(),/1–20 of 48/);
+      await page.evaluate(()=>failAppend=false);await page.getByRole('button',{name:'Retry',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[data-project-card]').dataset.slug==='project-20');
+      await page.getByRole('button',{name:'Next page',exact:true}).focus();await page.keyboard.press('Enter');await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===8);assert.equal(await page.getByRole('button',{name:'Next page'}).isDisabled(),true);
+      assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-current')),'page');assert.equal(await page.locator('[aria-current=page]').evaluate(e=>getComputedStyle(e).outlineStyle),'solid');
+      await page.getByRole('combobox',{name:'Projects per page'}).selectOption('10');await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===10);
+      await page.getByRole('combobox',{name:'Projects per page'}).selectOption('20');await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===20);
+      await page.evaluate(()=>{demoHits[2].title='LongProjectName'.repeat(8);demoHits[2].description='Long demo description to verify stable reflow. '.repeat(12);R();});
+      for(const mode of ['list','tiles','icons']) {
+        await page.evaluate(mode=>{viewMode=mode;R();},mode);
+        assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${width}/${theme}/${mode} browse overflow`);
+        assert.equal(await page.locator('.np-project-banner').count(),mode==='icons'?0:20);
+        assert.ok(await page.locator('.np-project-pages').evaluate(el=>el.getBoundingClientRect().height<=44 && el.scrollWidth<=el.clientWidth+1),'pagination is a compact horizontal row');
+        assert.ok(await page.locator('#store-grid').evaluate(el=>[el,...el.querySelectorAll('.np-project-result,.np-project-open,.np-project-result-foot')].every(n=>n.scrollWidth<=n.clientWidth+1)),`${width}/${theme}/${mode} no internal clipping or overflow`);
+        if(mode!=='icons') {
+          await page.locator('.np-project-banner').first().scrollIntoViewIfNeeded();await page.waitForFunction(()=>document.querySelector('.np-project-banner').naturalWidth>0);
+          await page.locator('.np-project-banner').nth(1).evaluate(el=>el.closest('article').scrollIntoView());await page.waitForFunction(()=>document.querySelectorAll('.np-project-banner')[1].hidden);
+          assert.equal(await page.locator('.np-project-banner').first().evaluate(el=>getComputedStyle(el).pointerEvents),'none');
+        }
+        if(process.env.NP_PLUGIN_ARTIFACTS) {fs.mkdirSync(process.env.NP_PLUGIN_ARTIFACTS,{recursive:true});await page.screenshot({path:path.join(process.env.NP_PLUGIN_ARTIFACTS,`browse-${width}-${theme}-${mode}.png`),fullPage:true});if(width===1440&&theme==='dark'&&mode==='list')fs.writeFileSync(path.join(process.env.NP_PLUGIN_ARTIFACTS,'browse-preview.html'),(await page.content()).replace(/<script[\s\S]*?<\/script>/g,''));}
+      }
+      // Dense capped pagination (including four-digit final page) must also fit mobile.
+      await page.evaluate(async()=>{window.savedApi=api;window.api=async(url,o)=>{if(!url.includes('/search?'))return savedApi(url,o);calls.push({url,...o});const q=new URL(url,'http://demo').searchParams,size=Number(q.get('limit')),offset=Number(q.get('offset'));return{hits:Array.from({length:size},(_,i)=>({...demoHits[i%demoHits.length],project_id:'cap'+(offset+i),slug:'cap-'+(offset+i)})),total_hits:12345};};await NPPlugins.setPageSize(10);await NPPlugins.goPage(500);});
+      assert.equal(await page.locator('.np-page-gap').count(),2);assert.equal(await page.locator('.np-page').count(),7);
+      assert.ok(await page.locator('.np-project-pages').evaluate(el=>el.getBoundingClientRect().height<=44 && el.scrollWidth<=el.clientWidth+1),`${width}/${theme} capped pagination fits one row`);
+      await page.getByRole('button',{name:'Page 1000',exact:true}).click();assert.match(await page.locator('.np-project-page-status').textContent(),/9,991–10,000 of 12,345/);assert.equal(await page.getByRole('button',{name:'Next page'}).isDisabled(),true);
+      if(process.env.NP_PLUGIN_ARTIFACTS)await page.locator('.np-project-pagination').screenshot({path:path.join(process.env.NP_PLUGIN_ARTIFACTS,`pagination-cap-${width}-${theme}.png`)});
+      await page.evaluate(async()=>{api=savedApi;await NPPlugins.setPageSize(20);});
+      await page.evaluate(()=>{window.beforePageBack=calls.filter(x=>x.url.includes('/search?')).length;});
+      await page.getByRole('button',{name:'Page 2',exact:true}).click();await page.locator('[data-np-project]').first().click();await page.locator('.np-project-hero').waitFor();await page.locator('[data-np-back]').click();
+      assert.equal(await page.locator('[aria-current=page]').textContent(),'2');assert.equal(await page.getByRole('combobox',{name:'Projects per page'}).inputValue(),'20');assert.equal(await page.evaluate(()=>calls.filter(x=>x.url.includes('/search?')).length),await page.evaluate(()=>beforePageBack+1));
+      await page.getByRole('button',{name:'Page 1',exact:true}).click();
+      await page.emulateMedia({reducedMotion:'no-preference'});await page.evaluate(()=>{document.documentElement.dataset.panelMotion='reduced';R();});assert.equal(await page.locator('[data-project-card]').first().evaluate(el=>getComputedStyle(el).animationName),'none');await page.emulateMedia({reducedMotion:'reduce'});
+      await page.evaluate(()=>{viewMode='list';R();});
       await page.locator('[data-project-card]').first().evaluate(el=>{el.scrollIntoView({block:'center'});window.savedScroll=document.getElementById('main').scrollTop;window.savedWindowScroll=scrollY;});
       await page.locator('[data-project-card]').first().locator('b').click();await page.locator('.np-project-hero').waitFor();assert.equal(await page.locator('.np-project-hero h1').textContent(),'Demo project 0');
       assert.equal(await page.locator('.np-project-markdown strong').first().textContent(),'secure');
@@ -107,9 +178,9 @@ test('Chrome: actual Plugins and Files renderers, theme, navigation, tabs, pagin
       assert.equal(await page.locator('.np-project-version [onerror]').count(),0);
       assert.equal(await page.locator('.np-project-version a[href="https://modrinth.com/project/dependency"]').count(),1);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${width}/${theme} detail overflow`);
-      await page.getByRole('button',{name:'Back to results'}).click();assert.equal(await page.locator('[data-project-card]').count(),48);
+      await page.getByRole('button',{name:'Back to results'}).click();assert.equal(await page.locator('[data-project-card]').count(),20);
       assert.equal(await page.evaluate(()=>document.getElementById('main').scrollTop===savedScroll && scrollY===savedWindowScroll),true,'Back preserves both scroll containers');
-      await page.locator('#store-search').fill('changed');await page.waitForTimeout(400);await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===24);assert.ok(await page.evaluate(()=>calls.filter(x=>x.url.includes('/search?')).at(-1).url.includes('offset=0')));
+      await page.locator('#store-search').fill('changed');await page.waitForTimeout(400);await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===20);assert.ok(await page.evaluate(()=>calls.filter(x=>x.url.includes('/search?')).at(-1).url.includes('offset=0')));
       assert.equal(await page.locator('[data-project-card]').first().evaluate(e=>getComputedStyle(e).animationName),'none');
       await page.locator('select[aria-label="Browse by loader"]').selectOption('fabric');assert.ok(await page.evaluate(()=>calls.filter(x=>x.url.includes('/search?')).at(-1).url.includes('loader=fabric')));
       // Delayed old search and detail requests are ignored by the actual renderer.
@@ -149,9 +220,13 @@ test('API context guards suppress stale 401 logout, recovery banners and errors'
   vm.runInContext(section('async function api(', 'function curServer('),c);
   const pending=c.api('/api/servers/a/plugins/project',{isCurrent:()=>live});live=false;resolve({status:401});await assert.rejects(pending,{name:'AbortError'});assert.deepEqual(events,[]);
 });
-test('pagination retained result limit is bounded at 1000',async()=>{
-  const {c,calls}=harness();c.handler=async url=>{const offset=Number(new URL(url,'http://demo').searchParams.get('offset'));return{hits:Array.from({length:24},(_,i)=>hit(offset+i)),total_hits:5000};};
-  await c.NPPlugins.search();for(let i=0;i<60;i++)await c.NPPlugins.search(false,true);assert.equal(c.S.lastModrinthHits.length,1000);assert.equal(calls.length,42);assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/Refine your search/);
+test('accessible results cap is 10000 with true total and bounded compact navigation',async()=>{
+  const {c,calls}=harness();c.handler=async url=>catalog(url,12345);
+  await c.NPPlugins.search();await c.NPPlugins.goPage(500);assert.match(calls.at(-1).url,/limit=20&offset=9980/);assert.equal(c.S.lastModrinthHits.length,20);
+  let html=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);assert.match(html,/9,981–10,000 of 12,345/);assert.match(html,/Refine your search/);assert.match(html,/Page 500 of 500/);
+  const before=calls.length;await c.NPPlugins.goPage(501);assert.equal(calls.length,before);
+  await c.NPPlugins.goPage(250);html=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);assert.equal((html.match(/class="np-page-gap"/g)||[]).length,2);assert.equal((html.match(/data-np-page=/g)||[]).length,7);
+  for(const size of [10,50,100]) {await c.NPPlugins.setPageSize(size);await c.NPPlugins.goPage(10000/size);assert.match(calls.at(-1).url,new RegExp(`offset=${10000-size}`));}
 });
 test('typing away and back cannot leave an aborted search permanently busy',async()=>{
   const {c,calls,timers}=harness();let resolve;c.handler=()=>new Promise(r=>resolve=r);
@@ -177,4 +252,15 @@ test('catalog errors identify Modrinth without exposing raw provider messages or
   const {c}=harness();c.handler=async()=>{throw Object.assign(Error('<script>private</script>'),{status:502,data:{code:'plugin_catalog_unavailable'}});};
   await c.NPPlugins.open('project-0');const html=c.NPPlugins.render();
   assert.match(html,/Modrinth could not provide this project/);assert.match(html,/separate from your server connection/);assert.doesNotMatch(html,/Check your connection|private|<script>/);
+});
+
+test('pending page reads are single flight, abort on size/filter changes and never commit stale results',async()=>{
+  const {c,calls}=harness();c.handler=async url=>catalog(url,250);await c.NPPlugins.search();
+  let resolve;c.handler=()=>new Promise(r=>resolve=r);const pending=c.NPPlugins.goPage(2);
+  await c.NPPlugins.goPage(2);await c.NPPlugins.search();assert.equal(calls.length,2);
+  const loading=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);assert.match(loading,/Loading page 2/);assert.match(loading,/1–20 of 250/);assert.equal((loading.match(/data-np-page=[^>]*disabled/g)||[]).length,(loading.match(/data-np-page=/g)||[]).length);
+  c.handler=async url=>catalog(url,250);await c.NPPlugins.setPageSize(50);assert.equal(calls[1].o.signal.aborted,true);
+  resolve({hits:[hit(999)],total_hits:250});await pending;assert.equal(c.S.lastModrinthHits.length,50);assert.equal(c.S.lastModrinthHits[0].project_id,'id0');
+  c.handler=()=>new Promise(r=>resolve=r);const old=c.NPPlugins.goPage(3);c.S.q='new';c.NPPlugins.debounce();assert.equal(calls.at(-1).o.signal.aborted,true);
+  resolve({hits:[hit(999)],total_hits:250});await old;assert.equal(c.S.lastModrinthHits.length,0);
 });

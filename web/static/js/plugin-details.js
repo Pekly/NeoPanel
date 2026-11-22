@@ -2,7 +2,8 @@
  * sanitized Markdown renderer; metadata fields are always escaped. */
 (() => {
   'use strict';
-  const PAGE = 24, MAX = 1000;
+  const PAGE = 20, SIZES = [10, 20, 50, 100], MAX = 10000;
+  let pageSize = PAGE;
   const e = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const arr = value => Array.isArray(value) ? value : [];
   const text = value => String(value ?? '');
@@ -47,47 +48,85 @@
     const busy = installing.has(installKey(slug)), done = installed.has(installKey(slug));
     return `<button type="button" class="btn pr" data-np-install data-slug="${e(slug)}" data-title="${e(title)}" ${version ? `data-version="${e(version)}"` : ''} ${busy || !allowed(true) ? 'disabled' : ''} aria-busy="${busy}">${busy ? 'Installing…' : done && !version ? 'Install again' : e(label)}</button>`;
   }
+  function sizeControl() {
+    return `<label class="np-project-size">View: <select data-np-page-size aria-label="Projects per page">${SIZES.map(n => `<option value="${n}" ${pageSize === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`;
+  }
+  const pageCount = (total, size) => Math.max(1, Math.ceil(Math.min(MAX, total) / size));
+  function pagination(st) {
+    if (!st) return '';
+    const shown = st.shown, current = shown?.page || 1, pages = pageCount(shown?.total || 0, shown?.size || st.size);
+    const start = shown?.hits.length ? (current - 1) * shown.size + 1 : 0;
+    const range = shown ? `${count(start)}–${count(start ? start + shown.hits.length - 1 : 0)} of ${count(shown.total)} projects · Page ${current} of ${pages}` : '';
+    const status = st.busy ? `Loading page ${st.page}…${shown ? ' Showing previous results.' : ''}` : st.error ? `Page ${st.page} could not be loaded.${shown ? ' Previous results are kept.' : ''}` : '';
+    const button = (n, label, disabled = false, selected = false) => `<button type="button" class="btn np-page" data-np-page="${n}" aria-label="${label}" ${selected ? 'aria-current="page"' : ''} ${disabled || st.busy || (shown && shown.size !== st.size) ? 'disabled' : ''}>${label === 'Previous page' ? '‹' : label === 'Next page' ? '›' : n}</button>`;
+    const numbers = [...new Set([1, current - 1, current, current + 1, pages])].filter(n => n >= 1 && n <= pages).sort((a,b) => a-b);
+    const controls = numbers.map((n,i) => (i && n - numbers[i-1] > 1 ? '<span class="np-page-gap" aria-hidden="true">…</span>' : '') + button(n,`Page ${n}`,false,n === current)).join('');
+    return `<div class="np-project-pagination" tabindex="-1"><div class="np-project-page-status" role="status" aria-live="polite"><span>${range}</span>${status ? `<span>${status}</span>` : ''}${shown?.total > MAX ? `<span>Browsing is limited to the first ${count(MAX)} results. Refine your search to see other projects.</span>` : ''}</div>${st.error ? '<button type="button" class="btn" data-np-search="retry">Retry</button>' : ''}${shown ? `<div class="np-project-pages" role="navigation" aria-label="Browse Store pages">${button(current-1,'Previous page',current <= 1)}${controls}${button(current+1,'Next page',current >= pages)}</div>` : ''}</div>`;
+  }
   function hitsHtml(hits) {
-    const list = arr(hits), mode = getViewMode('plug_store', 'list');
+    const st = search?.key === queryKey() ? search : null;
+    const list = st ? arr(st.shown?.hits) : arr(hits), mode = getViewMode('plug_store', 'list');
     const cards = list.map((h, i) => {
       const slug = h.slug || h.project_id || h.id || '';
+      const banner = mode !== 'icons' && (url(h.featured_gallery) || arr(h.gallery).slice(0,8).map(url).find(Boolean));
       return `<article class="np-project-result ${mode === 'list' ? 'plugin-card' : mode === 'tiles' ? 'vm-tile-card' : 'vm-icon-card'}" data-project-card data-slug="${e(slug)}" style="--np-item:${Math.min(i, 6)}">
+        ${banner ? `<img class="np-project-banner" src="${e(banner)}" alt="" aria-hidden="true" loading="lazy" referrerpolicy="no-referrer"><span class="np-project-banner-overlay" aria-hidden="true"></span>` : ''}
         <button type="button" class="np-project-open" data-np-project data-slug="${e(slug)}" aria-label="View ${e(h.title)}">${icon(h.icon_url, h.title)}<span class="np-project-copy"><b>${e(h.title)}</b>${h.author ? `<span class="mu">by ${e(h.author)}</span>` : ''}<span class="np-project-summary">${e(h.description)}</span></span></button>
         <div class="np-project-result-foot"><span class="mu">↓ ${count(h.downloads)}${h.follows != null ? ` · ${count(h.follows)} followers` : ''}</span>${installButton(slug, h.title)}${installed.has(installKey(slug)) ? '<span class="mu" role="status">Installed · restart required</span>' : ''}</div></article>`;
     }).join('');
-    const st = search?.key === queryKey() ? search : null;
     const empty = !list.length && !st?.busy && !st?.error ? '<p class="np-project-empty">No matching projects. Try another search or browsing filter.</p>' : '';
-    return cards + empty + `<div class="np-project-pagination" role="status">${st?.busy ? '<span>Loading projects…</span>' : st?.error ? `<p>Search could not be loaded. Your existing results are kept.</p><button class="btn" data-np-search="${st.append ? 'more' : 'retry'}">Retry</button>` : st ? `<span class="mu">${list.length} of ${count(st.total)} projects${list.length >= MAX ? ' · Refine your search to see more' : ''}</span>${st.more && list.length < MAX ? '<button class="btn" data-np-search="more">Load more</button>' : ''}` : ''}</div>`;
+    return cards + empty + pagination(st);
   }
   function drawSearch() {
     if (S.view !== 'plug' || activeDetail() || (S.plugTab || 'browse') !== 'browse') return;
     const host = document.getElementById('store-grid');
-    if (host) host.innerHTML = hitsHtml(S.lastModrinthHits);
+    if (host) {
+      const focused = document.activeElement, inPager = focused?.closest?.('.np-project-pagination');
+      host.innerHTML = hitsHtml(S.lastModrinthHits);
+      host.setAttribute('aria-busy', String(!!search?.busy));
+      if (inPager) (host.querySelector('[data-np-search]') || host.querySelector('[aria-current="page"]:not(:disabled)') || host.querySelector('.np-project-pagination'))?.focus({preventScroll:true});
+    }
   }
   function debounce() {
-    clearTimeout(timer); search?.controller?.abort(); search = null;
+    clearTimeout(timer); search?.controller?.abort();
     const ctx = capture(), key = queryKey();
+    search = {key, size:pageSize, page:1, busy:true, queued:true}; S.lastModrinthHits = []; drawSearch();
     timer = setTimeout(() => { if (ctx.live() && key === queryKey()) void searchProjects(); }, 350);
   }
-  async function searchProjects(skipDomWrite = false, append = false) {
+  function setPageSize(value) {
+    const size = Number(value); if (!SIZES.includes(size) || size === pageSize) return;
+    pageSize = size; return searchProjects(false, 1);
+  }
+  function goPage(value) {
+    if (!search || search.key !== queryKey() || search.busy || !search.shown || search.shown.size !== pageSize) return;
+    const page = Number(value), pages = pageCount(search.shown.total, pageSize);
+    if (!Number.isInteger(page) || page < 1 || page > pages || (page === search.shown.page && !search.error)) return;
+    return searchProjects(false, page);
+  }
+  // Keep the app wrapper's skipDomWrite contract; legacy `true` advances, never appends.
+  async function searchProjects(skipDomWrite = false, requestedPage) {
     if (!allowed()) return;
     clearTimeout(timer);
-    const key = queryKey(), ctx = capture();
-    if (append && (!search || search.key !== key || search.busy || !search.more || arr(S.lastModrinthHits).length >= MAX)) return;
-    if (!append && search?.key === key && search.busy) return;
+    const key = queryKey(), ctx = capture(), previous = search?.key === key ? search : null;
+    const page = previous ? requestedPage === true ? (previous.shown?.page || 1) + 1 : Number.isInteger(requestedPage) ? requestedPage : previous.page : 1;
+    const boundedPage = Math.max(1, Math.min(page, previous?.shown ? pageCount(previous.shown.total, pageSize) : 1));
+    if (previous?.busy && !previous.queued && previous.size === pageSize && previous.page === boundedPage) return;
     search?.controller?.abort();
-    const st = search = {key, busy:true, append, error:false, offset:append ? search.offset : 0, total:append ? search.total : 0, more:true, controller:new AbortController()};
-    if (!append) S.lastModrinthHits = [];
+    const st = search = {key, size:pageSize, page:boundedPage, shown:previous?.shown, busy:true, error:false, controller:new AbortController()};
+    if (!st.shown) S.lastModrinthHits = [];
     if (!skipDomWrite) drawSearch();
     const timeout = setTimeout(() => st.controller.abort(), 20000);
     try {
-      const params = new URLSearchParams({query:S.q || '', type:isModdedEngine(ctx.srv.type || S.core) ? 'mod' : 'plugin', loader:S.plugLoader || '', version:S.plugVer || '', sort:S.plugSort || 'relevance', limit:String(PAGE), offset:String(st.offset)});
+      const offset = (st.page - 1) * st.size;
+      const params = new URLSearchParams({query:S.q || '', type:isModdedEngine(ctx.srv.type || S.core) ? 'mod' : 'plugin', loader:S.plugLoader || '', version:S.plugVer || '', sort:S.plugSort || 'relevance', limit:String(st.size), offset:String(offset)});
       const res = await api(`/api/plugins/search?${params}`, {signal:st.controller.signal, suppressToast:true, isCurrent:() => search === st && ctx.live() && key === queryKey()});
       if (search !== st || !ctx.live() || key !== queryKey()) return;
-      if (!Array.isArray(res.hits)) throw Error('Invalid search response');
-      const seen = new Set(), all = [...(append ? arr(S.lastModrinthHits) : []), ...res.hits];
-      S.lastModrinthHits = all.filter(h => { const id = h.project_id || h.id || h.slug; if (!id || seen.has(id)) return false; seen.add(id); return true; }).slice(0, MAX);
-      st.offset += res.hits.length; st.total = Math.max(0, Number(res.total_hits) || 0); st.more = res.hits.length > 0 && st.offset < st.total && st.offset <= 10000;
+      if (!Array.isArray(res.hits) || !Number.isFinite(Number(res.total_hits)) || Number(res.total_hits) < 0) throw Error('Invalid search response');
+      const total = Math.floor(Number(res.total_hits)), lastPage = pageCount(total, st.size);
+      // A changing catalog can remove the requested last page. Resolve to its new last page.
+      if (st.page > lastPage) { st.busy = false; return searchProjects(skipDomWrite, lastPage); }
+      const hits = res.hits.slice(0, Math.min(st.size, Math.max(0, Math.min(total, MAX) - offset)));
+      st.shown = {page:st.page, size:st.size, total, hits}; S.lastModrinthHits = hits;
     } catch (_) { if (search === st && ctx.live() && key === queryKey()) st.error = true; }
     finally { clearTimeout(timeout); if (search === st && ctx.live() && key === queryKey()) { st.busy = false; if (!skipDomWrite) drawSearch(); } }
   }
@@ -196,14 +235,21 @@
     if (target.hasAttribute('data-project-card') && !event.target.closest('a,input,select,button')) { void open(target.dataset.slug); return; }
     if (target.hasAttribute('data-np-back')) back();
     if (target.hasAttribute('data-np-retry') && activeDetail()) void open(detail.slug,true);
-    if (target.hasAttribute('data-np-search')) void searchProjects(false,target.dataset.npSearch === 'more');
+    if (target.hasAttribute('data-np-search')) void searchProjects();
+    if (target.hasAttribute('data-np-page') && !target.disabled) void goPage(target.dataset.npPage);
     if (target.hasAttribute('data-np-tab') && activeDetail()) { detail.tab = target.dataset.npTab; R(); document.getElementById(`np-tab-${detail.tab}`)?.focus({preventScroll:true}); }
   });
+  document.addEventListener('change', event => {
+    if (S.view === 'plug' && event.target.matches('[data-np-page-size]')) void setPageSize(event.target.value);
+  });
+  document.addEventListener('error', event => {
+    if (event.target.matches?.('.np-project-banner')) event.target.hidden = true;
+  }, true);
   document.addEventListener('keydown', event => {
     if (!event.target.matches('[data-np-tab]') || !activeDetail()) return;
     const tabs = [...document.querySelectorAll('[data-np-tab]')], i = tabs.indexOf(event.target);
     const next = event.key === 'ArrowRight' ? (i+1)%tabs.length : event.key === 'ArrowLeft' ? (i+tabs.length-1)%tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length-1 : -1;
     if (next >= 0) { event.preventDefault(); tabs[next].click(); }
   });
-  window.NPPlugins = {render, open, back, install, hitsHtml, loaderOptions, search:searchProjects, debounce, reset, sync, capture, markdown, safeURL:url};
+  window.NPPlugins = {render, open, back, install, hitsHtml, loaderOptions, sizeControl, goPage, setPageSize, search:searchProjects, debounce, reset, sync, capture, markdown, safeURL:url};
 })();
