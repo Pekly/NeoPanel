@@ -214,11 +214,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		req.Type = "paper"
 	}
 	if strings.TrimSpace(req.Version) == "" {
-		if downloader.IsNativeSoftware(req.Type) || proxyconfig.Supported(req.Type) {
-			req.Version = "latest"
-		} else {
-			req.Version = "1.20.4"
-		}
+		req.Version = "latest"
 	}
 	if downloader.IsNativeSoftware(req.Type) {
 		req.MemoryMinMB, req.JavaArgs, req.JavaPath = 0, "", ""
@@ -229,8 +225,8 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if !downloader.IsNativeSoftware(req.Type) && strings.TrimSpace(req.JavaPath) == "" && h.cfg != nil {
-		req.JavaPath = h.cfg.Java.DefaultPath
+	if !downloader.IsNativeSoftware(req.Type) && strings.TrimSpace(req.JavaPath) == "" {
+		req.JavaPath = "25"
 	}
 
 	// Generate clean unique server ID (e.g. srv-3f8a1e)

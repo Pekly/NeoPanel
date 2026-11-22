@@ -67,7 +67,11 @@ func mockProxyDownloads(t *testing.T) {
 		switch r.URL.Host {
 		case "mcjarfiles.com", "fill-data.papermc.io", "ci.md-5.net":
 		case "fill.papermc.io":
-			data = "[]"
+			if strings.HasSuffix(r.URL.Path, "/builds") {
+				data = `[{"id":578,"downloads":{"server:default":{"url":"https://fill-data.papermc.io/fixture.jar"}}}]`
+			} else {
+				data = `{"versions":["1.19","1.20"]}`
+			}
 		default:
 			t.Fatalf("unexpected external request: %s", r.URL)
 		}

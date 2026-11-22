@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"github.com/Pekly/NeoPanel/internal/proxyconfig"
 	"github.com/Pekly/NeoPanel/internal/rooted"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -50,7 +52,8 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 	}
 	defer root.Close()
 	// Keep the same pinned root across both upstream attempts.
-	if err := downloadMCJarFiles(flavor, version, root, jarFileName); err == nil {
+	primaryErr := downloadMCJarFiles(flavor, version, root, jarFileName)
+	if primaryErr == nil {
 		return nil
 	}
 
@@ -60,6 +63,8 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 	switch flavor {
 	case "paper":
 		downloadURL, err = getPaperURL(version)
+	case "folia":
+		downloadURL, err = getFillURL("folia", version)
 	case "purpur":
 		downloadURL, err = getPurpurURL(version)
 	case "vanilla":
@@ -73,7 +78,7 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 	case "bungeecord":
 		downloadURL, err = getBungeeCordURL()
 	default:
-		return fmt.Errorf("unsupported server flavor for auto-download: %s", flavor)
+		return fmt.Errorf("failed to download %s %s (no official fallback): %w", flavor, version, primaryErr)
 	}
 
 	if err != nil {
@@ -211,205 +216,239 @@ func downloadRootFile(root *rooted.Root, name string, url string) error {
 	return err
 }
 
-func getPaperURL(version string) (string, error) {
-	// PaperMC v3 Fill API
-	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/paper/versions/%s/builds", version)
-	resp, err := httpGet(apiURL)
+// metadataJSON bounds upstream metadata independently of the larger JAR limit.
+func metadataJSON(url string, out any) error {
+	resp, err := httpGet(url)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("PaperMC v3 API returned status %d for version %s", resp.StatusCode, version)
+		return fmt.Errorf("metadata %s returned status %d", url, resp.StatusCode)
 	}
-
-	var builds []struct {
-		ID        int    `json:"id"`
-		Channel   string `json:"channel"`
-		Downloads map[string]struct {
-			Name string `json:"name"`
-			URL  string `json:"url"`
-		} `json:"downloads"`
+	const limit = 4 << 20
+	data, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return err
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&builds); err != nil {
-		return "", err
+	if len(data) > limit {
+		return fmt.Errorf("metadata %s exceeds size limit", url)
 	}
+	return json.Unmarshal(data, out)
+}
 
-	if len(builds) == 0 {
-		return "", fmt.Errorf("no builds found for Paper version %s", version)
-	}
+func wantsLatest(version string) bool {
+	return strings.TrimSpace(version) == "" || strings.EqualFold(strings.TrimSpace(version), "latest")
+}
 
-	// First item is the newest build in v3 Fill API
-	latest := builds[0]
-	if dl, ok := latest.Downloads["server:default"]; ok && dl.URL != "" {
-		return dl.URL, nil
-	}
-
-	// Fallback to any download URL in the map
-	for _, dl := range latest.Downloads {
-		if dl.URL != "" {
-			return dl.URL, nil
+// Only compare the selected project's own supported versions, never a merged
+// Minecraft catalog. Velocity's normal upstream releases use a SNAPSHOT suffix.
+func newestSupported(versions []string, snapshot bool) (string, error) {
+	var best string
+	var bestParts [4]int
+	for _, version := range versions {
+		base := version
+		if snapshot {
+			base = strings.TrimSuffix(base, "-SNAPSHOT")
+		}
+		parts := strings.Split(base, ".")
+		if len(parts) < 2 || len(parts) > 4 {
+			continue
+		}
+		var nums [4]int
+		valid := true
+		for i, part := range parts {
+			if part == "" || strings.IndexFunc(part, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+				valid = false
+				break
+			}
+			n, err := strconv.Atoi(part)
+			if err != nil {
+				valid = false
+				break
+			}
+			nums[i] = n
+		}
+		if !valid {
+			continue
+		}
+		newer := best == ""
+		for i := range nums {
+			if nums[i] != bestParts[i] {
+				newer = nums[i] > bestParts[i]
+				break
+			}
+		}
+		if nums == bestParts && !strings.Contains(version, "-") {
+			newer = true
+		}
+		if newer {
+			best, bestParts = version, nums
 		}
 	}
+	if best == "" {
+		return "", fmt.Errorf("no supported release versions in upstream metadata")
+	}
+	return best, nil
+}
 
-	return "", fmt.Errorf("no server download URL found in latest build %d for Paper %s", latest.ID, version)
+func getPaperURL(version string) (string, error) {
+	return getFillURL("paper", version)
+}
+
+func getFillURL(project, version string) (string, error) {
+	baseURL := "https://fill.papermc.io/v3/projects/" + project
+	if wantsLatest(version) {
+		var payload struct {
+			Versions json.RawMessage `json:"versions"`
+		}
+		if err := metadataJSON(baseURL, &payload); err != nil {
+			return "", err
+		}
+		var versions []string
+		if err := json.Unmarshal(payload.Versions, &versions); err != nil {
+			var groups map[string][]string
+			if err := json.Unmarshal(payload.Versions, &groups); err != nil {
+				return "", err
+			}
+			for _, group := range groups {
+				versions = append(versions, group...)
+			}
+		}
+		var err error
+		version, err = newestSupported(versions, project == "velocity")
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", project, err)
+		}
+	}
+	var builds []struct {
+		ID        int `json:"id"`
+		Downloads map[string]struct {
+			URL string `json:"url"`
+		} `json:"downloads"`
+	}
+	if err := metadataJSON(fmt.Sprintf("%s/versions/%s/builds", baseURL, version), &builds); err != nil {
+		return "", err
+	}
+	if len(builds) == 0 {
+		return "", fmt.Errorf("no builds found for %s %s", project, version)
+	}
+	latest := builds[0]
+	for _, build := range builds[1:] {
+		if build.ID > latest.ID {
+			latest = build
+		}
+	}
+	if url := latest.Downloads["server:default"].URL; url != "" {
+		return url, nil
+	}
+	return "", fmt.Errorf("no server download in latest build %d for %s %s", latest.ID, project, version)
 }
 
 func getPurpurURL(version string) (string, error) {
-	// Purpur direct latest build endpoint
+	if wantsLatest(version) {
+		var project struct {
+			Versions []string `json:"versions"`
+		}
+		if err := metadataJSON("https://api.purpurmc.org/v2/purpur", &project); err != nil {
+			return "", err
+		}
+		var err error
+		version, err = newestSupported(project.Versions, false)
+		if err != nil {
+			return "", err
+		}
+	}
 	return fmt.Sprintf("https://api.purpurmc.org/v2/purpur/%s/latest/download", version), nil
 }
 
 func getVanillaURL(version string) (string, error) {
-	manifestURL := "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
-	resp, err := httpGet(manifestURL)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
 	var manifest struct {
+		Latest struct {
+			Release string `json:"release"`
+		} `json:"latest"`
 		Versions []struct {
 			ID  string `json:"id"`
 			URL string `json:"url"`
 		} `json:"versions"`
 	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&manifest); err != nil {
+	if err := metadataJSON("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json", &manifest); err != nil {
 		return "", err
 	}
-
-	var versionDetailURL string
+	if wantsLatest(version) {
+		version = manifest.Latest.Release
+	}
+	var detailURL string
 	for _, v := range manifest.Versions {
-		if v.ID == version {
-			versionDetailURL = v.URL
+		if version != "" && v.ID == version {
+			detailURL = v.URL
 			break
 		}
 	}
-
-	if versionDetailURL == "" {
+	if detailURL == "" {
 		return "", fmt.Errorf("version %s not found in Mojang manifest", version)
 	}
-
-	vResp, err := httpGet(versionDetailURL)
-	if err != nil {
-		return "", err
-	}
-	defer vResp.Body.Close()
-
-	var versionData struct {
+	var detail struct {
 		Downloads struct {
 			Server struct {
 				URL string `json:"url"`
 			} `json:"server"`
 		} `json:"downloads"`
 	}
-
-	if err := json.NewDecoder(vResp.Body).Decode(&versionData); err != nil {
+	if err := metadataJSON(detailURL, &detail); err != nil {
 		return "", err
 	}
-
-	if versionData.Downloads.Server.URL == "" {
+	if detail.Downloads.Server.URL == "" {
 		return "", fmt.Errorf("no server download URL found for vanilla %s", version)
 	}
-
-	return versionData.Downloads.Server.URL, nil
+	return detail.Downloads.Server.URL, nil
 }
 
-func getFabricURL(version string) (string, error) {
-	loaderURL := "https://meta.fabricmc.net/v2/versions/loader"
-	resp, err := httpGet(loaderURL)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var loaders []struct {
+func stableFabricVersion(kind string) (string, error) {
+	var items []struct {
 		Version string `json:"version"`
 		Stable  bool   `json:"stable"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&loaders); err != nil {
+	if err := metadataJSON("https://meta.fabricmc.net/v2/versions/"+kind, &items); err != nil {
 		return "", err
 	}
-
-	loaderVersion := "0.16.9" // modern fallback
-	for _, l := range loaders {
-		if l.Stable {
-			loaderVersion = l.Version
-			break
+	var stable []string
+	for _, item := range items {
+		if item.Stable {
+			stable = append(stable, item.Version)
 		}
 	}
+	return newestSupported(stable, false)
+}
 
-	installerVersion := "1.0.1"
+func getFabricURL(version string) (string, error) {
+	if wantsLatest(version) {
+		var err error
+		version, err = stableFabricVersion("game")
+		if err != nil {
+			return "", err
+		}
+	}
+	loaderVersion, err := stableFabricVersion("loader")
+	if err != nil {
+		return "", err
+	}
+	const installerVersion = "1.0.1"
 	return fmt.Sprintf("https://meta.fabricmc.net/v2/versions/loader/%s/%s/%s/server/jar",
 		version, loaderVersion, installerVersion), nil
 }
 
 func getVelocityURL(version string) (string, error) {
-	v := strings.TrimSpace(version)
-	// If version is empty, "latest", or looks like Minecraft version ("1.21.4"), default to "3.4.0-SNAPSHOT"
-	if v == "" || strings.EqualFold(v, "latest") || strings.HasPrefix(v, "1.") {
-		v = "3.4.0-SNAPSHOT"
+	// Preserve the historical Minecraft-version compatibility mapping, but
+	// resolve the current proxy release rather than pinning an old proxy build.
+	if strings.HasPrefix(strings.TrimSpace(version), "1.") {
+		version = "latest"
 	}
-
-	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/velocity/versions/%s/builds", v)
-	resp, err := httpGet(apiURL)
-	if err == nil {
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			var builds []struct {
-				Downloads map[string]struct {
-					URL string `json:"url"`
-				} `json:"downloads"`
-			}
-			if json.NewDecoder(resp.Body).Decode(&builds) == nil && len(builds) > 0 {
-				if dl, ok := builds[0].Downloads["server:default"]; ok && dl.URL != "" {
-					return dl.URL, nil
-				}
-				for _, dl := range builds[0].Downloads {
-					if dl.URL != "" {
-						return dl.URL, nil
-					}
-				}
-			}
-		}
-	}
-	// Fallback to verified direct PaperMC fill-data object
-	return "https://fill-data.papermc.io/v1/objects/fe53021f3168322cb6cb68f78699866fd098df3c306e4359847a10b0d02689ef/velocity-3.4.0-SNAPSHOT-563.jar", nil
+	return getFillURL("velocity", version)
 }
 
 func getWaterfallURL(version string) (string, error) {
-	v := strings.TrimSpace(version)
-	if v == "" || strings.EqualFold(v, "latest") || (!strings.HasPrefix(v, "1.20") && !strings.HasPrefix(v, "1.21") && !strings.HasPrefix(v, "1.19")) {
-		v = "1.20"
-	}
-
-	apiURL := fmt.Sprintf("https://fill.papermc.io/v3/projects/waterfall/versions/%s/builds", v)
-	resp, err := httpGet(apiURL)
-	if err == nil {
-		defer resp.Body.Close()
-		if resp.StatusCode == http.StatusOK {
-			var builds []struct {
-				Downloads map[string]struct {
-					URL string `json:"url"`
-				} `json:"downloads"`
-			}
-			if json.NewDecoder(resp.Body).Decode(&builds) == nil && len(builds) > 0 {
-				if dl, ok := builds[0].Downloads["server:default"]; ok && dl.URL != "" {
-					return dl.URL, nil
-				}
-				for _, dl := range builds[0].Downloads {
-					if dl.URL != "" {
-						return dl.URL, nil
-					}
-				}
-			}
-		}
-	}
-	// Fallback to verified direct PaperMC fill-data object
-	return "https://fill-data.papermc.io/v1/objects/a6786337d4d41e19b5d0f771027b01956e6fb11a62244e762f5dae2e76c34644/waterfall-1.20-578.jar", nil
+	return getFillURL("waterfall", version)
 }
 
 func getBungeeCordURL() (string, error) {
