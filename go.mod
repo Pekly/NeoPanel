@@ -7,6 +7,7 @@ require (
 	github.com/go-webauthn/webauthn v0.10.2
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkg/sftp v1.13.6
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
@@ -33,9 +34,7 @@ require (
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/net v0.62.0 // indirect
-	golang.org/x/sync v0.25.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
-	golang.org/x/tools v0.52.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.55.3 // indirect
