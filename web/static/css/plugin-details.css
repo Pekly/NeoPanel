@@ -25,6 +25,7 @@
 .np-project-meta p, .np-project-meta dl { font-size: 12px; line-height: 1.6; margin: 0; }
 .np-project-links { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; }
 .np-project a { color: var(--ac); text-decoration: underline; text-underline-offset: 3px; }
+.np-project .np-project-markdown a { text-decoration: none; }
 .np-project-member { display: flex; align-items: center; gap: 12px; margin-top: 12px; font-size: 13px; }
 .np-project-member > div { min-width: 0; }
 .np-project-member .np-project-icon { width: 32px; height: 32px; border-radius: 50%; font-size: 14px; }
