@@ -40,20 +40,23 @@
     return summary || (permitted(srv) ? cached(srv)?.info : null);
   }
   function display(srv) {
-    if (isSteelEngine(srv?.type)) return {software: 'steel', text: `Steel${srv.version ? ' · ' + text(srv.version) : ''} · Native`};
+    if (isSteelEngine(srv?.type)) return {software: 'steel', name: 'Steel', version: text(srv.version) || 'Unknown version', text: `Steel${srv.version ? ' · ' + text(srv.version) : ''} · Native`};
     const a = info(srv), identified = a && ['identified', 'partial'].includes(a.status);
     const software = identified && known.has(a.software) ? a.software : 'custom';
-    const parts = [software === 'custom' ? 'Custom' : engineMeta(software).label];
+    const name = software === 'custom' ? 'Custom' : engineMeta(software).label;
+    const parts = [name];
     // project_version is a loader/proxy release, never a Minecraft version.
     if (identified && text(a.project_version)) parts.push('Release ' + text(a.project_version));
     if (identified && text(a.minecraft_version)) parts.push('Minecraft ' + text(a.minecraft_version));
     if (identified && (text(a.build_name) || a.build_id)) parts.push('Build ' + (text(a.build_name) || String(a.build_id).slice(0, 80)));
     if (parts.length === 1) parts.push('Unknown version');
-    return {software, text: parts.join(' / ')};
+    const proxy = ['velocity', 'waterfall', 'bungeecord'].includes(software);
+    const version = identified ? (proxy ? text(a.project_version) : text(a.minecraft_version) || text(a.project_version)) : '';
+    return {software, name, version: version || 'Unknown version', text: parts.join(' / ')};
   }
-  function label(srv, size = 13) {
+  function label(srv, size = 13, detailed = false) {
     const d = display(srv);
-    return `${engineIcon(d.software, size)} <span class="artifact-label">${esc(d.text)}</span>`;
+    return `${engineIcon(d.software, size)} <span class="artifact-label">${esc(detailed ? d.text : d.name)}</span>`;
   }
   function javaLabel(srv) {
     const a = info(srv);
@@ -73,7 +76,7 @@
     const a = info(srv), loading = cached(srv)?.state === 'loading';
     return `<section id="server-artifact-panel" class="artifact-note" aria-label="Installed server file">
       <div class="artifact-heading"><b>Installed file</b>${permitted(srv) ? `<button type="button" class="btn sm" onclick="NPServerArtifact.retry()" ${loading ? 'disabled' : ''}>${loading ? 'Identifying…' : 'Identify again'}</button>` : ''}</div>
-      <div class="artifact-badge">${label(srv)}</div>
+      <div class="artifact-badge">${label(srv, 13, true)}</div>
       <p class="artifact-message" role="status">${esc(explanation(srv))}</p>
       <p class="mu artifact-config">Configured software: ${esc(engineMeta(srv?.type).label)}${srv?.version ? ' · ' + esc(srv.version) : ''}</p>
       ${permitted(srv) ? `<p class="mu mono artifact-file">${esc(a?.filename || srv?.jar_file || 'server.jar')}</p>` : ''}
@@ -84,13 +87,15 @@
     if (!srv || !serverPagePermission(S.view)) return;
     const hero = document.getElementById('srv-hero-engine');
     if (hero) hero.innerHTML = label(srv);
+    const version = document.getElementById('srv-hero-version');
+    if (version) version.textContent = display(srv).version;
     const panelEl = document.getElementById('server-artifact-panel');
     // Keep the retry button mounted (and keyboard focus intact) during status changes.
     if (panelEl) {
       const button = panelEl.querySelector('button');
       const loading = cached(srv)?.state === 'loading';
       if (button) { button.disabled = loading; button.textContent = loading ? 'Identifying…' : 'Identify again'; button.hidden = !permitted(srv); }
-      panelEl.querySelector('.artifact-badge').innerHTML = label(srv);
+      panelEl.querySelector('.artifact-badge').innerHTML = label(srv, 13, true);
       panelEl.querySelector('.artifact-message').textContent = explanation(srv);
       const config = panelEl.querySelector('.artifact-config');
       if (config) config.textContent = `Configured software: ${engineMeta(srv.type).label}${srv.version ? ' · ' + srv.version : ''}`;

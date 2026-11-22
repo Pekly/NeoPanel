@@ -233,7 +233,11 @@ function engineIcon(type, size = 16, withBg = false) {
 }
 
 function serverArtifactLabel(srv, size = 13) {
-  return window.NPServerArtifact?.label(srv, size) || `${engineIcon('custom', size)} Custom / Unknown version`;
+  return window.NPServerArtifact?.label(srv, size) || `${engineIcon('custom', size)} Custom`;
+}
+
+function serverArtifactVersion(srv) {
+  return window.NPServerArtifact?.display(srv).version || 'Unknown version';
 }
 
 function javaCommandLabel(value, srv) {
@@ -787,6 +791,8 @@ function syncHeroFromSavedServer(targetSrv) {
   const engPill = $('#srv-hero-engine');
   if (engPill) {
     engPill.innerHTML = serverArtifactLabel(targetSrv);
+    const version = $('#srv-hero-version');
+    if (version) version.textContent = serverArtifactVersion(targetSrv);
   }
 
   const hst = $('#hst');
@@ -5176,6 +5182,7 @@ function srvh() {
       <div id="srv-hero-desc" class="srv-hero-sub" style="display:${panelDesc ? 'block' : 'none'};">${esc(panelDesc)}</div>
       <div class="srv-connection">
         <span id="srv-hero-engine" class="eng-pill" title="Installed server software">${serverArtifactLabel(srv)}</span>
+        <span id="srv-hero-version" class="mu mono">${esc(serverArtifactVersion(srv))}</span>
         <div id="hst" class="row hst" style="margin-top: 0;">
           ${playerAddressButtonHtml(hostAddr)}
           <span class="mono mu">CPU ${c.toFixed(1)}%</span>
@@ -5910,7 +5917,7 @@ const V = {
           const dVal = origIdx === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0);
           const upSec = origIdx === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
           const host = `${srvHost(s)}:${s.port || 25565}`;
-          const coreLabel = window.NPServerArtifact?.display(s).text || 'Custom / Unknown version';
+          const coreVersion = serverArtifactVersion(s);
           const srvUrl = serverRouteUrl(nid, s.id, 'con');
 
           if (dashVm === 'list') {
@@ -5929,6 +5936,7 @@ const V = {
                   <div class="row" style="gap: 8px; margin-top: 5px; align-items: center; flex-wrap: wrap;">
                     <span class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</span>
                     <span class="chip artifact-badge">${serverArtifactLabel(s, 14)}</span>
+                    <span class="mu mono artifact-version">${esc(coreVersion)}</span>
                     <span data-role="uptime" class="srv-card-uptime" style="font-size: 11.5px; color: var(--tx-muted); white-space: nowrap; ${isRun ? '' : 'display:none;'}">&bull; Up ${formatUptime(upSec)}</span>
                     ${isRemote ? `<span class="chip" style="font-size: 11px; padding: 1px 7px;">${esc(nodeName)}</span>` : ''}
                   </div>
@@ -5967,7 +5975,7 @@ const V = {
                 <span class="srv-card-action-btn" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();this.click();}" onclick="event.preventDefault(); event.stopPropagation(); refreshDashboard();" title="Refresh status" aria-label="Refresh server status">${ic('refresh', 13)}</span>
                 ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
-              <div class="srv-card-identity">${serverRowIconHtml(s)}<span>${esc(coreLabel)}</span></div>
+              <div class="srv-card-identity">${serverRowIconHtml(s)}<span class="artifact-version">${esc(coreVersion)}</span></div>
             </div>
             <div class="srv-card-body">
               <div class="srv-card-title-row">

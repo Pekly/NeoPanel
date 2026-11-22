@@ -30,7 +30,7 @@ test('proxy release is not Minecraft; loader, build and unsafe provider labels a
   const {a,srv}=setup();srv.artifact={status:'identified',software:'velocity',project_version:'3.4.0',required_java:21};
   assert.equal(a.display(srv).software,'velocity');assert.match(a.display(srv).text,/Release 3.4.0/);assert.doesNotMatch(a.display(srv).text,/Minecraft/);
   srv.artifact={status:'partial',software:'fabric',project_version:'<img onerror=x>',minecraft_version:'1.20.4',build_name:'<script>'};
-  assert.match(a.label(srv),/Minecraft 1.20.4/);assert.match(a.label(srv),/&lt;img/);assert.doesNotMatch(a.label(srv),/<script>/);
+  assert.match(a.label(srv,13,true),/Minecraft 1.20.4/);assert.match(a.label(srv,13,true),/&lt;img/);assert.doesNotMatch(a.label(srv,13,true),/<script>/);
   assert.equal(srv.type,'paper');assert.equal(srv.version,'configured-wrong');
 });
 test('Auto exact/minimum/unknown labels and system/manual selections remain distinct',()=>{
@@ -53,7 +53,7 @@ test('singleflight, worker path, bounded error attempt and explicit retry',async
 });
 test('permission and inventory views never auto-fetch; supplied summaries remain usable',()=>{
   const {a,c,calls,srv}=setup();c.allowed=false;a.sync();assert.equal(calls.length,0);srv.artifact={status:'identified',software:'paper',minecraft_version:'1.21'};
-  assert.match(a.label(srv),/Minecraft 1.21/);assert.doesNotMatch(a.panel(srv),/onclick=|custom.jar/);
+  assert.match(a.label(srv),/>Paper<\/span>/);assert.equal(a.display(srv).version,'1.21');assert.doesNotMatch(a.panel(srv),/onclick=|custom.jar/);
   c.allowed=true;c.S.view='dash';delete srv.artifact;a.sync();assert.equal(calls.length,0);
 });
 test('stale server/node/account/token/jar/type/version contexts abort and ignore completions',async()=>{
@@ -148,4 +148,20 @@ test('supplied and fetched identities expire without a polling timer',async()=>{
   assert.equal(a.display(srv).software,'fabric');now+=300001;
   assert.equal(a.display(srv).software,'custom');assert.equal(calls.length,1);
   a.sync();assert.equal(calls.length,2);a.dispose();
+});
+
+test('software badges stay short and version text excludes build metadata',()=>{
+  const {a,c,srv}=setup();
+  srv.artifact={status:'identified',software:'velocity',project_version:'4.3.2-SNAPSHOT',build_name:'#58',build_id:'long-build-uuid'};
+  assert.equal(a.display(srv).name,'Velocity');
+  assert.equal(c.serverArtifactVersion(srv),'4.3.2-SNAPSHOT');
+  assert.match(a.label(srv),/>Velocity<\/span>/);
+  assert.doesNotMatch(a.label(srv),/Release|Build|SNAPSHOT|long-build/);
+  assert.match(a.panel(srv),/Build #58/);
+  srv.artifact={status:'identified',software:'fabric',minecraft_version:'1.21.4',project_version:'0.20.1',build_name:'#99'};
+  assert.equal(c.serverArtifactVersion(srv),'1.21.4');
+  for(const status of ['unknown','missing','error']) {
+    srv.artifact={status,software:'velocity',project_version:'stale',minecraft_version:'stale'};
+    assert.equal(a.display(srv).name,'Custom');assert.equal(c.serverArtifactVersion(srv),'Unknown version');
+  }
 });
