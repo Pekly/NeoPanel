@@ -1,9 +1,6 @@
 package api
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -782,12 +779,12 @@ func (h *FileHandler) Move(w http.ResponseWriter, r *http.Request) {
 
 func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
-	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	ctx, limit, releaseArchive, err := h.manager.BeginArchiveCreation(r.Context(), serverID)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		writeArchiveCreationError(w, err)
 		return
 	}
-	defer releaseMutation()
+	defer releaseArchive()
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -804,7 +801,7 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 		Name        string   `json:"name"`
 		Format      string   `json:"format"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
 		return
 	}
@@ -815,6 +812,11 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(sources) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Select at least one file or folder to archive"})
+		return
+	}
+
+	if len(sources) > runner.ArchiveMaxEntries {
+		writeArchiveCreationError(w, runner.ErrArchiveLimit)
 		return
 	}
 
@@ -927,15 +929,11 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 	var fileCount int
 	err = root.Publish(outFull, 0644, func(out *os.File) error {
 		skip := map[string]bool{outFull: true}
-		if format == "tar.gz" {
-			fileCount, err = buildTarGzArchive(root, out, items, skip)
-		} else {
-			fileCount, err = buildZipArchive(root, out, items, skip)
-		}
+		fileCount, err = buildArchiveContext(ctx, root, out, items, skip, format, limit)
 		return err
 	})
 	if err != nil {
-		writeError(w, 500, "Failed to create archive: "+err.Error())
+		writeArchiveCreationError(w, err)
 		return
 	}
 
@@ -958,151 +956,6 @@ func (h *FileHandler) Compress(w http.ResponseWriter, r *http.Request) {
 type archiveSource struct {
 	full      string
 	entryRoot string
-}
-
-func buildZipArchive(root *rooted.Root, outFile io.Writer, sources []archiveSource, skipPaths map[string]bool) (int, error) {
-
-	zw := zip.NewWriter(outFile)
-	defer zw.Close()
-
-	count := 0
-	for _, src := range sources {
-		err := root.Walk(src.full, func(path string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if skipPaths[path] || strings.HasPrefix(filepath.Base(path), ".neopanel-") {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if info.Mode()&os.ModeSymlink != 0 {
-				return nil
-			}
-			rel, err := filepath.Rel(src.full, path)
-			if err != nil {
-				return err
-			}
-			archiveRel := src.entryRoot
-			if rel != "." {
-				archiveRel = filepath.ToSlash(filepath.Join(src.entryRoot, rel))
-			} else {
-				archiveRel = filepath.ToSlash(src.entryRoot)
-			}
-
-			header, err := zip.FileInfoHeader(info)
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				header.Name = strings.TrimSuffix(archiveRel, "/") + "/"
-				_, err = zw.CreateHeader(header)
-				return err
-			}
-			header.Name = archiveRel
-			header.Method = zip.Deflate
-
-			w, err := zw.CreateHeader(header)
-			if err != nil {
-				return err
-			}
-			f, err := root.Open(path)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-
-			if _, err := io.Copy(w, f); err != nil {
-				return err
-			}
-			count++
-			return nil
-		})
-		if err != nil {
-			return count, err
-		}
-	}
-
-	if err := zw.Close(); err != nil {
-		return count, err
-	}
-	return count, nil
-}
-
-func buildTarGzArchive(root *rooted.Root, outFile io.Writer, sources []archiveSource, skipPaths map[string]bool) (int, error) {
-
-	gw := gzip.NewWriter(outFile)
-	defer gw.Close()
-
-	tw := tar.NewWriter(gw)
-	defer tw.Close()
-
-	count := 0
-	for _, src := range sources {
-		err := root.Walk(src.full, func(path string, info os.FileInfo, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if skipPaths[path] || strings.HasPrefix(filepath.Base(path), ".neopanel-") {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if info.Mode()&os.ModeSymlink != 0 {
-				return nil
-			}
-			rel, err := filepath.Rel(src.full, path)
-			if err != nil {
-				return err
-			}
-			archiveRel := src.entryRoot
-			if rel != "." {
-				archiveRel = filepath.ToSlash(filepath.Join(src.entryRoot, rel))
-			} else {
-				archiveRel = filepath.ToSlash(src.entryRoot)
-			}
-
-			header, err := tar.FileInfoHeader(info, "")
-			if err != nil {
-				return err
-			}
-			header.Name = archiveRel
-			if info.IsDir() && !strings.HasSuffix(header.Name, "/") {
-				header.Name += "/"
-			}
-			if err := tw.WriteHeader(header); err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-
-			f, err := root.Open(path)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-
-			if _, err := io.Copy(tw, f); err != nil {
-				return err
-			}
-			count++
-			return nil
-		})
-		if err != nil {
-			return count, err
-		}
-	}
-
-	if err := tw.Close(); err != nil {
-		return count, err
-	}
-	if err := gw.Close(); err != nil {
-		return count, err
-	}
-	return count, nil
 }
 
 func (h *FileHandler) Unzip(w http.ResponseWriter, r *http.Request) {

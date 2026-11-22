@@ -77,3 +77,27 @@ func TestMutationCanonicalRoot(t *testing.T) {
 		t.Fatalf("alias bypassed lease: %v", err)
 	}
 }
+
+func TestMutationMissingRootKeepsKeyAfterCreation(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "server")
+	release, err := TryExclusiveMutation(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := TryMutation(dir); !errors.Is(err, ErrMutationBusy) {
+		if next != nil {
+			next()
+		}
+		t.Fatal("newly created root bypassed maintenance", err)
+	}
+	release()
+	next, err := TryMutation(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next()
+}

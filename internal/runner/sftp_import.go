@@ -19,7 +19,8 @@ var ErrImportTargetNotEmpty = errors.New("import requires a strictly empty serve
 // honor ctx and finish all file writes before returning; shutdown cancels ctx and
 // waits for it to return. Transport validation and transfer limits belong to the
 // caller. Success leaves the server stopped and retains even the empty original
-// directory in SafetyCopy (pre-existing file handles may still write into it).
+// directory in SafetyCopy. Managed writes are excluded during publication;
+// external processes and their pre-existing handles require host isolation.
 func (m *ServerManager) ImportServerFiles(ctx context.Context, srv *database.Server, transfer func(context.Context, string) error) (RestoreResult, error) {
 	var result RestoreResult
 	if srv == nil || !safeBackupComponent(srv.ID) || strings.HasPrefix(srv.ID, ".") || (srv.NodeID != "" && srv.NodeID != "local") {
@@ -28,7 +29,7 @@ func (m *ServerManager) ImportServerFiles(ctx context.Context, srv *database.Ser
 	if transfer == nil {
 		return result, errors.New("import transfer callback is required")
 	}
-	unlock, err := m.beginOperation(srv.ID)
+	unlock, err := m.beginFileOperation(srv.ID)
 	if err != nil {
 		return result, err
 	}

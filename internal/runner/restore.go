@@ -42,15 +42,7 @@ func (m *ServerManager) beginOperation(id string) (func(), error) {
 }
 
 func (m *ServerManager) CreateServerBackup(serverID, name string) (int64, error) {
-	unlock, err := m.beginOperation(serverID)
-	if err != nil {
-		return 0, err
-	}
-	defer unlock()
-	m.mu.RLock()
-	dir := m.backupDir
-	m.mu.RUnlock()
-	return CreateBackup(m.GetWorkingDir(serverID), filepath.Join(dir, serverID), name)
+	return m.CreateServerBackupContext(context.Background(), serverID, name)
 }
 
 type RestoreResult struct {
@@ -69,7 +61,7 @@ func (m *ServerManager) RestoreBackup(ctx context.Context, srv *database.Server,
 	if !safeBackupComponent(srv.ID) || !safeBackupComponent(name) || !strings.HasSuffix(name, ".tar.gz") {
 		return result, fmt.Errorf("%w: use an existing local .tar.gz backup basename", ErrInvalidArchive)
 	}
-	unlock, err := m.beginOperation(srv.ID)
+	unlock, err := m.beginFileOperation(srv.ID)
 	if err != nil {
 		return result, err
 	}

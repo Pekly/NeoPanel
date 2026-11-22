@@ -2,6 +2,7 @@ package rooted
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -37,7 +38,15 @@ func tryMutation(dir string, exclusive bool) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	original := key
 	key, err = filepath.EvalSymlinks(key)
+	if os.IsNotExist(err) {
+		// Maintenance can create a missing server directory. Its daemon-owned
+		// parent still gives that future root the same canonical lease key.
+		var parent string
+		parent, err = filepath.EvalSymlinks(filepath.Dir(original))
+		key = filepath.Join(parent, filepath.Base(original))
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -22,7 +22,7 @@ func (m *ServerManager) BeginServerOperation(id string) (func(), error) {
 // the operation gate until the caller has finished ALL filesystem/DB changes.
 // It deliberately uses the instance directly, not the guarded public Stop.
 func (m *ServerManager) BeginServerMaintenance(ctx context.Context, id string) (func(), error) {
-	release, err := m.beginOperation(id)
+	release, err := m.beginFileOperation(id)
 	if err != nil {
 		return nil, err
 	}

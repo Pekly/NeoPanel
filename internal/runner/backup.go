@@ -3,6 +3,7 @@ package runner
 import (
 	"archive/tar"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"github.com/Pekly/NeoPanel/internal/rooted"
@@ -16,6 +17,30 @@ import (
 // backup. Temporary files live on the destination filesystem and are always removed.
 // This is a live filesystem backup, not a transactional snapshot of a running JVM.
 func CreateBackup(sourceDir, backupDir, name string) (int64, error) {
+	unreserve, err := reserveBackupTarget(backupDir, name)
+	if err != nil {
+		return 0, err
+	}
+	defer unreserve()
+	ctx, cancel := context.WithTimeout(context.Background(), ArchiveTimeout)
+	defer cancel()
+	release, err := archiveSlot(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	mutation, err := rooted.TryExclusiveMutation(sourceDir)
+	if err != nil {
+		return 0, err
+	}
+	defer mutation()
+	return createBackupContext(ctx, sourceDir, backupDir, name, ArchiveMaxBytes)
+}
+
+func createBackupContext(ctx context.Context, sourceDir, backupDir, name string, limit int64) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, "/\\") || !strings.HasSuffix(name, ".tar.gz") {
 		return 0, fmt.Errorf("invalid backup filename")
 	}
@@ -56,7 +81,7 @@ func CreateBackup(sourceDir, backupDir, name string) (int64, error) {
 		return 0, fmt.Errorf("create temporary backup: %w", err)
 	}
 	defer os.Remove(out.Name())
-	archiveErr := writeBackupArchive(source, out)
+	archiveErr := writeBackupArchiveContext(ctx, source, out, limit)
 	syncErr := out.Sync()
 	closeErr := out.Close()
 	if err := errors.Join(archiveErr, syncErr, closeErr); err != nil {
@@ -66,6 +91,9 @@ func CreateBackup(sourceDir, backupDir, name string) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("stat completed backup: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	// Link is an atomic no-replace publication (Rename would overwrite on Unix).
 	if err := os.Link(out.Name(), filepath.Join(dest, name)); err != nil {
 		return 0, fmt.Errorf("publish backup: %w", err)
@@ -74,62 +102,70 @@ func CreateBackup(sourceDir, backupDir, name string) (int64, error) {
 }
 
 func writeBackupArchive(source string, out io.Writer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), ArchiveTimeout)
+	defer cancel()
+	return writeBackupArchiveContext(ctx, source, out, ArchiveMaxBytes)
+}
+
+func writeBackupArchiveContext(ctx context.Context, source string, out io.Writer, limit int64) error {
 	root, err := rooted.Open(source)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	gw := gzip.NewWriter(out)
-	tw := tar.NewWriter(gw)
-	walkErr := root.Walk(".", func(p string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
+	type entry struct {
+		path string
+		info os.FileInfo
+		link string
+	}
+	var entries []entry
+	err = NewArchiveBudget(limit).Walk(ctx, root, ".", func(p string, info os.FileInfo) error {
 		if p == "." {
 			return nil
 		}
-		rel := p
-		var err error
 		link := ""
 		if info.Mode()&os.ModeSymlink != 0 {
-			link, err = root.Readlink(p)
-			if err != nil {
-				return err
+			var e error
+			link, e = root.Readlink(p)
+			if e != nil {
+				return e
 			}
 		} else if !info.IsDir() && !info.Mode().IsRegular() {
-			return fmt.Errorf("unsupported file type: %s", rel)
+			return fmt.Errorf("unsupported file type: %s", p)
 		}
-		var f *os.File
-		if info.Mode().IsRegular() {
-			f, err = root.Open(p)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			info, err = f.Stat()
-			if err != nil {
-				return err
-			}
-		}
-		header, err := tar.FileInfoHeader(info, link)
-		if err != nil {
-			return err
-		}
-		header.Name = filepath.ToSlash(rel)
-		if err := tw.WriteHeader(header); err != nil {
-			return fmt.Errorf("archive header %s: %w", rel, err)
-		}
-		if info.Mode().IsRegular() {
-			// Read from the same regular-file handle used for the header.
-			_, copyErr := io.Copy(tw, f)
-			if err := errors.Join(copyErr, f.Close()); err != nil {
-				return fmt.Errorf("archive %s: %w", rel, err)
-			}
-		}
+		entries = append(entries, entry{p, info, link})
 		return nil
 	})
-	// Close in order, before measuring or publishing; gzip writes its footer on Close.
-	tarErr := tw.Close()
-	gzipErr := gw.Close()
-	return errors.Join(walkErr, tarErr, gzipErr)
+	if err != nil {
+		return err
+	} // No file content or compressed output before preflight succeeds.
+	gw := gzip.NewWriter(out)
+	tw := tar.NewWriter(gw)
+	writeErr := func() error {
+		for _, item := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			header, err := tar.FileInfoHeader(item.info, item.link)
+			if err != nil {
+				return err
+			}
+			header.Name = filepath.ToSlash(item.path)
+			if err = tw.WriteHeader(header); err != nil {
+				return err
+			}
+			if item.info.Mode().IsRegular() {
+				f, err := root.Open(item.path)
+				if err != nil {
+					return err
+				}
+				copyErr := CopyArchiveFile(ctx, tw, f, item.info.Size())
+				if err = errors.Join(copyErr, f.Close()); err != nil {
+					return fmt.Errorf("archive %s: %w", item.path, err)
+				}
+			}
+		}
+		return ctx.Err()
+	}()
+	return errors.Join(writeErr, tw.Close(), gw.Close(), ctx.Err())
 }

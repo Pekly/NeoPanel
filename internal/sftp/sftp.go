@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
@@ -28,12 +29,15 @@ import (
 )
 
 type SFTPServer struct {
-	cfg      *config.Config
-	db       *database.DB
-	listener net.Listener
-	sshConf  *ssh.ServerConfig
-	stopChan chan struct{}
-	wg       sync.WaitGroup
+	cfg       *config.Config
+	db        *database.DB
+	listener  net.Listener
+	sshConf   *ssh.ServerConfig
+	stopChan  chan struct{}
+	wg        sync.WaitGroup
+	stopOnce  sync.Once
+	admission connectionAdmission
+	growthMu  sync.Mutex // serializes SFTP size checks and mutations across sessions
 }
 
 func NewSFTPServer(cfg *config.Config, db *database.DB) (*SFTPServer, error) {
@@ -112,12 +116,16 @@ func (s *SFTPServer) Start() error {
 }
 
 func (s *SFTPServer) Stop() {
-	if s.listener != nil {
-		close(s.stopChan)
-		_ = s.listener.Close()
-		s.wg.Wait()
-		log.Printf("[SFTP] SFTP server stopped")
-	}
+	s.stopOnce.Do(func() {
+		if s.stopChan != nil {
+			close(s.stopChan)
+		}
+		s.admission.stop()
+		if s.listener != nil {
+			_ = s.listener.Close()
+		}
+	})
+	s.wg.Wait()
 }
 
 // Exact IDs are canonical; non-exact aliases must identify exactly one server.
@@ -328,7 +336,22 @@ func (s *SFTPServer) acceptLoop() {
 			}
 		}
 
-		go s.handleConnection(netConn)
+		timeout, ok := s.admission.admit(netConn)
+		if !ok {
+			_ = netConn.Close()
+			continue
+		}
+		// Count workers before launch; acceptLoop itself keeps Wait nonzero.
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			defer s.admission.release(netConn)
+			if err := netConn.SetDeadline(time.Now().Add(timeout)); err != nil {
+				_ = netConn.Close()
+				return
+			}
+			s.handleConnection(netConn)
+		}()
 	}
 }
 
@@ -357,6 +380,11 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 		return
 	}
 	defer sshConn.Close()
+	s.admission.authenticated(netConn)
+	// A handshake deadline must not expire an otherwise healthy SFTP session.
+	if err := netConn.SetDeadline(time.Time{}); err != nil {
+		return
+	}
 
 	log.Printf("[SFTP] Client %s connected as %q", netConn.RemoteAddr(), sshConn.User())
 
@@ -385,18 +413,31 @@ func (s *SFTPServer) handleConnection(netConn net.Conn) {
 	if err != nil {
 		return
 	}
+	var channelWorkers sync.WaitGroup
+	defer func() { _ = sshConn.Close(); channelWorkers.Wait() }()
+	channelSlots := make(chan struct{}, maxSessionChannels)
 	for newChannel := range chans {
 		if newChannel.ChannelType() != "session" {
 			_ = newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
 			continue
 		}
-
-		channel, requests, err := newChannel.Accept()
-		if err != nil {
+		select {
+		case channelSlots <- struct{}{}:
+		default:
+			_ = newChannel.Reject(ssh.ResourceShortage, "too many SFTP channels")
 			continue
 		}
 
+		channel, requests, err := newChannel.Accept()
+		if err != nil {
+			<-channelSlots
+			continue
+		}
+
+		channelWorkers.Add(1)
 		go func(ch ssh.Channel, in <-chan *ssh.Request) {
+			defer channelWorkers.Done()
+			defer func() { <-channelSlots }()
 			defer ch.Close()
 
 			subsystemAccepted := false
@@ -603,8 +644,25 @@ func (f *guardedFile) WriteAt(p []byte, off int64) (int, error) {
 		return 0, err
 	}
 	defer release()
+	f.h.server.growthMu.Lock()
+	defer f.h.server.growthMu.Unlock()
 	if err := f.check("files.edit"); err != nil {
 		return 0, err
+	}
+	limit, err := f.h.sizeLimit()
+	if err != nil {
+		return 0, err
+	}
+	_, err = checkedWriteEnd(off, len(p), limit)
+	if err != nil {
+		return 0, err
+	}
+	info, err := f.file.Stat()
+	if err != nil {
+		return 0, err
+	}
+	if info.Size() > limit {
+		return 0, sftp.ErrSSHFxFailure
 	}
 	return f.file.WriteAt(p, off)
 }
@@ -633,12 +691,19 @@ func (h *chrootHandler) openFileInternal(r *sftp.Request) (*guardedFile, error) 
 	if err := h.check(""); err != nil {
 		return nil, err
 	}
+	var fileLimit int64
 	if writes {
 		release, err := rooted.TryMutation(h.rootDir)
 		if err != nil {
 			return nil, err
 		}
 		defer release() // includes create/truncate, but does not pin idle handles
+		h.server.growthMu.Lock()
+		defer h.server.growthMu.Unlock()
+		fileLimit, err = h.sizeLimit()
+		if err != nil {
+			return nil, err
+		}
 		if err := h.check("files.edit"); err != nil {
 			return nil, err
 		}
@@ -669,6 +734,16 @@ func (h *chrootHandler) openFileInternal(r *sftp.Request) (*guardedFile, error) 
 	if err != nil {
 		return nil, err
 	}
+	// OPEN creates an empty file or truncates to zero; size attributes are not
+	// applied. Existing oversized files remain readable, but not writable until
+	// explicitly shrunk. Every subsequent WRITE rechecks the current assignment.
+	if writes {
+		info, err := file.Stat()
+		if err != nil || info.Size() > fileLimit {
+			_ = file.Close()
+			return nil, sftp.ErrSSHFxFailure
+		}
+	}
 	return &guardedFile{file: file, h: h, requestPath: r.Filepath, readable: pf.Read, writable: writes}, nil
 }
 
@@ -696,6 +771,35 @@ func (h *chrootHandler) Filecmd(r *sftp.Request) error {
 		return err
 	}
 	defer release()
+	h.server.growthMu.Lock()
+	defer h.server.growthMu.Unlock()
+	// Waiting behind another mutation must not preserve a revoked grant.
+	if err := h.check(permission); err != nil {
+		return err
+	}
+	if r.Method == "Rename" || r.Method == "PosixRename" {
+		if err := h.check("files.delete"); err != nil {
+			return err
+		}
+	}
+	if r.Method == "Setstat" && r.AttrFlags().Size {
+		limit, err := h.sizeLimit()
+		if err != nil {
+			return err
+		}
+		attrs := r.Attributes()
+		// Compare unsigned before converting: protocol size is uint64.
+		if attrs == nil || attrs.Size > uint64(limit) {
+			return sftp.ErrSSHFxFailure
+		}
+		info, err := h.fsStat(r.Filepath)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return sftp.ErrSSHFxPermissionDenied
+		}
+	}
 	return h.fsCommand(r)
 }
 
