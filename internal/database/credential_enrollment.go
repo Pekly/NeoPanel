@@ -69,3 +69,35 @@ func (db *DB) AddAPIKeyForAuth(auth CredentialEnrollmentAuth, name, keyHash, key
 	}
 	return &APIKey{ID: int(id), UserID: auth.UserID, Name: name, KeyPrefix: keyPrefix, CreatedAt: now}, nil
 }
+
+// EnableUserTwoFactorForAuth checks revocation and the un-enrolled state in the
+// same write. Keep the failure classification in that write transaction so a
+// revoked credential returns ErrNoRows, not an existing-factor conflict.
+func (db *DB) EnableUserTwoFactorForAuth(auth CredentialEnrollmentAuth, secret, recoveryCodes string) error {
+	predicate, args, err := auth.predicate()
+	if err != nil {
+		return err
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	writeArgs := append([]interface{}{secret, recoveryCodes}, args...)
+	res, err := tx.Exec(`UPDATE users SET two_factor_enabled = 1, two_factor_secret = ?, recovery_codes = ? WHERE two_factor_enabled = 0 AND `+predicate, writeArgs...)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		var id int
+		if err := tx.QueryRow(`SELECT id FROM users WHERE `+predicate, args...).Scan(&id); err != nil {
+			return err
+		}
+		return ErrFactorAlreadyEnabled
+	}
+	return tx.Commit()
+}

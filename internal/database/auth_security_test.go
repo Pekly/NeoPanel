@@ -168,7 +168,7 @@ func TestSecurityProfileWriteChecksAuthVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	avatar := "/new-avatar.png"
-	err := db.UpdateUserProfileForSession(user.ID, &user.AuthVersion, "changed", "First", "Last", "changed@example.test", &avatar)
+	_, err := db.UpdateUserProfileForAuth(CredentialEnrollmentAuth{UserID: user.ID, AuthVersion: &user.AuthVersion}, "changed", "First", "Last", "changed@example.test", &avatar)
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal("stale profile write accepted", err)
 	}
@@ -176,14 +176,17 @@ func TestSecurityProfileWriteChecksAuthVersion(t *testing.T) {
 	if err != nil || saved.Username != user.Username || saved.Email != user.Email || saved.AvatarURL != user.AvatarURL {
 		t.Fatal("stale write mutated profile", saved, err)
 	}
-	if err := db.UpdateUserProfileForSession(user.ID, &saved.AuthVersion, "changed", "First", "Last", "changed@example.test", &avatar); err != nil {
+	if _, err := db.UpdateUserProfileForAuth(CredentialEnrollmentAuth{UserID: user.ID, AuthVersion: &saved.AuthVersion}, "changed", "First", "Last", "changed@example.test", &avatar); err != nil {
 		t.Fatal(err)
 	}
 	saved, err = db.GetUserByID(user.ID)
 	if err != nil || saved.Username != "changed" || saved.Email != "changed@example.test" || saved.AvatarURL != avatar || saved.AuthVersion != 1 {
 		t.Fatal("atomic profile update failed", saved, err)
 	}
-	if err := db.UpdateUserProfileForSession(user.ID, nil, "changed", "", "", "api@example.test", nil); err != nil {
+	if _, err := db.AddAPIKey(user.ID, "source", "source-hash", "prefix"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.UpdateUserProfileForAuth(CredentialEnrollmentAuth{UserID: user.ID, APIKeyHash: "source-hash"}, "changed", "", "", "api@example.test", nil); err != nil {
 		t.Fatal("API key mutation rejected", err)
 	}
 	saved, err = db.GetUserByID(user.ID)

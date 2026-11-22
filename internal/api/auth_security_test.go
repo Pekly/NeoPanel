@@ -400,6 +400,14 @@ func TestSecurityProfileDelayedBodyCannotOutliveReset(t *testing.T) {
 			account := NewAccountHandler(db, auth)
 			body := &securityBlockedBody{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(`{"username":"changed","first_name":"First","last_name":"Last","email":"changed@example.test","avatar_url":"/changed.png"}`)}
 			req := httptest.NewRequest("PUT", "/api/account/profile", body).WithContext(context.WithValue(context.Background(), contextUserKey, claims))
+			if apiKey {
+				token := "neo_profile_test"
+				sum := sha256.Sum256([]byte(token))
+				if _, err := db.AddAPIKey(user.ID, "source", hex.EncodeToString(sum[:]), "neo_test"); err != nil {
+					t.Fatal(err)
+				}
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
 			w := httptest.NewRecorder()
 			done := make(chan struct{})
 			go func() { account.UpdateProfile(w, req); close(done) }()
@@ -433,9 +441,9 @@ func TestSecurityProfileDelayedBodyCannotOutliveReset(t *testing.T) {
 					t.Fatal("revoked session changed profile", saved)
 				}
 			}
-			if response.Token != "" {
-				if _, err := auth.ValidateToken(response.Token); err == nil {
-					t.Fatal("delayed request minted upgraded session")
+			if apiKey {
+				if _, err := auth.ValidateToken(response.Token); err != nil {
+					t.Fatal("independent API key did not mint a current session")
 				}
 			}
 		})

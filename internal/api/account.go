@@ -67,27 +67,15 @@ func (h *AccountHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
-	if !ok || claims == nil {
+	auth, err := credentialEnrollmentAuth(r)
+	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
 
-	var user *database.User
-	var err error
-	if claims.UserID > 0 {
-		user, err = h.db.GetUserByID(claims.UserID)
-	}
-	if user == nil || err != nil {
-		user, err = h.db.GetUserByUsername(claims.Username)
-	}
+	user, err := h.db.GetUserByID(auth.UserID)
 	if err != nil || user == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
-		return
-	}
-	// Never upgrade a session that was revoked between middleware and this read.
-	if !claims.APIKey && user.AuthVersion != claims.AuthVersion {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Session expired"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Credential revoked"})
 		return
 	}
 
@@ -133,26 +121,14 @@ func (h *AccountHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var expectedVersion *int64
-	if !claims.APIKey {
-		expectedVersion = &claims.AuthVersion
-	}
-	if err := h.db.UpdateUserProfileForSession(user.ID, expectedVersion, req.Username, req.FirstName, req.LastName, req.Email, req.AvatarURL); err != nil {
+	user, err = h.db.UpdateUserProfileForAuth(auth, req.Username, req.FirstName, req.LastName, req.Email, req.AvatarURL)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Session expired"})
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Credential revoked"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update profile: " + err.Error()})
 		return
-	}
-
-	user.Username = req.Username
-	user.FirstName = req.FirstName
-	user.LastName = req.LastName
-	user.Email = req.Email
-
-	if req.AvatarURL != nil {
-		user.AvatarURL = strings.TrimSpace(*req.AvatarURL)
 	}
 
 	newToken, _ := h.auth.GenerateToken(user)
@@ -250,24 +226,25 @@ func (h *AccountHandler) Generate2FA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	otpURL := GenerateTOTPURL("NeoPanel", user.Username, secret)
+	qrDataURL, err := totpQRDataURL(otpURL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not generate authenticator QR code")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"secret":      secret,
 		"otpauth_url": otpURL,
+		"qr_data_url": qrDataURL,
 		"username":    user.Username,
 	})
 }
 
 func (h *AccountHandler) Enable2FA(w http.ResponseWriter, r *http.Request) {
-	claims, ok := r.Context().Value(contextUserKey).(*JWTClaims)
-	if !ok || claims == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
-		return
-	}
-
-	user, err := h.db.GetUserByUsername(claims.Username)
+	auth, err := credentialEnrollmentAuth(r)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "User not found"})
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 		return
 	}
 
@@ -288,12 +265,19 @@ func (h *AccountHandler) Enable2FA(w http.ResponseWriter, r *http.Request) {
 	recoveryCodes := GenerateRecoveryCodes(8)
 	recoveryCSV := strings.Join(recoveryCodes, ",")
 
-	if err := h.db.EnableUserTwoFactor(user.ID, req.Secret, recoveryCSV); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "Two-factor authentication is already enabled or could not be enabled"})
+	if err := h.db.EnableUserTwoFactorForAuth(auth, req.Secret, recoveryCSV); err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Credential revoked"})
+		case errors.Is(err, database.ErrFactorAlreadyEnabled):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Two-factor authentication is already enabled"})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to enable two-factor authentication"})
+		}
 		return
 	}
 
-	_ = h.db.LogActivity(user.ID, "2fa_enable", "Activated two-factor authentication", extractClientIP(r))
+	_ = h.db.LogActivity(auth.UserID, "2fa_enable", "Activated two-factor authentication", extractClientIP(r))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message":        "Two-factor authentication successfully activated",

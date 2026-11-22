@@ -11963,22 +11963,24 @@ async function openEnable2FAWizard() {
       </div>
     </div>
   </div>`;
+  const wizardContent = $('#tfa-wizard-content'), setupUser = S.user, setupToken = S.token;
+  const setupCurrent = () => S.user === setupUser && S.token === setupToken && $('#tfa-wizard-content') === wizardContent;
 
   try {
     const res = await api('/api/account/2fa/generate', { method: 'POST' });
     const content = $('#tfa-wizard-content');
-    if (!content) return;
+    if (!content || !setupCurrent()) return;
 
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(res.otpauth_url)}`;
+    const qrUrl = typeof res.qr_data_url === 'string' && res.qr_data_url.length <= 65536 && /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(res.qr_data_url) ? res.qr_data_url : '';
     const formattedSecret = (res.secret.match(/.{1,4}/g) || []).join(' ');
 
     content.innerHTML = `
       <p class="mu" style="font-size:13px; margin:0 0 16px; text-align:left;">
         1. Scan this QR code in Google Authenticator, Authy, or 1Password. Or enter the secret key manually:
       </p>
-      <div style="background:#fff; display:inline-block; padding:10px; border-radius:12px; margin-bottom:14px; box-shadow:0 4px 14px rgba(0,0,0,0.25);">
-        <img src="${esc(qrUrl)}" alt="TOTP QR Code" width="180" height="180" style="display:block;">
-      </div>
+      ${qrUrl ? `<div style="background:#fff; display:inline-block; padding:10px; border-radius:12px; margin-bottom:14px; box-shadow:0 4px 14px rgba(0,0,0,0.25);">
+        <img src="${esc(qrUrl)}" alt="TOTP QR Code" width="180" height="180" style="display:block;" referrerpolicy="no-referrer">
+      </div>` : '<p class="mu">Enter the secret key below in your authenticator app. QR setup requires an updated backend.</p>'}
       <div style="margin-bottom:16px;">
         <span class="mu" style="font-size:11px; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">Secret Key</span>
         <div class="mono" style="background:var(--con-bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; font-size:14px; font-weight:700; user-select:all; color:#fff; display:inline-flex; align-items:center; gap:8px;">
@@ -11998,7 +12000,7 @@ async function openEnable2FAWizard() {
     $('#tfa-verify-code')?.focus();
   } catch (err) {
     const content = $('#tfa-wizard-content');
-    if (content) content.innerHTML = `<span style="color:var(--err);">Failed to generate 2FA key: ${esc(err.message)}</span>`;
+    if (content && setupCurrent()) content.innerHTML = `<span style="color:var(--err);">Failed to generate 2FA key: ${esc(err.message)}</span>`;
   }
 }
 
@@ -12006,6 +12008,9 @@ async function confirmEnable2FA(secret) {
   const code = $('#tfa-verify-code')?.value.trim();
   const errEl = $('#tfa-wizard-err');
   const btn = $('#tfa-confirm-btn');
+  const enrollmentContent = $('#tfa-wizard-content'), enrollmentUser = S.user, enrollmentToken = S.token;
+  const enrollmentCurrent = () => S.user === enrollmentUser && S.token === enrollmentToken && $('#tfa-wizard-content') === enrollmentContent;
+  if (!btn || btn.disabled || !enrollmentContent) return;
   if (!code || code.length !== 6) {
     if (errEl) errEl.textContent = 'Please enter a 6-digit code from your authenticator app.';
     return;
@@ -12016,6 +12021,7 @@ async function confirmEnable2FA(secret) {
       method: 'POST',
       body: JSON.stringify({ secret, code })
     });
+    if (!enrollmentCurrent()) return;
     if (S.user) S.user.two_factor_enabled = true;
     S.acct.two_factor_enabled = true;
 
@@ -12041,6 +12047,7 @@ async function confirmEnable2FA(secret) {
     }
     toast('Two-factor authentication successfully enabled!', 'ok');
   } catch (err) {
+    if (!enrollmentCurrent()) return;
     if (btn) btn.disabled = false;
     if (errEl) errEl.textContent = err.message || 'Verification failed. Please check the code and try again.';
   }
