@@ -53,9 +53,17 @@ try {
     $exe = Join-Path $OutputDirectory 'NeoPanel-Desktop.exe'
     & $go build -trimpath -tags 'desktop,production' '-ldflags=-s -w -H windowsgui' -o $exe ./cmd/neopanel-desktop
     if ($LASTEXITCODE -ne 0) { throw 'Desktop build failed. Close the app if replacing an existing EXE.' }
+    # The GUI wrapper does not run backend CLI commands. Ship the matching worker
+    # backend for local runtime provisioning only; Setup never starts it as a worker.
+    $runtimeHelper = Join-Path $OutputDirectory 'NeoPanel-Runtime.exe'
+    Push-Location $PSScriptRoot
+    try {
+        & $go build -trimpath -tags node '-ldflags=-s -w' -o $runtimeHelper ./cmd/neopanel
+        if ($LASTEXITCODE -ne 0) { throw 'Java provisioning helper build failed.' }
+    } finally { Pop-Location }
     $readme = Join-Path $OutputDirectory 'README-Desktop.md'
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs\windows-desktop.md') -Destination $readme -Force
-    $files = @($exe, $readme)
+    $files = @($exe, $runtimeHelper, $readme)
     if ($Installer) {
         if (!$InnoCompiler) { $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue; if ($cmd) { $InnoCompiler = $cmd.Source } }
         if (!$InnoCompiler) { $InnoCompiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }

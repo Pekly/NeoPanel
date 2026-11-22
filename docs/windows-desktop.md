@@ -56,7 +56,11 @@ To run a package you only need Windows 10/11 and Microsoft Edge WebView2 Runtime
 (normally already present). Go is not needed. If WebView2 is missing, install it
 from [Microsoft's WebView2 page](https://developer.microsoft.com/en-us/microsoft-edge/webview2/);
 no runtime is bundled in the ZIP.
-Java is needed only for local Java servers and can be installed through the panel.
+Java is needed only for local Java servers. Before first portable use, run the
+included `NeoPanel-Runtime.exe java install-all` from PowerShell under the hosting
+account. This helper provisions and verifies Java 8, 11, 16, 17, 21 and 25 without
+starting a service or game. `java list` reports local availability. New servers use
+Auto to match verified JAR/build requirements; explicit runtimes remain unchanged.
 
 ### Portable beta and optional installer
 
@@ -74,6 +78,13 @@ This adds `NeoPanel-Desktop-Setup.exe`. It installs for the current user under
 `%LOCALAPPDATA%\Programs\NeoPanel Desktop`, adds a Start menu shortcut, and offers
 an optional desktop shortcut. There is no service, scheduled startup, firewall
 change or administrator elevation. Close NeoPanel safely before upgrading.
+Setup runs the included `NeoPanel-Runtime.exe java install-all` synchronously before
+offering application launch. A missing family, failed download, or unsupported
+platform makes setup incomplete and suppresses launch. Retry that command in the
+installation folder after resolving the error. Old Java families may be unavailable
+on Windows ARM64. Use the same account and `NEOPANEL_JAVA_DIR` for setup and hosting.
+The helper is a backend binary; run it only with the documented Java subcommands
+for this purpose. It is included in package checksums.
 Uninstall removes application files, **not** databases, credentials or worlds.
 These builds are unsigned; production code signing is a separate release step.
 

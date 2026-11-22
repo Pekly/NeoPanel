@@ -33,6 +33,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 
 [Files]
 Source: "{#SourceDir}\NeoPanel-Desktop.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\NeoPanel-Runtime.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\README-Desktop.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
@@ -41,6 +42,35 @@ Name: "{group}\Uninstall NeoPanel Desktop"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\NeoPanel Desktop"; Filename: "{app}\NeoPanel-Desktop.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\NeoPanel-Desktop.exe"; Description: "Launch NeoPanel Desktop"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\NeoPanel-Desktop.exe"; Description: "Launch NeoPanel Desktop"; Flags: nowait postinstall skipifsilent; Check: JavaProvisioned
 
 ; Intentionally no UninstallDelete entries: databases, worlds, config and WebView profile stay intact.
+
+[Code]
+var
+  RuntimesReady: Boolean;
+
+function JavaProvisioned: Boolean;
+begin
+  Result := RuntimesReady;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    RuntimesReady := False;
+    WizardForm.StatusLabel.Caption := 'Installing and verifying Java 8, 11, 16, 17, 21 and 25...';
+    if not Exec(ExpandConstant('{app}\NeoPanel-Runtime.exe'), 'java install-all',
+      ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      RaiseException('Java provisioning could not start. Setup is incomplete. Run NeoPanel-Runtime.exe java install-all from the installation folder before launching NeoPanel.');
+    if ResultCode <> 0 then
+    begin
+      Log(Format('Java provisioning failed with exit code %d', [ResultCode]));
+      RaiseException('Required Java runtimes could not be verified. Setup is incomplete; NeoPanel will not be launched. Check network/platform support and run NeoPanel-Runtime.exe java install-all from the installation folder to retry.');
+    end;
+    RuntimesReady := True;
+  end;
+end;
