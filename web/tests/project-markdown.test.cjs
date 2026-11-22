@@ -79,6 +79,16 @@ port: 24454
     assert.equal(await page.locator('input:enabled').count(),0);assert.equal(await page.locator('input[type=checkbox]').count(),2);
     assert.match(await page.locator('pre code').textContent(),/port: 24454/);
     assert.equal(await page.locator('a[href="https://example.com/reference"]').getAttribute('rel'),'noopener noreferrer');
+    await page.evaluate(()=>{document.body.classList.add('np-project');document.body.style.setProperty('--ac','#4488ff');const sidebar=document.createElement('div');sidebar.className='np-project-links';sidebar.innerHTML='<a href="https://example.com/source">Source</a>';document.body.append(sidebar);});
+    const markdownLink=page.locator('a[href="https://example.com/reference"]');
+    assert.equal(await markdownLink.evaluate(el=>getComputedStyle(el).textDecorationLine),'none');
+    await page.keyboard.press('Tab');
+    await markdownLink.focus();
+    assert.equal(await markdownLink.evaluate(el=>getComputedStyle(el).outlineStyle),'solid');
+    assert.equal(await markdownLink.evaluate(el=>getComputedStyle(el).textDecorationLine),'none');
+    await markdownLink.hover();
+    assert.equal(await markdownLink.evaluate(el=>getComputedStyle(el).textDecorationLine),'none');
+    assert.equal(await page.locator('.np-project-links a').evaluate(el=>getComputedStyle(el).textDecorationLine),'underline');
     assert.equal(await page.locator('img[alt="Project banner"]').getAttribute('referrerpolicy'),'no-referrer');
     await page.locator('summary').click();assert.equal(await page.locator('details').getAttribute('open'),'');
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
