@@ -286,3 +286,34 @@ test('Browse defaults to Tiles and retains explicit saved layouts',()=>{
     assert.match(app,new RegExp(`renderViewModeToggle\\('${scope}', 'tiles'\\)`));
   }
 });
+
+test('button-owned install progress is project-scoped, indeterminate, and clears independently',async()=>{
+  const {c,calls}=harness();c.S.lastModrinthHits=[hit(0),hit(1)];const pending=new Map();
+  c.handler=async(url,o)=>{if(o.method==='POST')return new Promise((resolve,reject)=>pending.set(JSON.parse(o.body).slug,{resolve,reject}));return project();};
+  const first=c.NPPlugins.install('project-0','Demo 0');
+  assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/Checking…/);
+  for(let i=0;i<8;i++)await Promise.resolve();
+  const second=c.NPPlugins.install('project-1','Demo 1');for(let i=0;i<8;i++)await Promise.resolve();
+  let html=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);
+  assert.equal((html.match(/class="np-install-ring"/g)||[]).length,2);
+  assert.doesNotMatch(html,/aria-valuenow|\d+%/);
+  assert.ok(calls.filter(x=>x.o.method==='POST').every(x=>x.o.progressTarget==='button'));
+  await c.NPPlugins.install('project-0','Demo 0');assert.equal(pending.size,2);
+  pending.get('project-0').resolve({});await first;
+  html=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);assert.equal((html.match(/class="np-install-ring"/g)||[]).length,1);assert.match(html,/Install again/);
+  pending.get('project-1').reject(Error('timeout'));await second;
+  assert.doesNotMatch(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/np-install-ring|aria-busy="true"/);
+  assert.ok(c.messages.some(args=>args[0].includes('Check installed files')));
+});
+
+test('returning to a page while installation is pending retains its ring then clears it',async()=>{
+  const {c}=harness();c.S.lastModrinthHits=[hit(0)];let finish;let draws=0;
+  c.document.getElementById=id=>id==='store-grid'?{set innerHTML(_v){draws++;},removeAttribute(){}}:null;
+  c.handler=async(_url,o)=>o.method==='POST'?new Promise(resolve=>finish=resolve):project();
+  c.NPPlugins.sync();const job=c.NPPlugins.install('project-0','Demo');for(let i=0;i<8;i++)await Promise.resolve();
+  c.S.view='con';c.NPPlugins.sync();c.S.view='plug';c.NPPlugins.sync();
+  assert.match(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/np-install-ring/);
+  const before=draws;finish({});await job;
+  assert.ok(draws>before);assert.doesNotMatch(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/np-install-ring/);
+  assert.equal(c.messages.length,0,'stale completion does not claim success');
+});

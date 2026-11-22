@@ -174,3 +174,15 @@ html[data-panel-motion=reduced] .np-project-pages .np-page { transition: none; }
 @keyframes np-loading-enter { from { opacity: .5; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 600px) { .np-project-loading.card { padding: 16px; } .np-project-loading-head { grid-template-columns: 48px minmax(0,1fr); gap: 16px; } .np-project-loading-head > .np-project-icon { width: 48px; height: 48px; } .np-project-loading-grid { grid-template-columns: minmax(0,1fr); gap: 16px; } .np-loading-panel { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) { .np-project-loading.card { animation: none; } }
+
+/* Install feedback stays inside its own button: no invented percent or cancel affordance. */
+.btn.np-install-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-width: 128px; min-height: 34px; border-radius: 999px; padding: 7px 14px; white-space: nowrap; }
+.btn.np-install-btn.is-installing:disabled { opacity: 1; cursor: progress; color: var(--ac); background: color-mix(in srgb, var(--ac) 10%, var(--card-bg)); border-color: color-mix(in srgb, var(--ac) 25%, var(--border)); }
+.np-install-caption { line-height: 1.25; }
+.np-install-ring { display: block; flex: 0 0 18px; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.np-install-track { opacity: .2; }
+.np-install-arc { stroke-dasharray: 34 51; stroke-linecap: round; transform-origin: 10px 10px; animation: np-install-turn 900ms linear infinite; }
+.np-install-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+@keyframes np-install-turn { to { transform: rotate(360deg); } }
+html[data-panel-motion="reduced"] .np-install-arc { animation: none; }
+@media (prefers-reduced-motion: reduce) { .np-install-arc { animation: none; } }

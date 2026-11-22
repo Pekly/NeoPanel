@@ -3324,7 +3324,7 @@ async function computeGravatarHash(email) {
 // --- API Client ---
 async function api(endpoint, options = {}) {
   assertClientRequestAccess(endpoint, options);
-  const { suppressToast, isCurrent, optionalMetadata, ...fetchOpts } = options || {};
+  const { suppressToast, isCurrent, optionalMetadata, progressTarget, ...fetchOpts } = options || {};
   const headers = { ...(fetchOpts.headers || {}) };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
   if (!headers['Content-Type'] && !(fetchOpts.body instanceof FormData)) {
