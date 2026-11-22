@@ -1,0 +1,57 @@
+/* Match the workbench: semantic theme colors, inherited Inter/mono type,
+   4/8px rhythm, 8px surfaces. Provenance is text, never color alone. */
+.npi { color: var(--tx); min-width: 0; }
+.npi :is(p,span,b,button,dd,code), .npi-preview { overflow-wrap: anywhere; }
+.npi-toolbar, .npi-bulk, .npi-actions, .npi-pagination { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.npi-toolbar { justify-content: space-between; margin: 16px 0; }
+.npi-toolbar > div { flex: 1 1 240px; min-width: 0; }
+.npi-toolbar p { margin: 4px 0 0; font-size: 12px; }
+.npi-bulk { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; background: var(--card-inner); font-size: 12px; }
+.npi-bulk > .mu { flex: 1 1 240px; }
+.npi-feedback { font-size: 13px; line-height: 1.6; margin: 12px 0; }
+.npi-feedback:empty { margin: 0; }
+.npi-files { display: grid; gap: 12px; margin-top: 16px; }
+.npi-file { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; align-items: center; gap: 16px; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-width: 0; animation: npi-enter 220ms cubic-bezier(.2,.9,.25,1.1) both; animation-delay: calc(var(--npi-item,0) * 16ms); }
+.npi-file.is-selected { border-color: var(--ac); background: var(--ac-subtle); }
+.npi-file-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.npi input[type=checkbox]:not(.sw input), .npi input[type=radio] { width: 18px; height: 18px; flex: none; accent-color: var(--ac); cursor: pointer; }
+.npi input:disabled { cursor: not-allowed; }
+.npi-icon { display: grid; place-items: center; width: 40px; height: 40px; flex: none; background: var(--card-inner); border-radius: 8px; object-fit: contain; color: var(--ac); font-size: 24px; }
+.npi-copy { display: grid; gap: 4px; min-width: 0; }
+.npi-copy b, .npi-project { font-size: 14px; }
+.npi-project { padding: 0; text-align: left; color: var(--ac); background: none; border: 0; font-weight: 600; font-family: inherit; cursor: pointer; }
+.npi-project:hover { text-decoration: underline; text-underline-offset: 3px; }
+.npi-project:active { color: var(--tx); }
+.npi .mu { font-size: 12px; line-height: 1.5; }
+.npi-metadata { display: grid; gap: 8px; min-width: 0; font-size: 12px; }
+.npi-metadata .btn { justify-self: start; }
+.npi-status { font-weight: 600; }
+.npi dl { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 4px 12px; margin: 0; }
+.npi dt { color: var(--tx-muted); }
+.npi dd { margin: 0; }
+.npi .btn { white-space: normal; }
+.npi-actions { justify-content: flex-end; }
+.npi-tiles, .npi-icons { grid-template-columns: repeat(auto-fit,minmax(min(100%,280px),1fr)); }
+.npi-tiles .npi-file, .npi-icons .npi-file { grid-template-columns: minmax(0,1fr); align-content: start; }
+.npi-icons .npi-file-head { flex-wrap: wrap; justify-content: center; }
+.npi-icons .npi-copy { flex-basis: 100%; text-align: center; }
+.npi-icons .npi-project { text-align: center; }
+.npi-review { min-width: 0; grid-column: 1/-1; margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+.npi-review legend { padding: 0 8px; font-weight: 600; }
+.npi-review p { margin: 0 0 12px; }
+.npi-candidate { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; cursor: pointer; border-bottom: 1px solid var(--border); }
+.npi-candidate > span { display: grid; gap: 4px; min-width: 0; }
+.npi-review .npi-actions { margin-top: 16px; }
+.npi-pagination { justify-content: center; padding: 20px 0; }
+.npi-results { margin: 16px 0; border: 1px solid var(--border); border-radius: 8px; padding: 16px; font-size: 13px; }
+.npi-results h3 { margin: 0 0 8px; font-size: 14px; }
+.npi-results > div { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.npi-results .mu { display: block; }
+.npi-preview li { margin: 12px 0; }
+.npi :is(button,input):focus-visible { outline: 2px solid var(--ac); outline-offset: 4px; }
+.npi .sw:has(input:focus-visible) { outline: 2px solid var(--ac); outline-offset: 4px; }
+.npi :is(button,input) { transition: border-color 120ms cubic-bezier(.2,.8,.2,1), background-color 120ms cubic-bezier(.2,.8,.2,1); }
+@keyframes npi-enter { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 1100px) { .npi-list .npi-file { grid-template-columns: minmax(0,1fr) minmax(0,1fr); } .npi-list .npi-actions { grid-column: 1/-1; } }
+@media (max-width: 600px) { .npi-list .npi-file { grid-template-columns: minmax(0,1fr); } .npi-file { padding: 12px; } .npi-toolbar > .btn { width: 100%; } .npi-bulk { padding: 12px; } }
+@media (prefers-reduced-motion: reduce) { .npi-file { animation: none; } .npi :is(button,input) { transition: none; } }

@@ -192,7 +192,7 @@
     // A responding panel/worker reporting a third-party catalog failure is not
     // evidence that the game status connection was lost. Keep real proxy/network
     // failures (which do not carry this typed provider code) on the recovery path.
-    if (error?.data?.code === 'plugin_catalog_unavailable' && /^\/plugins\/(project|versions)(?:\?|$)/.test(endpoint.slice(base.length))) return;
+    if (error?.data?.code === 'plugin_catalog_unavailable' && /^\/plugins\/(project|versions|catalog|identify|update)(?:\?|$)/.test(endpoint.slice(base.length))) return;
     if (error && error.name !== 'AbortError' && (!error.status || [502,503,504].includes(error.status))) failed.add(key(srv));
     else if (!error && (endpoint === base || endpoint === base + '/permissions')) failed.delete(key(srv));
     syncControls();
