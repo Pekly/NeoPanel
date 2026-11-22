@@ -179,7 +179,7 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 		Port:            port,
 		MemoryMinMB:     1024,
 		MemoryMaxMB:     memMB,
-		JavaPath:        "",
+		JavaPath:        "auto",
 		JavaArgs:        "-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200",
 		JarFile:         jarName,
 		NodeID:          targetNode.ID,
@@ -188,7 +188,7 @@ func (h *ClientAPIHandler) Provision(w http.ResponseWriter, r *http.Request) {
 		DiskLimitMB:     req.DiskMB,
 	}
 	if downloader.IsNativeSoftware(srvType) {
-		srv.MemoryMinMB, srv.JavaArgs = 0, ""
+		srv.MemoryMinMB, srv.JavaArgs, srv.JavaPath = 0, "", ""
 		if strings.TrimSpace(srv.Version) == "" {
 			srv.Version = "latest"
 		}

@@ -1,8 +1,11 @@
 package runner_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -71,15 +74,33 @@ func TestDestructiveAPIsShareRestoreGate(t *testing.T) {
 		}
 	}
 	release()
-	// A real reinstall is paused in its download, after cleanup. Restore/delete
-	// must remain excluded until the download AND metadata update finish.
+	// A reinstall is paused before cleanup while fetching its replacement.
+	// Restore/delete remain excluded through installation and metadata update.
 	entered, proceed := make(chan struct{}), make(chan struct{})
 	oldTransport := http.DefaultTransport
 	defer func() { http.DefaultTransport = oldTransport }()
+	var jar bytes.Buffer
+	z := zip.NewWriter(&jar)
+	entry, err := z.Create("META-INF/MANIFEST.MF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(entry, "Manifest-Version: 1.0\r\nMain-Class: example.Main\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
 	http.DefaultTransport = maintenanceTransport(func(r *http.Request) (*http.Response, error) {
-		close(entered)
-		<-proceed
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("fresh jar")), Request: r}, nil
+		data := jar.String()
+		if r.URL.Host == "mcjars.app" {
+			close(entered)
+			<-proceed
+			data = fmt.Sprintf(`{"build":{"uuid":"11111111-1111-4111-8111-111111111111","type":"PAPER","version_id":"1.21","java":21,"installation":[[{"type":"download","file":"server.jar","url":"https://files.mcjars.app/paper.jar","size":%d}]]}}`, jar.Len())
+		} else if r.URL.Host != "files.mcjars.app" {
+			t.Fatalf("unexpected external request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(data)), Request: r}, nil
 	})
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() { done <- request(software.ReinstallServer, `{"software":"paper","version":"1.21"}`) }()
@@ -95,7 +116,7 @@ func TestDestructiveAPIsShareRestoreGate(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	got, _ := os.ReadFile(filepath.Join(live, "server.jar"))
-	if string(got) != "fresh jar" {
+	if !bytes.Equal(got, jar.Bytes()) {
 		t.Fatal("reinstall failed")
 	}
 	result, err := m.RestoreBackup(context.Background(), srv, "saved.tar.gz")

@@ -46,11 +46,8 @@ func TestJavaDownloadTraversalRejectedBeforeHTTP(t *testing.T) {
 	}
 }
 func TestJavaDownloadHardlinkAndEULASymlink(t *testing.T) {
-	old := httpClient
-	t.Cleanup(func() { httpClient = old })
-	httpClient = &http.Client{Transport: modrinthTransport(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("jar"))}, nil
-	})}
+	jar := testMCJarsJar(t)
+	mockMCJarsInstall(t, "PAPER", "latest", testMCJarsPayload("PAPER", "1.21.4", "21", testMCJarsURL, len(jar)), jar)
 	for _, download := range []func(string, string, string, string) error{DownloadServerJar, DownloadWithMCJarFiles} {
 		dir := t.TempDir()
 		outside := filepath.Join(t.TempDir(), "victim")

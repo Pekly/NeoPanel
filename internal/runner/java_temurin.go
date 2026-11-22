@@ -68,7 +68,7 @@ func officialJavaPackageURL(raw, ver string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && javaHTTPSURL(u) && u.Host == "github.com" &&
 		strings.HasPrefix(u.Path, "/adoptium/temurin"+ver+"-binaries/releases/download/") &&
-		strings.HasSuffix(u.Path, ".zip") && !strings.Contains(u.Path, "/../") && !strings.Contains(u.Path, "\\")
+		(strings.HasSuffix(u.Path, ".zip") || strings.HasSuffix(u.Path, ".tar.gz")) && !strings.Contains(u.Path, "/../") && !strings.Contains(u.Path, "\\")
 }
 
 func javaHTTPClient(base *http.Client, ver string) *http.Client {
@@ -78,7 +78,7 @@ func javaHTTPClient(base *http.Client, ver string) *http.Client {
 		if len(via) >= 5 || !javaHTTPSURL(req.URL) {
 			return fmt.Errorf("unsafe Java download redirect")
 		}
-		if req.URL.Host == "api.adoptium.net" && strings.HasPrefix(req.URL.Path, "/v3/assets/latest/") {
+		if req.URL.Host == "api.adoptium.net" && (strings.HasPrefix(req.URL.Path, "/v3/assets/latest/") || strings.HasPrefix(req.URL.Path, "/v3/assets/feature_releases/16/ga")) {
 			return nil
 		}
 		if officialJavaPackageURL(req.URL.String(), ver) {
@@ -117,8 +117,21 @@ func javaGET(ctx context.Context, c *http.Client, endpoint string) (*http.Respon
 }
 
 func fetchTemurinPackage(ctx context.Context, c *http.Client, ver, arch string) (temurinPackage, error) {
+	return fetchTemurinPackageForOS(ctx, c, ver, arch, "windows")
+}
+
+func fetchTemurinPackageForOS(ctx context.Context, c *http.Client, ver, arch, goos string) (temurinPackage, error) {
+	ext := ".zip"
+	if goos == "linux" {
+		ext = ".tar.gz"
+	}
 	for _, image := range []string{"jre", "jdk"} {
-		endpoint := fmt.Sprintf("https://api.adoptium.net/v3/assets/latest/%s/hotspot?architecture=%s&image_type=%s&os=windows&vendor=eclipse", ver, arch, image)
+		endpoint := fmt.Sprintf("https://api.adoptium.net/v3/assets/latest/%s/hotspot?architecture=%s&image_type=%s&os=%s&vendor=eclipse", ver, arch, image, goos)
+		// Java 16 is retired, not LTS: query a bounded page of historical GA
+		// releases rather than assuming it is present in the latest inventory.
+		if ver == "16" {
+			endpoint = fmt.Sprintf("https://api.adoptium.net/v3/assets/feature_releases/16/ga?architecture=%s&image_type=%s&os=%s&vendor=eclipse&jvm_impl=hotspot&page=0&page_size=10&sort_order=DESC", arch, image, goos)
+		}
 		resp, err := javaGET(ctx, c, endpoint)
 		if err != nil {
 			if err == javaHTTPStatusError(http.StatusNotFound) || err == javaHTTPStatusError(http.StatusNoContent) {
@@ -138,19 +151,41 @@ func fetchTemurinPackage(ctx context.Context, c *http.Client, ver, arch string) 
 		if err := json.Unmarshal(body, &assets); err != nil {
 			return temurinPackage{}, fmt.Errorf("invalid Adoptium metadata: %w", err)
 		}
+		if ver == "16" {
+			var releases []struct {
+				Binaries []json.RawMessage `json:"binaries"`
+				Version  json.RawMessage   `json:"version_data"`
+			}
+			if err := json.Unmarshal(body, &releases); err != nil {
+				return temurinPackage{}, err
+			}
+			assets = nil
+			for _, release := range releases {
+				for _, binary := range release.Binaries {
+					var a temurinAsset
+					if err := json.Unmarshal(binary, &a.Binary); err != nil {
+						return temurinPackage{}, err
+					}
+					if err := json.Unmarshal(release.Version, &a.Version); err != nil {
+						return temurinPackage{}, err
+					}
+					assets = append(assets, a)
+				}
+			}
+		}
 		for _, a := range assets {
-			if strconv.Itoa(a.Version.Major) != ver || a.Binary.Architecture != arch || a.Binary.OS != "windows" || a.Binary.ImageType != image || a.Binary.JVMImpl != "hotspot" {
+			if strconv.Itoa(a.Version.Major) != ver || a.Binary.Architecture != arch || a.Binary.OS != goos || a.Binary.ImageType != image || a.Binary.JVMImpl != "hotspot" {
 				continue
 			}
 			p := a.Binary.Package
 			checksum, err := hex.DecodeString(p.Checksum)
-			if err != nil || len(checksum) != sha256.Size || p.Size <= 0 || p.Size > javaDownloadLimit || !strings.HasSuffix(p.Name, ".zip") || !officialJavaPackageURL(p.Link, ver) {
+			if err != nil || len(checksum) != sha256.Size || p.Size <= 0 || p.Size > javaDownloadLimit || !strings.HasSuffix(p.Name, ext) || !strings.HasSuffix(p.Link, ext) || !officialJavaPackageURL(p.Link, ver) {
 				return temurinPackage{}, fmt.Errorf("unsafe or invalid Temurin package metadata")
 			}
 			return p, nil
 		}
 	}
-	return temurinPackage{}, fmt.Errorf("no official Temurin Java %s Windows/%s runtime available", ver, arch)
+	return temurinPackage{}, fmt.Errorf("no official Temurin Java %s %s/%s runtime available", ver, goos, arch)
 }
 
 func downloadTemurinZIP(ctx context.Context, c *http.Client, p temurinPackage, target string) error {
@@ -185,17 +220,31 @@ func downloadTemurinZIP(ctx context.Context, c *http.Client, p temurinPackage, t
 }
 
 func installWindowsJava(ver, goarch, rootPath string, deps windowsJavaInstaller) (JavaRuntimeInfo, error) {
+	return installTemurinJava(ver, "windows", goarch, rootPath, deps)
+}
+
+// Both platforms share metadata, checksum, limits, locking and rollback. Only
+// archive format and executable name differ. Probes are injectable only in tests.
+func installTemurinJava(ver, goos, goarch, rootPath string, deps windowsJavaInstaller) (JavaRuntimeInfo, error) {
+	if goos != "linux" && goos != "windows" {
+		return JavaRuntimeInfo{}, fmt.Errorf("unsupported Java platform %s", goos)
+	}
+	binName, ext := "java.exe", ".zip"
+	mode := os.FileMode(0700)
+	if goos == "linux" {
+		binName, ext, mode = "java", ".tar.gz", 0755
+	}
 	if !javaSupported[ver] {
 		return JavaRuntimeInfo{}, fmt.Errorf("unsupported Java version %q", ver)
 	}
 	arch := map[string]string{"amd64": "x64", "arm64": "aarch64"}[goarch]
 	if arch == "" {
-		return JavaRuntimeInfo{}, fmt.Errorf("unsupported Windows Java architecture %s", goarch)
+		return JavaRuntimeInfo{}, fmt.Errorf("unsupported %s Java architecture %s", goos, goarch)
 	}
 	if !filepath.IsAbs(rootPath) {
 		return JavaRuntimeInfo{}, fmt.Errorf("Java install root must be absolute")
 	}
-	if err := os.MkdirAll(rootPath, 0700); err != nil {
+	if err := os.MkdirAll(rootPath, mode); err != nil {
 		return JavaRuntimeInfo{}, err
 	}
 	root, err := os.OpenRoot(rootPath)
@@ -212,7 +261,7 @@ func installWindowsJava(ver, goarch, rootPath string, deps windowsJavaInstaller)
 	lock.Close()
 	defer root.Remove(".install.lock")
 	dest := "java-" + ver + "-temurin"
-	finalBin := filepath.Join(rootPath, dest, "bin", "java.exe")
+	finalBin := filepath.Join(rootPath, dest, "bin", binName)
 	info := JavaRuntimeInfo{Version: ver, Name: premadeDisplayName(ver), Path: finalBin, Installed: true}
 	if st, e := root.Lstat(dest); e == nil {
 		if !st.IsDir() || st.Mode()&os.ModeSymlink != 0 {
@@ -238,24 +287,29 @@ func installWindowsJava(ver, goarch, rootPath string, deps windowsJavaInstaller)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	client := javaHTTPClient(deps.client, ver)
-	p, err := fetchTemurinPackage(ctx, client, ver, arch)
+	p, err := fetchTemurinPackageForOS(ctx, client, ver, arch, goos)
 	if err != nil {
 		return JavaRuntimeInfo{}, err
 	}
-	archive := filepath.Join(workPath, "runtime.zip")
+	archive := filepath.Join(workPath, "runtime"+ext)
 	if err := downloadTemurinZIP(ctx, client, p, archive); err != nil {
 		return JavaRuntimeInfo{}, err
 	}
 	payload := filepath.Join(work, "payload")
-	if err := root.Mkdir(payload, 0700); err != nil {
+	if err := root.Mkdir(payload, mode); err != nil {
 		return JavaRuntimeInfo{}, err
 	}
 	// No downloaded code is executed until the authenticated metadata checksum
 	// and the entire archive have both passed validation.
-	if err := extractWindowsJavaZIP(ctx, archive, filepath.Join(rootPath, payload)); err != nil {
+	if goos == "windows" {
+		err = extractWindowsJavaZIP(ctx, archive, filepath.Join(rootPath, payload))
+	} else {
+		err = extractJavaTarGz(ctx, archive, filepath.Join(rootPath, payload))
+	}
+	if err != nil {
 		return JavaRuntimeInfo{}, err
 	}
-	if deps.detect(filepath.Join(rootPath, payload, "bin", "java.exe")) != ver {
+	if deps.detect(filepath.Join(rootPath, payload, "bin", binName)) != ver {
 		return JavaRuntimeInfo{}, fmt.Errorf("downloaded Java failed major-version %s validation", ver)
 	}
 	backup := filepath.Join(work, "previous")

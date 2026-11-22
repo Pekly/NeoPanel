@@ -6,11 +6,11 @@ import (
 	"testing"
 )
 
-func TestCreateServerUsesJava25Default(t *testing.T) {
+func TestCreateServerUsesAutoJavaDefault(t *testing.T) {
 	f := newReliabilityFixture(t)
 	f.cfg.Java.DefaultPath = `C:\Program Files\Java\bin\java.exe`
 	for i, tc := range []struct{ name, engine, javaPath, want string }{
-		{"default", "custom", "", "25"},
+		{"default", "custom", "", "auto"},
 		{"explicit", "custom", "java-override", "java-override"},
 		{"legacy-runtime", "paper", "17", "17"},
 		{"native", "steel", "java-ignored", ""},

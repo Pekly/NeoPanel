@@ -44,6 +44,7 @@ type ServerManager struct {
 	operations                sync.Map // server ID -> *sync.Mutex; shared by power, backups and restore
 	restoreBlocked            sync.Map // unrecoverable publication failures block subsequent power operations
 	restorePaused             sync.Map // suppress late crash callbacks until an explicit start
+	artifacts                 artifactCache
 }
 
 func NewServerManager(baseDir string, db *database.DB) *ServerManager {
@@ -154,6 +155,7 @@ func (m *ServerManager) getOrCreateInstance(srv *database.Server) *ProcessInstan
 			m.handleProcessExit(srvID, unexpected, reachedOnline, timedOut, uptime)
 		},
 	)
+	inst.resolveAutoJava = m.resolveAutoJava
 	inst.allowInsecureGameFallback = m.allowInsecureGameFallback
 
 	if m.db != nil {

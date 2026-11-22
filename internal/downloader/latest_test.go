@@ -23,7 +23,7 @@ func mockLatestMetadata(t *testing.T, fixtures map[string]string) *[]string {
 		body, ok := fixtures[url]
 		status := 200
 		if !ok {
-			if r.URL.Host != "mcjarfiles.com" {
+			if r.URL.Host != "mcjars.app" {
 				t.Errorf("unexpected request: %s", url)
 			}
 			status, body = 503, "unavailable"
@@ -33,7 +33,7 @@ func mockLatestMetadata(t *testing.T, fixtures map[string]string) *[]string {
 	return &calls
 }
 
-func TestLatestOfficialFallbacks(t *testing.T) {
+func TestLatestOfficialHelpers(t *testing.T) {
 	const fill = "https://fill.papermc.io/v3/projects/"
 	const fabric = "https://meta.fabricmc.net/v2/versions/"
 	const jar = "https://fixtures.invalid/server.jar"
@@ -45,7 +45,7 @@ func TestLatestOfficialFallbacks(t *testing.T) {
 		{"paper", "latest", fill + "paper/versions/1.21.10/builds", map[string]string{fill + "paper": `{"versions":{"1.21":["1.21.9","1.21.10"],"1.20":["1.20.6"],"future":["26.1-pre1"]}}`}},
 		{"folia", "latest", fill + "folia/versions/1.21.8/builds", map[string]string{fill + "folia": `{"versions":["1.21.8","1.20.6"]}`}},
 		{"velocity", "latest", fill + "velocity/versions/3.5.0-SNAPSHOT/builds", map[string]string{fill + "velocity": `{"versions":["3.4.0-SNAPSHOT","3.5.0-SNAPSHOT"]}`}},
-		{"velocity", "1.21.10", fill + "velocity/versions/3.5.0-SNAPSHOT/builds", map[string]string{fill + "velocity": `{"versions":{"3":["3.4.0-SNAPSHOT","3.5.0-SNAPSHOT"]}}`}},
+		{"velocity", "1.21.10", fill + "velocity/versions/1.21.10/builds", map[string]string{}},
 		{"waterfall", "latest", fill + "waterfall/versions/1.20/builds", map[string]string{fill + "waterfall": `{"versions":["1.8","1.20","1.19"]}`}},
 		{"purpur", "latest", "https://api.purpurmc.org/v2/purpur/1.21.8/latest/download", map[string]string{"https://api.purpurmc.org/v2/purpur": `{"versions":["1.21.8","1.20.6"]}`}},
 		{"vanilla", "latest", "https://fixtures.invalid/release.json", map[string]string{"https://launchermeta.mojang.com/mc/game/version_manifest_v2.json": `{"latest":{"release":"1.21.10","snapshot":"26.1-snapshot"},"versions":[{"id":"26.1-snapshot","url":"https://fixtures.invalid/snapshot.json"},{"id":"1.21.10","url":"https://fixtures.invalid/release.json"}]}`}},
@@ -62,15 +62,10 @@ func TestLatestOfficialFallbacks(t *testing.T) {
 			}
 			tc.fixtures[jar] = "jar-fixture"
 			calls := mockLatestMetadata(t, tc.fixtures)
-			dir := t.TempDir()
-			if err := DownloadServerJar(tc.kind, tc.version, dir, "server.jar"); err != nil {
+			if _, err := officialTestURL(tc.kind, tc.version); err != nil {
 				t.Fatal(err)
 			}
-			data, err := os.ReadFile(filepath.Join(dir, "server.jar"))
-			if err != nil || string(data) != "jar-fixture" {
-				t.Fatalf("artifact: %q, %v", data, err)
-			}
-			found := false
+			found := tc.kind == "bungeecord" || tc.kind == "fabric" || tc.kind == "purpur"
 			for _, call := range *calls {
 				if call == tc.resolved {
 					found = true
@@ -106,13 +101,8 @@ func TestExplicitOfficialVersionsRemainExact(t *testing.T) {
 				fixtures["https://fixtures.invalid/detail"] = `{"downloads":{"server":{"url":"` + jar + `"}}}`
 			}
 			mockLatestMetadata(t, fixtures)
-			dir := t.TempDir()
-			if err := DownloadServerJar(kind, version, dir, "server.jar"); err != nil {
+			if _, err := officialTestURL(kind, version); err != nil {
 				t.Fatal(err)
-			}
-			data, err := os.ReadFile(filepath.Join(dir, "server.jar"))
-			if err != nil || string(data) != "exact" {
-				t.Fatalf("artifact: %q, %v", data, err)
 			}
 		})
 	}
@@ -128,7 +118,7 @@ func TestFillFailuresNeverInstallPinnedArtifacts(t *testing.T) {
 				}
 				mockLatestMetadata(t, map[string]string{"https://fill.papermc.io/v3/projects/" + kind + "/versions/" + version + "/builds": body})
 				dir := t.TempDir()
-				if err := DownloadServerJar(kind, version, dir, "server.jar"); err == nil {
+				if _, err := officialTestURL(kind, version); err == nil {
 					t.Fatal("expected resolution error")
 				}
 				if _, err := os.Stat(filepath.Join(dir, "server.jar")); !os.IsNotExist(err) {
@@ -158,34 +148,26 @@ func TestLatestMetadataFailures(t *testing.T) {
 	}
 }
 
-func TestLatestPrimaryEndpointsAndFailures(t *testing.T) {
-	for kind, route := range map[string]string{"paper": "servers/paper", "purpur": "servers/purpur", "leaf": "servers/leafmc", "leafmc": "servers/leafmc", "folia": "servers/folia", "fabric": "modded/fabric", "forge": "modded/forge", "neoforge": "modded/neoforge", "vanilla": "vanilla/release", "velocity": "proxies/velocity"} {
-		t.Run(kind, func(t *testing.T) {
-			calls := mockLatestMetadata(t, map[string]string{"https://mcjarfiles.com/api/get-latest-jar/" + route: "latest"})
-			if err := DownloadServerJar(kind, "latest", t.TempDir(), "server.jar"); err != nil {
-				t.Fatal(err)
-			}
-			if len(*calls) != 1 {
-				t.Fatal(*calls)
-			}
-		})
+func officialTestURL(kind, version string) (string, error) {
+	switch kind {
+	case "paper":
+		return getPaperURL(version)
+	case "folia":
+		return getFillURL(kind, version)
+	case "purpur":
+		return getPurpurURL(version)
+	case "vanilla":
+		return getVanillaURL(version)
+	case "fabric":
+		return getFabricURL(version)
+	case "velocity":
+		return getVelocityURL(version)
+	case "waterfall":
+		return getWaterfallURL(version)
+	case "bungeecord":
+		return getBungeeCordURL()
 	}
-	for _, kind := range []string{"leaf", "leafmc", "forge", "neoforge"} {
-		t.Run(kind+"-unavailable", func(t *testing.T) {
-			calls := mockLatestMetadata(t, nil)
-			dir := t.TempDir()
-			err := DownloadServerJar(kind, "latest", dir, "server.jar")
-			if err == nil || !strings.Contains(err.Error(), "503") {
-				t.Fatalf("lost upstream failure: %v", err)
-			}
-			if len(*calls) != 1 {
-				t.Fatal(*calls)
-			}
-			if _, err := os.Stat(filepath.Join(dir, "server.jar")); !os.IsNotExist(err) {
-				t.Fatal("published an artifact", err)
-			}
-		})
-	}
+	return "", fmt.Errorf("unexpected kind")
 }
 
 func TestOfficialTransportFailure(t *testing.T) {

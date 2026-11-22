@@ -129,6 +129,7 @@ test('proxy entry points never request Java properties or quick configs; common 
     hasServerPermission:() => true, api:async (...args) => {calls.push(args); return {};}, srvApiPath:(_, suffix) => '/srv' + suffix,
     $:() => ({}), document:{querySelector:() => null}, go:() => {}, applyRoute:() => {}, uiAlert:() => {},
     _settingsSaveInFlight:false, _settingsSaveQueued:null, _settingsLastSaved:{}, getSettingsSnapshotKey:() => 'one', setSettingsSaveStatus:() => {}, clock:() => '', toast:() => {}, syncHeroFromSavedServer:() => {}};
+  c.window = c;
   vm.runInNewContext([slice('function isSteelEngine(', 'function serverExecutable('), slice('async function loadProperties(', 'async function persistSettingsPayload('), slice('async function openQuickConfigsModal(', 'function renderQuickConfigsModalBody('), slice('async function saveQuickConfigs(', '// --- Client Area Provisioning'), slice('function buildSettingsSnapshots(', 'function collectSettingsFormPayload('), slice('async function persistSettingsPayload(', 'async function saveProperties(')].join('\n'), c);
   for (const proxy of ['velocity', 'waterfall', 'bungeecord']) {
     srv.type = proxy; await c.loadProperties(); await c.openQuickConfigsModal('one'); await c.saveQuickConfigs({preventDefault() {}}, 'one'); assert.equal(calls.length, 0);
@@ -139,7 +140,7 @@ test('proxy entry points never request Java properties or quick configs; common 
 test('startup preview omits nogui only for proxies; Paper and Steel behavior retained', () => {
   let srv = {type:'velocity', jar_file:'proxy.jar', memory_max:2048}; const preview = {};
   const c = {$:selector => selector === '#set-cmd-preview' ? preview : null, curServer:() => srv, getServerMaxRamMB:() => 2048, resolveJavaSelectValue:() => '21'};
-  vm.runInNewContext(slice('function isSteelEngine(', 'function steelConfigNotice(') + slice('function updateSettingsCmdPreview()', '// --- Selectors & Shortcuts ---'), c);
+  vm.runInNewContext(slice('function isSteelEngine(', 'function steelConfigNotice(') + slice('function javaCommandLabel(', 'function onPlayerHeadError(') + slice('function updateSettingsCmdPreview()', '// --- Selectors & Shortcuts ---'), c);
   for (const type of ['velocity', 'waterfall', 'bungeecord']) {srv.type = type; c.updateSettingsCmdPreview(); assert.doesNotMatch(preview.textContent, /nogui/); assert.match(preview.textContent, /-Xmx2048M/);}
   srv.type = 'paper'; c.updateSettingsCmdPreview(); assert.match(preview.textContent, /nogui$/);
   srv = {type:'steel', jar_file:'steel'}; c.updateSettingsCmdPreview(); assert.equal(preview.textContent, './steel');
@@ -160,7 +161,8 @@ test('Settings replaces Java gameplay controls only for proxies and retains comm
     resolveJavaSelectValue:() => '21', getServerMaxRamMB:() => 2048, getAllMcVersions:() => ['latest'],
     getNodeById:() => ({allow_user_ram:false, allow_user_java:false, allow_user_ports:false}), _settingsUiState:{},
     renderJavaSelectOptions:() => '<option>21</option>', renderJavaAvailabilityStrip:() => '', renderMinecraftTextHtml:() => ''};
-  vm.runInNewContext(slice('function isSteelEngine(', 'function steelConfigNotice(') + `var settingsView = {${slice('  set() {', '\n  },')}\n}};`, c);
+  c.window = c;
+  vm.runInNewContext(slice('function isSteelEngine(', 'function steelConfigNotice(') + slice('function javaCommandLabel(', 'function onPlayerHeadError(') + `var settingsView = {${slice('  set() {', '\n  },')}\n}};`, c);
   for (const type of ['velocity', 'waterfall', 'bungeecord']) {
     srv.type = type; const html = c.settingsView.set(); assert.match(html, /id="proxy-settings"/);
     assert.doesNotMatch(html, /server.properties|Game Rules|id="prop-max"|id="prop-port"|nogui/);

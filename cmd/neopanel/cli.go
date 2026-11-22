@@ -38,6 +38,8 @@ func runCLI(defaultConfigPath string, args []string) int {
 	case "version":
 		fmt.Printf("NeoPanel v%s\n", Version)
 		return 0
+	case "java":
+		return cliJava(rest, os.Stdout, os.Stderr, defaultJavaCLI())
 	case "panel-address":
 		return cliPanelAddress(defaultConfigPath, rest, os.Stdin, os.Stdout, os.Stderr)
 	case "node-token":
@@ -68,6 +70,13 @@ Daemon Flags:
   -node             Shorthand for -role node
 
 CLI Commands:
+  java install-all
+      Install and verify all required Java families on this hosting machine.
+      No database, daemon, service or firewall changes.
+
+  java list
+      List locally verified Java families and missing runtimes (no downloads).
+
   panel-address --url <https://panel.example.com> [--confirm] [--config <path>]
       Manual host-admin recovery: save the panel address only, after you configure
       trusted HTTPS. Does not verify HTTPS, change proxy/DNS, or restart services.

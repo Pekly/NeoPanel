@@ -61,6 +61,9 @@ func javaTestInstaller(t *testing.T, archive []byte, mutate func(*temurinAsset))
 		mutate(&asset)
 	}
 	meta, err := json.Marshal([]temurinAsset{asset})
+	if asset.Version.Major == 16 {
+		meta, err = json.Marshal([]map[string]any{{"binaries": []any{asset.Binary}, "version_data": asset.Version}})
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +287,7 @@ func TestJavaWindowsMetadataFallbackAndRedirects(t *testing.T) {
 }
 
 func TestJavaWindowsSupportedVersionsAndArchitectures(t *testing.T) {
-	for _, ver := range []string{"25", "21", "17", "8"} {
+	for _, ver := range SupportedJavaMajors() {
 		for _, arch := range []string{"amd64", "arm64"} {
 			t.Run(ver+"/"+arch, func(t *testing.T) {
 				archive := javaTestZIP(t, javaZIPMember{name: "jdk/bin/java.exe", body: ver})
@@ -303,7 +306,7 @@ func TestJavaWindowsSupportedVersionsAndArchitectures(t *testing.T) {
 	if _, err := installWindowsJava("21", "386", t.TempDir(), deps); err == nil {
 		t.Fatal("accepted unsupported architecture")
 	}
-	if _, err := installWindowsJava("11", "amd64", t.TempDir(), deps); err == nil {
+	if _, err := installWindowsJava("7", "amd64", t.TempDir(), deps); err == nil {
 		t.Fatal("accepted unsupported release")
 	}
 }

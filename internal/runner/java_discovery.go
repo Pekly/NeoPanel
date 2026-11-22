@@ -140,6 +140,11 @@ func detectWindowsJavaMajor(bin string) string {
 	if !filepath.IsAbs(bin) || !strings.EqualFold(filepath.Ext(bin), ".exe") || !isExecutableBinary(bin) {
 		return ""
 	}
+	return probeJavaMajor(bin)
+}
+
+// Use the same bounded, successful executable probe on Linux and Windows.
+func probeJavaMajor(bin string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, "-version")

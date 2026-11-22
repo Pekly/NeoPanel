@@ -20,6 +20,7 @@ import (
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/runner"
+	"github.com/Pekly/NeoPanel/internal/serverjar"
 	"github.com/gorilla/websocket"
 )
 
@@ -298,6 +299,7 @@ func (h *NodeHandler) ListClusterServers(w http.ResponseWriter, r *http.Request)
 		NodeID   string               `json:"node_id"`
 		NodeName string               `json:"node_name"`
 		NodeFQDN string               `json:"node_fqdn"`
+		Artifact *serverjar.Info      `json:"artifact,omitempty"`
 	}
 
 	allServers := make([]interface{}, 0, len(localServers)+8)
@@ -309,6 +311,7 @@ func (h *NodeHandler) ListClusterServers(w http.ResponseWriter, r *http.Request)
 			NodeID:   "local",
 			NodeName: localName,
 			NodeFQDN: localFQDN,
+			Artifact: h.manager.ArtifactSummary(s),
 		})
 	}
 

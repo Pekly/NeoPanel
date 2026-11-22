@@ -229,6 +229,7 @@ func (r *Router) registerRoutes(db *database.DB) {
 	// Server Icon routes
 	r.mux.HandleFunc("POST /api/servers/{id}/icon", r.requireAuth(r.servers.UploadServerIcon))
 	r.mux.HandleFunc("GET /api/servers/{id}/icon", r.requireAuth(r.servers.GetServerIcon))
+	r.mux.HandleFunc("GET /api/servers/{id}/artifact", r.requireAuth(r.servers.ServerArtifact))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/icon", r.requireAuth(r.servers.DeleteServerIcon))
 
 	// Server Quick Configs & Optimization Presets
@@ -713,6 +714,11 @@ func serverActionPermission(method, suffix string) string {
 			}
 		}
 		return "server.power"
+	case "artifact":
+		if read {
+			return "files.view"
+		}
+		return "owner"
 	case "world-conversion":
 		if read {
 			return "files.view"

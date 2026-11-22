@@ -14,7 +14,7 @@ const creation = section('function setCreateRam(', 'function closeModal(');
 const helpers = section('const ENGINE_ICONS =', 'function onPlayerHeadError(') + section('const CORES =', 'const CATS =') + section('const PREMADE_JAVA_VERSIONS =', 'async function loadJavaRuntimes(');
 const dropdowns = section('function closeAllCustomSelects()', "document.addEventListener('click',");
 
-test('fresh creation advertises latest rather than a dated preset and selects Java 25', () => {
+test('fresh creation advertises latest rather than a dated preset and selects Auto', () => {
   const container={innerHTML:''}, javaCalls=[];
   const c={S:{nodes:[],servers:[],user:{role:'admin'}},$:()=>container,canCreateServers:()=>true,getNextSuggestedPort:()=>25565,
     getAllMcVersions:()=>['1.21.11','26.3'],CORES:[['Paper','Demo']],engineIcon:()=>'',esc:String,
@@ -25,11 +25,11 @@ test('fresh creation advertises latest rather than a dated preset and selects Ja
   assert.match(container.innerHTML, /id="cs-ver" value="latest"/);
   assert.match(container.innerHTML, /value="latest" selected>Latest available/);
   assert.doesNotMatch(container.innerHTML, /ver-pill|Recent &amp; Popular|value="1.21.11" selected/);
-  assert.deepEqual(javaCalls[0].slice(0,4),['25',false,'latest','paper']);
+  assert.deepEqual(javaCalls[0].slice(0,4),['auto',false,'latest','paper']);
   for(const id of ['cs-eula','cs-dl','cs-aikar']) assert.match(container.innerHTML,new RegExp(`<label[^>]*np-check-row[^>]*>\\s*<input[^>]*id="${id}"`));
 });
 
-test('creation submission defaults to latest/25 and preserves explicit choices and native settings', async () => {
+test('creation submission defaults to latest/auto and preserves explicit choices and native settings', async () => {
   for(const variant of [{type:'paper'},{type:'velocity'},{type:'steel'},{type:'paper',version:'1.12.2',java:'8'}]) {
     const fields={'#cs-type':{value:variant.type}};
     if(variant.version) fields['#cs-ver']={value:variant.version};
@@ -40,17 +40,17 @@ test('creation submission defaults to latest/25 and preserves explicit choices a
     vm.runInNewContext(section('async function handleCreateServer(', '// --- Port Allocation Management ---'),c);
     await c.handleCreateServer({preventDefault(){}});
     assert.equal(payload.version,variant.version||'latest');
-    assert.equal(payload.java_path,variant.type==='steel'?'':variant.java||'25');
+    assert.equal(payload.java_path,variant.type==='steel'?'':variant.java||'auto');
     if(variant.type==='steel') assert.equal(payload.java_args,'');
   }
 });
 
-test('automatic Java selection never downgrades Java 25 or overrides a manual runtime', () => {
+test('automatic Java selection remains Auto and never overrides a manual runtime', () => {
   const select={value:'21',dataset:{},_cselectRebuild(){this.rebuilt=true;}};
   const fields={'#cs-type':{value:'velocity'},'#cs-java':select};
   const c={$:id=>fields[id],$$:()=>[],isSteelEngine:type=>type==='steel'};
   vm.runInNewContext(section('function syncCreateJavaFromVersion(', 'function syncCreateSelectValue('),c);
-  c.syncCreateJavaFromVersion('3.4.0-SNAPSHOT');assert.equal(select.value,'25');assert.equal(select.dataset.userPicked,undefined);
+  c.syncCreateJavaFromVersion('3.4.0-SNAPSHOT');assert.equal(select.value,'auto');assert.equal(select.dataset.userPicked,undefined);
   select.value='8';select.dataset.userPicked='1';c.syncCreateJavaFromVersion('latest');assert.equal(select.value,'8');
   fields['#cs-type'].value='steel';delete select.dataset.userPicked;c.syncCreateJavaFromVersion('latest');assert.equal(select.value,'8');
 });
@@ -76,7 +76,7 @@ test('browser: creation defaults survive engine/catalog changes and fields stay 
         ${helpers}\n${creation}\n${dropdowns}\nopenCreateServerModal();`});
       assert.equal(await page.locator('#cs-ver').inputValue(),'latest');
       assert.equal(await page.locator('#cs-ver-sel').inputValue(),'latest');
-      assert.equal(await page.locator('#cs-java').inputValue(),'25','missing Java 25 must not silently select installed Java 21');
+      assert.equal(await page.locator('#cs-java').inputValue(),'auto','Auto must not silently select an installed manual runtime');
       const shape=await page.evaluate(()=>{
         const box=id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y,height:r.height,width:r.width};};
         return {resources:['cs-mem','cs-cpu','cs-disk'].map(box),version:box('cs-ver'),port:box('cs-port'),java:box('cs-java').height?box('cs-java'):(()=>{const r=document.querySelector('[data-for="cs-java"] .cselect-trigger').getBoundingClientRect();return {x:r.x,y:r.y,height:r.height};})(),overflow:document.querySelector('.pbox').scrollWidth>document.querySelector('.pbox').clientWidth+1,
@@ -93,7 +93,7 @@ test('browser: creation defaults survive engine/catalog changes and fields stay 
         await page.evaluate(engine=>setCreateEngine(engine),engine);
         assert.equal(await page.locator('#cs-ver').inputValue(),'latest');
         assert.equal(await page.locator('#cs-ver-sel').inputValue(),'latest');
-        assert.equal(await page.locator('#cs-java').inputValue(),'25');
+        assert.equal(await page.locator('#cs-java').inputValue(),'auto');
         assert.equal(await page.locator('#cs-java').isDisabled(),engine==='steel');
       }
       await page.selectOption('#cs-java','17',{force:true});
@@ -108,7 +108,7 @@ test('browser: creation defaults survive engine/catalog changes and fields stay 
       assert.equal(await page.evaluate(()=>S.servers[0].java_path),'17');
       await page.evaluate(()=>openCreateServerModal());
       assert.equal(await page.locator('#cs-ver').inputValue(),'latest');
-      assert.equal(await page.locator('#cs-java').inputValue(),'25');
+      assert.equal(await page.locator('#cs-java').inputValue(),'auto');
       await page.close();
     }
   } finally {await browser.close();}

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -58,24 +61,42 @@ func proxySaveBody(t *testing.T, view proxyConfigView, confirm bool) string {
 	return string(data)
 }
 
+func proxyFixtureJar(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	z := zip.NewWriter(&b)
+	w, err := z.Create("META-INF/MANIFEST.MF")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(w, "Manifest-Version: 1.0\r\nMain-Class: example.Main\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := z.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
 func mockProxyDownloads(t *testing.T) {
 	t.Helper()
+	jar := proxyFixtureJar(t)
 	old := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = old })
 	http.DefaultTransport = steelAPITransport(func(r *http.Request) (*http.Response, error) {
-		data := "jar-fixture"
+		data := string(jar)
 		switch r.URL.Host {
-		case "mcjarfiles.com", "fill-data.papermc.io", "ci.md-5.net":
-		case "fill.papermc.io":
-			if strings.HasSuffix(r.URL.Path, "/builds") {
-				data = `[{"id":578,"downloads":{"server:default":{"url":"https://fill-data.papermc.io/fixture.jar"}}}]`
-			} else {
-				data = `{"versions":["1.19","1.20"]}`
+		case "mcjars.app":
+			parts := strings.Split(r.URL.Path, "/")
+			if len(parts) != 9 {
+				t.Fatalf("unexpected metadata request: %s", r.URL)
 			}
+			data = fmt.Sprintf(`{"build":{"uuid":"11111111-1111-4111-8111-111111111111","type":%q,"project_version_id":"3.3.0","java":21,"installation":[[{"type":"download","file":"server.jar","url":"https://files.mcjars.app/proxy.jar","size":%d}]]}}`, parts[5], len(jar))
+		case "files.mcjars.app":
 		default:
 			t.Fatalf("unexpected external request: %s", r.URL)
 		}
-		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(data))}, nil
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(data)), Request: r}, nil
 	})
 }
 
@@ -102,7 +123,7 @@ func TestProxyCreateUsesRealConfigAndNoWorldDefaults(t *testing.T) {
 					t.Fatal("world config created", name, err)
 				}
 			}
-			if data, err := os.ReadFile(filepath.Join(dir, result.JarFile)); err != nil || string(data) != "jar-fixture" {
+			if data, err := os.ReadFile(filepath.Join(dir, result.JarFile)); err != nil || !bytes.Equal(data, proxyFixtureJar(t)) {
 				t.Fatal(string(data), err)
 			}
 			view, err := proxyconfig.Read(dir, kind, 25588)
