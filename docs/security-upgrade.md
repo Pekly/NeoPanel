@@ -2,6 +2,8 @@
 
 The same security rules apply to free and premium servers. Update **the panel and every worker**; updating the repository alone does not protect running services.
 
+**Audit follow-up:** see [panel-wide security fixes](security-audit.md) for credential-revocation races, local 2FA QR generation, SFTP/archive limits, managed file-operation coordination, and provider request bounds. **Users who enrolled through the older external QR setup should re-enroll 2FA after upgrading**, generating a new secret and recovery codes. No automatic factor reset is performed.
+
 ## Before upgrading
 
 1. Back up the database, configuration and server data. Check that you can restore them.
