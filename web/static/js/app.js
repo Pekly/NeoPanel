@@ -142,6 +142,10 @@ function isSteelEngine(type) {
   return String(type || '').toLowerCase().trim() === 'steel';
 }
 
+function isProxyEngine(type) {
+  return ['velocity', 'bungeecord', 'waterfall'].includes(String(type || '').toLowerCase().trim());
+}
+
 function serverExecutable(srv) {
   return srv?.jar_file || (isSteelEngine(srv?.type) ? 'steel' : 'server.jar');
 }
@@ -930,7 +934,7 @@ function updateSettingsCmdPreview() {
   const jar = $('#prop-jar')?.value?.trim() || srv?.jar_file || 'server.jar';
   const argsEl = $('#prop-args');
   const args = argsEl ? argsEl.value.trim() : (srv?.java_args !== undefined && srv?.java_args !== null ? srv.java_args : '-XX:+UseG1GC');
-  el.textContent = `${javaCmd} -Xms${memMin}M -Xmx${memMax}M ${args ? args + ' ' : ''}-jar ${jar} nogui`;
+  el.textContent = `${javaCmd} -Xms${memMin}M -Xmx${memMax}M ${args ? args + ' ' : ''}-jar ${jar}${isProxyEngine(srv?.type) ? '' : ' nogui'}`;
 }
 
 // --- Selectors & Shortcuts ---
@@ -7530,6 +7534,7 @@ const V = {
     const p = S.props;
     const srv = curServer();
     const native = isSteelEngine(srv?.type);
+    const proxy = isProxyEngine(srv?.type);
     const o = (v, a) => a.map(x => `<option ${x === v ? 'selected' : ''}>${x}</option>`).join('');
     const sw = (k, l) => `<label class="row sb" style="padding:7px 0; border-bottom:1px solid var(--ln);">
       <span>${l}</span>
@@ -7588,7 +7593,7 @@ const V = {
             </div>
             <div style="flex: 1; min-width: 180px;">
               <div style="font-weight: 600; font-size: 13.5px; margin-bottom: 3px; color: var(--tx);">Server Icon &amp; Quick Configs</div>
-              <div class="mu" style="font-size: 12px; margin-bottom: 8px;">64×64 PNG for Minecraft server list &amp; instant gameplay config editor</div>
+              <div class="mu" style="font-size: 12px; margin-bottom: 8px;">${proxy ? '64×64 PNG for the server list · proxy setup below' : '64×64 PNG for Minecraft server list &amp; instant gameplay config editor'}</div>
               <div class="row" style="gap: 8px; flex-wrap: wrap;">
                 <label class="btn sm" style="cursor: pointer; margin: 0;">
                   ${ic('upload', 12)} Upload Icon
@@ -7611,7 +7616,7 @@ const V = {
             </label>
           </div>
           <div class="mu" style="font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;">Active Startup Command</div>
-          <div id="set-cmd-preview" class="mono" style="background: var(--con-bg); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.55; word-break: break-all;">${native ? esc(nativeCommandPreview(jarName)) : `${esc(javaCmd)} -Xms${memMin}M -Xmx${curMem}M ${jvmFlags ? esc(jvmFlags) + ' ' : ''}-jar ${esc(jarName)} nogui`}</div>
+          <div id="set-cmd-preview" class="mono" style="background: var(--con-bg); padding: 12px 14px; border-radius: 8px; border: 1px solid var(--border); color: #f0f3f6; font-size: 12.5px; line-height: 1.55; word-break: break-all;">${native ? esc(nativeCommandPreview(jarName)) : `${esc(javaCmd)} -Xms${memMin}M -Xmx${curMem}M ${jvmFlags ? esc(jvmFlags) + ' ' : ''}-jar ${esc(jarName)}${proxy ? '' : ' nogui'}`}</div>
           <span class="mu" style="font-size: 11.5px; margin-top: 8px; display: block;">Auto-restart automatically times out after 2 consecutive startup failures.</span>
         </div>
 
@@ -7637,7 +7642,7 @@ const V = {
 
       <!-- Main Unified Configuration & Startup Grid -->
       <div class="grid g2">
-        ${native ? steelConfigNotice() : `
+        ${proxy ? '' : native ? steelConfigNotice() : `
         <div class="card">
           <h2>Server Properties (<code>server.properties</code>)</h2>
           <label class="f">
@@ -7754,6 +7759,7 @@ const V = {
           </div>
         </div>
       </div>
+      ${proxy && typeof NPProxySettings !== 'undefined' ? NPProxySettings.render(srv) : ''}
       ${typeof NPServerAutomation !== 'undefined' ? NPServerAutomation.render(srv) : ''}
 
       ${isAdmin ? `
@@ -9326,6 +9332,7 @@ window.addEventListener('hashchange', () => {
 
 // --- Main Render Function (R) ---
 window.R = function() {
+  window.NPProxySettings?.sync();
   captureEditor();
   window.NPWorkspace?.captureConsole();
   window.NPWorkspace?.activate(curServer());
@@ -9374,6 +9381,7 @@ window.R = function() {
     if (S.view === 'set' && !blocked) organizeServerSettings(main);
     applyPermissionControls(main);
     if (S.view === 'set' && !blocked) window.NPServerAutomation?.mount();
+    window.NPProxySettings?.mount();
     if (S.view === 'dash') filterServerCards(S.serverFilter || '');
     main.scrollTop = prevMainScroll;
     if (S.view === 'con') {
@@ -11685,7 +11693,7 @@ function shouldSkipSettingsBgRender() {
 async function loadProperties(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
-  if (isSteelEngine(srv.type)) { seedSettingsSavedSnapshot(srv); return; }
+  if (isSteelEngine(srv.type) || isProxyEngine(srv.type)) { seedSettingsSavedSnapshot(srv); return; }
   try {
     const props = await api(srvApiPath(srv, '/properties'));
     if (shouldSkipSettingsBgRender()) return;
@@ -11716,7 +11724,7 @@ async function persistSettingsPayload(targetSrv, collected, opts = {}) {
   const snaps = buildSettingsSnapshots(targetSrv, collected.data);
   const key = getSettingsSnapshotKey(targetSrv);
   const prev = _settingsLastSaved[key];
-  const sendProps = !isSteelEngine(targetSrv.type) && (force || !prev || prev.propsJson !== snaps.propsJson);
+  const sendProps = !isSteelEngine(targetSrv.type) && !isProxyEngine(targetSrv.type) && (force || !prev || prev.propsJson !== snaps.propsJson);
   const sendSrv = force || !prev || prev.srvJson !== snaps.srvJson;
 
   if (!sendProps && !sendSrv) {
@@ -13389,6 +13397,13 @@ async function openQuickConfigsModal(srvId) {
   const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
   if (!srv) return;
   if (isSteelEngine(srv.type)) { uiAlert({ title: 'Steel Configuration', message: steelConfigNotice() }); return; }
+  if (isProxyEngine(srv.type)) {
+    S.serverSettingsSection = 0;
+    if (curServer()?.id !== srv.id || (curServer()?.node_id || 'local') !== (srv.node_id || 'local')) applyRoute(serverRouteUrl(srv.node_id || 'local', srv.id, 'set'));
+    else go('set');
+    document.querySelector('#proxy-settings')?.focus();
+    return;
+  }
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding: 26px; max-width: 640px; max-height: 90vh; overflow-y: auto;">
@@ -13413,6 +13428,7 @@ async function openQuickConfigsModal(srvId) {
 }
 
 function renderQuickConfigsModalBody(srv) {
+  if (isProxyEngine(srv?.type) || isSteelEngine(srv?.type)) return;
   const body = $('#quick-cfg-body');
   if (!body || !_quickConfigsCache) return;
   const cfg = _quickConfigsCache;
@@ -13523,6 +13539,7 @@ async function saveQuickConfigs(e, srvId) {
   e.preventDefault();
   const srv = srvId ? S.servers.find(s => s.id === srvId) : curServer();
   if (!srv) return;
+  if (isProxyEngine(srv.type) || isSteelEngine(srv.type)) return;
   const btn = $('#qc-save-btn');
   if (btn) setBtnLoading(btn, true, 'Saving...');
 
@@ -16997,6 +17014,7 @@ async function logout() {
   window.NPOnboarding?.resetSession();
   window.NPDomain?.reset();
   window.NPWorkspace?.reset();
+  window.NPProxySettings?.reset();
   cancelAllUploads();
   QOL.uploads = [];
   renderUploadQueue();
@@ -17795,6 +17813,7 @@ function assertClientRequestAccess(endpoint, options = {}) {
   }
   const permission = clientRequestPermission(match[3], method);
   if (match[3] === '/power/countdown' && method === 'POST' && !hasServerPermission('console.command', srv)) throw Object.assign(new Error('Access restricted: console.command required'), { status: 403 });
+  if (match[3] === '/proxy-config/secret' && !hasServerPermission('files.view', srv)) throw Object.assign(new Error('Access restricted: files.view required'), { status: 403 });
   if (match[3] === '/automation' && method === 'PATCH' && !hasServerPermission('server.power', srv)) throw Object.assign(new Error('Access restricted: server.power required'), { status: 403 });
   if (!['GET', 'HEAD'].includes(method) && (/^\/files\/(rename|move|unzip|extract)$/.test(match[3]) || /^\/files\/trash\/[^/]+\/restore$/.test(match[3])) && !hasServerPermission('files.edit', srv)) throw Object.assign(new Error('Access restricted: files.edit required'), { status: 403 });
   if ((permission && !hasServerPermission(permission, srv)) || (match[3].startsWith('/files') && !hasServerPermission('files.view', srv))) throw Object.assign(new Error('Access restricted: ' + (permission || 'files.view') + ' required'), { status: 403 });
@@ -17943,9 +17962,9 @@ function organizeServerSettings(root) {
   if (!identity) return;
   const wrapper = identity.parentElement.parentElement;
   const groups = [
-    ['General', [identity, root.querySelector('#prop-motd')?.closest('.card') || root.querySelector('[data-steel-config]')]],
+    ['General', [identity, root.querySelector('#proxy-settings') || root.querySelector('#prop-motd')?.closest('.card') || root.querySelector('[data-steel-config]')]],
     ['Startup & resources', [root.querySelector('#prop-java')?.closest('.card'), root.querySelector('#prop-jar')?.closest('.card'), root.querySelector('#server-automation-settings')]],
-    ['Administration', [...wrapper.children].filter(el => el.classList.contains('card') && el.id !== 'server-automation-settings')]
+    ['Administration', [...wrapper.children].filter(el => el.classList.contains('card') && el.id !== 'server-automation-settings' && el.id !== 'proxy-settings')]
   ];
   const selected = Math.min(S.serverSettingsSection || 0, 2);
   const nav = document.createElement('div'); nav.className = 'tabs np-settings-tabs'; nav.setAttribute('aria-label', 'Server settings sections');
