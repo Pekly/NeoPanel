@@ -148,14 +148,14 @@ test('uninstall uses delete permission independently of edit permission and rech
   perms.add('files.delete');c.uiConfirm=async()=>{perms.delete('files.delete');return true;};await c.deletePlugin('demo-0.jar');assert.equal(calls.filter(r=>r.o.method==='DELETE').length,1);
 });
 
-test('Installed defaults to Tiles without overriding stored or session choices',()=>{
+test('Installed defaults to Tiles, preserves supported choices, and migrates Icons',()=>{
   for(const saved of [null,'list','icons','tiles','invalid','blocked']) {
     const {c}=harness();
     c.localStorage={getItem:()=>{if(saved==='blocked')throw Error('storage unavailable');return saved;}};
     vm.runInNewContext(part('function getViewMode(', 'let viewModeTimer'),c);
-    const expected=['list','icons','tiles'].includes(saved)?saved:'tiles';
+    const expected=['list','tiles'].includes(saved)?saved:'tiles';
     assert.match(c.NPInstalledPlugins.render(),new RegExp(`npi-files npi-${expected}`));
     c.S.viewModes.plug_inst='icons';
-    assert.match(c.NPInstalledPlugins.render(),/npi-files npi-icons/);
+    assert.match(c.NPInstalledPlugins.render(),new RegExp(`npi-files npi-${expected}`));
   }
 });

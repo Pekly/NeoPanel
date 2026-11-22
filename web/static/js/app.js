@@ -1375,21 +1375,27 @@ function finishPageProgress() {
 }
 
 function getViewMode(scope, fallback = 'list') {
+  fallback = ['list', 'tiles'].includes(fallback) ? fallback : 'list';
   if (!S.viewModes) S.viewModes = {};
-  if (S.viewModes[scope]) return S.viewModes[scope];
-  try {
-    const saved = localStorage.getItem(`neopanel_vm_${scope}`);
-    if (saved === 'list' || saved === 'icons' || saved === 'tiles') {
-      S.viewModes[scope] = saved;
-      return saved;
-    }
-  } catch (e) {}
+  const cached = S.viewModes[scope];
+  if (cached === 'list' || cached === 'tiles') return cached;
+  let saved;
+  try { saved = localStorage.getItem(`neopanel_vm_${scope}`); } catch (_) {}
+  if (saved === 'list' || saved === 'tiles') {
+    S.viewModes[scope] = saved;
+    return saved;
+  }
+  // Retired Icons preferences follow the collection's normal default.
+  if (cached === 'icons' || saved === 'icons') {
+    S.viewModes[scope] = fallback;
+    try { localStorage.setItem(`neopanel_vm_${scope}`, fallback); } catch (_) {}
+  }
   return fallback;
 }
 
 let viewModeTimer = null;
 function setViewMode(scope, mode) {
-  if (!['list', 'icons', 'tiles'].includes(mode)) return;
+  if (!['list', 'tiles'].includes(mode)) return;
   const toggle = Array.from(document.querySelectorAll('.vm-toggle')).find(el => el.dataset.scope === scope);
   if (!toggle) return;
   const current = getViewMode(scope, toggle.dataset.fallback || 'list');
@@ -1400,8 +1406,8 @@ function setViewMode(scope, mode) {
   viewModeTimer = setTimeout(() => {
     if (context !== JSON.stringify([S.token, S.view, S.activeNodeId, S.activeServerId, S.ptab, S.plugTab, S.currentDir])) return;
     const focused = document.activeElement?.closest('.vm-toggle') === toggle;
-    const from = ['list', 'icons', 'tiles'].indexOf(current);
-    const to = ['list', 'icons', 'tiles'].indexOf(mode);
+    const from = ['list', 'tiles'].indexOf(current);
+    const to = ['list', 'tiles'].indexOf(mode);
     if (!S.viewModes) S.viewModes = {};
     S.viewModes[scope] = mode;
     try { localStorage.setItem(`neopanel_vm_${scope}`, mode); } catch (_) {}
@@ -1421,7 +1427,6 @@ function renderViewModeToggle(scope, fallback = 'list') {
   const cur = getViewMode(scope, fallback);
   const opts = [
     ['list', 'viewList', 'List'],
-    ['icons', 'viewIcons', 'Icons'],
     ['tiles', 'viewTiles', 'Tiles']
   ];
   return `<div class="vm-toggle" data-scope="${esc(scope)}" data-fallback="${esc(fallback)}" style="--vm-index:${opts.findIndex(([m]) => m === cur)}" role="group" aria-label="View layout">

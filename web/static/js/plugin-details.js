@@ -17,7 +17,7 @@
     return '<pre class="np-markdown-fallback">' + e(input.slice(0, 100000)) + '</pre>' + (input.length > 100000 ? '<p class="mu">Content shortened. Read the full text on Modrinth.</p>' : '');
   }
   let epoch = 0, detail = null, search = null, timer = null, lastIdentity = null, lastView = null;
-  const installing = new Map(), installed = new Set();
+  const installing = new Map(), installed = new Map();
   function identity() { const s = curServer(); return JSON.stringify([s?.id, s?.node_id, s?.type, S.user?.id, S.user?.username, S.user?.role, S.token]); }
   function allowed(edit = false) { return !!curServer() && !isSteelEngine(curServer().type) && hasServerPermission(edit ? 'files.edit' : 'files.view') && (!window.NPFeatures || NPFeatures.enabled('plugins')); }
   function capture() { const key = identity(), generation = epoch, srv = {...curServer()}; return {key, srv, live: () => key === identity() && generation === epoch && allowed()}; }
@@ -45,10 +45,11 @@
   }
   const installKey = slug => `${identity()}|${projectKey(slug)}`;
   function installButton(slug, title, version, label = 'Install') {
-    const stage = installing.get(installKey(slug)), busy = Boolean(stage), done = installed.has(installKey(slug));
-    const caption = busy ? stage : done && !version ? 'Install again' : label;
+    const key = installKey(slug), stage = installing.get(key), busy = Boolean(stage);
+    const done = installed.has(key) && (!version || installed.get(key) === version);
+    const caption = busy ? stage : done ? 'Installed' : label;
     const ring = busy ? '<svg class="np-install-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="np-install-track" cx="10" cy="10" r="8"/><circle class="np-install-arc" cx="10" cy="10" r="8"/></svg>' : '';
-    return `<button type="button" class="btn pr np-install-btn${busy ? ' is-installing' : ''}" data-np-install data-slug="${e(slug)}" data-title="${e(title)}" ${version ? `data-version="${e(version)}"` : ''} ${busy || !allowed(true) ? 'disabled' : ''} aria-busy="${busy}" aria-label="${e(caption)} ${e(title || slug)}" ${busy ? 'title="Waiting for the host; download percentage is unavailable. Leaving this page does not cancel installation."' : ''}>${ring}<span class="np-install-caption">${e(caption)}</span></button>`;
+    return `<button type="button" class="btn pr np-install-btn${busy ? ' is-installing' : done ? ' is-installed' : ''}" data-np-install data-slug="${e(slug)}" data-title="${e(title)}" ${version ? `data-version="${e(version)}"` : ''} ${busy || done || !allowed(true) ? 'disabled' : ''} aria-busy="${busy}" aria-label="${e(caption)} ${e(title || slug)}" ${busy ? 'title="Waiting for the host; download percentage is unavailable. Leaving this page does not cancel installation."' : ''}>${ring}<span class="np-install-caption">${e(caption)}</span></button>`;
   }
   function sizeControl() {
     return `<label class="np-project-size">View: <select data-np-page-size aria-label="Projects per page">${SIZES.map(n => `<option value="${n}" ${pageSize === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`;
@@ -76,7 +77,7 @@
       return `<article class="np-project-result ${mode === 'list' ? 'plugin-card' : mode === 'tiles' ? 'vm-tile-card' : 'vm-icon-card'}" data-project-card data-slug="${e(slug)}" style="--np-item:${Math.min(i, 6)}">
         ${banner ? `<img class="np-project-banner" src="${e(banner)}" alt="" aria-hidden="true" loading="lazy" referrerpolicy="no-referrer"><span class="np-project-banner-overlay" aria-hidden="true"></span>` : ''}
         <button type="button" class="np-project-open" data-np-project data-slug="${e(slug)}" aria-label="View ${e(h.title)}">${icon(h.icon_url, h.title)}<span class="np-project-copy"><b>${e(h.title)}</b>${h.author ? `<span class="mu">by ${e(h.author)}</span>` : ''}<span class="np-project-summary">${e(h.description)}</span></span></button>
-        <div class="np-project-result-foot"><span class="mu">↓ ${count(h.downloads)}${h.follows != null ? ` · ${count(h.follows)} followers` : ''}</span>${installButton(slug, h.title)}${installed.has(installKey(slug)) ? '<span class="mu" role="status">Installed · restart required</span>' : ''}</div></article>`;
+        <div class="np-project-result-foot"><span class="mu">↓ ${count(h.downloads)}${h.follows != null ? ` · ${count(h.follows)} followers` : ''}</span>${installButton(slug, h.title)}</div></article>`;
     }).join('');
     const empty = !list.length && !st?.busy && !st?.error ? '<p class="np-project-empty">No matching projects. Try another search or browsing filter.</p>' : '';
     return cards + empty + pagination(st);
@@ -200,7 +201,7 @@
       body = versions.length ? `<div class="np-project-markdown"><h2>${e(versions[0].name || versions[0].version_number)}</h2><p class="mu">Latest published release · ${date(versions[0].date_published)}</p>${markdown(versions[0].changelog)}</div>` : '<p class="np-project-empty">No releases provided.</p>';
     } else body = `<div class="np-project-markdown">${markdown(p.body)}</div>`;
     if (!versions.length && sections.has('versions') && ['versions','changelog'].includes(st.tab)) body = '<p class="np-project-empty">Version history is temporarily unavailable. Retry missing data above.</p>';
-    return `<section class="np-project">${backButton}<header class="card np-project-hero">${icon(p.icon_url,p.title)}<div class="np-project-copy"><div class="np-eyebrow">Modrinth · ${e(p.project_type || 'Project')}</div><h1>${e(p.title)}</h1><p>${e(p.description)}</p><div class="np-project-stats"><span>↓ ${count(p.downloads)} downloads</span><span>♡ ${count(p.followers)} followers</span></div></div><div class="np-project-install">${installAction}<span class="mu">For ${e(d.loader || curServer()?.type)}</span>${installed.has(installKey(st.slug)) ? '<span role="status">Installed · restart required</span>' : ''}</div></header>
+    return `<section class="np-project">${backButton}<header class="card np-project-hero">${icon(p.icon_url,p.title)}<div class="np-project-copy"><div class="np-eyebrow">Modrinth · ${e(p.project_type || 'Project')}</div><h1>${e(p.title)}</h1><p>${e(p.description)}</p><div class="np-project-stats"><span>↓ ${count(p.downloads)} downloads</span><span>♡ ${count(p.followers)} followers</span></div></div><div class="np-project-install">${installAction}<span class="mu">For ${e(d.loader || curServer()?.type)}</span></div></header>
       ${warningHtml}<p class="np-project-notice">Install latest chooses the newest release for your server software, not Minecraft ${e(d.minecraft_version || 'version')}. It may not support your current Minecraft version. Runtime compatibility is not guaranteed. Restart after installing.</p>
       <div class="np-project-layout"><div class="np-project-content"><div class="tabs np-project-tabs" role="tablist" aria-label="Project content">${['description','gallery','changelog','versions'].map(t => `<button type="button" role="tab" id="np-tab-${t}" aria-controls="np-project-panel" aria-selected="${st.tab === t}" tabindex="${st.tab === t ? 0 : -1}" class="${st.tab === t ? 'on' : ''}" data-np-tab="${t}">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div><section id="np-project-panel" class="card" role="tabpanel" aria-labelledby="np-tab-${st.tab}" tabindex="0">${body}</section></div>
       <aside class="card np-project-sidebar" aria-label="Project information">${metadata('Compatibility',`<p>Server: ${e(p.server_side || 'Not provided')} · Client: ${e(p.client_side || 'Not provided')}</p><div class="np-project-tags">${chips(p.loaders)}</div><details><summary>Minecraft versions (${arr(p.game_versions).length})</summary><div class="np-project-tags">${chips(p.game_versions)}</div></details>`)}${metadata('Links',`<div class="np-project-links">${links.map(([label,v]) => link(label,v)).join('')}</div>`)}${metadata('Tags',`<div class="np-project-tags">${chips([...arr(p.categories),...arr(p.additional_categories)])}</div>`)}${metadata('Creators',arr(d.members).length ? arr(d.members).slice(0,100).map(m => `<div class="np-project-member">${icon(m.user?.avatar_url,m.user?.username)}<div><b>${e(m.user?.name || m.user?.username)}</b><p class="mu">${e(m.role)}</p></div></div>`).join('') : '<p class="mu">No creators provided.</p>')}${metadata('Details',`<dl><dt>License</dt><dd>${link(p.license?.name || p.license?.id || 'Not provided',p.license?.url)}</dd><dt>Published</dt><dd>${date(p.published)}</dd><dt>Updated</dt><dd>${date(p.updated)}</dd>${p.status ? `<dt>Status</dt><dd>${e(p.status)}</dd>` : ''}</dl>`)}</aside></div></section>`;
@@ -214,7 +215,7 @@
   async function install(slug, title, _button, versionId) {
     if (!slug || !allowed(true) || S.view !== 'plug') return;
     const ctx = capture(), key = installKey(slug), live = () => ctx.live() && allowed(true) && S.view === 'plug';
-    if (installing.has(key)) return;
+    if (installing.has(key) || (installed.has(key) && (!versionId || installed.get(key) === versionId))) return;
     installing.set(key, 'Checking…'); redraw();
     try {
       const selection = versionId ? `version_id=${encodeURIComponent(versionId)}` : 'latest=true';
@@ -233,7 +234,7 @@
       await installRequest(srvApiPath(ctx.srv, '/plugins/install'), {method:'POST',body:JSON.stringify(payload),progressTarget:'button'}, live);
       if (!live()) return;
       window.NPInstalledPlugins?.invalidate();
-      installed.add(key); toast(`Installed ${title || slug}. Restart server to apply.`, 'ok');
+      installed.set(key, selected.id); toast(`Installed ${title || slug}. Restart server to apply.`, 'ok');
       await loadPluginsList();
     } catch (_) { if (live()) toast('Installation could not be confirmed. Check installed files before trying again.', 'bad'); }
     finally {

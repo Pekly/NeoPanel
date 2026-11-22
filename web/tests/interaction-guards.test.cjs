@@ -28,12 +28,12 @@ function layoutSetup(scope = 'dash', fallback = 'tiles') {
 }
 test('layout bursts coalesce to the last choice, preserve focus, and never fetch', () => {
   const { c, clock } = layoutSetup();
-  for (let i = 0; i < 40; i++) c.setViewMode('dash', i % 2 ? 'icons' : 'list');
+  for (let i = 0; i < 40; i++) c.setViewMode('dash', i % 2 ? 'list' : 'tiles');
   assert.equal(c.renders, 0); assert.equal(clock.jobs.size, 1);
   clock.flush();
-  assert.equal(c.S.viewModes.dash, 'icons'); assert.equal(c.renders, 1); assert.equal(c.focused, 1);
-  assert.deepEqual(c.effects[0].slice(2), [2, 1]);
-  c.setViewMode('dash', 'icons'); clock.flush(); assert.equal(c.renders, 1);
+  assert.equal(c.S.viewModes.dash, 'list'); assert.equal(c.renders, 1); assert.equal(c.focused, 1);
+  assert.deepEqual(c.effects[0].slice(2), [1, 0]);
+  c.setViewMode('dash', 'list'); clock.flush(); assert.equal(c.renders, 1);
   assert.doesNotMatch(section('function setViewMode(', 'function renderViewModeToggle('), /searchModrinth\(|\bapi\(|\bfetch\(/);
 });
 test('reselecting the current layout cancels a pending switch; invalid scopes do nothing', () => {
@@ -54,7 +54,7 @@ test('store layout switches are local even before the first search finishes', ()
   c.S.lastModrinthHits = null; c.setViewMode('plug_store', 'tiles'); clock.flush();
   assert.equal(c.renders, 1); assert.equal(c.S.viewModes.plug_store, 'tiles');
   const html = c.renderViewModeToggle('plug_store');
-  assert.match(html, /vm-indicator/); assert.match(html, /--vm-index:2/); assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1);
+  assert.match(html, /vm-indicator/); assert.match(html, /--vm-index:1/); assert.equal((html.match(/aria-pressed="true"/g) || []).length, 1);
 });
 function searchSetup() {
   const clock = timers(), requests = [];
@@ -172,7 +172,7 @@ test('file layout changes retain the filter text and reapply filtering', () => {
   c.$ = selector => selector === '#fi-filter' ? input : {};
   c.R = () => { input.value = ''; };
   c.filterFileList = value => { filtered = value; };
-  c.setViewMode('files', 'icons'); clock.flush();
+  c.setViewMode('files', 'tiles'); clock.flush();
   assert.equal(input.value, 'world'); assert.equal(filtered, 'world');
 });
 
@@ -183,4 +183,85 @@ test('status reconciliation ignores a response after server navigation', async (
   const pending = c.refreshServerStatus(); c.server = { id: 'two', node_id: 'local' };
   request.resolve({ stats: {}, version: 'stale' }); await pending;
   assert.equal(c.applied, 0); assert.equal(c.S.ver, undefined);
+});
+
+test('every collection offers List and Tiles and migrates retired Icons preferences', () => {
+  const scopes = new Map([...app.matchAll(/getViewMode\('([^']+)',\s*'(list|tiles)'\)/g)].map(m => [m[1], m[2]]));
+  assert.ok(scopes.size >= 9, 'all collection scopes are covered');
+  for (const [scope, fallback] of scopes) {
+    const { c, clock, storage } = layoutSetup(scope, fallback);
+    storage.set(`neopanel_vm_${scope}`, 'icons');
+    assert.equal(c.getViewMode(scope, fallback), fallback, scope);
+    assert.equal(storage.get(`neopanel_vm_${scope}`), fallback, `${scope} persisted migration`);
+    c.S.viewModes[scope] = 'icons';
+    assert.equal(c.getViewMode(scope, fallback), fallback, `${scope} cached migration`);
+    const html = c.renderViewModeToggle(scope, fallback);
+    assert.equal((html.match(/class="vm-btn /g) || []).length, 2, scope);
+    assert.match(html, /List view/); assert.match(html, /Tiles view/);
+    assert.doesNotMatch(html, /Icons|viewIcons|'icons'/);
+    c.setViewMode(scope, 'icons'); clock.flush();
+    assert.equal(c.renders, 0, `${scope} rejects retired layout`);
+  }
+});
+
+test('view preferences preserve supported choices and tolerate blocked storage', () => {
+  for (const mode of ['list', 'tiles']) {
+    const { c, storage } = layoutSetup();
+    storage.set('neopanel_vm_dash', mode);
+    assert.equal(c.getViewMode('dash', 'tiles'), mode);
+    c.S.viewModes.dash = mode === 'list' ? 'tiles' : 'list';
+    assert.equal(c.getViewMode('dash', 'tiles'), c.S.viewModes.dash);
+  }
+  const { c } = layoutSetup();
+  c.S.viewModes.dash = 'icons';
+  c.localStorage = { getItem() { throw Error('blocked'); }, setItem() { throw Error('blocked'); } };
+  assert.equal(c.getViewMode('dash', 'tiles'), 'tiles');
+  assert.equal(c.S.viewModes.dash, 'tiles');
+  assert.equal(c.getViewMode('unknown', 'icons'), 'list');
+});
+
+test('Chrome: two-option layout selectors migrate every collection and keep the indicator aligned', {skip:!process.env.NP_LAYOUT_PLAYWRIGHT,timeout:60000}, async () => {
+  const { chromium } = require(process.env.NP_LAYOUT_PLAYWRIGHT);
+  const browser = await chromium.launch({headless:true,executablePath:process.env.NP_LAYOUT_CHROME});
+  const root = path.join(__dirname,'../static');
+  const index = fs.readFileSync(path.join(root,'index.html'),'utf8');
+  const css = [...index.matchAll(/href="\/css\/([^"]+)"/g)].map(m=>fs.readFileSync(path.join(root,'css',m[1]),'utf8')).join('\n');
+  const scopes = [...new Map([...app.matchAll(/getViewMode\('([^']+)',\s*'(list|tiles)'\)/g)].map(m=>[m[1],m[2]]))];
+  try {
+    const page = await browser.newPage(), errors = [];
+    page.on('pageerror',error=>errors.push(error.message));
+    await page.route('https://neopanel-layout.test/',route=>route.fulfill({contentType:'text/html',body:`<!doctype html><html><head><style>${css}#main{position:static;margin:0;padding:20px;}#main section{margin-bottom:16px;}</style></head><body><main id="main"></main></body></html>`}));
+    await page.goto('https://neopanel-layout.test/');
+    await page.evaluate(scopes=>{
+      window.S={view:'dash',token:'fixture',viewModes:{}};window.layoutScopes=scopes;
+      window.esc=value=>String(value);window.ic=()=>'<svg width="13" height="13" aria-hidden="true"></svg>';
+      window.$=selector=>document.querySelector(selector);
+      window.R=()=>document.getElementById('main').innerHTML=layoutScopes.map(([scope,fallback])=>`<section>${renderViewModeToggle(scope,fallback)}</section>`).join('');
+    },scopes);
+    await page.addScriptTag({content:section('function getViewMode(', '// --- Clean Multi-Page')});
+    for (const theme of ['dark','light']) for (const width of [1440,390,320]) {
+      await page.setViewportSize({width,height:900});
+      await page.evaluate(theme=>{
+        document.documentElement.dataset.theme=theme;S.viewModes={};
+        for(const [scope] of layoutScopes)localStorage.setItem(`neopanel_vm_${scope}`,'icons');
+        R();
+      },theme);
+      assert.equal(await page.getByRole('button',{name:'Icons view'}).count(),0);
+      assert.equal(await page.locator('.vm-btn').count(),scopes.length*2);
+      for (const [scope,fallback] of scopes) {
+        const toggle=page.locator(`.vm-toggle[data-scope="${scope}"]`);
+        assert.equal(await toggle.locator('.vm-btn.on').textContent().then(value=>value.trim()),fallback==='list'?'List':'Tiles');
+        assert.equal(await toggle.evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(/\s+/).length),2);
+        assert.equal(await page.evaluate(scope=>localStorage.getItem(`neopanel_vm_${scope}`),scope),fallback);
+      }
+      const files=page.locator('.vm-toggle[data-scope="files"]');
+      await files.getByRole('button',{name:'Tiles',exact:true}).focus();await page.keyboard.press('Enter');
+      await page.waitForFunction(()=>S.viewModes.files==='tiles');
+      assert.equal(await files.getByRole('button',{name:'Tiles',exact:true}).evaluate(el=>el===document.activeElement),true);
+      const aligned=await files.evaluate(el=>{const indicator=el.querySelector('.vm-indicator').getBoundingClientRect(),button=el.querySelector('.vm-btn.on').getBoundingClientRect();return Math.abs(indicator.left-button.left)<=2&&Math.abs(indicator.width-button.width)<=2;});
+      assert.equal(aligned,true,`${theme}/${width} indicator`);
+      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+    }
+    assert.deepEqual(errors,[]);
+  } finally { await browser.close(); }
 });

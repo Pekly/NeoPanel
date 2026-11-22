@@ -87,7 +87,7 @@ test('artwork prefers safe featured then first safe gallery; no active URL or at
   const h={...hit(0),featured_gallery:'https://demo.test/featured',gallery:['https://demo.test/other']};
   assert.match(c.NPPlugins.hitsHtml([h]),/src="https:\/\/demo.test\/featured" alt="" aria-hidden="true" loading="lazy" referrerpolicy="no-referrer"/);
   h.featured_gallery='https://demo.test/" onerror="evil';assert.doesNotMatch(c.NPPlugins.hitsHtml([h]),/ onerror=/);
-  c.getViewMode=()=> 'icons';assert.doesNotMatch(c.NPPlugins.hitsHtml([h]),/np-project-banner/);
+  c.getViewMode=()=> 'tiles';assert.match(c.NPPlugins.hitsHtml([h]),/np-project-banner/);
 });
 test('search requests and detail responses never commit stale identity or query; duplicate loads are ignored',async()=>{
   for(const change of ['query','loader','server','node','account','token']) {
@@ -133,17 +133,15 @@ test('Chrome: actual Plugins and Files renderers, theme, navigation, tabs, pagin
       await page.getByRole('combobox',{name:'Projects per page'}).selectOption('10');await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===10);
       await page.getByRole('combobox',{name:'Projects per page'}).selectOption('20');await page.waitForFunction(()=>document.querySelectorAll('[data-project-card]').length===20);
       await page.evaluate(()=>{demoHits[2].title='LongProjectName'.repeat(8);demoHits[2].description='Long demo description to verify stable reflow. '.repeat(12);R();});
-      for(const mode of ['list','tiles','icons']) {
+      for(const mode of ['list','tiles']) {
         await page.evaluate(mode=>{viewMode=mode;R();},mode);
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),`${width}/${theme}/${mode} browse overflow`);
-        assert.equal(await page.locator('.np-project-banner').count(),mode==='icons'?0:20);
+        assert.equal(await page.locator('.np-project-banner').count(),20);
         assert.ok(await page.locator('.np-project-pages').evaluate(el=>el.getBoundingClientRect().height<=44 && el.scrollWidth<=el.clientWidth+1),'pagination is a compact horizontal row');
         assert.ok(await page.locator('#store-grid').evaluate(el=>[el,...el.querySelectorAll('.np-project-result,.np-project-open,.np-project-result-foot')].every(n=>n.scrollWidth<=n.clientWidth+1)),`${width}/${theme}/${mode} no internal clipping or overflow`);
-        if(mode!=='icons') {
           await page.locator('.np-project-banner').first().scrollIntoViewIfNeeded();await page.waitForFunction(()=>document.querySelector('.np-project-banner').naturalWidth>0);
           await page.locator('.np-project-banner').nth(1).evaluate(el=>el.closest('article').scrollIntoView());await page.waitForFunction(()=>document.querySelectorAll('.np-project-banner')[1].hidden);
           assert.equal(await page.locator('.np-project-banner').first().evaluate(el=>getComputedStyle(el).pointerEvents),'none');
-        }
         if(process.env.NP_PLUGIN_ARTIFACTS) {fs.mkdirSync(process.env.NP_PLUGIN_ARTIFACTS,{recursive:true});await page.screenshot({path:path.join(process.env.NP_PLUGIN_ARTIFACTS,`browse-${width}-${theme}-${mode}.png`),fullPage:true});if(width===1440&&theme==='dark'&&mode==='list')fs.writeFileSync(path.join(process.env.NP_PLUGIN_ARTIFACTS,'browse-preview.html'),(await page.content()).replace(/<script[\s\S]*?<\/script>/g,''));}
       }
       // Dense capped pagination (including four-digit final page) must also fit mobile.
@@ -169,6 +167,10 @@ test('Chrome: actual Plugins and Files renderers, theme, navigation, tabs, pagin
       await page.locator('#np-tab-description').focus();await page.keyboard.press('ArrowRight');assert.equal(await page.locator('#np-tab-gallery').getAttribute('aria-selected'),'true');assert.match(await page.locator('#np-project-panel').textContent(),/No gallery/);assert.equal(await page.locator('#np-tab-gallery').evaluate(e=>getComputedStyle(e).outlineStyle),'solid');
       await page.getByRole('tab',{name:'Changelog',exact:true}).click();assert.match(await page.locator('#np-project-panel').textContent(),/Improved sessions/);
       await page.getByRole('tab',{name:'Versions',exact:true}).click();assert.equal(await page.locator('[data-version]').count(),2);await page.locator('[data-version="v-old"]').click();await page.waitForFunction(()=>calls.filter(x=>x.method==='POST').length===2);assert.deepEqual(await page.evaluate(()=>JSON.parse(calls.filter(x=>x.method==='POST')[1].body)),{slug:'project-0',version_id:'v-old'});
+      await page.waitForFunction(()=>document.querySelector('[data-version="v-old"]').textContent==='Installed');
+      assert.equal(await page.locator('[data-version="v-old"]').isDisabled(),true);
+      assert.equal(await page.locator('[data-version="v-new"]').isDisabled(),false);
+      assert.doesNotMatch(await page.locator('.np-project').innerText(),/Install again|Installed · restart required/);
       await page.evaluate(()=>{demoData.versions_truncated=true;demoData.versions[0].dependencies=[{project_id:'dependency',filename:'<img onerror=window.pwned=1>',dependency_type:'required',version_id:'dep-version'}];});
       await page.evaluate(async()=>{await NPPlugins.open('project-0',true);});
       await page.getByRole('tab',{name:'Versions',exact:true}).click();
@@ -198,9 +200,9 @@ test('Chrome: actual Plugins and Files renderers, theme, navigation, tabs, pagin
       }
       await page.addScriptTag({content:fs.readFileSync(path.join(root,'js/file-drag.js'),'utf8')});
       await page.evaluate(()=>{window.uploads=[];window.enqueueUploads=async(...args)=>uploads.push(args);window.sameQolServer=(a,b)=>a.id===b.id&&a.node_id===b.node_id;NPFileDrag.init();});
-      for(const mode of ['list','tiles','icons']) {
+      for(const mode of ['list','tiles']) {
         await page.evaluate(mode=>{S.view='fi';viewMode=mode;S.currentDir='';R();},mode);
-        const first=mode==='list'?page.locator('.file-table tbody > tr').first():page.locator(mode==='tiles'?'.vm-tiles-grid > *':'.vm-icons-grid > *').first();assert.match(await first.textContent(),/Trash/);assert.equal(await first.locator('input,[data-file-drag],[data-path]').count(),0);
+        const first=mode==='list'?page.locator('.file-table tbody > tr').first():page.locator('.vm-tiles-grid > *').first();assert.match(await first.textContent(),/Trash/);assert.equal(await first.locator('input,[data-file-drag],[data-path]').count(),0);
         await first.evaluate(el=>{const dt=new DataTransfer();dt.items.add(new File(['test'],'not-uploaded.txt'));el.dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:dt}));el.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt}));});
         await page.waitForTimeout(10);assert.equal(await page.evaluate(()=>uploads.length),0,'Trash rejects external drops');
         await page.locator('#chk-all-files').check();assert.deepEqual(await page.evaluate(()=>[...S.selectedFiles]),['world','server.properties']);
@@ -271,14 +273,14 @@ test('pending project renders a safe clicked-result preview and skeleton, never 
   resolve(project());await pending;assert.doesNotMatch(c.NPPlugins.render(),/np-project-loading/);assert.match(c.NPPlugins.render(),/data-np-install/);
 });
 
-test('Browse defaults to Tiles and retains explicit saved layouts',()=>{
+test('Browse defaults to Tiles, preserves supported layouts, and migrates Icons',()=>{
   for(const saved of [null,'list','icons','tiles','invalid','blocked']) {
     const {c}=harness();
     c.localStorage={getItem:key=>{if(saved==='blocked')throw Error('storage unavailable');return key==='neopanel_vm_plug_store'?saved:null;}};
     vm.runInNewContext(section('function getViewMode(', 'let viewModeTimer'),c);
-    const expected=['list','icons','tiles'].includes(saved)?saved:'tiles';
+    const expected=['list','tiles'].includes(saved)?saved:'tiles';
     const html=c.NPPlugins.hitsHtml([hit(0)]);
-    assert.match(html,new RegExp(`np-project-result ${{list:'plugin-card',icons:'vm-icon-card',tiles:'vm-tile-card'}[expected]}`));
+    assert.match(html,new RegExp(`np-project-result ${{list:'plugin-card',tiles:'vm-tile-card'}[expected]}`));
     assert.equal(c.getViewMode('fi','list'),'list','Files retains its own fallback');
   }
   for(const scope of ['plug_store','plug_inst']) {
@@ -300,7 +302,7 @@ test('button-owned install progress is project-scoped, indeterminate, and clears
   assert.ok(calls.filter(x=>x.o.method==='POST').every(x=>x.o.progressTarget==='button'));
   await c.NPPlugins.install('project-0','Demo 0');assert.equal(pending.size,2);
   pending.get('project-0').resolve({});await first;
-  html=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);assert.equal((html.match(/class="np-install-ring"/g)||[]).length,1);assert.match(html,/Install again/);
+  html=c.NPPlugins.hitsHtml(c.S.lastModrinthHits);assert.equal((html.match(/class="np-install-ring"/g)||[]).length,1);assert.match(html,/is-installed[^>]*disabled[^>]*>[\s\S]*?<span class="np-install-caption">Installed<\/span>/);assert.doesNotMatch(html,/Install again|Installed · restart required/);
   pending.get('project-1').reject(Error('timeout'));await second;
   assert.doesNotMatch(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/np-install-ring|aria-busy="true"/);
   assert.ok(c.messages.some(args=>args[0].includes('Check installed files')));
@@ -316,4 +318,20 @@ test('returning to a page while installation is pending retains its ring then cl
   const before=draws;finish({});await job;
   assert.ok(draws>before);assert.doesNotMatch(c.NPPlugins.hitsHtml(c.S.lastModrinthHits),/np-install-ring/);
   assert.equal(c.messages.length,0,'stale completion does not claim success');
+});
+
+test('completed project and matching-version buttons show Installed without a restart status',async()=>{
+  const {c,calls}=harness();c.S.lastModrinthHits=[hit(0)];await c.NPPlugins.open('project-0');
+  await c.NPPlugins.install('project-0','Demo 0',null,'v-old');
+  const hero=c.NPPlugins.render();
+  assert.match(hero,/is-installed[^>]*data-np-install[^>]*disabled[^>]*aria-busy="false"/);
+  assert.doesNotMatch(hero,/Install again|Installed · restart required/);
+  const actions=()=>[...c.NPPlugins.hitsHtml(c.S.lastModrinthHits).matchAll(/<button[^>]*data-np-install[^>]*>[\s\S]*?<\/button>/g)];
+  assert.equal(actions().length,1);assert.match(actions()[0][0],/>Installed<\/span>/);
+  const before=calls.length;
+  await c.NPPlugins.install('id0','Demo 0');
+  await c.NPPlugins.install('project-0','Demo 0',null,'v-old');
+  assert.equal(calls.length,before,'completed default and identical version do not reinstall');
+  await c.NPPlugins.install('project-0','Demo 0',null,'v-new');
+  assert.equal(calls.filter(call=>call.o.method==='POST').length,2,'a different release remains installable');
 });

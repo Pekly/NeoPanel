@@ -41,7 +41,7 @@ test('Chrome: inline install rings replace trays, remain independent, and respec
       assert.equal(await page.locator('[aria-valuenow]').count(),0);
       await page.evaluate(()=>NPPlugins.install('demo-0','Simple Voice Chat'));
       assert.equal(posts.length,2,'duplicate click must not repeat POST');
-      for(const width of [1440,390,320])for(const mode of ['tiles','icons','list']){
+      for(const width of [1440,390,320])for(const mode of ['tiles','list']){
         await page.setViewportSize({width,height:900});await page.evaluate(mode=>{viewMode=mode;R();},mode);
         assert.equal(await page.locator('.np-install-ring').count(),2);
         assert.ok(await page.locator('.np-install-btn').first().isDisabled());
@@ -58,7 +58,15 @@ test('Chrome: inline install rings replace trays, remain independent, and respec
       if(process.env.PI_SCRATCH_DIR){await page.setViewportSize({width:390,height:900});await page.screenshot({path:path.join(process.env.PI_SCRATCH_DIR,`plugin-button-${theme}.png`)});}
       await pending.get('demo-0').fulfill({contentType:'application/json',body:'{}'});
       await page.waitForFunction(()=>document.querySelectorAll('.np-install-ring').length===1);
-      assert.match(await page.locator('[data-np-install][data-slug="demo-0"]').innerText(),/Install again/);
+      const completed=page.locator('[data-np-install][data-slug="demo-0"]');
+      assert.equal(await completed.innerText(),'Installed');
+      assert.equal(await completed.isDisabled(),true);
+      assert.equal(await completed.getAttribute('aria-busy'),'false');
+      assert.match(await completed.getAttribute('class'),/is-installed/);
+      assert.equal(await completed.evaluate(el=>getComputedStyle(el).opacity),'1');
+      assert.doesNotMatch(await page.locator('#main').innerText(),/Install again|Installed · restart required/);
+      await page.evaluate(()=>NPPlugins.install('demo-0','Simple Voice Chat'));
+      assert.equal(posts.length,2,'completed installs cannot be submitted again');
       await pending.get('demo-1').fulfill({status:502,contentType:'application/json',body:'{"error":"fixture failure"}'});
       await page.waitForFunction(()=>document.querySelectorAll('.np-install-ring').length===0);
       assert.equal(await page.locator('[data-np-install][data-slug="demo-1"]').isDisabled(),false);
