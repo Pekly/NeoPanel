@@ -66,6 +66,17 @@ html body .pal {
 .pbox .np-check-row > input[type="checkbox"] { flex: 0 0 auto; margin-top: 2px; }
 .pbox .np-check-row > :not(input) { flex: 1; min-width: 0; line-height: 1.5; }
 
+/* Creation presets sit below the inputs so wrapped buttons cannot stagger fields. */
+#create-server-form .np-create-label { display: block; margin-bottom: 5px; color: var(--tx-muted); font-size: 12.5px; font-weight: 500; }
+#create-server-form :is(input:not([type="checkbox"]):not([type="hidden"]), select, .cselect-trigger) { height: 40px; }
+#create-server-form .np-create-resources { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#create-server-form .np-create-resource { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+#create-server-form .np-create-resource-title { display: flex; flex-direction: column; gap: 2px; min-height: 36px; color: var(--tx-muted); font-size: 12.5px; font-weight: 500; line-height: 1.4; }
+#create-server-form .np-create-resource-title small { font-size: 11px; font-weight: 400; }
+#create-server-form .np-create-presets { gap: 4px; }
+#create-server-form .np-create-presets .btn { font-size: 11.5px; padding: 5px 8px; }
+#create-server-form .np-create-connection:has(#cs-java:disabled) { grid-template-columns: minmax(0, 1fr); }
+
 @media (max-width: 700px) {
   :root { --np-modal-gutter: 16px; }
   html body .pal { padding-inline: 12px; }
