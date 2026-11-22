@@ -117,8 +117,10 @@
     state.parking.appendChild(state.source);
   }
   function showHint(target, state) {
-    clearVisuals();
-    highlight = target.el; highlight.classList.add('np-file-drop-target');
+    if (highlight !== target.el) {
+      clearVisuals();
+      highlight = target.el; highlight.classList.add('np-file-drop-target');
+    }
     hint = document.querySelector('#dropzone-overlay');
     if (!hint) return;
     hint.classList.add('np-file-drop-hint');
@@ -133,9 +135,14 @@
       const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       shape.setAttribute('d', 'M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6');
       svg.appendChild(shape); hint.appendChild(svg);
-      const label = document.createElement('span'); label.className = 'np-file-drop-label'; hint.appendChild(label);
+      const copy = document.createElement('span'); copy.className = 'np-file-drop-copy'; hint.appendChild(copy);
+      const label = document.createElement('span'); label.className = 'np-file-drop-label'; copy.appendChild(label);
+      const detail = document.createElement('span'); detail.className = 'np-file-drop-detail'; copy.appendChild(detail);
     }
-    hint.querySelector('.np-file-drop-label').textContent = `${state.internal ? 'Move' : 'Upload'} to ${target.destination || 'root'}${target.folder ? ' · Hold to open' : ' · Current folder'}`;
+    const label = hint.querySelector('.np-file-drop-label');
+    label.textContent = `${state.internal ? 'Move' : 'Upload'} to ${target.destination || 'root'}`;
+    label.setAttribute('title', label.textContent);
+    hint.querySelector('.np-file-drop-detail').textContent = target.folder && target.destination !== path(S.currentDir || '') ? 'Drop here · Hold to open' : 'Drop here · Current folder';
     hint.style.display = 'flex';
   }
   function scheduleHover(target, state) {

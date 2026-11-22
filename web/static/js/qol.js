@@ -225,12 +225,41 @@ function renderUploadQueue() {
     </div>`).join('')}</div>
     <div class="row" style="gap:8px;margin-top:10px">${c.failed ? '<button class="btn sm" onclick="retryFailedUploads()">Retry failed</button>' : ''}${c.queued + c.uploading ? '<button class="btn sm dg" onclick="cancelAllUploads()">Cancel pending</button>' : ''}</div>`;
 }
+function uploadIdentity() { return JSON.stringify([S.user?.id, S.user?.username, S.user?.role]); }
+function uploadSessionCurrent(item) {
+  return Boolean(S.token && S.user && item.token === S.token && item.user === uploadIdentity());
+}
+function uploadAccessAllowed(item) {
+  if (!uploadSessionCurrent(item) || !item.authorized) return false;
+  // Navigation replaces S.serverAccess. Retain the enqueue-time UI grant for
+  // another server; the captured token is reauthorized by the API on every POST.
+  return !sameQolServer(item.server, curServer()) || typeof hasServerPermission !== 'function' ||
+    (hasServerPermission('files.view', item.server) && hasServerPermission('files.edit', item.server));
+}
+function uploadsPendingFor(server, dir) {
+  return QOL.uploads.some(item => uploadSessionCurrent(item) && sameQolServer(item.server, server) && item.dir === dir && ['queued', 'uploading'].includes(item.status));
+}
 function enqueueUploads(files, destination = S.currentDir || '') {
-  if (typeof hasServerPermission === 'function' && (!hasServerPermission('files.view') || !hasServerPermission('files.edit'))) { toast('Access restricted: files.view and files.edit required', 'bad'); return; }
   const srv = curServer();
-  if (!srv || !files?.length) return;
-  const dir = destination;
-  for (const file of files) QOL.uploads.push({ id: ++QOL.uploadID, file, dir, server: { ...srv }, user: S.user?.id || S.user?.username, status: 'queued', progress: 0, error: '' });
+  if (!srv || !S.token || !S.user || !files?.length) return;
+  if (typeof hasServerPermission === 'function' && (!hasServerPermission('files.view', srv) || !hasServerPermission('files.edit', srv))) { toast('Access restricted: files.view and files.edit required', 'bad'); return; }
+  if (typeof destination !== 'string' || /[\\\x00-\x1f]/.test(destination) || destination.startsWith('/') || destination.split('/').some(p => p === '.' || p === '..')) {
+    toast('Invalid upload destination.', 'bad'); return;
+  }
+  if (files.length > 1000 || Array.from(files).some(file => file.webkitRelativePath)) {
+    toast('Choose between 1 and 1000 files, not folders, to upload.', 'bad'); return;
+  }
+  const dir = destination.split('/').filter(Boolean).join('/');
+  for (const file of files) {
+    const item = { id: ++QOL.uploadID, file, status: 'queued', progress: 0, error: '' };
+    // Queue progress is mutable; its destination and authentication lease are not.
+    Object.defineProperties(item, {
+      dir: { value: dir, enumerable: true }, server: { value: Object.freeze({ ...srv }), enumerable: true },
+      user: { value: uploadIdentity() }, token: { value: S.token }, authorized: { value: true }
+    });
+    QOL.uploads.push(item);
+  }
+  window.NPPluginIdentities?.sync();
   renderUploadQueue();
   return processUploadQueue();
 }
@@ -245,8 +274,9 @@ function cancelUpload(id) {
 function cancelAllUploads() { QOL.uploads.forEach(item => cancelUpload(item.id)); }
 function retryUpload(id) {
   const item = QOL.uploads.find(i => i.id === id);
-  if (!item || !['failed', 'cancelled'].includes(item.status) || item.user !== (S.user?.id || S.user?.username)) return;
+  if (!item || !['failed', 'cancelled'].includes(item.status) || !uploadAccessAllowed(item)) return;
   item.status = 'queued'; item.error = ''; item.progress = 0;
+  window.NPPluginIdentities?.sync();
   renderUploadQueue(); processUploadQueue();
 }
 function retryFailedUploads() {
@@ -283,11 +313,14 @@ function transferUpload(item) {
     xhr.ontimeout = () => finish('failed', 'Upload timed out after 15 minutes. Check the destination before retrying.');
     xhr.onabort = () => finish('cancelled');
     try {
-      if (typeof assertClientRequestAccess === 'function') assertClientRequestAccess(srvApiPath(item.server, '/files/upload'), { method: 'POST' });
+      if (item.status === 'cancelled' || !uploadAccessAllowed(item)) {
+        finish('cancelled', 'Upload session or permissions changed. Select the files again.'); return;
+      }
+      if (sameQolServer(item.server, curServer()) && typeof assertClientRequestAccess === 'function') assertClientRequestAccess(srvApiPath(item.server, '/files/upload'), { method: 'POST' });
       const body = new FormData(); body.append('file', item.file); body.append('path', item.dir);
       xhr.open('POST', srvApiPath(item.server, '/files/upload'));
       xhr.timeout = 15 * 60 * 1000;
-      xhr.setRequestHeader('Authorization', `Bearer ${S.token}`);
+      xhr.setRequestHeader('Authorization', `Bearer ${item.token}`);
       xhr.send(body);
     } catch (err) { finish('failed', err.message); }
   });
@@ -300,9 +333,11 @@ async function processUploadQueue() {
     while ((item = QOL.uploads.find(i => i.status === 'queued'))) {
       item.status = 'uploading'; renderUploadQueue();
       await transferUpload(item);
-      if (S.view === 'fi' && sameQolServer(item.server, curServer()) && S.currentDir === item.dir) await loadFileList(item.dir);
+      const completed = item;
+      const isCurrent = () => uploadAccessAllowed(completed) && S.view === 'fi' && !S.fileTrashOpen && sameQolServer(completed.server, curServer()) && (S.currentDir || '') === completed.dir;
+      if (item.status === 'succeeded' && isCurrent()) await loadFileList(item.dir, false, { isCurrent });
     }
-  } finally { QOL.uploading = false; renderUploadQueue(); }
+  } finally { QOL.uploading = false; renderUploadQueue(); window.NPPluginIdentities?.sync(); }
 }
 
 function cronFieldValues(field, min, max) {

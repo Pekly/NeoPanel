@@ -135,6 +135,8 @@
     if (!slug || !allowed() || S.view !== 'plug') return;
     const previous = activeDetail(); detail?.controller?.abort();
     const st = detail = {slug, ctx:capture(), tab:'description', busy:true, data:null, error:false, controller:new AbortController(), scroll:retry && previous ? previous.scroll : (document.getElementById('main')?.scrollTop || 0), windowScroll:retry && previous ? previous.windowScroll : window.scrollY};
+    const hit = arr(S.lastModrinthHits).find(h => [h.slug,h.project_id,h.id].includes(slug));
+    st.preview = hit ? {title:text(hit.title).slice(0,512),description:text(hit.description).slice(0,1500),icon_url:url(hit.icon_url)} : retry ? previous?.preview : null;
     R(); document.getElementById('np-project-back')?.focus({preventScroll:true});
     const main = document.getElementById('main'); if (main) main.scrollTop = 0;
     const timeout = setTimeout(() => st.controller.abort(), 35000);
@@ -172,7 +174,8 @@
   function render() {
     const st = activeDetail(); if (!st) return '';
     const backButton = '<button type="button" id="np-project-back" class="btn sm" data-np-back>← Back to results</button>';
-    if (st.busy || st.error) return `<section class="np-project">${backButton}<div class="card np-project-empty" role="status">${st.busy ? 'Loading project from Modrinth…' : `<h2>Project could not be loaded</h2><p>${e(st.error)}</p><button type="button" class="btn" data-np-retry>Retry</button>`}</div></section>`;
+    if (st.busy) return `<section class="np-project">${backButton}<section class="card np-project-loading" aria-busy="true" aria-label="Loading project"><header class="np-project-loading-head">${icon(st.preview?.icon_url,st.preview?.title || '◇')}<div class="np-project-copy"><div class="np-eyebrow">Modrinth · Project preview</div><h1>${e(st.preview?.title || 'Opening project')}</h1>${st.preview?.description ? `<p>${e(st.preview.description)}</p>` : '<div class="np-skeleton np-skeleton-summary" aria-hidden="true"></div>'}</div></header><div class="np-project-loading-status" role="status" aria-live="polite"><span class="np-loading-dot" aria-hidden="true"></span><div><b>Loading project from Modrinth…</b><p>Fetching the description, releases and project information. Compatibility and install options are not ready yet.</p></div></div><div class="np-project-loading-grid" aria-hidden="true"><div class="np-loading-panel"><div class="np-skeleton np-skeleton-heading"></div><div class="np-skeleton"></div><div class="np-skeleton"></div><div class="np-skeleton np-skeleton-short"></div><div class="np-skeleton np-skeleton-block"></div></div><div class="np-loading-panel"><div class="np-skeleton np-skeleton-heading"></div><div class="np-skeleton"></div><div class="np-skeleton np-skeleton-short"></div><div class="np-skeleton"></div></div></div></section></section>`;
+    if (st.error) return `<section class="np-project">${backButton}<div class="card np-project-empty" role="status"><h2>Project could not be loaded</h2><p>${e(st.error)}</p><button type="button" class="btn" data-np-retry>Retry</button></div></section>`;
     const d = st.data, p = d.project, eligible = new Set(arr(d.installable_version_ids)), versions = arr(d.versions).slice(0, 500);
     const sections = new Set(arr(d.warnings).map(w => w.section));
     const latest = d.latest_version_status ? d.latest_version_status === 'available' : versions.some(v => eligible.has(v.id));
@@ -243,6 +246,7 @@
     if (S.view === 'plug' && event.target.matches('[data-np-page-size]')) void setPageSize(event.target.value);
   });
   document.addEventListener('error', event => {
+    if (event.target.matches?.('.np-project-loading .np-project-icon')) { const fallback = document.createElement('span'); fallback.className = 'np-project-icon'; fallback.setAttribute('aria-hidden','true'); fallback.textContent = '◇'; event.target.replaceWith(fallback); }
     if (event.target.matches?.('.np-project-banner')) event.target.hidden = true;
   }, true);
   document.addEventListener('keydown', event => {
@@ -251,5 +255,5 @@
     const next = event.key === 'ArrowRight' ? (i+1)%tabs.length : event.key === 'ArrowLeft' ? (i+tabs.length-1)%tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length-1 : -1;
     if (next >= 0) { event.preventDefault(); tabs[next].click(); }
   });
-  window.NPPlugins = {render, open, back, install, hitsHtml, loaderOptions, sizeControl, goPage, setPageSize, search:searchProjects, debounce, reset, sync, capture, markdown, safeURL:url};
+  window.NPPlugins = {render, open, back, isOpen:() => !!activeDetail(), install, hitsHtml, loaderOptions, sizeControl, goPage, setPageSize, search:searchProjects, debounce, reset, sync, capture, markdown, safeURL:url};
 })();

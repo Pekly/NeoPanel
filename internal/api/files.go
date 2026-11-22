@@ -429,7 +429,6 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer root.Close()
-	targetDir := r.URL.Query().Get("path")
 
 	err = parseUploadForm(w, r, 200<<20)
 	if r.MultipartForm != nil {
@@ -437,6 +436,33 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, "Upload exceeds 200 MiB or invalid multipart body")
+		return
+	}
+
+	// Browser uploads send path as a multipart field, not a URL parameter.
+	// Retain query-only clients, but never silently choose between two targets.
+	targetDir := ""
+	queryPaths, queryPresent := r.URL.Query()["path"]
+	formPaths, formPresent := r.MultipartForm.Value["path"]
+	if (queryPresent && len(queryPaths) != 1) || (formPresent && len(formPaths) != 1) ||
+		(queryPresent && formPresent && queryPaths[0] != formPaths[0]) {
+		writeError(w, http.StatusBadRequest, "Ambiguous upload destination")
+		return
+	}
+	if formPresent {
+		targetDir = formPaths[0]
+	} else if queryPresent {
+		targetDir = queryPaths[0]
+	}
+	// Validate before joining: Join would otherwise erase traversal components.
+	for _, part := range strings.Split(strings.ReplaceAll(targetDir, "\\", "/"), "/") {
+		if part == ".." || strings.ContainsRune(part, '\x00') {
+			writeError(w, http.StatusBadRequest, "Invalid upload destination")
+			return
+		}
+	}
+	if _, err = root.Path(targetDir); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -458,9 +484,31 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	written, err := root.Copy(r.Context(), fullPath, file, 200<<20, 0644)
+	// Stage privately, then link atomically without replacing an existing name.
+	// A retry or concurrent upload must never overwrite a file (or hardlink).
+	stageName, stage, err := root.TempDir()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to write file"})
+		writeError(w, http.StatusInternalServerError, "Failed to stage file")
+		return
+	}
+	defer root.RemoveAll(stageName)
+	defer stage.Close()
+	written, err := stage.Copy(r.Context(), "data", file, 200<<20, 0644)
+	if err == nil {
+		err = root.Check(fullPath)
+	}
+	if err == nil {
+		err = r.Context().Err()
+	}
+	if err == nil {
+		err = root.Link(filepath.Join(stageName, "data"), fullPath)
+	}
+	if err != nil {
+		if os.IsExist(err) {
+			writeError(w, http.StatusConflict, "Destination already exists; nothing was overwritten")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Failed to write file")
+		}
 		return
 	}
 

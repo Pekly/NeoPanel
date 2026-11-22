@@ -6354,7 +6354,7 @@ const V = {
             </tr>
           </thead>
           <tbody>
-            ${!isSubdir ? `<tr class="np-trash-entry"><td class="file-select-cell"></td><td colspan="6"><button type="button" class="np-file-open" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="fi-badge dir">${ic('folder', 15)}</span><span>Trash <small class="mu">· Recently deleted files</small></span></button></td></tr>` : ''}
+            ${!isSubdir ? `<tr class="np-trash-entry"><td class="file-select-cell"></td><td colspan="6"><button type="button" class="np-file-open" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="fi-badge np-trash-badge">${ic('trash', 15)}</span><span>Trash <small class="mu">· Recently deleted files</small></span></button></td></tr>` : ''}
             ${isSubdir ? `
               <tr data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <td class="file-select-cell"></td>
@@ -6364,7 +6364,7 @@ const V = {
             ` : ''}
             ${sortedFiles.map((item, idx) => {
               const isDir = item.is_dir;
-              const icon = fileListIconHtml(item);
+              const icon = window.NPPluginIdentities?.fileIcon(item, fileListIconHtml(item)) ?? fileListIconHtml(item);
               const extLabel = isDir ? 'Folder' : (getFileExtension(item.name, false) ? `.${getFileExtension(item.name, false)}` : '—');
               const sizeStr = formatFileSize(item.size, isDir);
               const dateStr = formatFileDate(item.modified);
@@ -6381,7 +6381,7 @@ const V = {
                          aria-label="Select ${esc(item.name)}">
                 </td>
                 <td class="file-icon-cell">${icon}</td>
-                <td class="file-name-cell" style="font-weight: 500; color: var(--tx);"><button type="button" class="np-file-open" data-name="${esc(item.name)}" onclick="event.stopPropagation(); ${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}">${esc(item.name)}</button></td>
+                <td class="file-name-cell" style="font-weight: 500; color: var(--tx);"><button type="button" class="np-file-open" data-name="${esc(item.name)}" onclick="event.stopPropagation(); ${isDir ? 'browseFolder(this.dataset.name)' : 'openFile(this.dataset.name)'}">${window.NPPluginIdentities?.fileTitle(item) ?? esc(item.name)}</button></td>
                 <td class="mu mono" style="font-size: 12px; width: 90px;">${esc(extLabel)}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 130px;">${sizeStr}</td>
                 <td class="mu mono" style="font-size: 12.5px; width: 170px;">${dateStr}</td>
@@ -6407,7 +6407,7 @@ const V = {
           </div>` : ''}
         ${S.loading?.files ? loaderHtml('Loading directory contents...') : ''}
         ${`<div class="vm-icons-grid">
-            ${!isSubdir ? `<button type="button" class="vm-icon-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-file-center"><span class="fi-badge dir lg">${ic('folder', 24)}</span><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></button>` : ''}
+            ${!isSubdir ? `<button type="button" class="vm-icon-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-file-center"><span class="fi-badge np-trash-badge lg">${ic('trash', 24)}</span><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></button>` : ''}
             ${isSubdir ? `
               <div class="vm-icon-card vm-file-card" data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <div class="vm-file-head"><span></span><span></span></div>
@@ -6435,8 +6435,8 @@ const V = {
                   </div>
                 </div>
                 <div class="vm-file-center">
-                  ${fileListIconHtml(item, 'lg', 24)}
-                  <div class="vm-file-name" title="${esc(item.name)}">${esc(item.name)}</div>
+                  ${window.NPPluginIdentities?.fileIcon(item, fileListIconHtml(item, 'lg', 24), 'lg') ?? fileListIconHtml(item, 'lg', 24)}
+                  <div class="vm-file-name" title="${esc(item.name)}">${window.NPPluginIdentities?.fileTitle(item) ?? esc(item.name)}</div>
                   <div class="vm-file-meta">${sizeStr}</div>
                 </div>
               </div>`;
@@ -6457,7 +6457,7 @@ const V = {
           </div>` : ''}
         ${S.loading?.files ? loaderHtml('Loading directory contents...') : ''}
         ${`<div class="vm-tiles-grid">
-            ${!isSubdir ? `<button type="button" class="vm-tile-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-tile-file-row"><span class="fi-badge dir md">${ic('folder', 18)}</span><span class="vm-tile-file-info"><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></span></button>` : ''}
+            ${!isSubdir ? `<button type="button" class="vm-tile-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-tile-file-row"><span class="fi-badge np-trash-badge md">${ic('trash', 18)}</span><span class="vm-tile-file-info"><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></span></button>` : ''}
             ${isSubdir ? `
               <div class="vm-tile-card vm-file-card" data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <div class="vm-tile-file-row">
@@ -6484,9 +6484,9 @@ const V = {
                            data-path="${esc(itemPath)}" onchange="toggleFileSelect(this.dataset.path, this.checked)"
                            aria-label="Select ${esc(item.name)}">
                   </div>
-                  ${fileListIconHtml(item, 'md', 18)}
+                  ${window.NPPluginIdentities?.fileIcon(item, fileListIconHtml(item, 'md', 18), 'md') ?? fileListIconHtml(item, 'md', 18)}
                   <div class="vm-tile-file-info">
-                    <div class="vm-file-name" title="${esc(item.name)}">${esc(item.name)}</div>
+                    <div class="vm-file-name" title="${esc(item.name)}">${window.NPPluginIdentities?.fileTitle(item) ?? esc(item.name)}</div>
                     <div class="vm-file-meta">${sizeStr} &bull; ${dateStr}</div>
                   </div>
                   <div style="position: relative;" onclick="event.stopPropagation();">
@@ -6539,6 +6539,7 @@ const V = {
         </div>
       </div>
 
+      ${window.NPPluginIdentities?.statusHtml() || ''}
       ${filesContainerHtml}
       ${!isSubdir && hasServerPermission('files.view') ? `<details class="np-world-tools"><summary>World tools</summary><div><button type="button" class="btn sm" onclick="window.NPWorldConversion.open()">${ic('refresh', 14)} Convert world</button><span class="mu">Convert a copy, monitor jobs, or cancel an active conversion.</span></div></details>` : ''}
 
@@ -9334,6 +9335,7 @@ window.R = function() {
   window.NPPlugins?.sync();
   window.NPInstalledPlugins?.sync();
   window.NPFeatures?.sync();
+  window.NPPluginIdentities?.sync();
   window.NPProxySettings?.sync();
   captureEditor();
   window.NPWorkspace?.captureConsole();
@@ -9374,7 +9376,7 @@ window.R = function() {
   }
   if (main) {
     const maintBannerHtml = window.NPWorkspace?.maintenanceBanner() || '';
-    const viewFn = V[S.view] || V.notfound;
+    const viewFn = () => window.NPPluginIdentities && ['fi','plug'].includes(S.view) ? NPPluginIdentities.batch(V[S.view] || V.notfound) : (V[S.view] || V.notfound)();
     const featureBlocked = window.NPFeatures?.pageEnabled(S.view) === false;
     const blocked = featureBlocked || (serverPagePermission(S.view) && !canServerPage(S.view));
     if (blocked && typeof disposeFilePreview === 'function') disposeFilePreview();
@@ -10228,6 +10230,7 @@ async function loadFileList(path = '', skipRender = false, options = {}) {
   }
   if (dirChanged || !S.fileList || S.fileList.length === 0) {
     S.loading.files = true;
+    window.NPPluginIdentities?.sync();
     if (!skipRender && S.view === 'fi') R();
   }
   try {
@@ -10246,6 +10249,7 @@ async function loadFileList(path = '', skipRender = false, options = {}) {
     if (ownsRequest()) {
       fileListController = null;
       S.loading.files = false;
+      window.NPPluginIdentities?.sync();
       if (!skipRender && S.view === 'fi') R();
     }
   }
@@ -11188,12 +11192,13 @@ async function loadPluginsList(skipRender = false) {
       if (typeof p === 'string') return [p, 'installed', true, ''];
       const fname = p.filename || p.name || 'plugin.jar';
       const meta = p.size ? formatFileSize(p.size) : (p.version || 'installed');
-      return [fname, meta, p.enabled !== false, p.modified || '', false];
+      return [fname, meta, p.enabled !== false, p.modified || '', false, p.size ?? ''];
     });
     window.NPInstalledPlugins?.sync();
   } catch (e) {} finally {
     if (context && !context.live()) return;
     S.loading.plugins = false;
+    window.NPPluginIdentities?.sync();
     if (!skipRender) {
       if (S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
         const cnt = $('#plug-installed-count');

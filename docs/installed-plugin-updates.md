@@ -1,6 +1,12 @@
 # Installed plugin identification and bulk updates
 
-Open **Server → Plugins → Installed** (or **Mods → Installed** on a modded server) and choose **Check for updates**. Update the panel and workers together. Discovery uses `files.view`; source confirmation and updating require `files.edit`, and the Plugins feature policy still applies.
+Open **Server → Plugins → Installed** (or **Mods → Installed** on a modded server). Names and icons load automatically; choose **Check for updates** to fetch replacement candidates and latest releases. Update the panel and workers together. Metadata uses `files.view`; source confirmation and updating require `files.edit`, and the Plugins feature policy still applies.
+
+## Default names and icons
+
+Installed and the active `plugins/` or `mods/` directory in Files share a bounded display-only lookup. Exact SHA-512 matches and explicitly confirmed sources show their public project name/icon. Unmatched files may show their embedded name, but retain a generic icon and unverified identity. The real filename stays visible, and every file action still targets that filename. Names/icons do not enable updates or clear an uncertain-write warning.
+
+Opening these views sends eligible file hashes to Modrinth for identity lookup; JAR contents, configurations and credentials are not uploaded. This automatic path does not perform name searches or fetch latest releases. Results are reused within the current session and invalidated when the relevant file list or server/session identity changes. Failed lookups leave normal file operations available rather than repeatedly retrying on each render.
 
 ## How identification works
 
@@ -42,6 +48,6 @@ If publication and rollback both fail, NeoPanel blocks startup pending operator 
 ## Bounds and limitations
 
 Discovery scans 20 files per page, with at most 1,000 records retained in the UI. Each file is limited to 200 MiB and each scan page or download batch to 512 MiB. Scans have a 60-second deadline; bulk updates have a 120-second deadline. Descriptors are capped at 128 KiB and archives at 10,000 entries with a 4 MiB central-directory limit. ZIP64 and prepended archives are conservatively rejected. Supported descriptors include Bukkit/Paper/Bungee YAML, Velocity/Fabric JSON, and Forge/NeoForge TOML. Files are never extracted or executed during inspection.
-Downloads require a positive declared size and upstream SHA-512 or SHA-1 verification. Old JARs remain under `plugin-backups/<unique-batch>/` outside the active folder. Discovery is explicitly requested rather than repeated on each UI refresh.
+Downloads require a positive declared size and upstream SHA-512 or SHA-1 verification. Old JARs remain under `plugin-backups/<unique-batch>/` outside the active folder. Update discovery is explicitly requested; automatic display metadata is bounded and reused rather than fetched on every UI refresh.
 
 Application file-operation leases coordinate NeoPanel's managed writes. They do not prevent an external process or another daemon from changing the same directory. Backups consume disk space; they are not a replacement for host disk/inode quotas or a complete server backup.

@@ -49,6 +49,7 @@ function setup(mode = 'list') {
     formatFileSize: () => '1 B', formatFileDate: () => 'Today', formatBytes: () => '1 B',
     event: { key: 'Enter', stopPropagation() {}, preventDefault() {} }, calls: []
   });
+  c.window = c;
   vm.runInContext(section('const esc =', 'const DEFAULT_USER_AVATAR_URL') + `\nthis.views = ({${section('\n  pl() {', '\n  plug() {')}${section('\n  bk() {', '\n  sc() {')}});`, c);
   for (const name of ['openFile', 'browseFolder', 'loadFileList', 'toggleFileSelect', 'downloadFileItem', 'playerAction', 'downloadBackup', 'deleteBackup', 'restoreBackup']) {
     c[name] = (...args) => c.calls.push([name, ...args]);
