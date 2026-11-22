@@ -1332,7 +1332,6 @@ function toast(msg, type = 'info') {
   if (!t) return;
   t.textContent = msg;
   t.classList.add('s');
-  window.NPMotion?.notify(t);
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.remove('s'), 2600);
 }
