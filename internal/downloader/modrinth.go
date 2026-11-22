@@ -46,10 +46,11 @@ type ModrinthVersion struct {
 	Changelog     string               `json:"changelog"`
 	Dependencies  []ModrinthDependency `json:"dependencies"`
 	Files         []struct {
-		URL      string `json:"url"`
-		Filename string `json:"filename"`
-		Primary  bool   `json:"primary"`
-		Size     int64  `json:"size"`
+		URL      string            `json:"url"`
+		Filename string            `json:"filename"`
+		Primary  bool              `json:"primary"`
+		Size     int64             `json:"size"`
+		Hashes   map[string]string `json:"hashes"`
 	} `json:"files"`
 }
 

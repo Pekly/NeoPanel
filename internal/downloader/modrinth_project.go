@@ -24,7 +24,15 @@ type modrinthBudget struct{ remaining int64 }
 
 func modrinthMetadataContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	return context.WithValue(ctx, modrinthBudgetKey{}, &modrinthBudget{remaining: maxModrinthMetadataBytes}), cancel
+	return ModrinthMetadataBudgetContext(ctx), cancel
+}
+
+// ModrinthMetadataBudgetContext shares a sequential 16 MiB budget across nested calls.
+func ModrinthMetadataBudgetContext(ctx context.Context) context.Context {
+	if ctx.Value(modrinthBudgetKey{}) != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, modrinthBudgetKey{}, &modrinthBudget{remaining: maxModrinthMetadataBytes})
 }
 
 // These allowlisted public v2 fields deliberately exclude moderation, financial,
@@ -166,6 +174,10 @@ func modrinthRequestError(ctx context.Context, kind string) error {
 }
 
 func modrinthMetadata(ctx context.Context, path string, out any) error {
+	return modrinthMetadataRequest(ctx, http.MethodGet, path, nil, out)
+}
+
+func modrinthMetadataRequest(ctx context.Context, method, path string, body io.Reader, out any) error {
 	if ctx.Err() != nil {
 		return modrinthRequestError(ctx, "metadata")
 	}
@@ -173,7 +185,17 @@ func modrinthMetadata(ctx context.Context, path string, out any) error {
 	if budget != nil && budget.remaining <= 0 {
 		return fmt.Errorf("Modrinth metadata exceeds total size limit; retry later")
 	}
-	resp, err := modrinthGet(ctx, "https://api.modrinth.com/v2"+path)
+	req, err := http.NewRequestWithContext(ctx, method, "https://api.modrinth.com/v2"+path, body)
+	if err != nil {
+		return modrinthRequestError(ctx, "metadata")
+	}
+	req.Header.Set("User-Agent", userAgent)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	client := *httpClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return modrinthRequestError(ctx, "metadata")
 	}
