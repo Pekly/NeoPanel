@@ -1,264 +1,103 @@
-/* NeoPanel coordinated motion layer. Load after workbench.css, before brand overrides.
-   Preserve the existing theme, geometry, typography and icon filters.
-   CSS owns interaction feedback and transient surfaces; motion.js owns route/list
-   entrances and the fixed ripple overlay. No base content is hidden for entrance.
-   Only explicit loading / in-flight indicators repeat. */
+/* NeoPanel motion contract — keep the workbench's semantic colors, type and geometry.
+   120ms control feedback; 160ms transient surfaces; 180ms navigation. One ease-out.
+   CSS owns controls/overlays; JS owns navigation, never telemetry refreshes.
+   Do: fade one surface, keep focus immediate, close synchronously, preserve positioning.
+   Don't: bounce, zoom, blur, ripple, stagger rows, animate skeletons or retain transforms.
+   Load after feature sheets and before custom branding. */
 :root {
-  --np-motion-instant: 80ms;
-  --np-motion-fast: 140ms;
-  --np-motion-medium: 240ms;
-  --np-motion-enter: 360ms;
-  --np-motion-stagger: 28ms;
-  --np-motion-loop: 1600ms;
-  --np-motion-out: cubic-bezier(.16, 1, .3, 1);
-  --np-motion-settle: cubic-bezier(.22, .85, .28, 1);
-  --np-motion-spring: cubic-bezier(.2, 1.35, .35, 1);
-  --np-motion-breathe: cubic-bezier(.45, 0, .55, 1);
+  --np-motion-fast: 120ms;
+  --np-motion-medium: 160ms;
+  --np-motion-enter: 180ms;
+  --np-motion-out: cubic-bezier(.2, .8, .2, 1);
 }
 
-/* Do not replay workspace entrances whenever telemetry rebuilds card markup. */
-html[data-panel-motion="full"] .np-server-grid > .sift-server-card {
+/* Rebuilt data and selected states must not replay CSS entrances on every render. */
+html :is(.np-server-grid > .sift-server-card, .np-project-result, .npi-file,
+  .np-project-loading.card, .np-skeleton, .engine-card.on,
+  .settings-autosave-dot, .fly-con-dot, .badge .dot, .btn.is-loading) {
   animation: none;
 }
+html :is(.np-loading, .np-loading *, .np-skeleton) {
+  animation: none !important;
+  transition: none !important;
+}
 
-/* These menus are measured and clamped by JS. Never transform their boxes. */
-.floating-ctx-menu,
-.cselect-menu {
+/* One owner per surface. In particular, no nested dialog or menu-option entrances.
+   Opacity never establishes a containing block for fixed descendants or overrides
+   a menu's measured transform / a bulk bar's translateX(-50%) centering. */
+html :is(.pal, .pbox, .ui-modal-box, .lbox, .floating-ctx-menu, .cselect-menu,
+  .file-ctx-menu, .cmenu, .dropzone-overlay, .upload-progress-widget,
+  .bulk-action-bar, .fly-con-drawer) {
   animation: none;
+  transition: none;
 }
+html :is(.floating-ctx-menu, .file-ctx-menu, .cmenu) > button { animation: none; }
 
-/* JS positions and animates this separate overlay, never a button pseudo-element.
-   Clipping here confines ink to the measured control, not application content. */
-.np-motion-ripple-layer {
-  position: fixed;
-  pointer-events: none;
-  overflow: hidden;
-  z-index: 2147483646;
-  contain: paint;
+/* Feedback is color, not displacement. Do not reset positioning transforms on
+   arrows, switch thumbs, centered controls, menus or overlays. */
+html :is(.btn, .btn-ico, .lbtn, .srv-card-action-btn, .vm-btn, .fly-con-fab,
+  .copyable-ip, .sift-server-card, .plugin-card, .engine-card, .vm-icon-card,
+  .vm-tile-card, .create-server-dashed-card):is(:hover, :active) {
+  transform: none;
 }
-.np-motion-ripple {
-  position: absolute;
-  display: block;
-  pointer-events: none;
-  border-radius: 50%;
-  background: currentColor;
-  transform-origin: center;
-  opacity: 0;
-}
+html .create-server-dashed-card .create-icon-bubble { transform: none; }
+html .toast { transform: none; transition: opacity var(--np-motion-medium) var(--np-motion-out); }
 
 @media (prefers-reduced-motion: no-preference) {
-  /* Explicit properties avoid accidental geometry, filter and typography tweens. */
-  html:not([data-panel-motion="reduced"]) :is(.btn, .btn-ico, .lbtn, .srv-card-action-btn, .vm-btn, .fly-con-fab, .copyable-ip, .seg button, .lf .eye) {
-    transition: transform var(--np-motion-fast) var(--np-motion-spring),
-      background-color var(--np-motion-fast) var(--np-motion-out),
+  html:not([data-panel-motion="reduced"]) :is(.btn, .btn-ico, .lbtn,
+    .srv-card-action-btn, .vm-btn, .fly-con-fab, .copyable-ip, .seg button, .lf .eye,
+    .nav-item, .nb, .nsearch, .chip2, .tabs button, .atabs button, .pit,
+    .cselect-opt, .cmenu button, .file-ctx-menu button, .floating-ctx-menu button,
+    .breadcrumb span, summary, .sift-server-card, .plugin-card, .engine-card,
+    .vm-icon-card, .vm-tile-card, .create-server-dashed-card) {
+    transition: background-color var(--np-motion-fast) var(--np-motion-out),
       border-color var(--np-motion-fast) var(--np-motion-out),
       color var(--np-motion-fast) var(--np-motion-out),
       box-shadow var(--np-motion-fast) var(--np-motion-out),
       opacity var(--np-motion-fast) var(--np-motion-out);
   }
-  html:not([data-panel-motion="reduced"]) :is(.btn, .btn-ico, .lbtn, .srv-card-action-btn, .vm-btn, .fly-con-fab, .copyable-ip):active:not(:disabled):not([aria-disabled="true"]):not(.is-loading) {
-    transform: translateY(1px) scale(.97);
-    transition-duration: var(--np-motion-instant);
+  html:not([data-panel-motion="reduced"]) :is(.btn, .btn-ico, .lbtn, .vm-btn):active {
+    transition-duration: 0s;
   }
-  html:not([data-panel-motion="reduced"]) :is(.btn, .btn-ico, .lbtn, .srv-card-action-btn, .vm-btn):is(:disabled, [aria-disabled="true"], .is-loading) {
-    transform: none;
-  }
-
-  html:not([data-panel-motion="reduced"]) #nav :is(.nav-item, .nb, .nsearch, .chip2),
-  html:not([data-panel-motion="reduced"]) :is(.tabs button, .atabs button, .pit, .cselect-opt, .cmenu button, .file-ctx-menu button, .floating-ctx-menu button, .breadcrumb span, summary) {
-    transition: background-color var(--np-motion-fast) var(--np-motion-out),
-      color var(--np-motion-fast) var(--np-motion-out),
-      border-color var(--np-motion-fast) var(--np-motion-out),
-      box-shadow var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) #nav .nav-item > svg,
-  html:not([data-panel-motion="reduced"]) :is(.btn-ico, .vm-btn, .srv-card-action-btn, .fly-con-fab) > svg,
-  html:not([data-panel-motion="reduced"]) .create-icon-bubble {
-    transition: transform var(--np-motion-medium) var(--np-motion-spring);
-  }
-  /* Route/tab entrance is owned by motion.js and its session visit history.
-     CSS-only selected-state animations would replay whenever R replaces DOM. */
-
-  /* Focus rings stay immediate and visible; only the surrounding surface settles. */
-  html:not([data-panel-motion="reduced"]) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea, .cselect-trigger, .lf) {
+  /* Focus outline is intentionally not transitioned. */
+  html:not([data-panel-motion="reduced"]) :is(input:not([type="range"]), select,
+    textarea, .cselect-trigger, .lf, .sw i) {
     transition: border-color var(--np-motion-fast) var(--np-motion-out),
       background-color var(--np-motion-fast) var(--np-motion-out),
-      box-shadow var(--np-motion-medium) var(--np-motion-out);
+      box-shadow var(--np-motion-fast) var(--np-motion-out);
   }
-  html:not([data-panel-motion="reduced"]) .cselect-arrow {
-    transition: transform var(--np-motion-medium) var(--np-motion-spring), color var(--np-motion-fast) var(--np-motion-out);
+  html:not([data-panel-motion="reduced"]) :is(.cselect-arrow, .np-menu-chevron),
+  html:not([data-panel-motion="reduced"]) .sw i::after,
+  html:not([data-panel-motion="reduced"]) input[type="checkbox"]:not(.no-ccheck)::before {
+    transition: transform var(--np-motion-fast) var(--np-motion-out);
   }
-  html:not([data-panel-motion="reduced"]) .sw i {
-    transition: background-color var(--np-motion-medium) var(--np-motion-out), box-shadow var(--np-motion-fast) var(--np-motion-out);
+  html:not([data-panel-motion="reduced"]) :is(.pal, .lbox,
+    .floating-ctx-menu, .cselect-menu, .file-ctx-menu, .cmenu,
+    .dropzone-overlay, .upload-progress-widget, .bulk-action-bar, .fly-con-drawer) {
+    animation: np-motion-fade var(--np-motion-medium) var(--np-motion-out);
   }
-  html:not([data-panel-motion="reduced"]) .sw i::after {
-    transition: transform var(--np-motion-medium) var(--np-motion-spring);
+  html:not([data-panel-motion="reduced"]) .np-compact-menu[open] > .np-menu-panel {
+    animation: np-motion-fade var(--np-motion-medium) var(--np-motion-out);
   }
-  html:not([data-panel-motion="reduced"]) input[type="checkbox"]:not(.no-ccheck) {
+  html:not([data-panel-motion="reduced"]) :is(.meter-bar i, .upload-prog-bar > i, #np-top-progress) {
+    transition: width var(--np-motion-enter) var(--np-motion-out),
+      opacity var(--np-motion-fast) var(--np-motion-out),
+      background-color var(--np-motion-fast) var(--np-motion-out);
+  }
+  html:not([data-panel-motion="reduced"]) :is(.settings-autosave-pill,
+    .settings-autosave-footer, .badge, .fly-con-dot, .conn-dot, .con-live-pill) {
     transition: background-color var(--np-motion-fast) var(--np-motion-out),
       border-color var(--np-motion-fast) var(--np-motion-out),
-      box-shadow var(--np-motion-fast) var(--np-motion-out),
-      transform var(--np-motion-fast) var(--np-motion-spring);
-  }
-  html:not([data-panel-motion="reduced"]) input[type="checkbox"]:not(.no-ccheck)::before {
-    transition: transform var(--np-motion-medium) var(--np-motion-spring);
-  }
-
-  /* Only known interactive cards, never generic .card or editor surfaces. */
-  html:not([data-panel-motion="reduced"]) :is(.sift-server-card, .plugin-card, .engine-card, .vm-icon-card, .vm-tile-card, .create-server-dashed-card) {
-    transition: transform var(--np-motion-medium) var(--np-motion-spring),
-      border-color var(--np-motion-fast) var(--np-motion-out),
-      background-color var(--np-motion-fast) var(--np-motion-out),
-      box-shadow var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) .engine-card.on {
-    animation: np-motion-selection var(--np-motion-enter) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) .file-table td {
-    transition: background-color var(--np-motion-fast) var(--np-motion-out);
-  }
-
-  /* Backdrop fades and spring-like surface arrivals; no retained transforms. */
-  html:not([data-panel-motion="reduced"]) :is(.pal, .dropzone-overlay) {
-    animation: np-motion-fade var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.pbox, .ui-modal-box, .lbox) {
-    animation: np-motion-dialog var(--np-motion-enter) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.floating-ctx-menu, .cselect-menu, .file-ctx-menu, .cmenu) {
-    animation: np-motion-fade var(--np-motion-medium) var(--np-motion-out);
-  }
-  /* Context options only fade: scrolling and viewport clamping remain exact. */
-  html:not([data-panel-motion="reduced"]) :is(.floating-ctx-menu, .file-ctx-menu, .cmenu) > button {
-    animation: np-motion-fade var(--np-motion-medium) var(--np-motion-out) backwards;
-  }
-  html:not([data-panel-motion="reduced"]) :is(.floating-ctx-menu, .file-ctx-menu, .cmenu) > button:nth-child(2) {
-    animation-delay: var(--np-motion-stagger);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.floating-ctx-menu, .file-ctx-menu, .cmenu) > button:nth-child(3) {
-    animation-delay: calc(var(--np-motion-stagger) * 2);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.floating-ctx-menu, .file-ctx-menu, .cmenu) > button:nth-child(4) {
-    animation-delay: calc(var(--np-motion-stagger) * 3);
-  }
-  html:not([data-panel-motion="reduced"]) .toast {
-    transition: opacity var(--np-motion-medium) var(--np-motion-out), transform var(--np-motion-enter) var(--np-motion-spring);
-  }
-  html:not([data-panel-motion="reduced"]) .upload-progress-widget {
-    animation: np-motion-rise var(--np-motion-enter) var(--np-motion-out);
-  }
-  /* Keep the bulk bar's existing translateX(-50%) centering intact. */
-  html:not([data-panel-motion="reduced"]) .bulk-action-bar {
-    animation: np-motion-fade var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) .fly-con-drawer {
-    transform-origin: bottom right;
-    animation: np-motion-drawer var(--np-motion-enter) var(--np-motion-out);
-    transition: width var(--np-motion-medium) var(--np-motion-out), height var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) details[open] > :is(div, p, dl, ul, ol, section) {
-    animation: np-motion-fade var(--np-motion-medium) var(--np-motion-out);
-  }
-
-  /* Telemetry interpolates values rather than replaying entrance on every poll. */
-  html:not([data-panel-motion="reduced"]) :is(.meter-bar i, .upload-prog-bar > i) {
-    transition: width var(--np-motion-enter) var(--np-motion-settle), background-color var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) #np-top-progress {
-    transition: width var(--np-motion-enter) var(--np-motion-out), opacity var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.settings-autosave-pill, .settings-autosave-footer, .badge, .fly-con-dot, .conn-dot, .con-live-pill) {
-    transition: background-color var(--np-motion-medium) var(--np-motion-out),
-      border-color var(--np-motion-medium) var(--np-motion-out), color var(--np-motion-medium) var(--np-motion-out);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.settings-autosave-pill, .settings-autosave-footer).is-saving .settings-autosave-dot,
-  html:not([data-panel-motion="reduced"]) .badge:is(.starting, .stopping) .dot,
-  html:not([data-panel-motion="reduced"]) .fly-con-dot:is(.starting, .stopping) {
-    animation: np-motion-busy var(--np-motion-loop) var(--np-motion-breathe) infinite;
-  }
-  html:not([data-panel-motion="reduced"]) :is(.settings-autosave-pill, .settings-autosave-footer):is(.is-saved, .is-warn) .settings-autosave-dot {
-    animation: np-motion-icon var(--np-motion-enter) var(--np-motion-spring);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.np-spinner, .np-spinner-sm) {
-    animation: np-motion-spin 1000ms var(--np-motion-breathe) infinite;
-  }
-  html:not([data-panel-motion="reduced"]) .np-skeleton {
-    animation: np-motion-skeleton var(--np-motion-loop) var(--np-motion-breathe) infinite;
-  }
-  html:not([data-panel-motion="reduced"]) .btn.is-loading {
-    animation: np-motion-busy var(--np-motion-loop) var(--np-motion-breathe) infinite;
-  }
-}
-
-/* Hover displacement is reserved for devices that actually support hover. */
-@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
-  html:not([data-panel-motion="reduced"]) :is(.btn, .btn-ico, .lbtn, .vm-btn, .srv-card-action-btn, .copyable-ip):hover:not(:active):not(:disabled):not([aria-disabled="true"]):not(.is-loading) {
-    transform: translateY(-1px);
-  }
-  html:not([data-panel-motion="reduced"]) #nav .nav-item:hover > svg {
-    transform: translateX(2px);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.btn-ico, .vm-btn, .srv-card-action-btn, .fly-con-fab):hover:not(:disabled):not([aria-disabled="true"]) > svg {
-    transform: scale(1.08);
-  }
-  html:not([data-panel-motion="reduced"]) :is(.sift-server-card, .plugin-card, .engine-card, .vm-icon-card, .vm-tile-card, .create-server-dashed-card):hover:not(:active):not(:disabled):not([aria-disabled="true"]) {
-    transform: translateY(-2px);
-  }
-  html:not([data-panel-motion="reduced"]) .create-server-dashed-card:hover .create-icon-bubble {
-    transform: rotate(8deg) scale(1.08);
-  }
-}
-
-/* Neutralize legacy hover lifts on touch; selected and checked states remain. */
-@media (hover: none), (pointer: coarse) {
-  html :is(.sift-server-card, .plugin-card, .engine-card, .vm-icon-card, .vm-tile-card, .create-server-dashed-card, .fly-con-fab):hover {
-    transform: none;
+      color var(--np-motion-fast) var(--np-motion-out);
   }
 }
 
 @keyframes np-motion-fade {
-  from { opacity: .35; }
+  from { opacity: .6; }
   to { opacity: 1; }
 }
-@keyframes np-motion-dialog {
-  from { opacity: .3; transform: translateY(12px) scale(.975); }
-  70% { opacity: 1; transform: translateY(-1px) scale(1); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes np-motion-rise {
-  from { opacity: .35; transform: translateY(12px); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes np-motion-drawer {
-  from { opacity: .35; transform: translateY(16px) scale(.985); }
-  75% { opacity: 1; transform: translateY(-1px) scale(1); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes np-motion-icon {
-  from { transform: scale(.85); }
-  to { transform: scale(1); }
-}
-@keyframes np-motion-underline {
-  from { opacity: .4; transform: scaleX(.3); }
-  to { opacity: 1; transform: scaleX(1); }
-}
-@keyframes np-motion-selection {
-  from { box-shadow: 0 0 0 3px var(--ac-glow); }
-  to { box-shadow: 0 0 0 0 transparent; }
-}
-@keyframes np-motion-busy {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .6; }
-}
-@keyframes np-motion-skeleton {
-  0%, 100% { opacity: .5; }
-  50% { opacity: .85; }
-}
-@keyframes np-motion-spin {
-  to { transform: rotate(360deg); }
-}
 
-/* Background tabs must not spend paint time on CSS loops (or finish entrances). */
+/* Background tabs do not spend paint time on existing operation/spinner loops. */
 html[data-panel-motion-paused],
 html[data-panel-motion-paused] *,
 html[data-panel-motion-paused] *::before,
@@ -266,9 +105,8 @@ html[data-panel-motion-paused] *::after {
   animation-play-state: paused !important;
 }
 
-/* Reduced motion is an immediate final state, including legacy animation rules.
-   Do not reset transforms globally: checked switches and centered overlays use
-   transforms for meaningful positioning. Toast visibility still follows .s. */
+/* Immediate final states, including legacy and feature CSS. Never reset transforms
+   globally: checked switches and measured/centered overlays depend on them. */
 html[data-panel-motion="reduced"],
 html[data-panel-motion="reduced"] *,
 html[data-panel-motion="reduced"] *::before,
@@ -277,18 +115,10 @@ html[data-panel-motion="reduced"] *::after {
   transition: none !important;
   scroll-behavior: auto !important;
 }
-html[data-panel-motion="reduced"] :is(.btn, .btn-ico, .lbtn, .sift-server-card, .plugin-card, .engine-card, .vm-icon-card, .vm-tile-card, .create-server-dashed-card, .fly-con-fab):is(:hover, :active) {
-  transform: none !important;
-}
-html[data-panel-motion="reduced"] .np-motion-ripple-layer { display: none; }
 @media (prefers-reduced-motion: reduce) {
   html, *, *::before, *::after {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
   }
-  html :is(.btn, .btn-ico, .lbtn, .sift-server-card, .plugin-card, .engine-card, .vm-icon-card, .vm-tile-card, .create-server-dashed-card, .fly-con-fab):is(:hover, :active) {
-    transform: none !important;
-  }
-  .np-motion-ripple-layer { display: none; }
 }
