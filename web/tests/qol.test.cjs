@@ -37,7 +37,8 @@ function setup() {
   return { c, elements, storage, requests, listeners, server };
 }
 function editState(c, content = 'edited') {
-  c.qol.editor = { server: c.curServer(), path: 'server.properties', key: 'draft', base: 'original', content };
+  c.S.editingFile = 'server.properties';
+  c.qol.editor = { server: c.curServer(), path: c.S.editingFile, token: c.S.token, user: c.S.user.id, session: 1, key: 'draft', base: 'original', content };
 }
 
 test('cron preview supports ranges/steps, weekday lists, leap day and UTC boundaries', () => {
@@ -262,4 +263,53 @@ test('large bulk selections use bounded, paced chunks', async () => {
   await c.deleteSelectedFiles();
   assert.deepEqual(sizes, [1000, 1]); assert.deepEqual(delays, [1100]);
   assert.equal(c.S.selectedFiles.size, 0);
+});
+
+test('save availability follows clean, undo, busy, permissions and readonly; clean never POSTs', async () => {
+  const { c, elements } = setup(); editState(c, 'original');
+  const button = elements['#editor-save-btn'] = { setAttribute() {} };
+  const status = elements['#editor-save-status'] = {};
+  let calls = 0, finish; c.api = () => { calls++; return new Promise(resolve => { finish = resolve; }); };
+  c.updateEditorStatus(); assert.equal(button.disabled, true);
+  assert.equal(await c.saveQolFile(), true); assert.equal(calls, 0);
+  c.qol.editor.content = 'edit'; c.updateEditorStatus(); assert.equal(button.disabled, false);
+  c.qol.editor.content = 'original'; c.updateEditorStatus(); await c.saveQolFile(); assert.equal(calls, 0); assert.equal(button.disabled, true);
+  c.qol.editor.content = 'edit'; c.hasServerPermission = () => false;
+  c.updateEditorStatus(); assert.equal(button.disabled, true); assert.equal(await c.saveQolFile(), false);
+  c.hasServerPermission = () => true; elements['#ed'] = { dataset: {}, readOnly: true };
+  c.updateEditorStatus(); assert.equal(button.disabled, true); assert.equal(await c.saveQolFile(), false);
+  delete elements['#ed']; const pending = c.saveQolFile();
+  assert.equal(button.disabled, true); assert.equal(status.textContent, 'Saving…');
+  assert.equal(await c.saveQolFile(), false); assert.equal(calls, 1);
+  finish({ modified_at: '2025-01-02T03:04:05Z' }); await pending;
+  assert.equal(button.disabled, true); assert.match(status.textContent, /^Saved · /); assert.ok(status.title);
+});
+test('load/save timestamps use server metadata, never load time or failed acknowledgements', async () => {
+  const { c, elements } = setup(); const status = elements['#editor-save-status'] = {};
+  const modified = '2024-02-03T04:05:06.000Z';
+  c.api = async url => url.includes('preview') ? { kind: 'text', editable: true } : { content: 'base', modified_at: modified };
+  await c.openQolFile('file.txt'); assert.equal(c.qol.editor.savedAt, modified);
+  c.updateEditorStatus(); const label = status.textContent; c.bindQolEditor(); c.updateEditorStatus(); assert.equal(status.textContent, label);
+  c.qol.editor.content = 'changed'; c.api = async () => { throw Error('failed'); };
+  await c.saveQolFile(); assert.equal(c.qol.editor.savedAt, modified);
+  c.api = async () => ({}); const before = Date.now(); await c.saveQolFile(); assert.ok(Date.parse(c.qol.editor.savedAt) >= before);
+  c.qol.editor = null; c.api = async url => url.includes('preview') ? { kind: 'text', editable: true } : { content: 'base' };
+  await c.openQolFile('old-node.txt'); assert.equal(c.qol.editor.savedAt, null); c.updateEditorStatus(); assert.equal(status.textContent, 'Saved');
+});
+test('late save acknowledgements cannot mutate another editor, node, account or session', async () => {
+  for (const change of [c => { c.qol.editor = { ...c.qol.editor, content: 'other' }; }, c => { c.S.servers = [{ id: 'a', node_id: 'other' }]; }, c => { c.S.user.id = 'u2'; }, c => { c.S.token = 'new'; }, c => { c.S.editingFile = 'other'; }]) {
+    const { c, storage } = setup(); editState(c); const original = c.qol.editor;
+    let finish, toasted = false; c.toast = () => { toasted = true; }; c.api = () => new Promise(resolve => { finish = resolve; });
+    const pending = c.saveQolFile(); change(c); finish({ modified_at: '2026-01-01T00:00:00Z' });
+    assert.equal(await pending, false); assert.equal(original.base, 'original'); assert.equal(original.savedAt, undefined);
+    assert.equal(toasted, false); assert.equal(storage.size, 0); assert.equal(Object.keys(c.S.files).length, 0);
+  }
+});
+test('late content loads cannot enter a new account or session', async () => {
+  for (const change of [c => { c.S.user.id = 'u2'; }, c => { c.S.token = 'new'; }]) {
+    const { c } = setup(); let finish;
+    c.api = async url => url.includes('preview') ? { kind: 'text', editable: true } : new Promise(resolve => { finish = resolve; });
+    const pending = c.openQolFile('file.txt'); await tick(); change(c); finish({ content: 'secret', modified_at: '2025-01-01T00:00:00Z' }); await pending;
+    assert.equal(c.qol.editor, null);
+  }
 });

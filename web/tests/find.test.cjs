@@ -12,12 +12,13 @@ function setup({ noEditor = false, noWorker = false, text = 'key=one\nkey=two' }
     get isConnected() { return this === doc.body || Boolean(this.parent?.isConnected); }
     get childElementCount() { return this.children.length; }
     appendChild(child) { child.remove(); this.children.push(child); child.parent = this; }
+    insertBefore(child, before) { child.remove(); const i = this.children.indexOf(before); this.children.splice(i < 0 ? this.children.length : i, 0, child); child.parent = this; }
     remove() { if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; }
     setAttribute(key, value) { this.attrs[key] = value; }
     addEventListener(key, fn) { (this.events[key] ||= []).push(fn); }
     removeEventListener(key, fn) { this.events[key] = (this.events[key] || []).filter(f => f !== fn); }
     dispatchEvent(event) { for (const fn of this.events[event.type] || []) fn(event); }
-    closest(selector) { return selector === '.np-editor-workspace' ? this.workspace ? this : null : this.hidden ? this : null; }
+    closest(selector) { return selector === '.np-editor-workspace' ? this.workspace ? this.parent : null : this.hidden ? this : null; }
     getClientRects() { return this.hidden ? [] : [{}]; }
     focus() { doc.activeElement = this; }
     select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
@@ -52,6 +53,7 @@ test('Ctrl/Cmd+F is built-in only for the verified text-file editor', () => {
   assert.equal(outside.key('f', { ctrlKey: true }).prevented, undefined);
   const h = setup(); assert.equal(h.key('f', { ctrlKey: true }).prevented, true);
   assert.equal(h.doc.activeElement.id, 'np-find-query'); assert.equal(h.doc.activeElement.attrs['aria-label'], 'Find in text file');
+  assert.equal(h.doc.getElementById('np-find').parent, h.main);
   h.c.NPFind.close(); assert.equal(h.key('f', { metaKey: true }).prevented, true);
 });
 test('login, modals, hidden and unverified textareas do not intercept browser find', () => {
@@ -73,6 +75,7 @@ test('search runs off-thread and Enter/F3 reuse cached offsets without scanning 
   assert.equal(h.workers[0].jobs.length, 1); assert.equal(h.ed.value, original);
   const escape = h.key('Escape'); assert.ok(escape.prevented && escape.stopped); assert.equal(h.count(), undefined);
   assert.equal(h.workers[0].terminated, true); assert.equal(h.timers.size, 0); assert.equal(h.intervals.size, 0);
+  assert.equal(h.doc.activeElement, h.ed);
 });
 test('rapid queries coalesce and stale worker results cannot overwrite the newest search', () => {
   const h = setup(); h.c.NPFind.open(); h.type('one'); h.flush(); const old = h.workers[0], oldReply = old.onmessage, job = old.jobs[0];
@@ -131,4 +134,16 @@ test('find never scans the page/mirror, stores content, or sends file text over 
   assert.doesNotMatch(source, /MutationObserver|createTreeWalker|innerHTML|sessionStorage|localStorage|fetch\(/);
   const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
   assert.ok(html.indexOf('/js/find-search.js') < html.indexOf('/js/find.js'));
+});
+test('new editor session drops search state even for the same file', () => {
+  const h = setup(); h.c.NPFind.open(); h.type('key'); h.flush();
+  h.ed.dataset.editorSession = 'new-login'; h.c.NPFind.refresh();
+  assert.equal(h.count(), undefined); assert.equal(h.workers[0].terminated, true);
+  h.ed.setSelectionRange(0, 0); h.c.NPFind.open(); assert.equal(h.doc.getElementById('np-find-query').value, '');
+});
+test('navigation uses full-file line/column offsets to scroll offscreen matches', () => {
+  const h = setup({ text: ('line\n').repeat(2000) + ' '.repeat(400) + 'needle' });
+  h.c.NPFind.open(); h.type('needle'); h.flush(); h.workers[0].reply();
+  assert.equal(h.ed.selectionStart, h.ed.value.indexOf('needle'));
+  assert.ok(h.ed.scrollTop > 40000); assert.ok(h.ed.scrollLeft > 2000);
 });

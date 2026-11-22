@@ -3,11 +3,12 @@
   'use strict';
   const FALLBACK_LIMIT = 128 * 1024;
   let bar, input, count, previous, next, editor, priorFocus, worker;
-  let fileKey = '', query = '', snapshot = '', matches = [], active = -1;
+  let fileKey = '', fileSession = '', query = '', snapshot = '', matches = [], active = -1;
   let opened = false, dirty = true, pending = false, workerBusy = false, limited = false, fallback = false;
   let timer = null, deadline = null, guard = null, requestID = 0, wantedDirection = 0;
 
   function currentEditor() {
+    if (typeof activeQolEditor === 'function' && !activeQolEditor()) return null;
     const ed = document.getElementById('ed');
     if (!ed || !ed.isConnected || ed.tagName !== 'TEXTAREA' || !ed.dataset.editorKey ||
         !ed.closest('.np-editor-workspace') || ed.closest('[hidden], [inert], [aria-hidden="true"]') ||
@@ -88,13 +89,15 @@
   function changed() { schedule(false); }
   function bind(ed) {
     editor?.removeEventListener('input', changed);
-    editor = ed; fileKey = ed.dataset.editorKey;
+    editor = ed; fileKey = ed.dataset.editorKey; fileSession = ed.dataset.editorSession;
+    const workspace = ed.closest('.np-editor-workspace');
+    workspace.insertBefore(bar, workspace.children[1] || null);
     ed.addEventListener('input', changed);
   }
   function refresh() {
     if (!opened) return;
     const ed = currentEditor();
-    if (!ed || ed.dataset.editorKey !== fileKey) { close(false); query = ''; return; }
+    if (!ed || ed.dataset.editorKey !== fileKey || ed.dataset.editorSession !== fileSession) { close(false); return; }
     if (ed !== editor || ed.value !== snapshot) { bind(ed); schedule(false); }
   }
   function move(direction) {
@@ -139,7 +142,7 @@
       priorFocus = document.activeElement;
       if (fileKey !== ed.dataset.editorKey) query = '';
       if (!bar) build();
-      document.body.appendChild(bar); opened = true; bind(ed);
+      opened = true; bind(ed);
       guard = setInterval(() => { if (currentEditor() !== editor) refresh(); }, 250);
     }
     if (seed) query = seed;
@@ -152,8 +155,8 @@
     opened = false; ++requestID;
     clearTimeout(timer); clearInterval(guard); timer = guard = null; stopWorker();
     editor?.removeEventListener('input', changed);
-    const target = priorFocus?.isConnected ? priorFocus : currentEditor() || document.getElementById('main');
-    bar.remove(); matches = []; snapshot = ''; active = -1; pending = false;
+    const target = currentEditor() || document.getElementById('main');
+    bar.remove(); input.value = query = ''; matches = []; snapshot = ''; active = -1; pending = false;
     editor = priorFocus = null;
     if (restore) target?.focus({ preventScroll: true });
   }

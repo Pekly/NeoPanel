@@ -1,14 +1,14 @@
 /* Text-file find only; matches use the editor's native selection. */
 #np-find {
-  position: fixed;
-  top: max(12px, env(safe-area-inset-top));
-  right: max(16px, env(safe-area-inset-right));
-  z-index: 90;
+  position: relative;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
+  align-self: stretch;
   display: flex;
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
-  max-width: calc(100vw - 24px);
+  max-width: 100%;
   padding: 8px;
   border: 1px solid var(--border-light, #536176);
   border-radius: 10px;
@@ -52,7 +52,7 @@
 #np-find button:disabled { opacity: .4; cursor: default; }
 #np-find :focus-visible { outline: 2px solid var(--ac, #2f6feb); outline-offset: 2px; }
 @media (max-width: 480px) {
-  #np-find { right: 12px; left: 12px; flex-wrap: wrap; }
+  #np-find { flex-wrap: wrap; }
   #np-find input { flex: 1 1 120px; }
   #np-find-count { font-size: 12px; }
 }
