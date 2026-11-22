@@ -14,10 +14,12 @@
         !['exists', 'can_edit', 'can_view_secret', 'running', 'ready'].every(k => bool(view[k])) ||
         typeof view.revision !== 'string' || (view.exists && !view.revision) || !Number.isInteger(view.port) || view.port < 1 || view.port > 65535) return false;
     const c = view.config;
-    return object(c) && typeof c.motd === 'string' && Number.isInteger(c.max_players) && c.max_players >= 1 && c.max_players <= 100000 &&
+    // Validate the transport shape here, not editable field values. The API can
+    // return a recoverable draft with validation_error and ready:false.
+    return object(c) && typeof c.motd === 'string' && Number.isInteger(c.max_players) && c.max_players >= -2147483648 && c.max_players <= 2147483647 &&
       ['online_mode', 'ip_forward', 'force_key_authentication', 'force_default_server'].every(k => bool(c[k])) &&
-      (type === 'velocity' ? ['NONE', 'LEGACY', 'MODERN', 'BUNGEEGUARD'].includes(c.forwarding_mode) : c.forwarding_mode === '') &&
-      (type === 'velocity' ? ['DISABLED', 'MODS', 'DESCRIPTION', 'ALL'] : ['DISABLED', 'ALL']).includes(c.ping_passthrough) &&
+      typeof c.forwarding_mode === 'string' && typeof c.ping_passthrough === 'string' &&
+      (view.validation_error === undefined || typeof view.validation_error === 'string') &&
       Array.isArray(c.backends) && c.backends.length <= 128 && c.backends.every(b => object(b) && ['name', 'address', 'motd'].every(k => typeof b[k] === 'string') && bool(b.restricted)) &&
       strings(c.try) && Array.isArray(c.forced_hosts) && c.forced_hosts.length <= 128 && c.forced_hosts.every(r => object(r) && typeof r.host === 'string' && strings(r.servers));
   }
@@ -28,7 +30,9 @@
     return true;
   }
   function validate(c, type) {
-    if (!Number.isInteger(c.max_players) || c.max_players < 1 || c.max_players > 100000) return 'Displayed slots must be 1–100000.';
+    if (!Number.isInteger(c.max_players) || c.max_players < 0 || c.max_players > 2147483647) return 'Displayed slots must be 0–2147483647.';
+    if (type === 'velocity' && !['NONE', 'LEGACY', 'MODERN', 'BUNGEEGUARD'].includes(c.forwarding_mode)) return 'Choose a valid player forwarding mode in Authentication & forwarding.';
+    if (!(type === 'velocity' ? ['DISABLED', 'MODS', 'DESCRIPTION', 'ALL'] : ['DISABLED', 'ALL']).includes(c.ping_passthrough)) return 'Choose a valid server-list ping passthrough mode in Authentication & forwarding.';
     if (!c.backends.length) return 'Add at least one backend server.';
     if (c.backends.length > 128 || c.try.length > 128 || c.forced_hosts.length > 128) return 'Use at most 128 servers, routes and fallback entries.';
     const names = new Set();
@@ -104,19 +108,19 @@
   const button = (action, text, disabled = false, index = '') => `<button type="button" class="btn sm" data-action="${action}" data-index="${index}" ${disabled ? 'disabled' : ''}>${text}</button>`;
   const input = (label, value, attrs) => `<label class="f"><span>${label}</span><input ${attrs} value="${esc(value)}"></label>`;
   const check = (label, value, attrs) => `<label class="proxy-check"><input type="checkbox" ${attrs} ${value ? 'checked' : ''}><span>${label}</span></label>`;
-  const select = (label, value, choices, attrs) => `<label class="f"><span>${label}</span><select class="no-cselect" ${attrs}>${choices.map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(v || 'Choose a server')}</option>`).join('')}</select></label>`;
+  const select = (label, value, choices, attrs) => `<label class="f"><span>${label}</span><select class="no-cselect" ${attrs}>${[...new Set([...choices, value])].map(v => `<option value="${esc(v)}" ${v === value ? 'selected' : ''}>${esc(v || 'Choose a server')}</option>`).join('')}</select></label>`;
   function paint(ctx, focus) {
     if (!live(ctx)) return;
     const d = ctx.data, c = ctx.draft, vel = ctx.type === 'velocity', disabled = !editable(ctx);
     const open = new Set([...ctx.root.querySelectorAll('details[open]')].map(el => el.dataset.section));
     const active = document.activeElement;
     if (!focus && active && ctx.root.contains?.(active) && active.dataset.action) focus = `[data-action="${active.dataset.action}"][data-index="${active.dataset.index || ''}"]`;
-    ctx.root.innerHTML = `<header class="proxy-heading"><div><h2 id="proxy-settings-title">Proxy configuration</h2><p class="mu">${vel ? 'Velocity · velocity.toml' : (ctx.type === 'waterfall' ? 'Waterfall' : 'BungeeCord') + ' · config.yml'}</p></div>${button('refresh', 'Refresh', ctx.busy)}</header>
+    ctx.root.innerHTML = `<header class="proxy-heading"><div><h2 id="proxy-settings-title">Proxy configuration</h2><p class="mu">${vel ? 'Velocity · velocity.toml' : (ctx.type === 'waterfall' ? 'Waterfall' : 'BungeeCord') + ' · config.yml'}</p></div>${button('refresh', ctx.blocked ? 'Retry / Refresh' : 'Refresh', ctx.busy)}</header>
       <p class="proxy-status" role="status" aria-live="polite">${esc(ctx.busy ? 'Working…' : ctx.message || (ctx.dirty ? 'Unsaved proxy changes' : d ? (d.running ? 'Stop the proxy before saving.' : !d.can_edit || !permitted(ctx, 'settings.edit') ? 'View only' : !d.ready ? 'Setup needed · Add a server and join order.' : 'Ready to edit') : 'Configuration unavailable.'))}</p>
       <p class="proxy-error" role="alert" ${ctx.error ? '' : 'hidden'}>${esc(ctx.error)}</p>
-      ${!d ? button('files', 'Open ' + (vel ? 'velocity.toml' : 'config.yml') + ' in Files', !permitted(ctx, 'files.view')) : !d.exists ? `<div class="proxy-empty"><h3>Create your proxy config</h3><p>No config file yet. Create it, then add your backend servers.</p>${button('initialize', 'Create config', disabled)}<p class="mu">Only creates a missing file. Does not start the proxy.</p></div>` : `
+      ${!d ? (ctx.showFiles ? button('files', 'Open ' + (vel ? 'velocity.toml' : 'config.yml') + ' in Files', !permitted(ctx, 'files.view')) : '') : !d.exists ? `<div class="proxy-empty"><h3>Create your proxy config</h3><p>No config file yet. Create it, then add your backend servers.</p>${button('initialize', 'Create config', disabled)}<p class="mu">Only creates a missing file. Does not start the proxy.</p></div>` : `
       <fieldset ${disabled ? 'disabled' : ''} class="proxy-fields"><legend class="sr-only">Proxy settings</legend>
-        <div class="proxy-grid">${input('Server message (MOTD)', c.motd, 'data-field="motd"')}${input('Displayed slots', c.max_players, 'type="number" min="1" max="100000" data-field="max_players"')}
+        <div class="proxy-grid">${input('Server message (MOTD)', c.motd, 'data-field="motd"')}${input('Displayed slots', c.max_players, 'type="number" min="0" max="2147483647" data-field="max_players"')}
         </div><p class="mu proxy-hint">${vel ? 'MOTD supports MiniMessage, such as &lt;bold&gt;Welcome&lt;/bold&gt;.' : 'MOTD supports &amp; color codes, such as &amp;aWelcome.'}</p>
         ${input('Assigned proxy port', d.port, 'readonly aria-describedby="proxy-port-note"')}<p id="proxy-port-note" class="mu proxy-hint">Change the port in Networking, if allowed.</p>
         <div class="proxy-heading"><h3>Backend servers</h3>${button('add-backend', 'Add server', disabled || c.backends.length >= 128)}</div>
@@ -207,19 +211,43 @@
         if (typeof response?.secret !== 'string' || !response.secret) throw Error('invalid');
         ctx.secret = response.secret; ctx.message = 'Secret revealed. Hide it when finished.';
       } else {
-        if (!valid(response, ctx.type)) throw Error('invalid');
-        ctx.data = clone(response); ctx.draft = clone(response.config); ctx.dirty = false; ctx.blocked = false;
+        if (!valid(response, ctx.type)) throw Object.assign(Error('invalid'), {incompatible:true});
+        if ((action === 'initialize' && !response.exists) || (action === 'save' && (!response.exists || !response.ready || response.validation_error || validate(response.config, ctx.type)))) throw Object.assign(Error('unconfirmed'), {incompatible:true});
+        ctx.data = clone(response); ctx.draft = clone(response.config); ctx.dirty = false; ctx.blocked = false; ctx.showFiles = false;
+        if (response.exists) ctx.error = response.validation_error || validate(ctx.draft, ctx.type);
         ctx.message = action === 'save' ? 'Proxy config saved. Start the proxy manually when ready.' : action === 'initialize' ? 'Config created. Add your first backend server.' : '';
       }
     } catch (error) {
       if (!live(ctx)) return;
       ctx.blocked = true;
       ctx.message = ctx.dirty ? 'Draft kept · Refresh required before saving.' : 'Refresh required.';
-      ctx.error = error.status === 409 ? 'Config changed or the proxy is running. Check its status, then refresh. Your draft has not been overwritten.' : error.status === 400 ? `This config cannot be edited here. Open ${ctx.type === 'velocity' ? 'velocity.toml' : 'config.yml'} in Files.` : 'Could not confirm the configuration. Refresh to check it, or open the config in Files.';
+      const failure = failureAdvice(error, ctx.type);
+      ctx.error = failure.message; ctx.showFiles = failure.files;
     } finally {
       if (live(ctx)) { ctx.busy = false; paint(ctx); }
       else clearSecret(ctx);
     }
+  }
+  function failureAdvice(error, type) {
+    const file = type === 'velocity' ? 'velocity.toml' : 'config.yml';
+    const code = error.data?.code;
+    const advice = {
+      unsupported_config:`This document has invalid syntax or a structure the builder cannot safely edit. Open ${file} in Files, or ask your administrator to check it. No file was reset.`,
+      file_unavailable:'The config file cannot be accessed safely. Ask your administrator to check permissions, file size and server path links, then Retry.',
+      unsafe_secret:'The forwarding secret path or file is unsafe or invalid. Ask your administrator to check it without replacing an existing secret, then Retry.',
+      config_missing:'The config is missing. Retry to load its current state; Create config is offered only after the server confirms it is missing.',
+      revision_conflict:'The config changed. Refresh before saving; your draft has not been overwritten.',
+      server_running:'Stop the proxy before saving, then Refresh. Your draft has not been overwritten.',
+      operation_busy:'Another server action is in progress. Wait for it to finish, then Retry.',
+      validation_failed:'The settings were rejected. Check the field values, then Refresh before retrying. Your draft has been kept.'
+    };
+    if (typeof advice[code] === 'string') return {message:advice[code], files:code === 'unsupported_config'};
+    if (error.incompatible || [404, 405, 501].includes(error.status)) return {message:'Could not confirm a compatible proxy settings API. Retry; if this continues, ask your administrator to update the panel and hosting worker together and check the server route.', files:false};
+    if (error.status === 401) return {message:'Your session expired. Sign in again, then Retry.', files:false};
+    if (error.status === 403) return {message:'Proxy settings access was denied. Ask the server owner to check your Settings permissions, then Retry.', files:false};
+    if (error.status === 409) return {message:'Config changed or the proxy is busy. Check its status, then Refresh. Your draft has not been overwritten.', files:false};
+    if (error.status === 400) return {message:'The hosting worker rejected this request. Retry; if it continues, ask your administrator to check worker compatibility and the config format. No file was reset.', files:false};
+    return {message:'Could not reach or confirm the hosting worker. Check your connection, then Retry. If this continues, contact your administrator. No save has been confirmed.', files:false};
   }
   async function action(ctx, event) {
     const target = event.target.closest('[data-action]');
