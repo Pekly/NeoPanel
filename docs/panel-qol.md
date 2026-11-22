@@ -9,6 +9,13 @@ These features live in the shared web panel. They do not remove or change Window
 - Pin servers with the star on their card. Pins sort first; **Pinned only** filters the list. Sort by name, status, or location. Search, location, sorting, and pins are saved for your account in this browser. The location selector lists only hosts containing your servers and stays locked when they are all on one host. Layout buttons keep a stable toolbar position.
 - The address button in the server header copies the Minecraft player connection address, not the panel URL. Its label stays consistent during live updates. Card addresses remain copyable.
 
+## Text editor
+
+- **Save** is unavailable when there are no changes, a save is pending, or the file is read-only. Ctrl+S also avoids unchanged writes.
+- The **Saved** label shows the file's acknowledged modification time, with the full date in its tooltip. Opening the editor does not invent a new save time; failed saves do not advance it.
+- Typing during a save remains unsaved work after that request completes; only the submitted contents are acknowledged.
+- **Ctrl+F / Cmd+F** opens search inside the active editor. Outside it, normal browser find remains available.
+
 ## Console and connection status
 
 - Scroll upward to stop following new output. The position survives UI redraws; **Jump to latest** resumes following.

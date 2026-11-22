@@ -621,7 +621,6 @@ function buildSettingsSnapshots(srv, data) {
     type: srv?.type || 'paper',
     version: data.ver,
     jar_file: data.jar,
-    port: data.port,
     memory_min: isSteelEngine(srv?.type) ? 0 : Math.min(1024, data.ram),
     memory_max: data.ram,
     java_path: isSteelEngine(srv?.type) ? '' : data.javaPath,
@@ -1870,6 +1869,7 @@ function syncActiveServerState(srv) {
 }
 
 function applyRoute(urlStr, opts = {}) {
+  window.NPWorldConversion?.reset();
   captureEditor();
   window.NPWorkspace?.remember();
   if (!opts.editorChecked && (editorIsDirty() || QOL.editor?.saving || QOL.leaving)) {
@@ -6529,6 +6529,7 @@ const V = {
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
           <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
           ${['files.view', 'files.edit', 'sftp.access'].every(p => hasServerPermission(p)) ? `<button type="button" class="btn" onclick="window.NPSFTPImport.open()" style="height: 36px;">${ic('download', 14)} Import SFTP</button>` : ''}
+          ${hasServerPermission('files.view') ? `<button type="button" class="btn" onclick="window.NPWorldConversion.open()" style="height:36px;">${ic('refresh', 14)} Convert world</button>` : ''}
           <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
         </div>
       </div>
@@ -6977,8 +6978,10 @@ const V = {
           <div>
             <h2 style="margin: 0; font-size: 18px; color: #fff;">Network Allocations</h2>
             <p class="mu" style="font-size: 13px; margin: 4px 0 0;">Manage ports for your game server and plugins.</p>
+            <p class="mu" style="margin:8px 0 0;"><b>${Number.isInteger(srv?.ports_used) ? srv.ports_used : ports.length} used / ${Number.isInteger(srv?.ports_allowed) ? srv.ports_allowed : '…'} allowed</b> · includes the primary port</p>
+            ${S.user?.role === 'admin' ? `<div class="row" style="gap:8px;margin-top:10px;"><label for="port-allowance">Allowed ports</label><input id="port-allowance" type="number" min="1" max="64512" value="${Number.isInteger(srv?.ports_allowed) ? srv.ports_allowed : 1}" style="width:100px;"><button type="button" class="btn sm" onclick="NPPorts.saveAllowance()">Save allowance</button></div>` : ''}
           </div>
-          <button class="btn pr sm" onclick="openAddPortModal()" style="height: 36px; padding: 0 16px;">
+          <button class="btn pr sm" onclick="openAddPortModal()" ${Number.isInteger(srv?.ports_allowed) && (srv.ports_used || ports.length) >= srv.ports_allowed ? 'disabled title="Port allowance reached"' : ''} style="height: 36px; padding: 0 16px;">
             ${ic('plus', 14)} Assign Port
           </button>
         </div>
@@ -7030,6 +7033,7 @@ const V = {
             `).join('')}
           </tbody>
         </table>
+        <p class="mu" style="font-size:12px;margin-top:12px;">Primary changes require the server to be stopped and apply on its next start. Extra ports are reservations: configure your plugin or service to listen on them.</p>
       </div>
 
       <!-- Secondary Row: SFTP Access & Common Ports -->
@@ -7662,7 +7666,8 @@ const V = {
                 <span>Server Game Port</span>
                 ${isPortsLocked ? '<span class="chip" style="font-size:10px; color:#f59e0b; border-color:rgba(245,158,11,0.3);">🔒 Locked</span>' : ''}
               </span>
-              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}" ${isPortsLocked ? 'disabled title="Your host manages the server port."' : 'oninput="scheduleSettingsAutoSave(600)" onblur="flushSettingsAutoSave()"'} >
+              <input type="number" min="1024" max="65535" id="prop-port" value="${srv?.port || 25565}" readonly title="Manage allocated ports in Network while the server is stopped.">
+              <small class="mu">Change the primary port in Network.</small>
             </label>
             <label class="f">
               <span>Max Players</span>
@@ -7760,6 +7765,7 @@ const V = {
         </div>
       </div>
       ${proxy && typeof NPProxySettings !== 'undefined' ? NPProxySettings.render(srv) : ''}
+      ${typeof NPFeatures !== 'undefined' ? NPFeatures.render(srv) : ''}
       ${typeof NPServerAutomation !== 'undefined' ? NPServerAutomation.render(srv) : ''}
 
       ${isAdmin ? `
@@ -8519,6 +8525,8 @@ const V = {
         </div>
 
         ${renderAdminPanelUrlCard()}
+        ${typeof NPFeatures !== 'undefined' ? NPFeatures.render(null) : ''}
+        ${typeof NPPorts !== 'undefined' ? NPPorts.renderPool() : ''}
 
         <div class="card" style="margin-bottom:18px;">
           <h2 style="margin:0 0 6px; color:var(--tx);">Network and server defaults</h2>
@@ -9269,7 +9277,7 @@ function navHtml() {
       const href = routeUrl(key);
       const displayLabel = (key === 'plug' && isModSrv) ? 'Mods' : label;
       return `${header}
-    <a class="nav-item ${active}" ${canServerPage(key) ? `href="${esc(href)}"` : 'aria-disabled="true" tabindex="0" title="Access restricted — permission required"'} onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
+    <a class="nav-item ${active}" data-feature-page="${key}" ${canServerPage(key) ? `href="${esc(href)}"` : 'aria-disabled="true" tabindex="0" title="Access restricted — permission required"'} onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
       ${ic(iconName, 16)}
       <span>${displayLabel}</span>
     </a>`;
@@ -9332,6 +9340,7 @@ window.addEventListener('hashchange', () => {
 
 // --- Main Render Function (R) ---
 window.R = function() {
+  window.NPFeatures?.sync();
   window.NPProxySettings?.sync();
   captureEditor();
   window.NPWorkspace?.captureConsole();
@@ -9373,10 +9382,11 @@ window.R = function() {
   if (main) {
     const maintBannerHtml = window.NPWorkspace?.maintenanceBanner() || '';
     const viewFn = V[S.view] || V.notfound;
-    const blocked = serverPagePermission(S.view) && !canServerPage(S.view);
+    const featureBlocked = window.NPFeatures?.pageEnabled(S.view) === false;
+    const blocked = featureBlocked || (serverPagePermission(S.view) && !canServerPage(S.view));
     if (blocked && typeof disposeFilePreview === 'function') disposeFilePreview();
     const retainedPreviewMedia = typeof captureFilePreviewMedia === 'function' ? captureFilePreviewMedia() : null;
-    main.innerHTML = (window.NPWorkspace?.connectionBanner() || '') + renderAnnouncement() + maintBannerHtml + (blocked ? renderAccessRestricted() : (S.view === 'admin' && !isAdmin ? renderAccessRestricted(false) : viewFn())) + (S.view === 'dash' ? renderDiscordCard() : '');
+    main.innerHTML = (window.NPWorkspace?.connectionBanner() || '') + renderAnnouncement() + maintBannerHtml + (featureBlocked ? '<div class="card"><h2>Feature unavailable</h2><p class="mu">This tool is disabled by an administrator.</p></div>' : blocked ? renderAccessRestricted() : (S.view === 'admin' && !isAdmin ? renderAccessRestricted(false) : viewFn())) + (S.view === 'dash' ? renderDiscordCard() : '');
     if (typeof restoreFilePreviewMedia === 'function') restoreFilePreviewMedia(retainedPreviewMedia);
     if (S.view === 'set' && !blocked) organizeServerSettings(main);
     applyPermissionControls(main);
@@ -9405,6 +9415,9 @@ window.R = function() {
   window.NPFind?.refresh();
   window.NPFileDrag?.afterRender($('#main'));
   window.NPWorkspace?.afterRender();
+  updateEditorStatus();
+  window.NPFeatures?.mount();
+  window.NPPorts?.mount();
 };
 
 function bindConsoleInput() {
@@ -12795,7 +12808,10 @@ async function loadServerPorts(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   try {
-    const list = await api(srvApiPath(srv, '/ports'));
+    const url = srvApiPath(srv, '/ports');
+    const [list, summary] = await Promise.all([api(url), api(srvApiPath(srv, '/ports/summary'))]);
+    if (!curServer() || srvApiPath(curServer(), '/ports') !== url) return;
+    if (Number.isInteger(summary?.used) && Number.isInteger(summary?.allowed)) { srv.ports_used = summary.used; srv.ports_allowed = summary.allowed; }
     if (Array.isArray(list)) {
       S.ports = list;
       if (!skipRender && S.view === 'net') R();
@@ -12811,6 +12827,9 @@ function openAddPortModal() {
 
   const srv = curServer();
   const nextPort = getNextSuggestedPort(srv?.node_id || 'local');
+  const isAdmin = S.user?.role === 'admin';
+  if (!srv || !hasServerPermission('settings.edit', srv) || window.NPFeatures?.enabled('extra_ports') === false) return;
+  if (Number.isInteger(srv.ports_allowed) && srv.ports_used >= srv.ports_allowed) return toast('Port allowance reached. Ask an administrator to raise it.', 'bad');
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:520px;">
@@ -12820,10 +12839,11 @@ function openAddPortModal() {
       </div>
 
       <p class="mu" style="font-size:13px; margin-bottom:16px;">
-        Assign an additional incoming network port to <b>${esc(srv?.name || 'this server')}</b>.
+        ${isAdmin ? 'Choose a free port for' : 'A random free port will be assigned to'} <b>${esc(srv?.name || 'this server')}</b>. Configure your plugin or service to use it.
       </p>
 
-      <form id="add-port-form" onsubmit="submitAddPort(event)">
+      <form id="add-port-form" data-server-url="${esc(srvApiPath(srv, '/ports'))}" onsubmit="submitAddPort(event)">
+        ${isAdmin ? `
         <label class="f" style="margin-bottom:14px;">
           <span>Port Number (1024 - 65535)</span>
           <input type="number" id="ap-port" min="1024" max="65535" required value="${nextPort}">
@@ -12840,6 +12860,7 @@ function openAddPortModal() {
             <button type="button" class="btn sm" style="font-size:11.5px; padding:4px 8px;" onclick="setPortPreset(8100, 'BlueMap')">BlueMap (8100)</button>
           </div>
         </div>
+        ` : '<p class="mu">Port number: assigned automatically</p>'}
 
         <label class="f" style="margin-bottom:14px;">
           <span>Protocol</span>
@@ -12855,9 +12876,9 @@ function openAddPortModal() {
           <input type="text" id="ap-notes" placeholder="e.g. Simple Voice Chat, Dynmap, Geyser" value="Additional Allocation">
         </label>
 
-        <label class="row" style="gap:8px; margin-bottom:20px; cursor:pointer;">
+        <label class="np-check-row" style="margin-bottom:20px;">
           <input type="checkbox" id="ap-primary">
-          <span style="font-size:13px; color:#fff;">Set as primary game port (updates server.properties)</span>
+          <span>Set as primary game port (server must be stopped)</span>
         </label>
 
         <div class="row" style="justify-content:flex-end; gap:10px;">
@@ -12882,42 +12903,44 @@ function setPortPreset(port, notes) {
 async function submitAddPort(e) {
   e.preventDefault();
   const srv = curServer();
-  if (!srv) return;
+  const form = $('#add-port-form');
+  const url = srv ? srvApiPath(srv, '/ports') : '';
+  if (!srv || !form || form.dataset.serverUrl !== url || form.dataset.busy === '1') return;
+  form.dataset.busy = '1';
 
   const btn = $('#ap-submit-btn');
   if (btn) btn.disabled = true;
 
-  const port = parseInt($('#ap-port')?.value, 10);
+  const isAdmin = S.user?.role === 'admin';
+  const port = isAdmin ? parseInt($('#ap-port')?.value, 10) : 0;
   const protocol = $('#ap-proto')?.value || 'tcp/udp';
   const notes = $('#ap-notes')?.value.trim() || 'Additional Allocation';
   const isPrimary = $('#ap-primary')?.checked || false;
 
-  if (isNaN(port) || port < 1024 || port > 65535) {
+  if (isAdmin && (isNaN(port) || port < 1024 || port > 65535)) {
+    delete form.dataset.busy;
     toast('Invalid port: must be between 1024 and 65535', 'bad');
     if (btn) btn.disabled = false;
     return;
   }
 
   try {
-    await api(srvApiPath(srv, '/ports'), {
+    const result = await api(url, {
       method: 'POST',
-      body: JSON.stringify({ port, protocol, notes, is_primary: isPrimary })
+      body: JSON.stringify({ ...(isAdmin ? {port} : {}), protocol, notes, is_primary: isPrimary })
     });
-    toast(`Port ${port} successfully assigned!`, 'ok');
+    if (!Number.isInteger(result?.port)) throw new Error('Allocation was not confirmed. Reload Network before retrying.');
+    if ($('#add-port-form') !== form || !curServer() || srvApiPath(curServer(), '/ports') !== url) return;
+    toast(isPrimary ? `Primary port ${result.port} saved for the next start.` : `Port ${result.port} reserved. Configure your plugin to use it.`, 'ok');
     closeModal();
-    if (isPrimary) {
-      srv.port = port;
-    }
+    if (isPrimary) srv.port = result.port;
     await loadServerPorts();
-    R();
   } catch (err) {
-    toast(err.message || 'Failed to assign port', 'bad');
-    if (btn) btn.disabled = false;
-    uiAlert({
-      title: 'Port Allocation Failed',
-      message: `Failed to allocate port <b>${port}</b>:<br><br>${esc(err.message || 'Port is already assigned or unavailable.')}`,
-      type: 'error'
-    });
+    if ($('#add-port-form') === form) {
+      toast(err.message || 'Failed to assign port', 'bad');
+      if (btn) btn.disabled = false;
+      delete form.dataset.busy;
+    }
   }
 }
 
@@ -12949,7 +12972,7 @@ async function setPrimaryPort(portId) {
   if (!srv) return;
   const ok = await uiConfirm({
     title: 'Change Primary Game Port',
-    message: `Set this port allocation as the primary Minecraft game port for <b>${esc(srv.name)}</b>? This updates <code>server.properties</code> and requires a server restart to take effect.`,
+    message: `Set this allocation as the primary game port for <b>${esc(srv.name)}</b>? The server must be stopped. Its game or proxy configuration will be saved for the next manual start.`,
     confirmText: 'Set Primary Port',
     cancelText: 'Cancel',
     isDanger: false,
@@ -12962,7 +12985,7 @@ async function setPrimaryPort(portId) {
     if (res && res.port) {
       srv.port = res.port;
     }
-    toast(`Primary game port updated to ${res.port}`, 'ok');
+    toast(`Primary port ${res.port} saved for the next start.`, 'ok');
     await loadServerPorts();
     R();
   } catch (err) {
@@ -16986,6 +17009,9 @@ async function logout() {
   window.NPDomain?.reset();
   window.NPWorkspace?.reset();
   window.NPProxySettings?.reset();
+  window.NPFeatures?.reset();
+  window.NPPorts?.reset();
+  window.NPWorldConversion?.reset();
   cancelAllUploads();
   QOL.uploads = [];
   renderUploadQueue();
@@ -17750,8 +17776,9 @@ function renderAccessRestricted(server = true) {
 function clientRequestPermission(suffix, method = 'GET') {
   const read = ['GET', 'HEAD'].includes(method.toUpperCase());
   const path = suffix.split('?')[0];
-  if (path === '/permissions') return '';
+  if (path === '/permissions' || (path === '/features' && read)) return '';
   if (path === '/automation') return read ? '' : 'settings.edit';
+  if (path.startsWith('/world-conversion')) return read ? 'files.view' : 'files.edit';
   if (path.startsWith('/files')) {
     if (path === '/files/trash' || path.startsWith('/files/trash/')) return 'files.delete';
     if (read) return 'files.view';
@@ -17782,6 +17809,13 @@ function assertClientRequestAccess(endpoint, options = {}) {
     for (const required of ['files.view', 'files.edit', 'sftp.access']) if (!hasServerPermission(required, srv)) throw Object.assign(new Error('Access restricted: ' + required + ' required'), { status: 403 });
     return; // Cancelling an import is not deleting destination files.
   }
+  if (/^\/world-conversion(?:\/|$)/.test(match[3])) {
+    const required = ['files.view'];
+    if (!['GET', 'HEAD'].includes(method)) required.push('files.edit');
+    if (match[3].endsWith('/replace')) required.push('backup.manage');
+    for (const permission of required) if (!hasServerPermission(permission, srv)) throw Object.assign(new Error('Access restricted: ' + permission + ' required'), { status: 403 });
+    return;
+  }
   const permission = clientRequestPermission(match[3], method);
   if (match[3] === '/power/countdown' && method === 'POST' && !hasServerPermission('console.command', srv)) throw Object.assign(new Error('Access restricted: console.command required'), { status: 403 });
   if (match[3] === '/proxy-config/secret' && !hasServerPermission('files.view', srv)) throw Object.assign(new Error('Access restricted: files.view required'), { status: 403 });
@@ -17805,6 +17839,7 @@ function applyPermissionControls(root) {
     disable('[onclick*="RenameFile"], [onclick*="MoveFiles"], [onclick*="unzipFile"], [onclick*="unzipSelected"]', 'files.edit');
   }
   window.NPWorkspace?.syncControls();
+  updateEditorStatus(); // Permissions/workspace controls must not re-enable a clean or busy save.
 }
 V.sftp = () => `${srvh()}<div class="np-section-heading"><div><h2>SFTP</h2></div></div>${S.sftpLoading ? '<div class="card" role="status">Loading connection details…</div>' : S.sftp ? renderSftpCardHtml(curServer()) : `<div class="card" role="status">${esc(S.sftpError || 'Connection details are not loaded.')} <button class="btn sm" onclick="loadSFTPDetails()">Retry</button></div>`}`;
 V.create = () => canCreateServers() ? '<section class="card"><h1>Create server</h1><p class="mu">Choose a node and configure your Minecraft server.</p><button class="btn pr" onclick="openCreateServerModal()">Configure server</button></section>' : renderAccessRestricted(false);

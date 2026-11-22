@@ -31,6 +31,14 @@ function sameQolServer(a, b) {
 function editorDraftKey(srv, path) {
   return 'neopanel:draft:' + JSON.stringify([S.user?.id || S.user?.username, srv.node_id || 'local', srv.id, path]);
 }
+function activeQolEditor(e = QOL.editor) {
+  return Boolean(e && QOL.editor === e && e.token === S.token && e.user === (S.user?.id || S.user?.username) &&
+    S.view === 'fi' && S.editingFile === e.path && sameQolServer(curServer(), e.server));
+}
+function editorModifiedAt(value) {
+  const date = typeof value === 'string' && value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
 function editorIsDirty() {
   const e = QOL.editor;
   return Boolean(e && e.content !== e.base);
@@ -49,7 +57,7 @@ function persistEditorDraft() {
 }
 function captureEditor() {
   const ed = document.querySelector('#ed');
-  if (ed && QOL.editor && ed.dataset.editorKey === QOL.editor.key) {
+  if (ed && activeQolEditor() && ed.dataset.editorKey === QOL.editor.key) {
     QOL.editor.content = ed.value;
     QOL.editor.selection = [ed.selectionStart, ed.selectionEnd, ed.scrollTop];
     persistEditorDraft();
@@ -59,21 +67,32 @@ function updateEditorStatus() {
   const e = QOL.editor;
   const status = document.querySelector('#editor-save-status');
   const button = document.querySelector('#editor-save-btn');
-  if (status && e) status.textContent = e.saving ? 'Saving…' : editorIsDirty() ? (e.draftStored ? 'Unsaved · draft kept in this tab' : 'Unsaved · draft not stored') : 'Saved';
-  if (button && e) button.disabled = Boolean(e.saving) || (typeof hasServerPermission === 'function' && !hasServerPermission('files.edit', e.server));
+  const current = activeQolEditor(e);
+  const saved = e?.savedAt ? new Date(e.savedAt) : null;
+  if (status) {
+    status.textContent = !current ? '' : e.saving ? 'Saving…' : editorIsDirty() ? (e.draftStored ? 'Unsaved · draft kept in this tab' : 'Unsaved · draft not stored') : saved ? `Saved · ${saved.toLocaleTimeString()}` : 'Saved';
+    status.title = current && saved ? saved.toLocaleString() : '';
+  }
+  if (button) {
+    const ed = document.querySelector('#ed');
+    button.disabled = !current || Boolean(e.saving) || !editorIsDirty() || Boolean(ed?.readOnly || ed?.disabled) ||
+      (typeof hasServerPermission === 'function' && (!hasServerPermission('files.view', e.server) || !hasServerPermission('files.edit', e.server)));
+    button.setAttribute('aria-disabled', String(button.disabled));
+  }
 }
 function bindQolEditor() {
   const ed = document.querySelector('#ed');
   const e = QOL.editor;
-  if (!ed || !e || S.editingFile !== e.path || !sameQolServer(curServer(), e.server)) return;
+  if (!ed || !activeQolEditor(e)) return;
   ed.dataset.editorKey = e.key;
+  ed.dataset.editorSession = String(e.session);
   ed.value = e.content;
   if (e.selection) { ed.setSelectionRange(e.selection[0], e.selection[1]); ed.scrollTop = e.selection[2]; }
   ed.addEventListener('input', () => { captureEditor(); updateEditorStatus(); });
   ed.addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault(); saveActiveFile();
-    } else if (event.key === 'Tab') {
+    } else if (event.key === 'Tab' && !ed.readOnly && !ed.disabled) {
       event.preventDefault();
       ed.setRangeText('  ', ed.selectionStart, ed.selectionEnd, 'end');
       captureEditor(); updateEditorStatus();
@@ -126,23 +145,27 @@ async function openQolFile(name) {
   if (!srv) return;
   if (typeof hasServerPermission === 'function' && !hasServerPermission('files.view', srv)) return;
   const token = S.token;
+  const user = S.user?.id || S.user?.username;
   const path = S.currentDir ? `${S.currentDir}/${name}` : name;
   const sequence = ++QOL.openSequence;
   try {
     const metadata = await api(srvApiPath(srv, `/files/preview?path=${encodeURIComponent(path)}`));
-    if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || !sameQolServer(srv, curServer())) return;
+    if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || user !== (S.user?.id || S.user?.username) || !sameQolServer(srv, curServer())) return;
     if (!metadata || !['text', 'image', 'video', 'zip', 'binary'].includes(metadata.kind)) throw Error('File type could not be verified. Refresh the panel and check that the node is updated.');
     if (metadata.kind !== 'text' || metadata.editable !== true) return openFilePreview(srv, path, metadata);
     const data = await api(srvApiPath(srv, `/files/content?path=${encodeURIComponent(path)}`));
-    if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || !sameQolServer(srv, curServer())) return;
+    if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || user !== (S.user?.id || S.user?.username) || !sameQolServer(srv, curServer())) return;
     if (typeof data?.content !== 'string' || /[\x00-\x08\x0b\x0e-\x1a\x1c-\x1f]/.test(data.content)) throw Error('This file is not safe to open as text. Download it instead.');
-    const base = data.content;
-    const e = { server: { ...srv }, path, base, content: base, key: editorDraftKey(srv, path), url: location.pathname + location.search };
+    // Native textareas normalize CRLF/CR on assignment; opening is not an edit.
+    const base = data.content.replace(/\r\n?/g, '\n');
+    const e = { server: { ...srv }, path, base, content: base, token, user, session: sequence, savedAt: editorModifiedAt(data.modified_at), key: editorDraftKey(srv, path), url: location.pathname + location.search };
     let draft;
     try { draft = JSON.parse(sessionStorage.getItem(e.key)); } catch (_) {}
+    if (draft && typeof draft.content === 'string') draft.content = draft.content.replace(/\r\n?/g, '\n');
+    if (draft && typeof draft.base === 'string') draft.base = draft.base.replace(/\r\n?/g, '\n');
     if (draft && typeof draft.content === 'string' && draft.content !== base) {
       const recover = await uiConfirm({ title: 'Recover file draft?', message: `An unsaved draft exists for <b>${esc(path)}</b>.${draft.base !== base ? ' The server copy has changed since this draft was created; review it before saving.' : ''}`, confirmText: 'Recover draft', cancelText: 'Use server copy' });
-      if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || !sameQolServer(srv, curServer())) return;
+      if (sequence !== QOL.openSequence || S.view !== 'fi' || token !== S.token || user !== (S.user?.id || S.user?.username) || !sameQolServer(srv, curServer())) return;
       if (recover) e.content = draft.content;
       else { try { sessionStorage.removeItem(e.key); } catch (_) {} }
     }
@@ -153,26 +176,30 @@ async function openQolFile(name) {
     S.files[path] = base;
     persistEditorDraft();
     R();
-  } catch (err) { if (sequence === QOL.openSequence && token === S.token && S.view === 'fi' && sameQolServer(srv, curServer())) toast(`Could not open ${path}: ${err.message}`, 'bad'); }
+  } catch (err) { if (sequence === QOL.openSequence && token === S.token && user === (S.user?.id || S.user?.username) && S.view === 'fi' && sameQolServer(srv, curServer())) toast(`Could not open ${path}: ${err.message}`, 'bad'); }
 }
 async function saveQolFile() {
   captureEditor();
   const e = QOL.editor;
-  if (!e || e.saving) return false;
+  if (!activeQolEditor(e) || e.saving) return false;
+  if (!editorIsDirty()) { updateEditorStatus(); return true; }
+  const ed = document.querySelector('#ed');
+  if (ed?.readOnly || ed?.disabled || (typeof hasServerPermission === 'function' &&
+      (!hasServerPermission('files.view', e.server) || !hasServerPermission('files.edit', e.server)))) return false;
   const content = e.content;
   e.saving = true;
   updateEditorStatus();
   try {
-    await api(srvApiPath(e.server, '/files/content'), { method: 'POST', body: JSON.stringify({ path: e.path, content }) });
+    const result = await api(srvApiPath(e.server, '/files/content'), { method: 'POST', body: JSON.stringify({ path: e.path, content }) });
+    if (!activeQolEditor(e)) return false;
     e.base = content;
-    if (QOL.editor === e) {
-      S.files[e.path] = content;
-      persistEditorDraft();
-    }
+    e.savedAt = editorModifiedAt(result?.modified_at) || new Date().toISOString();
+    S.files[e.path] = content;
+    persistEditorDraft();
     toast(`Saved ${e.path.split('/').pop()}`, 'ok');
     return true;
   } catch (_) { return false; }
-  finally { e.saving = false; updateEditorStatus(); }
+  finally { e.saving = false; if (activeQolEditor(e)) updateEditorStatus(); }
 }
 
 function uploadQueueCounts() {

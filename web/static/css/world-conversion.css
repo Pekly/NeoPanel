@@ -1,0 +1,52 @@
+/* Native NeoPanel contract: copy-first world tools, existing semantic surfaces/type.
+   4/8px spacing, 8px cards, accent focus; danger belongs only to destructive actions.
+   Keep actions and text in document order. Never clip long paths or hide state. */
+.wc-modal { color: var(--tx); font-size: 13px; padding: 24px; }
+.wc-modal [hidden] { display: none !important; }
+.wc-modal h2 { font-size: 20px; margin: 0; }
+.wc-modal h3, .wc-modal legend { font-size: 14px; font-weight: 600; margin: 0 0 16px; }
+.wc-modal h4 { font-size: 13px; margin: 0; overflow-wrap: anywhere; }
+.wc-modal p { margin: 8px 0; line-height: 1.6; overflow-wrap: anywhere; }
+.wc-modal .mu { color: var(--tx-muted); font-size: 12px; }
+.wc-modal fieldset { min-width: 0; border: 0; padding: 24px 0 0; margin: 0; }
+.wc-modal legend { padding: 24px 0 0; margin-bottom: 0; }
+.wc-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.wc-grid > *, .wc-row > * { min-width: 0; }
+.wc-modal .f { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; }
+.wc-modal input:not([type="checkbox"]), .wc-modal select { min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; }
+.wc-modal input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; accent-color: var(--ac); margin: 2px 0; }
+.wc-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.wc-row .btn { flex-shrink: 0; }
+.wc-check { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; cursor: pointer; margin: 16px 0; }
+.wc-notice, .wc-warning, .wc-job, .wc-replace { padding: 16px; border: 1px solid var(--border); background: var(--card-inner); border-radius: 8px; margin-top: 16px; }
+.wc-warning { border-left: 3px solid var(--wn); }
+.wc-replace { border-color: var(--er); }
+.wc-modal #wc-replace-submit { color: var(--er); border-color: var(--er); }
+.wc-modal #wc-replace-submit:hover:not(:disabled) { background: var(--card-hover); }
+.wc-history { border-top: 1px solid var(--border); padding-top: 24px; margin-top: 24px; }
+.wc-job { animation: wc-appear 180ms cubic-bezier(.2,.85,.3,1.1) both; animation-delay: var(--wc-delay, 0ms); }
+.wc-job[data-state="succeeded"], .wc-job[data-state="replaced"] { border-left: 3px solid var(--ok, var(--ac)); }
+.wc-job[data-state="failed"], .wc-job[data-state="blocked"] { border-left: 3px solid var(--er); }
+.wc-state { color: var(--tx-muted); font-size: 12px; }
+.wc-job-actions { justify-content: flex-start; margin-top: 16px; }
+.wc-modal details > summary { padding: 8px 0; font-weight: 600; cursor: pointer; }
+.wc-modal pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; max-height: 240px; overflow-y: auto; font-size: 12px; line-height: 1.6; margin: 8px 0; }
+.wc-modal progress { width: 100%; accent-color: var(--ac); height: 8px; margin-top: 16px; }
+.wc-error { color: var(--er); border-left: 3px solid var(--er); padding: 8px 12px; }
+.wc-modal footer { line-height: 1.6; margin-top: 24px; }
+.wc-modal :is(input, select, button, summary):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+.wc-modal .btn { transition: background-color 100ms ease-out, border-color 100ms ease-out; white-space: normal; }
+.wc-modal :disabled { cursor: not-allowed; }
+.wc-modal .btn:active:not(:disabled) { transform: translateY(1px); }
+#wc-reason { flex: 1 1 240px; }
+@keyframes wc-appear { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 700px) {
+  .wc-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .wc-modal .wc-row { align-items: flex-start; }
+  .wc-modal #wc-start, .wc-replace .btn { width: 100%; }
+  .wc-modal .wc-job-actions .btn { max-width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wc-modal, .wc-modal *, .wc-modal .btn { animation: none !important; transition: none !important; }
+  .wc-modal .btn:active:not(:disabled) { transform: none; }
+}
