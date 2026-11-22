@@ -59,6 +59,8 @@ type SecurityConfig struct {
 	// Empty means socket peers only. For local Caddy explicitly configure
 	// ["127.0.0.1/32", "::1/128"]. Only X-Forwarded-For is accepted.
 	TrustedProxies []string `yaml:"trusted_proxies,omitempty"`
+	// Exact host:port exceptions for imports from private networks; no tenant override.
+	SFTPImportAllowedHosts []string `yaml:"sftp_import_allowed_hosts,omitempty"`
 }
 
 type JavaConfig struct {

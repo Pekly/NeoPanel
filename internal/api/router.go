@@ -33,6 +33,7 @@ type Router struct {
 	servers        *ServerHandler
 	console        *ConsoleHandler
 	files          *FileHandler
+	sftpImports    *sftpImportHandler
 	plugins        *PluginHandler
 	backups        *BackupHandler
 	players        *PlayerHandler
@@ -83,6 +84,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		servers:        serverHandler,
 		console:        consoleHandler,
 		files:          fileHandler,
+		sftpImports:    newSFTPImportHandler(cfg, db, manager),
 		plugins:        pluginHandler,
 		backups:        backupHandler,
 		players:        playerHandler,
@@ -267,6 +269,11 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/trash/{trashId}/restore", r.requireAuth(r.files.RestoreTrash))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files/trash/{trashId}", r.requireAuth(r.files.PurgeTrash))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload", r.requireAuth(r.files.Upload))
+	r.mux.HandleFunc("GET /api/servers/{id}/files/import-sftp", r.requireAuth(r.sftpImports.status))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp", r.requireAuth(r.sftpImports.start))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp/host-key", r.requireAuth(r.sftpImports.hostKey))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp/test", r.requireAuth(r.sftpImports.probe))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/files/import-sftp/{jobId}", r.requireAuth(r.sftpImports.cancelJob))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/download", r.requireAuth(r.files.Download))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/rename", r.requireAuth(r.files.Rename))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/move", r.requireAuth(r.files.Move))
@@ -678,6 +685,9 @@ func serverActionPermission(method, suffix string) string {
 		}
 		return "server.power"
 	case "files":
+		if len(parts) > 1 && parts[1] == "import-sftp" {
+			return sftpImportPermission
+		}
 		if len(parts) > 1 && parts[1] == "trash" {
 			if read {
 				return "files.view+files.delete"
@@ -821,6 +831,7 @@ func setProxyIdentity(header http.Header, claims *JWTClaims, nodeToken string) {
 	header.Del("X-NeoPanel-User-Role")
 	header.Del("X-NeoPanel-Can-Create-Server")
 	header.Del(forwardedNodePolicyHeader)
+	header.Del(sftpImportExpiryHeader)
 	header.Set("Authorization", "Bearer "+nodeToken)
 	// Native node tokens have user ID zero and are already privileged machine identities.
 	if claims.UserID > 0 && claims.Role != "admin" {
@@ -877,11 +888,14 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	remote.ContentLength = req.ContentLength
 	setProxyIdentity(remote.Header, claims, node.APIToken)
-	// Countdown execution must retain even an administrator's originating
-	// identity rather than becoming a permanently privileged node-daemon job.
-	if claims.UserID > 0 && strings.HasPrefix(rest, "api/servers/") && strings.HasSuffix(rest, "/power/countdown") {
+	// Background actions retain the administrator's originating identity rather
+	// than becoming permanently privileged node-daemon jobs.
+	if claims.UserID > 0 && strings.HasPrefix(rest, "api/servers/") && (strings.HasSuffix(rest, "/power/countdown") || strings.Contains(rest, "/files/import-sftp")) {
 		remote.Header.Set("X-NeoPanel-User-ID", strconv.Itoa(claims.UserID))
 		remote.Header.Set("X-NeoPanel-User-Role", claims.Role)
+		if strings.Contains(rest, "/files/import-sftp") && claims.ExpiresAt != nil {
+			remote.Header.Set(sftpImportExpiryHeader, strconv.FormatInt(claims.ExpiresAt.Unix(), 10))
+		}
 	}
 	if claims.UserID > 0 && claims.Role != "admin" {
 		policy, _ := json.Marshal(userPolicyForNode(node))

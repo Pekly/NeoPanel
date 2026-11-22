@@ -31,6 +31,7 @@ type ServerManager struct {
 	shutdownCh                chan struct{}
 	shutdownOnce              sync.Once
 	idleWG                    sync.WaitGroup
+	importWG                  sync.WaitGroup // Registered under launchMu; shutdown joins transfers before DB close.
 	launchMu                  sync.Mutex // Serializes process launch with the shutdown boundary.
 	wake                      wakeCoordinator
 	wakeSuppressed            sync.Map // failed durable invalidations fail closed until repaired

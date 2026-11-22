@@ -154,6 +154,7 @@ func (m *ServerManager) shutdownAll() {
 	m.launchMu.Lock()
 	close(m.shutdownCh)
 	m.launchMu.Unlock()
+	m.importWG.Wait() // Cancellation is signaled by shutdownCh; callbacks must exit before DB close.
 	m.idleWG.Wait() // No watchdog database access may outlive manager shutdown.
 	m.stopWakeListeners()
 	if m.trash != nil {
