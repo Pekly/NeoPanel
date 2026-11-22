@@ -17,7 +17,7 @@
     return '<pre class="np-markdown-fallback">' + e(input.slice(0, 100000)) + '</pre>' + (input.length > 100000 ? '<p class="mu">Content shortened. Read the full text on Modrinth.</p>' : '');
   }
   let epoch = 0, detail = null, search = null, timer = null, lastIdentity = null, lastView = null;
-  const installing = new Set(), installed = new Set();
+  const installing = new Map(), installed = new Set();
   function identity() { const s = curServer(); return JSON.stringify([s?.id, s?.node_id, s?.type, S.user?.id, S.user?.username, S.user?.role, S.token]); }
   function allowed(edit = false) { return !!curServer() && !isSteelEngine(curServer().type) && hasServerPermission(edit ? 'files.edit' : 'files.view') && (!window.NPFeatures || NPFeatures.enabled('plugins')); }
   function capture() { const key = identity(), generation = epoch, srv = {...curServer()}; return {key, srv, live: () => key === identity() && generation === epoch && allowed()}; }
@@ -45,8 +45,10 @@
   }
   const installKey = slug => `${identity()}|${projectKey(slug)}`;
   function installButton(slug, title, version, label = 'Install') {
-    const busy = installing.has(installKey(slug)), done = installed.has(installKey(slug));
-    return `<button type="button" class="btn pr" data-np-install data-slug="${e(slug)}" data-title="${e(title)}" ${version ? `data-version="${e(version)}"` : ''} ${busy || !allowed(true) ? 'disabled' : ''} aria-busy="${busy}">${busy ? 'Installing…' : done && !version ? 'Install again' : e(label)}</button>`;
+    const stage = installing.get(installKey(slug)), busy = Boolean(stage), done = installed.has(installKey(slug));
+    const caption = busy ? stage : done && !version ? 'Install again' : label;
+    const ring = busy ? '<svg class="np-install-ring" viewBox="0 0 20 20" aria-hidden="true"><circle class="np-install-track" cx="10" cy="10" r="8"/><circle class="np-install-arc" cx="10" cy="10" r="8"/></svg>' : '';
+    return `<button type="button" class="btn pr np-install-btn${busy ? ' is-installing' : ''}" data-np-install data-slug="${e(slug)}" data-title="${e(title)}" ${version ? `data-version="${e(version)}"` : ''} ${busy || !allowed(true) ? 'disabled' : ''} aria-busy="${busy}" aria-label="${e(caption)} ${e(title || slug)}" ${busy ? 'title="Waiting for the host; download percentage is unavailable. Leaving this page does not cancel installation."' : ''}>${ring}<span class="np-install-caption">${e(caption)}</span></button>`;
   }
   function sizeControl() {
     return `<label class="np-project-size">View: <select data-np-page-size aria-label="Projects per page">${SIZES.map(n => `<option value="${n}" ${pageSize === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>`;
@@ -213,7 +215,7 @@
     if (!slug || !allowed(true) || S.view !== 'plug') return;
     const ctx = capture(), key = installKey(slug), live = () => ctx.live() && allowed(true) && S.view === 'plug';
     if (installing.has(key)) return;
-    installing.add(key); redraw();
+    installing.set(key, 'Checking…'); redraw();
     try {
       const selection = versionId ? `version_id=${encodeURIComponent(versionId)}` : 'latest=true';
       const result = await installRequest(srvApiPath(ctx.srv, `/plugins/versions?slug=${encodeURIComponent(slug)}&${selection}`), {}, live);
@@ -221,18 +223,25 @@
       const releases = arr(result.versions), selected = versionId ? releases.find(v => v.id === versionId) : releases[0];
       if (!selected) { await uiAlert({title:'No eligible release',message:`No ${versionId ? 'selected ' : ''}release of <b>${e(title || slug)}</b> supports your server software <b>${e(result.loader)}</b>. Nothing was installed.`}); return; }
       if (!S.skipPlugConfirm) {
+        installing.set(key, 'Confirm…'); redraw();
         const ok = await uiConfirm({title:versionId ? 'Install selected version' : 'Install latest release', message:`<p>Install <b>${e(title || slug)}</b>${versionId ? ` · ${e(selected.version_number)}` : ' (latest for your software)'} on <b>${e(ctx.srv.name)}</b>?</p><p>Server software: ${e(result.loader)} · Minecraft ${e(result.minecraft_version)}.</p><p class="mu">The newest release for your software may not support your current Minecraft version. Runtime compatibility is not guaranteed. Restart after installation.</p>`,confirmText:'Download & Install',cancelText:'Cancel'});
         if (!ok || !live()) return;
       }
       if (!live()) return;
       const payload = {slug}; if (versionId) payload.version_id = versionId;
-      await installRequest(srvApiPath(ctx.srv, '/plugins/install'), {method:'POST',body:JSON.stringify(payload)}, live);
+      installing.set(key, 'Installing…'); redraw();
+      await installRequest(srvApiPath(ctx.srv, '/plugins/install'), {method:'POST',body:JSON.stringify(payload),progressTarget:'button'}, live);
       if (!live()) return;
       window.NPInstalledPlugins?.invalidate();
       installed.add(key); toast(`Installed ${title || slug}. Restart server to apply.`, 'ok');
       await loadPluginsList();
     } catch (_) { if (live()) toast('Installation could not be confirmed. Check installed files before trying again.', 'bad'); }
-    finally { installing.delete(key); if (live()) redraw(); }
+    finally {
+      installing.delete(key);
+      // A return to the same server can have a new render epoch. Clear its ring
+      // without applying stale success data or touching another server's buttons.
+      if (ctx.key === identity() && allowed() && S.view === 'plug') redraw();
+    }
   }
   document.addEventListener('click', event => {
     const target = event.target.closest('button, [data-project-card]'); if (!target || S.view !== 'plug') return;

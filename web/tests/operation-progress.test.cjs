@@ -126,3 +126,14 @@ test('progress assets load before app and honor reduced motion', () => {
   assert.match(css, /animation: np-operation-sweep/);
   assert.doesNotMatch(source, /innerHTML|aria-valuenow/);
 });
+
+test('plugin-owned button progress creates no tray or timer and never reaches fetch options', async()=>{
+  const {c,cards,timers}=setup();let sent;
+  c.fetch=async(_url,options)=>{sent=options;return{ok:true,status:200,json:async()=>({})};};
+  for(const prefix of ['', '/api/nodes/east/proxy']) {
+    await c.api(prefix+'/api/servers/srv-one/plugins/install',{method:'POST',progressTarget:'button'});
+    assert.equal(cards().length,0);assert.equal(timers.size,0);assert.equal(sent.progressTarget,undefined);
+  }
+  const end=c.NPProgress.startRequest(endpoint,{method:'POST',progressTarget:'button'});
+  assert.equal(cards().length,1,'unrelated reinstall retains its progress');end();
+});

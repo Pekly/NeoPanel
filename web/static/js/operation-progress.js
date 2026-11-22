@@ -13,6 +13,9 @@
     if (node) path = path.slice(node[0].length);
     const server = path.match(/^\/api\/servers\/([^/]+)(\/.*)$/);
     const route = server ? server[2] : path;
+    // Plugin installs own persistent, project-scoped feedback on their buttons.
+    // Do not also stack request cards; unrelated operations retain their tray.
+    if (route === '/plugins/install' && options.progressTarget === 'button') return null;
     const labels = {
       '/reinstall': 'Reinstalling server',
       '/software': 'Installing server software',
