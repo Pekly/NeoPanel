@@ -30,6 +30,7 @@ function setup(type = 'steel') {
     seedSettingsSavedSnapshot: () => {}, uiAlert: message => notices.push(message),
     sessionStorage: { setItem: () => {} }
   });
+  c.window = c;
   vm.runInContext([
     slice('function fileListIconHtml(', '// --- Server Software Icons & Helpers ---'),
     slice('const ENGINE_ICONS =', 'function onPlayerHeadError('),
@@ -64,7 +65,7 @@ test('Steel uses a local official PNG and distinct engine identity', () => {
   const logo = fs.readFileSync(path.join(__dirname, '../static/img/steel-logo.png'));
   assert.equal(logo.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
   assert.equal(c.getRecommendedJavaForMcVersion('latest', 'steel'), '');
-  assert.equal(c.getRecommendedJavaForMcVersion('1.21.11', 'paper'), '21');
+  assert.equal(c.getRecommendedJavaForMcVersion('1.21.11', 'paper'), 'requirement identified after download');
 });
 
 test('experimental Steel stays last while Paper remains first and the creation default', () => {
@@ -138,7 +139,7 @@ test('creation toggles native controls and sends latest with resource memory but
   assert.equal(payload.java_path, ''); assert.equal(payload.java_args, '');
   assert.equal(payload.jar_file, undefined, 'backend chooses host executable filename');
   c.setCreateEngine('paper');
-  assert.equal(version.value, 'latest'); assert.equal(java.disabled, false); assert.equal(java.value, '25');
+  assert.equal(version.value, 'latest'); assert.equal(java.disabled, false); assert.equal(java.value, 'auto');
 });
 
 test('reinstall defaults to latest, warns across engine families and never syncs Java for Steel', async () => {

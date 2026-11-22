@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,18 +14,26 @@ import (
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/downloader"
 	"github.com/Pekly/NeoPanel/internal/proxyconfig"
+	"github.com/Pekly/NeoPanel/internal/rooted"
 	"github.com/Pekly/NeoPanel/internal/runner"
+	"github.com/Pekly/NeoPanel/internal/serverjar"
 )
 
 type SoftwareHandler struct {
-	db      *database.DB
-	manager *runner.ServerManager
+	db          *database.DB
+	manager     *runner.ServerManager
+	download    func(context.Context, string, string, string, string) (serverjar.Info, error)
+	beginChange func(context.Context, string) (context.Context, func(), error)
 }
 
 func NewSoftwareHandler(db *database.DB, manager *runner.ServerManager) *SoftwareHandler {
 	return &SoftwareHandler{
-		db:      db,
-		manager: manager,
+		db:       db,
+		manager:  manager,
+		download: downloader.DownloadServerJarWithInfo,
+		// This stopped-process gate is engine-neutral, despite its legacy name.
+		// It retains the canonical root lease/runlock and joins shutdown.
+		beginChange: manager.BeginPluginUpdateOperation,
 	}
 }
 
@@ -57,14 +64,16 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	release, err := h.manager.BeginServerOperation(serverID)
+	ctx, release, err := h.beginChange(r.Context(), serverID)
 	if err != nil {
-		writeServerOperationError(w, err)
+		writeError(w, http.StatusConflict, "Stop the server and wait for active file or power operations before changing software")
 		return
 	}
 	defer release()
-	if (proxyconfig.Supported(srv.Type) || proxyconfig.Supported(req.Software)) && h.manager.GetStatus(serverID) != "offline" {
-		writeError(w, http.StatusConflict, "Stop the server before changing proxy software")
+	r = r.WithContext(ctx)
+	srv, err = h.db.GetServer(serverID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Server not found")
 		return
 	}
 
@@ -74,48 +83,58 @@ func (h *SoftwareHandler) ChangeSoftware(w http.ResponseWriter, r *http.Request)
 		jarName = downloader.ServerFileName(req.Software)
 	}
 
-	// Download jar
-	if err := downloader.DownloadServerJar(req.Software, req.Version, serverDir, jarName); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Download failed: " + err.Error()})
+	// The downloader validates and publishes only approved distribution files.
+	info, err := h.download(ctx, req.Software, req.Version, serverDir, jarName)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Server software download failed; retry after checking the selected release")
 		return
 	}
 	if downloader.IsNativeSoftware(req.Software) {
 		if err := runner.SyncSteelPort(serverDir, srv.Port); err != nil {
-			writeServerOperationError(w, err)
+			writeError(w, http.StatusInternalServerError, "Software installed, but native server port configuration could not be updated")
 			return
 		}
 	}
 	if proxyconfig.Supported(req.Software) {
 		if _, err := proxyconfig.Ensure(serverDir, req.Software, srv.Port); err != nil {
-			writeProxyConfigError(w, r, err)
+			writeError(w, http.StatusConflict, "Software installed, but proxy configuration could not be prepared safely")
 			return
 		}
 		if err := proxyconfig.SyncPort(serverDir, req.Software, srv.Port); err != nil {
-			writeProxyConfigError(w, r, err)
+			writeError(w, http.StatusConflict, "Software installed, but proxy port configuration could not be updated safely")
 			return
 		}
 	}
 
 	// Update DB record
+	oldNative := downloader.IsNativeSoftware(srv.Type)
 	srv.Type = req.Software
 	srv.Version = req.Version
 	srv.JarFile = jarName
 	if downloader.IsNativeSoftware(req.Software) {
 		srv.MemoryMinMB, srv.JavaArgs, srv.JavaPath = 0, "", ""
+	} else if oldNative {
+		srv.JavaPath = "auto"
 	}
 	if err := h.db.UpdateServer(srv); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server record: " + err.Error()})
+		writeError(w, http.StatusInternalServerError, "Software files installed, but the server record could not be updated")
 		return
 	}
 	h.manager.UpdateInstanceServer(srv)
+	if err := h.manager.RecordArtifactInfo(srv, info); err != nil {
+		writeError(w, http.StatusInternalServerError, "Software installed, but artifact metadata could not be verified and saved; refresh artifact information before starting")
+		return
+	}
 
 	logAudit(h.db, r, "software_install", fmt.Sprintf("Installed %s %s (%s) on %s (%s)", req.Software, req.Version, jarName, srv.Name, serverID))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":  fmt.Sprintf("Installed %s %s successfully", req.Software, req.Version),
-		"software": req.Software,
-		"version":  req.Version,
-		"jar_file": jarName,
+		"message":   fmt.Sprintf("Installed %s %s successfully", req.Software, req.Version),
+		"software":  req.Software,
+		"version":   req.Version,
+		"jar_file":  jarName,
+		"java_path": srv.JavaPath,
+		"artifact":  h.manager.ArtifactSummary(srv),
 	})
 }
 
@@ -244,56 +263,82 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 	// Keep the same gate as restore through stop, cleanup, download and DB update.
 	release, err := h.manager.BeginServerMaintenance(r.Context(), serverID)
 	if err != nil {
-		writeServerOperationError(w, err)
+		status := http.StatusInternalServerError
+		if errors.Is(err, runner.ErrServerOperation) || errors.Is(err, runner.ErrRestoreRecovery) || errors.Is(err, runner.ErrServerProcessAlive) {
+			status = http.StatusConflict
+		}
+		writeError(w, status, "Cannot enter reinstall maintenance; stop the server and wait for active operations before retrying")
 		return
 	}
 	defer release()
+	srv, err = h.db.GetServer(serverID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Server not found")
+		return
+	}
 
 	serverDir := h.manager.GetWorkingDir(serverID)
 	root, err := rooted.Open(serverDir)
 	if err != nil {
-		writeServerOperationError(w, err)
+		writeError(w, http.StatusInternalServerError, "Cannot open the server installation directory")
 		return
 	}
 	defer root.Close()
-	// Stage native downloads before destructive cleanup: bad tags, unsupported
-	// hosts or network failures must leave the existing installation untouched.
-	staged := ""
+	// Stage every distribution before cleanup. Failed downloads/validation leave
+	// the existing installation untouched; publication itself is not crash-atomic.
+	jarName := downloader.ServerFileName(req.Software)
+	staged, stageRoot, err := root.TempDir()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Cannot prepare a private software staging directory")
+		return
+	}
+	defer func() { stageRoot.Close(); _ = root.RemoveAll(staged) }()
+	stageDir := filepath.Join(serverDir, staged)
+	info, err := h.download(r.Context(), req.Software, req.Version, stageDir, jarName)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Server software download failed; existing installation files were preserved")
+		return
+	}
 	if downloader.IsNativeSoftware(req.Software) {
-		staged, err = os.MkdirTemp(filepath.Dir(serverDir), ".steel-reinstall-*")
-		if err != nil {
-			writeServerOperationError(w, err)
+		if err := runner.SyncSteelPort(stageDir, srv.Port); err != nil {
+			writeError(w, http.StatusInternalServerError, "Cannot prepare native server port configuration; existing files were preserved")
 			return
 		}
-		defer os.RemoveAll(staged)
-		if err := downloader.DownloadServerJar(req.Software, req.Version, staged, downloader.ServerFileName(req.Software)); err != nil {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Steel reinstall download failed: " + err.Error()})
-			return
-		}
-		if err := runner.SyncSteelPort(staged, srv.Port); err != nil {
-			writeServerOperationError(w, err)
-			return
-		}
+	}
+	if err := validateSoftwareStage(r.Context(), stageRoot, stageDir, req.Software, jarName, info); err != nil {
+		writeError(w, http.StatusBadGateway, "Downloaded distribution could not be validated; existing installation files were preserved")
+		return
 	}
 
 	preservedProxyFiles := map[string]bool{}
 	if req.PreserveConfig {
 		preservedProxyFiles, err = proxyConfigPreservedNames(root, strings.EqualFold(srv.Type, "velocity") || req.Software == "velocity")
 		if err != nil {
-			writeProxyConfigError(w, r, err)
+			writeError(w, http.StatusConflict, "Cannot safely determine which proxy configuration files to preserve; existing files were preserved")
 			return
 		}
 	}
 
+	if r.Context().Err() != nil {
+		writeError(w, http.StatusRequestTimeout, "Reinstall canceled before cleanup; existing installation files were preserved")
+		return
+	}
 	// 2. Perform selective cleanup based on preservation flags
 	entries, err := root.ReadDir(".")
 	if err != nil && !os.IsNotExist(err) {
-		writeServerOperationError(w, err)
+		writeError(w, http.StatusInternalServerError, "Cannot list the server installation directory for cleanup")
 		return
 	}
 	if err == nil {
 		for _, entry := range entries {
+			if r.Context().Err() != nil {
+				writeError(w, http.StatusRequestTimeout, "Reinstall canceled during cleanup; installation may be incomplete")
+				return
+			}
 			name := entry.Name()
+			if name == staged {
+				continue
+			}
 			lower := strings.ToLower(name)
 
 			// Keep worlds?
@@ -313,96 +358,74 @@ func (h *SoftwareHandler) ReinstallServer(w http.ResponseWriter, r *http.Request
 
 			// Remove all other runtime files, old jars, cache directories
 			if err := root.RemoveAll(name); err != nil {
-				writeServerOperationError(w, err)
+				writeError(w, http.StatusInternalServerError, "Reinstall cleanup failed; installation may be incomplete and must be retried before starting")
 				return
 			}
 		}
 	}
 
-	// Install the staged native executable or download the Java distribution.
-	jarName := downloader.ServerFileName(req.Software)
-	if staged != "" {
-		stagedRoot, err := rooted.Open(staged)
-		if err != nil {
-			writeServerOperationError(w, err)
-			return
-		}
-		defer stagedRoot.Close()
-		binary, err := stagedRoot.Open(jarName)
-		if err != nil {
-			writeServerOperationError(w, err)
-			return
-		}
-		defer binary.Close()
-		if _, err := root.Copy(context.Background(), jarName, binary, 1<<30, 0755); err != nil {
-			writeServerOperationError(w, err)
-			return
-		}
-		configPath := filepath.Join("config", "config.toml")
-		if _, err := root.Lstat(configPath); os.IsNotExist(err) {
-			if err := root.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
-				writeServerOperationError(w, err)
-				return
-			}
-			config, err := stagedRoot.ReadFile(configPath)
-			if err != nil {
-				writeServerOperationError(w, err)
-				return
-			}
-			if err := root.WriteFile(configPath, config, 0644); err != nil {
-				writeServerOperationError(w, err)
-				return
-			}
-		}
-		if err := runner.SyncSteelPort(serverDir, srv.Port); err != nil {
-			writeServerOperationError(w, err)
-			return
-		}
-	} else if err := downloader.DownloadServerJar(req.Software, req.Version, serverDir, jarName); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Reinstall failed to download server: " + err.Error()})
+	// Move only the validated, downloader-approved outputs; no provider scripts
+	// or generic archive extraction is performed by the API.
+	if err := publishSoftwareStage(r.Context(), root, stageRoot, staged, req.Software, jarName); err != nil {
+		writeError(w, http.StatusInternalServerError, "Reinstall could not publish all software files; installation may be incomplete and must be retried before starting")
 		return
+	}
+	if downloader.IsNativeSoftware(req.Software) {
+		if err := runner.SyncSteelPort(serverDir, srv.Port); err != nil {
+			writeError(w, http.StatusInternalServerError, "Software installed, but native server port configuration could not be updated")
+			return
+		}
 	}
 
 	// Proxies use their own config; world servers retain server.properties.
 	if proxyconfig.Supported(req.Software) {
 		if _, err := proxyconfig.Ensure(serverDir, req.Software, srv.Port); err != nil {
-			writeProxyConfigError(w, r, err)
+			writeError(w, http.StatusConflict, "Software installed, but proxy configuration could not be prepared safely")
 			return
 		}
 		if err := proxyconfig.SyncPort(serverDir, req.Software, srv.Port); err != nil {
-			writeProxyConfigError(w, r, err)
+			writeError(w, http.StatusConflict, "Software installed, but proxy port configuration could not be updated safely")
 			return
 		}
 	} else if !downloader.IsNativeSoftware(req.Software) {
 		if _, err := root.Lstat("server.properties"); os.IsNotExist(err) {
 			propsContent := fmt.Sprintf("# Minecraft server properties generated by NeoPanel\nserver-port=%d\nquery.port=%d\nmotd=A NeoPanel Minecraft Server\nenable-rcon=false\n", srv.Port, srv.Port)
 			if err := root.WriteFile("server.properties", []byte(propsContent), 0644); err != nil {
-				writeServerOperationError(w, err)
+				writeError(w, http.StatusInternalServerError, "Software installed, but server.properties could not be created")
 				return
 			}
 		}
 	}
 
 	// 5. Update database record
+	oldNative := downloader.IsNativeSoftware(srv.Type)
 	srv.Type = req.Software
 	srv.Version = req.Version
 	srv.JarFile = jarName
 	if downloader.IsNativeSoftware(req.Software) {
 		srv.MemoryMinMB, srv.JavaArgs, srv.JavaPath = 0, "", ""
+	} else if oldNative {
+		srv.JavaPath = "auto"
 	}
 	if err := h.db.UpdateServer(srv); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to update server record: " + err.Error()})
+		writeError(w, http.StatusInternalServerError, "Software files installed, but the server record could not be updated")
 		return
 	}
 	h.manager.UpdateInstanceServer(srv)
+	if err := h.manager.RecordArtifactInfo(srv, info); err != nil {
+		writeError(w, http.StatusInternalServerError, "Software installed, but artifact metadata could not be verified and saved; refresh artifact information before starting")
+		return
+	}
 
 	logAudit(h.db, r, "server_reinstall", fmt.Sprintf("Reinstalled %s %s on %s (%s)", req.Software, req.Version, srv.Name, serverID))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"message":  fmt.Sprintf("Server reinstalled successfully to %s %s", req.Software, req.Version),
-		"software": req.Software,
-		"version":  req.Version,
-		"jar_file": jarName,
+		"message":   fmt.Sprintf("Server reinstalled successfully to %s %s", req.Software, req.Version),
+		"software":  req.Software,
+		"version":   req.Version,
+		"jar_file":  jarName,
+		"java_path": srv.JavaPath,
+		"artifact":  h.manager.ArtifactSummary(srv),
 	})
 }
 

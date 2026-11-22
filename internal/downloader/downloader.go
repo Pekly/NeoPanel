@@ -8,7 +8,6 @@ import (
 	"github.com/Pekly/NeoPanel/internal/rooted"
 	"io"
 	"net/http"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -30,168 +29,15 @@ func httpGet(url string) (*http.Response, error) {
 	return httpClient.Do(req)
 }
 
-// DownloadServerJar installs the server distribution (a native binary for Steel).
-// World-server distributions also get an automatically accepted eula.txt.
+// DownloadServerJar installs the distribution, retaining the legacy error-only API.
 func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
-	if err := ValidateSoftware(flavor, version); err != nil {
-		return err
-	}
-	if !rooted.Basename(jarFileName) {
-		return fmt.Errorf("invalid server filename")
-	}
-	if IsNativeSoftware(flavor) {
-		return downloadSteel(version, destDir, jarFileName)
-	}
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	root, err := rooted.Open(destDir)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	// Keep the same pinned root across both upstream attempts.
-	primaryErr := downloadMCJarFiles(flavor, version, root, jarFileName)
-	if primaryErr == nil {
-		return nil
-	}
-
-	var downloadURL string
-	err = nil
-
-	switch flavor {
-	case "paper":
-		downloadURL, err = getPaperURL(version)
-	case "folia":
-		downloadURL, err = getFillURL("folia", version)
-	case "purpur":
-		downloadURL, err = getPurpurURL(version)
-	case "vanilla":
-		downloadURL, err = getVanillaURL(version)
-	case "fabric":
-		downloadURL, err = getFabricURL(version)
-	case "velocity":
-		downloadURL, err = getVelocityURL(version)
-	case "waterfall":
-		downloadURL, err = getWaterfallURL(version)
-	case "bungeecord":
-		downloadURL, err = getBungeeCordURL()
-	default:
-		return fmt.Errorf("failed to download %s %s (no official fallback): %w", flavor, version, primaryErr)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to resolve download URL for %s %s: %w", flavor, version, err)
-	}
-
-	if err := downloadRootFile(root, jarFileName, downloadURL); err != nil {
-		return fmt.Errorf("failed to download file from %s: %w", downloadURL, err)
-	}
-
-	return acceptWorldServerEULA(root, flavor)
+	_, err := DownloadServerJarWithInfo(context.Background(), flavor, version, destDir, jarFileName)
+	return err
 }
 
-// DownloadWithMCJarFiles downloads a Minecraft server JAR from mcjarfiles.com REST API.
-// Automatically follows 302 redirects to the official upstream builds.
+// DownloadWithMCJarFiles is a compatibility alias for the MCJars provider.
 func DownloadWithMCJarFiles(flavor, version, destDir, jarFileName string) error {
-	if err := ValidateSoftware(flavor, version); err != nil {
-		return err
-	}
-	if !rooted.Basename(jarFileName) {
-		return fmt.Errorf("invalid server filename")
-	}
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-	root, err := rooted.Open(destDir)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	return downloadMCJarFiles(flavor, version, root, jarFileName)
-}
-
-func downloadMCJarFiles(flavor, version string, root *rooted.Root, jarFileName string) error {
-	fl := strings.ToLower(strings.TrimSpace(flavor))
-	ver := strings.TrimSpace(version)
-
-	var endpoint string
-	switch fl {
-	case "paper":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/paper"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/paper/%s", ver)
-		}
-	case "purpur":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/purpur"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/purpur/%s", ver)
-		}
-	case "leaf", "leafmc":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/leafmc"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/leafmc/%s", ver)
-		}
-	case "folia":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/servers/folia"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/servers/folia/%s", ver)
-		}
-	case "fabric":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/modded/fabric"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/modded/fabric/%s", ver)
-		}
-	case "forge":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/modded/forge"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/modded/forge/%s", ver)
-		}
-	case "neoforge":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/modded/neoforge"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/modded/neoforge/%s", ver)
-		}
-	case "vanilla":
-		if ver == "" || strings.EqualFold(ver, "latest") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/vanilla/release"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/vanilla/release/%s", ver)
-		}
-	case "velocity":
-		if ver == "" || strings.EqualFold(ver, "latest") || strings.HasPrefix(ver, "1.") {
-			endpoint = "https://mcjarfiles.com/api/get-latest-jar/proxies/velocity"
-		} else {
-			endpoint = fmt.Sprintf("https://mcjarfiles.com/api/get-jar/proxies/velocity/%s", ver)
-		}
-	default:
-		return fmt.Errorf("flavor %s is not supported on mcjarfiles", fl)
-	}
-
-	// root was pinned before any remote request.
-
-	resp, err := httpGet(endpoint)
-	if err != nil {
-		return fmt.Errorf("mcjarfiles download failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("mcjarfiles returned non-200 status: %d %s", resp.StatusCode, resp.Status)
-	}
-
-	if _, err := root.Copy(context.Background(), jarFileName, resp.Body, 1<<30, 0644); err != nil {
-		return err
-	}
-	return acceptWorldServerEULA(root, flavor)
+	return DownloadServerJar(flavor, version, destDir, jarFileName)
 }
 
 func acceptWorldServerEULA(root *rooted.Root, flavor string) error {
@@ -439,11 +285,7 @@ func getFabricURL(version string) (string, error) {
 }
 
 func getVelocityURL(version string) (string, error) {
-	// Preserve the historical Minecraft-version compatibility mapping, but
-	// resolve the current proxy release rather than pinning an old proxy build.
-	if strings.HasPrefix(strings.TrimSpace(version), "1.") {
-		version = "latest"
-	}
+	// Explicit proxy versions are project versions, never Minecraft aliases.
 	return getFillURL("velocity", version)
 }
 

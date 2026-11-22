@@ -21,7 +21,7 @@ func TestCreateServerLatestDefaultsAndExplicitChoices(t *testing.T) {
 		for _, explicit := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/explicit=%v", kind, explicit), func(t *testing.T) {
 				version, javaPath := " \t", " \t"
-				wantVersion, wantJava := "latest", "25"
+				wantVersion, wantJava := "latest", "auto"
 				if explicit {
 					version, javaPath = "1.16.5", `C:\custom-java\bin\java.exe`
 					wantVersion, wantJava = version, javaPath

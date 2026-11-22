@@ -71,7 +71,7 @@ function fileListIconHtml(item, extraCls = '', iconSize = 15) {
     const jarEngine = detectJarEngine(name);
     const iconUrl = getEngineIconUrl(jarEngine);
     const imgSize = Math.max(14, iconSize - 2);
-    return `<span class="fi-badge jar${cls}" style="padding:0; overflow:hidden; display:inline-flex; align-items:center; justify-content:center;" title="${esc(item.name || 'JAR')} (${esc(engineMeta(jarEngine).label)} Jar)"><img src="${esc(iconUrl)}" alt="jar" style="width:${imgSize}px; height:${imgSize}px; object-fit:cover; border-radius:3px;" loading="lazy"></span>`;
+    return `<span class="fi-badge jar${cls}" style="padding:0; overflow:hidden; display:inline-flex; align-items:center; justify-content:center;" title="${esc(item.name || 'JAR')} (${esc(engineMeta(jarEngine).label)} Jar)"><img src="${esc(iconUrl)}" alt="jar" style="width:${imgSize}px; height:${imgSize}px; object-fit:cover; border-radius:3px;" loading="lazy" onerror="this.onerror=null;this.src='/img/default-server-icon.png'"></span>`;
   }
   if (['zip', 'tar', 'gz', 'tgz', 'rar', '7z', 'bz2', 'xz'].includes(ext)) {
     return `<span class="fi-badge arc${cls}" title="Compressed Archive">${ic('archive', iconSize)}</span>`;
@@ -109,13 +109,13 @@ const ENGINE_ICONS = {
   velocity: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc-velocity.svg',
   waterfall: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc.svg',
   bungeecord: 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/papermc-velocity.svg',
-  custom: 'https://i.ibb.co/MmxPTbN/image.jpg'
+  custom: '/img/default-server-icon.png'
 };
 
 function getEngineIconUrl(type) {
-  const raw = String(type || 'paper').toLowerCase().trim();
+  const raw = String(type || '').toLowerCase().trim();
   const k = raw === 'leafmc' ? 'leaf' : (raw === 'neoforged' ? 'neoforge' : raw);
-  return ENGINE_ICONS[k] || ENGINE_ICONS.paper;
+  return Object.hasOwn(ENGINE_ICONS, k) ? ENGINE_ICONS[k] : '/img/default-server-icon.png';
 }
 
 function detectJarEngine(filename = '') {
@@ -199,11 +199,14 @@ function incompatibleEngineChange(from, to) {
 }
 
 function engineMeta(type) {
-  const raw = String(type || 'paper').toLowerCase().trim();
+  const raw = String(type || 'custom').toLowerCase().trim();
   const key = raw === 'leafmc' ? 'leaf' : (raw === 'neoforged' ? 'neoforge' : raw);
   const map = {
     steel: { key: 'steel', label: 'Steel', color: '#94a3b8' },
     paper: { key: 'paper', label: 'Paper', color: '#3b82f6' },
+    spigot: { key: 'spigot', label: 'Spigot', color: '#94a3b8' },
+    craftbukkit: { key: 'craftbukkit', label: 'CraftBukkit', color: '#94a3b8' },
+    quilt: { key: 'quilt', label: 'Quilt', color: '#94a3b8' },
     purpur: { key: 'purpur', label: 'Purpur', color: '#a855f7' },
     leaf: { key: 'leaf', label: 'Leaf', color: '#22c55e' },
     folia: { key: 'folia', label: 'Folia', color: '#10b981' },
@@ -216,17 +219,27 @@ function engineMeta(type) {
     bungeecord: { key: 'bungeecord', label: 'BungeeCord', color: '#818cf8' },
     custom: { key: 'custom', label: 'Custom', color: '#94a3b8' }
   };
-  return map[key] || { key: key || 'custom', label: raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Paper', color: '#94a3b8' };
+  return Object.hasOwn(map, key) ? map[key] : { key: 'custom', label: 'Custom', color: '#94a3b8' };
 }
 
 function engineIcon(type, size = 16, withBg = false) {
   const m = engineMeta(type);
   const iconUrl = getEngineIconUrl(type);
   const rad = size >= 24 ? 6 : (size >= 16 ? 4 : 3);
-  const img = `<img src="${esc(iconUrl)}" alt="${esc(m.label)}" width="${size}" height="${size}" class="eng-img-ic" style="width:${size}px; height:${size}px; min-width:${size}px; min-height:${size}px; object-fit:contain; border-radius:${rad}px; display:inline-block; vertical-align:middle; flex-shrink:0;" loading="lazy">`;
+  const img = `<img src="${esc(iconUrl)}" alt="${esc(m.label)}" width="${size}" height="${size}" class="eng-img-ic" style="width:${size}px; height:${size}px; min-width:${size}px; min-height:${size}px; object-fit:contain; border-radius:${rad}px; display:inline-block; vertical-align:middle; flex-shrink:0;" loading="lazy" onerror="this.onerror=null;this.src='/img/default-server-icon.png'">`;
   if (!withBg) return img;
   const wrapCls = size >= 22 ? 'lg' : (size <= 14 ? 'sm' : '');
   return `<span class="eng-ico-wrap ${wrapCls}" title="${esc(m.label)}">${img}</span>`;
+}
+
+function serverArtifactLabel(srv, size = 13) {
+  return window.NPServerArtifact?.label(srv, size) || `${engineIcon('custom', size)} Custom / Unknown version`;
+}
+
+function javaCommandLabel(value, srv) {
+  if (value === 'auto') return window.NPServerArtifact?.javaLabel(srv) || 'Auto (identify build first)';
+  if (['', 'java', 'default'].includes(value)) return 'java (system default)';
+  return `java (OpenJDK ${value})`;
 }
 
 function onPlayerHeadError(imgEl, fallbackUrl) {
@@ -699,7 +712,7 @@ function collectSettingsFormPayload(srv) {
       if (!customPath) return { ok: false, reason: 'Enter a custom Java binary path' };
       javaPath = customPath;
     } else if (javaSelEl.value) {
-      javaPath = javaSelEl.value;
+      javaPath = javaSelEl.value === 'java' && ['', 'java', 'default'].includes(srv.java_path || '') ? (srv.java_path || '') : javaSelEl.value;
     }
   }
 
@@ -773,9 +786,7 @@ function syncHeroFromSavedServer(targetSrv) {
 
   const engPill = $('#srv-hero-engine');
   if (engPill) {
-    const srvType = targetSrv.type || S.core || 'paper';
-    const eng = engineMeta(srvType);
-    engPill.innerHTML = `${engineIcon(srvType, 13)} ${esc(eng.label)}${targetSrv.version ? ` ${esc(targetSrv.version)}` : ''}`;
+    engPill.innerHTML = serverArtifactLabel(targetSrv);
   }
 
   const hst = $('#hst');
@@ -924,7 +935,7 @@ function updateSettingsCmdPreview() {
     return;
   }
   let javaVal = $('#prop-java')?.value || resolveJavaSelectValue(srv?.java_path || '', srv?.version, srv?.type);
-  let javaCmd = `java (OpenJDK ${javaVal})`;
+  let javaCmd = javaCommandLabel(javaVal, srv);
   if (javaVal === 'custom') {
     javaCmd = $('#prop-java-custom')?.value?.trim() || srv?.java_path || 'java';
   }
@@ -3308,7 +3319,7 @@ async function computeGravatarHash(email) {
 // --- API Client ---
 async function api(endpoint, options = {}) {
   assertClientRequestAccess(endpoint, options);
-  const { suppressToast, isCurrent, ...fetchOpts } = options || {};
+  const { suppressToast, isCurrent, optionalMetadata, ...fetchOpts } = options || {};
   const headers = { ...(fetchOpts.headers || {}) };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
   if (!headers['Content-Type'] && !(fetchOpts.body instanceof FormData)) {
@@ -3334,11 +3345,12 @@ async function api(endpoint, options = {}) {
       error.data = data; // Preserve safe retry metadata for invitation controls.
       throw error;
     }
-    window.NPWorkspace?.requestResult(endpoint, null, requestToken);
+    if (!optionalMetadata) window.NPWorkspace?.requestResult(endpoint, null, requestToken);
+    window.NPServerArtifact?.requestResult(endpoint, options, data, requestToken);
     return data;
   } catch (err) {
     if (isCurrent && !isCurrent()) throw err;
-    window.NPWorkspace?.requestResult(endpoint, err, requestToken);
+    if (!optionalMetadata) window.NPWorkspace?.requestResult(endpoint, err, requestToken);
     if (!suppressToast && err.message && !err.message.includes('Session expired')) {
       toast(window.NPWorkspace ? `${err.message} ${window.NPWorkspace.errorAdvice(err)}` : err.message, 'error');
     }
@@ -4674,7 +4686,7 @@ async function performPowerAction(action, skipConfirm, srv) {
         </div>
         <b>How to resolve:</b>
         <ol style="margin: 8px 0 0 18px; padding: 0; line-height: 1.6;">
-          <li>Click <b>Reinstall Server</b> in Settings to download an official ${isSteelEngine(srv.type) ? 'Steel release' : 'build from mcjarfiles.com'}.</li>
+          <li>Click <b>Reinstall Server</b> in Settings to download an official ${isSteelEngine(srv.type) ? 'Steel release' : 'build through MCJars'}.</li>
           <li>Or navigate to <b>Files</b> and upload the ${isSteelEngine(srv.type) ? 'native executable' : 'JAR'} as <code>${esc(serverExecutable(srv))}</code>.</li>
           <li>Or verify your <b>Server Executable File</b> name in <b>Startup Settings</b>.</li>
         </ol>
@@ -4974,47 +4986,23 @@ async function loadVersionsCatalog(force = false) {
 
 const CATS = ['All', 'Admin', 'Protection', 'Performance', 'Network', 'Building', 'Utility', 'API', 'Map'];
 
-const PREMADE_JAVA_VERSIONS = [
-  { value: '25', short: 'Java 25', label: 'Java 25 (Latest LTS • Minecraft 26+)' },
-  { value: '21', short: 'Java 21', label: 'Java 21 (LTS • Minecraft 1.20.5 - 1.21.x)' },
-  { value: '17', short: 'Java 17', label: 'Java 17 (LTS • Minecraft 1.17 - 1.20.4)' },
-  { value: '8', short: 'Java 8', label: 'Java 8 (Legacy • Minecraft 1.8 - 1.16.5)' }
-];
+const PREMADE_JAVA_VERSIONS = [25, 21, 17, 16, 11, 8].map(version => ({
+  value: String(version), short: `Java ${version}`, label: `Java ${version}`
+}));
 
 function isStandardJavaChoice(val) {
-  return ['25', '21', '17', '8', 'java', ''].includes(String(val ?? '').trim());
+  return ['auto', '25', '21', '17', '16', '11', '8', 'java', 'default', ''].includes(String(val ?? '').trim());
 }
 
+// A version selector has no downloaded build metadata. Never guess an exact JVM.
 function getRecommendedJavaForMcVersion(ver, engine = '') {
-  const eng = String(engine || '').toLowerCase().trim();
-  if (isSteelEngine(eng)) return '';
-  const v = String(ver || '').toLowerCase().trim();
-  if (eng === 'velocity') {
-    return v.startsWith('3.3') ? '17' : '21';
-  }
-  if (eng === 'waterfall' || eng === 'bungeecord') {
-    return '21';
-  }
-  if (!v || v === 'latest') return '25';
-  const parts = v.replace(/^v/i, '').split('.');
-  const major = parseInt(parts[0] || '0', 10);
-  const minor = parseInt(parts[1] || '0', 10);
-  const patch = parseInt((parts[2] || '0').replace(/[^0-9].*$/, ''), 10) || 0;
-  if (major >= 26) return '25';
-  if (major === 1) {
-    if (minor >= 21 || (minor === 20 && patch >= 5)) return '21';
-    if (minor >= 17) return '17';
-    if (minor > 0 && minor <= 16) return '8';
-  }
-  return '21';
+  return isSteelEngine(engine) ? '' : 'requirement identified after download';
 }
 
 function resolveJavaSelectValue(rawVal, mcVer = '', engine = '') {
   const v = String(rawVal ?? '').trim();
-  if (!v || v === 'java' || v === 'default') {
-    return mcVer ? getRecommendedJavaForMcVersion(mcVer, engine) : '21';
-  }
-  if (['25', '21', '17', '8'].includes(v)) return v;
+  if (!v || v === 'java' || v === 'default') return 'java';
+  if (['auto', '25', '21', '17', '16', '11', '8'].includes(v)) return v;
   return 'custom';
 }
 
@@ -5032,7 +5020,7 @@ function getPremadeJavaStatusMap(nodeId = null) {
 function renderJavaSelectOptions(selectedVal, includeCustom = true, fallbackMcVer = '', engine = '', nodeId = null) {
   const cur = resolveJavaSelectValue(selectedVal, fallbackMcVer, engine);
   const statusMap = getPremadeJavaStatusMap(nodeId);
-  const opts = PREMADE_JAVA_VERSIONS.map(item => {
+  const opts = `<option value="auto" ${cur === 'auto' ? 'selected' : ''}>Auto (detected build)</option><option value="java" ${cur === 'java' ? 'selected' : ''}>System default (java)</option>` + PREMADE_JAVA_VERSIONS.map(item => {
     const info = statusMap.get(item.value);
     const suffix = info ? (info.installed ? ' [Installed]' : ' [Not Installed]') : '';
     return `<option value="${item.value}" ${cur === item.value ? 'selected' : ''}>${esc(item.label + suffix)}</option>`;
@@ -5045,7 +5033,7 @@ function renderJavaAvailabilityStrip(nodeId = null) {
   const nid = nodeId || curServer()?.node_id || 'local';
   const data = (S.javaRuntimesMap && S.javaRuntimesMap[nid]) || (nid === 'local' ? S.javaRuntimes : null);
   if (!data || !Array.isArray(data.premade)) {
-    return `<div class="java-status-strip" data-node-id="${esc(nid)}"><span class="java-status-chip">Checking installed Java 25, 21, 17 &amp; 8 runtimes...</span></div>`;
+    return `<div class="java-status-strip" data-node-id="${esc(nid)}"><span class="java-status-chip">Checking installed Java runtimes...</span></div>`;
   }
   const canInstall = Boolean(data.can_auto_install) && (S.user?.role === 'admin');
   return `<div class="java-status-strip" data-node-id="${esc(nid)}">
@@ -5188,7 +5176,7 @@ function srvh() {
       <div id="srv-hero-title" class="srv-hero-sub" style="display:${rawMotd ? 'block' : 'none'};">${rawMotd ? renderMinecraftTextHtml(rawMotd, { allowNewlines: true }) : ''}</div>
       <div id="srv-hero-desc" class="srv-hero-sub" style="display:${panelDesc ? 'block' : 'none'};">${esc(panelDesc)}</div>
       <div class="srv-connection">
-        <span id="srv-hero-engine" class="eng-pill" title="Server software">${engineIcon(srvType, 13)} ${esc(eng.label)}${srv?.version ? ` ${esc(srv.version)}` : ''}</span>
+        <span id="srv-hero-engine" class="eng-pill" title="Installed server software">${serverArtifactLabel(srv)}</span>
         <div id="hst" class="row hst" style="margin-top: 0;">
           ${playerAddressButtonHtml(hostAddr)}
           <span class="mono mu">CPU ${c.toFixed(1)}%</span>
@@ -5923,8 +5911,7 @@ const V = {
           const dVal = origIdx === S.cs ? (S.diskMB || Number(s.stats?.disk_mb) || 0) : (Number(s.stats?.disk_mb) || 0);
           const upSec = origIdx === S.cs ? S.uptimeSec : (Number(s.stats?.uptime_sec) || 0);
           const host = `${srvHost(s)}:${s.port || 25565}`;
-          const coreLabel = engineMeta(s.type || 'paper').label;
-          const engBadgeIcon = engineIcon(s.type || 'paper', 14);
+          const coreLabel = window.NPServerArtifact?.display(s).text || 'Custom / Unknown version';
           const srvUrl = serverRouteUrl(nid, s.id, 'con');
 
           if (dashVm === 'list') {
@@ -5942,7 +5929,7 @@ const V = {
                   </div>
                   <div class="row" style="gap: 8px; margin-top: 5px; align-items: center; flex-wrap: wrap;">
                     <span class="srv-card-addr copyable-ip" data-addr="${esc(host)}" onclick="return copyServerAddress(this.dataset.addr, event)" title="Click to copy server address"><span class="pv">${esc(host)}</span> ${ic('copy', 12)}</span>
-                    <span class="chip" style="font-size: 11px; display:inline-flex; align-items:center; gap:5px;">${engBadgeIcon} ${esc(coreLabel)} ${esc(s.version || '')}</span>
+                    <span class="chip artifact-badge">${serverArtifactLabel(s, 14)}</span>
                     <span data-role="uptime" class="srv-card-uptime" style="font-size: 11.5px; color: var(--tx-muted); white-space: nowrap; ${isRun ? '' : 'display:none;'}">&bull; Up ${formatUptime(upSec)}</span>
                     ${isRemote ? `<span class="chip" style="font-size: 11px; padding: 1px 7px;">${esc(nodeName)}</span>` : ''}
                   </div>
@@ -5974,14 +5961,14 @@ const V = {
           <a id="dash-srv-${nid}-${s.id}" href="${esc(srvUrl)}" class="sift-server-card ${dashVm === 'icons' ? 'vm-dash-icon' : ''}" onclick="return handleServerCardClick(event, ${origIdx}, 'con')" data-name="${esc(s.name)}" data-addr="${esc(host)}">
             <div class="srv-card-banner ${coverUrl ? 'has-brand-art' : ''}" ${coverUrl ? `style="background-image: url('${esc(coverUrl)}');"` : ''}>
               <div class="srv-card-badges-left">
-                <span class="srv-card-badge" style="display:inline-flex; align-items:center; gap:6px;">${engBadgeIcon} <span>${esc(coreLabel)}</span></span>
+                <span class="srv-card-badge artifact-badge">${serverArtifactLabel(s, 14)}</span>
               </div>
               <div class="srv-card-actions">
                 ${window.NPWorkspace?.favouriteButton(s, origIdx) || ''}
                 <span class="srv-card-action-btn" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();this.click();}" onclick="event.preventDefault(); event.stopPropagation(); refreshDashboard();" title="Refresh status" aria-label="Refresh server status">${ic('refresh', 13)}</span>
                 ${canDelete ? `<span class="srv-card-action-btn danger" data-srv-id="${esc(s.id)}" data-srv-name="${esc(s.name)}" data-node-id="${esc(nid)}" onclick="event.preventDefault(); event.stopPropagation(); openDeleteServerModal(this.dataset.srvId, this.dataset.srvName, this.dataset.nodeId);" title="Delete Server">${ic('trash', 13)}</span>` : ''}
               </div>
-              <div class="srv-card-identity">${serverRowIconHtml(s)}<span>${esc(s.version || coreLabel)}</span></div>
+              <div class="srv-card-identity">${serverRowIconHtml(s)}<span>${esc(coreLabel)}</span></div>
             </div>
             <div class="srv-card-body">
               <div class="srv-card-title-row">
@@ -6736,9 +6723,9 @@ const V = {
         <div class="row" style="gap: 14px; align-items: center;">
           ${engineIcon(S.core || srv?.type || 'paper', 24, true)}
           <div>
-            <span class="mu">Currently Running</span>
+            <span class="mu">Configured installation (not detected)</span>
             <b class="big">${esc(S.core)} ${esc(S.ver)}</b>
-            <span class="mu">${isSteelEngine(srv?.type) ? 'Steel • Written in Rust • No Java runtime required' : 'Java 25, 21, 17 &amp; 8 supported • Direct server installer'}</span>
+            <span class="mu">${isSteelEngine(srv?.type) ? 'Steel • Written in Rust • No Java runtime required' : 'MCJars server installer • Exact Java identified from the downloaded build'}</span>
           </div>
         </div>
         <button class="btn pr" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)">
@@ -7539,7 +7526,7 @@ const V = {
     const memMin = srv?.memory_min || Math.min(1024, curMem);
     const jvmFlags = (srv?.java_args !== undefined && srv?.java_args !== null) ? srv.java_args : '-XX:+UseG1GC';
     const jarName = serverExecutable(srv);
-    const javaCmd = isCustom ? (rawJava || 'java') : `java (OpenJDK ${curJava})`;
+    const javaCmd = isCustom ? (rawJava || 'java') : javaCommandLabel(curJava, srv);
     const editName = (S.activeServerId === srv?.id && S.editSrvName !== '') ? S.editSrvName : (srv?.name || '');
     const editDesc = (S.activeServerId === srv?.id && typeof S.editSrvDesc === 'string') ? S.editSrvDesc : (srv?.description || '');
     const curV = srv?.version || (native ? 'latest' : '1.21.11');
@@ -7624,7 +7611,8 @@ const V = {
             <input type="text" id="prop-java-custom" value="${esc(isCustom ? rawJava : '')}" placeholder="/usr/lib/jvm/java-25-temurin/bin/java" style="font-size: 13px;" ${isJavaLocked ? 'disabled' : ''} oninput="updateSettingsCmdPreview(); scheduleSettingsAutoSave(600);" onblur="flushSettingsAutoSave()">
           </div>
           ${renderJavaAvailabilityStrip(srv?.node_id || 'local')}
-          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Choose Java 25, 21, 17, 8, or a custom JVM binary path for this server.</span>
+          ${window.NPServerArtifact?.panel(srv) || ''}
+          <span class="mu" style="font-size: 12px; line-height: 1.5; display: block; margin-top: 8px;">Auto uses the identified build's exact Java requirement. System default keeps the host's java command. Manual versions and custom paths stay under your control.</span>
         </div>`}
       </div>
 
@@ -7785,7 +7773,7 @@ const V = {
               ${ic('refresh', 16)} Reinstall Server Instance
             </h2>
             <p class="mu" style="font-size: 13px; margin: 0; max-width: 620px;">
-              Re-download a fresh server executable from official upstream releases (Steel) or mcjarfiles.com (Java engines). Back up your files before switching engines; preserved worlds, configs and plugins are not converted.
+              Re-download a fresh server executable from official upstream releases (Steel) or MCJars (Java engines). Back up your files before switching engines; preserved worlds, configs and plugins are not converted.
             </p>
           </div>
           <button class="btn" data-srv-id="${esc(srv?.id || '')}" data-node-id="${esc(srv?.node_id || 'local')}" onclick="openReinstallModal(this.dataset.srvId, this.dataset.nodeId)" style="height: 38px; padding: 0 18px; font-weight: 600;">
@@ -7986,7 +7974,7 @@ const V = {
         <div class="card tw np-admin-info-card" style="margin-bottom:18px;">
           <div class="row sb" style="margin-bottom:10px; flex-wrap:wrap; gap:12px;">
             <div>
-              <h2 style="margin:0 0 4px; color:var(--tx);">Java versions (25, 21, 17 &amp; 8)</h2>
+              <h2 style="margin:0 0 4px; color:var(--tx);">Java versions (25, 21, 17, 16, 11 &amp; 8)</h2>
               <span class="mu" style="font-size:13px;">View and install Java versions on this host.</span>
             </div>
             <button class="btn sm" onclick="loadJavaRuntimes(true, 'local')">${ic('refresh', 13)} Refresh</button>
@@ -8198,7 +8186,7 @@ const V = {
                   <td><span class="chip" style="font-size:11px; display:inline-flex; align-items:center; gap:4px;">${ic('user', 11)} ${esc(ownerLabel)}</span></td>
                   <td><span class="chip srv-node-badge">${esc(nodeName)}</span></td>
                   <td class="mono">${s.port}</td>
-                  <td><span class="chip" style="display:inline-flex; align-items:center; gap:5px;">${engineIcon(s.type || 'paper', 12)} ${esc(engineMeta(s.type || 'paper').label)} ${esc(s.version)}</span></td>
+                  <td><span class="chip artifact-badge">${serverArtifactLabel(s, 12)}</span></td>
                   <td><span class="mono mu" style="font-size:11.5px;">${(getServerMaxRamMB(s)/1024).toFixed(1)}G RAM &bull; ${cpuLabel} &bull; ${diskLabel}</span></td>
                   <td><span class="badge ${isRun ? 'online' : 'offline'}"><i class="dot"></i>${isRun ? 'Online' : 'Offline'}</span></td>
                   <td style="text-align:right">
@@ -8232,7 +8220,7 @@ const V = {
                 </div>
                 <div class="row" style="gap:6px; flex-wrap:wrap;">
                   <span class="chip srv-node-badge">${esc(nodeName)}</span>
-                  <span class="chip" style="display:inline-flex; align-items:center; gap:5px;">${engineIcon(s.type || 'paper', 12)} ${esc(engineMeta(s.type || 'paper').label)} ${esc(s.version)}</span>
+                  <span class="chip artifact-badge">${serverArtifactLabel(s, 12)}</span>
                 </div>
                 <div class="vm-item-foot">
                   <a href="${esc(srvUrl)}" class="btn sm pr" style="text-decoration:none;" onclick="return handleServerCardClick(event, ${idx}, 'con')">Manage</a>
@@ -9324,6 +9312,7 @@ window.addEventListener('hashchange', () => {
 
 // --- Main Render Function (R) ---
 window.R = function() {
+  window.NPServerArtifact?.sync();
   window.NPPlugins?.sync();
   window.NPInstalledPlugins?.sync();
   window.NPFeatures?.sync();
@@ -10230,6 +10219,7 @@ async function loadFileList(path = '', skipRender = false, options = {}) {
     if (!live()) return false;
     if (!Array.isArray(data)) throw Error('Invalid directory response');
     if (dirChanged) S.selectedFiles?.clear();
+    window.NPServerArtifact?.files(srv, path, data);
     S.fileList = data;
     S.currentDir = path;
     return true;
@@ -11350,13 +11340,7 @@ function askInstallSoftwareModal(srv, software, version) {
     }
     _uiModalResolver = (val) => resolve(val);
 
-    const recJava = getRecommendedJavaForMcVersion(version, software);
-    const curJava = resolveJavaSelectValue(srv.java_path || '', srv.version || '', srv.type || '');
-    const needsJavaSwitch = !isSteelEngine(software) && curJava !== recJava;
-    const javaInfo = getPremadeJavaStatusMap(srv?.node_id || 'local').get(recJava);
-    const javaMissingNote = !isSteelEngine(software) && javaInfo && !javaInfo.installed
-      ? `<span class="mu" style="font-size: 11.5px; display: block; margin-top: 4px; color: #fbbf24;">Java ${esc(recJava)} is not installed yet. Install it from Settings or Admin before starting the server.</span>`
-      : '';
+    // Preserve the selected runtime; Auto can be chosen deliberately in Settings.
 
     const container = $('#modal-container') || document.body;
     container.innerHTML = `
@@ -11381,21 +11365,11 @@ function askInstallSoftwareModal(srv, software, version) {
                 </div>
               </label>
             </div>
-            ${needsJavaSwitch ? `
-            <div style="margin-top: 10px; padding: 12px 14px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 10px;">
-              <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin: 0;">
-                <input type="checkbox" id="confirm-sync-java" checked style="margin-top: 2px;">
-                <div>
-                  <b style="color: var(--tx); display: block; font-size: 13.5px;">Switch Java Runtime to Java ${esc(recJava)} (Recommended)</b>
-                  <span class="mu" style="font-size: 12px; display: block; margin-top: 2px;">${esc(software)} ${esc(version)} expects <b>Java ${esc(recJava)}</b> (currently using <code>${esc(curJava === 'custom' ? (srv.java_path || 'custom') : 'Java ' + curJava)}</code>).</span>
-                  ${javaMissingNote}
-                </div>
-              </label>
-            </div>` : (javaMissingNote ? `<div style="margin-top: 10px;">${javaMissingNote}</div>` : '')}
+            ${!isSteelEngine(software) ? '<p class="mu">Your Java selection is preserved. Choose <b>Auto (detected build)</b> in Settings to use build metadata after download; the version list alone cannot identify the exact requirement.</p>' : ''}
           </div>
           <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 20px;">
             <button type="button" class="btn" onclick="closeUiModal(null)">Cancel</button>
-            <button type="button" id="ui-modal-confirm-btn" class="btn pr" data-java="${esc(recJava)}" onclick="closeUiModal({ confirmed: true, backup: Boolean(document.getElementById('confirm-bkf')?.checked), syncJava: Boolean(document.getElementById('confirm-sync-java')?.checked), recJava: this.dataset.java })">
+            <button type="button" id="ui-modal-confirm-btn" class="btn pr" onclick="closeUiModal({ confirmed: true, backup: Boolean(document.getElementById('confirm-bkf')?.checked) })">
               ${ic('download', 14)} Download &amp; Install
             </button>
           </div>
@@ -11415,11 +11389,16 @@ async function installSoftware(software, version, btnEl) {
     toast('Another software installation is already in progress.');
     return;
   }
+  const installToken = S.token, installUser = S.user?.id;
+  const target = { ...srv };
+  const sameTarget = () => S.token === installToken && S.user?.id === installUser && curServer()?.id === target.id && (curServer()?.node_id || 'local') === (target.node_id || 'local');
+  const sameSelection = () => sameTarget() && curServer()?.jar_file === target.jar_file && curServer()?.type === target.type && curServer()?.version === target.version;
   const choice = await askInstallSoftwareModal(srv, software, version);
-  if (!choice || !choice.confirmed) return;
+  if (!choice || !choice.confirmed || !sameSelection() || S.installingSoftware) return;
 
   S.installingSoftware = `${software}:${version}`;
   const findBtn = () => {
+    if (!sameTarget()) return null;
     if (btnEl && document.body.contains(btnEl)) return btnEl;
     if (typeof CSS !== 'undefined' && CSS.escape) {
       return document.querySelector(`#vres button[data-soft="${CSS.escape(software)}"][data-ver="${CSS.escape(version)}"]`);
@@ -11432,43 +11411,32 @@ async function installSoftware(software, version, btnEl) {
     if (choice.backup) {
       if (curBtn) setBtnLoading(curBtn, true, 'Backing up...');
       toast('Creating world & server backup prior to upgrade...');
-      await api(srvApiPath(srv, '/backups'), { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
+      await api(srvApiPath(target, '/backups'), { method: 'POST', body: JSON.stringify({ name: `before-${version}` }) }).catch(() => {});
     }
+    if (!sameSelection()) return;
     curBtn = findBtn();
     if (curBtn) setBtnLoading(curBtn, true, 'Installing...');
     toast(`Downloading ${software} ${version} server ${isSteelEngine(software) ? 'executable' : 'jar'}...`);
-    const softRes = await api(srvApiPath(srv, '/software'), {
+    const softRes = await api(srvApiPath(target, '/software'), {
       method: 'POST',
-      body: JSON.stringify({ software, version })
+      body: JSON.stringify({ software, version }),
+      isCurrent: () => S.token === installToken && S.user?.id === installUser
     });
     srv.type = softRes?.software || String(software).toLowerCase();
     srv.version = softRes?.version || version;
     if (softRes?.jar_file) srv.jar_file = softRes.jar_file;
+    if (typeof softRes?.java_path === 'string') srv.java_path = softRes.java_path;
 
-    if (!isSteelEngine(software) && choice.syncJava && choice.recJava) {
-      await api(srvApiPath(srv, ''), {
-        method: 'PUT',
-        body: JSON.stringify({
-          name: srv.name,
-          description: srv.description,
-          type: srv.type,
-          version: srv.version,
-          jar_file: srv.jar_file,
-          port: srv.port,
-          memory_min: srv.memory_min,
-          memory_max: srv.memory_max,
-          java_path: choice.recJava,
-          java_args: srv.java_args,
-          auto_restart: srv.auto_restart
-        })
-      });
-      srv.java_path = choice.recJava;
+    window.NPServerArtifact?.installed(srv, softRes);
+
+    if (sameTarget()) {
+      S.core = isSteelEngine(software) ? 'Steel' : software;
+      S.ver = srv.version;
+      toast(`Successfully installed ${software} ${version}! Restarting...`);
+      power('restart', true);
+    } else {
+      toast(`Installed ${software} ${version} on ${target.name}. Start it from that server's console.`, 'ok');
     }
-
-    S.core = isSteelEngine(software) ? 'Steel' : software;
-    S.ver = srv.version;
-    toast(`Successfully installed ${software} ${version}! Restarting...`);
-    power('restart', true);
   } catch (e) {
     toast(`Software installation failed: ${e.message}`, 'bad');
     uiAlert({
@@ -11478,7 +11446,7 @@ async function installSoftware(software, version, btnEl) {
     });
   } finally {
     S.installingSoftware = null;
-    if (S.view === 'ver') {
+    if (sameTarget() && S.view === 'ver') {
       renderVersionRows();
       R();
     } else {
@@ -11590,24 +11558,29 @@ async function persistSettingsPayload(targetSrv, collected, opts = {}) {
     }
 
     if (sendSrv) {
-      await api(srvApiPath(targetSrv, ''), {
+      const saved = await api(srvApiPath(targetSrv, ''), {
         method: 'PUT',
         suppressToast: autoSave,
         body: JSON.stringify(snaps.srvPayload)
       });
+      // Apply authoritative settings/metadata returned by the server, not stale submitted fields.
+      if (saved && saved.id === targetSrv.id) Object.assign(targetSrv, saved);
+      if (saved?.artifact) targetSrv.artifact = saved.artifact;
     }
 
-    targetSrv.name = d.name;
-    targetSrv.description = d.desc;
-    targetSrv.version = d.ver;
-    targetSrv.jar_file = d.jar;
+    if (!sendSrv) {
+      targetSrv.name = d.name;
+      targetSrv.description = d.desc;
+      targetSrv.version = d.ver;
+      targetSrv.jar_file = d.jar;
+    }
     targetSrv.java_args = snaps.srvPayload.java_args;
     targetSrv.auto_restart = d.autoRestart;
     targetSrv.port = d.port;
     targetSrv.memory_max = d.ram;
     targetSrv.memory_min = snaps.srvPayload.memory_min;
     targetSrv.motd = d.motd;
-    if (isSteelEngine(targetSrv.type) || d.javaPath) targetSrv.java_path = snaps.srvPayload.java_path;
+    if (!sendSrv) targetSrv.java_path = snaps.srvPayload.java_path;
 
     _settingsLastSaved[key] = {
       propsJson: snaps.propsJson,
@@ -11616,12 +11589,13 @@ async function persistSettingsPayload(targetSrv, collected, opts = {}) {
 
     const stillActive = curServer()?.id === targetSrv.id && (curServer()?.node_id || 'local') === nodeId;
     if (stillActive) {
-      S.ver = d.ver;
+      S.ver = targetSrv.version;
       S.editSrvName = d.name;
       S.editSrvDesc = d.desc;
       S.props._srvId = targetSrv.id;
       S.memMaxMB = d.ram;
       syncHeroFromSavedServer(targetSrv);
+      window.NPServerArtifact?.refresh();
     }
 
     setSettingsSaveStatus('saved', `Saved at ${clock()}`);
@@ -12261,8 +12235,8 @@ function syncCreateJavaFromVersion(ver) {
   });
   const sel = $('#cs-java');
   if (!sel || sel.dataset.userPicked === '1') return;
-  if (sel.value !== '25') {
-    sel.value = '25';
+  if (sel.value !== 'auto') {
+    sel.value = 'auto';
     if (typeof sel._cselectRebuild === 'function') sel._cselectRebuild();
   }
 }
@@ -12362,7 +12336,7 @@ function onCreateNodeChange(nodeId) {
   if (strip) {
     strip.dataset.nodeId = nid;
     if (!S.javaRuntimesMap?.[nid]) {
-      strip.innerHTML = '<span class="java-status-chip">Checking installed Java 25, 21, 17 &amp; 8 runtimes...</span>';
+      strip.innerHTML = '<span class="java-status-chip">Checking installed Java runtimes...</span>';
     }
   }
   loadJavaRuntimes(false, nid);
@@ -12453,7 +12427,7 @@ function openCreateServerModal() {
           <label class="f" style="margin-bottom:0;">
             <span>Java Runtime</span>
             <select id="cs-java" onchange="this.dataset.userPicked='1'">
-              ${renderJavaSelectOptions('25', false, 'latest', 'paper', defaultNodeId)}
+              ${renderJavaSelectOptions('auto', false, 'latest', 'paper', defaultNodeId)}
             </select>
           </label>
         </div>
@@ -12565,7 +12539,7 @@ async function handleCreateServer(e) {
   const memoryMax = parseInt($('#cs-mem')?.value) || 2048;
   const memoryMin = isSteelEngine(type) ? 0 : Math.min(1024, memoryMax);
   const port = parseInt($('#cs-port')?.value) || 25565;
-  const javaPath = isSteelEngine(type) ? '' : ($('#cs-java')?.value || '25');
+  const javaPath = isSteelEngine(type) ? '' : ($('#cs-java')?.value || 'auto');
   const autoDownload = $('#cs-dl')?.checked ?? true;
   const useAikar = $('#cs-aikar')?.checked;
   const cpuLimit = parseInt($('#cs-cpu')?.value) || 0;
@@ -13639,12 +13613,12 @@ async function executeDeleteServer(srvId, nodeId = 'local') {
   }
 }
 
-// --- Server Reinstallation (mcjarfiles.com) ---
+// --- Server Reinstallation (MCJars) ---
 function updateReinstallJavaPreview() {
   const sw = $('#reinst-software')?.value || 'paper';
   const ver = $('#reinst-version')?.value.trim() || '1.21.11';
   const el = $('#reinst-java-rec');
-  if (el) el.textContent = isSteelEngine(sw) ? 'Not required (native)' : `Java ${getRecommendedJavaForMcVersion(ver, sw)}`;
+  if (el) el.textContent = isSteelEngine(sw) ? 'Not required (native)' : 'Identified after download';
 }
 
 function syncReinstallSelectFromInput(ver) {
@@ -13737,7 +13711,6 @@ function openReinstallModal(srvId, nodeId = null) {
   const targetName = targetSrv.name || 'Server';
   const curType = (targetSrv.type || 'paper').toLowerCase();
   const curVer = isSteelEngine(curType) ? 'latest' : (targetSrv.version || '1.21.11');
-  const recJava = getRecommendedJavaForMcVersion(curVer, curType);
   const allVers = getAllMcVersions(curType);
   const verList = (curVer && !allVers.includes(curVer)) ? [curVer, ...allVers] : allVers;
 
@@ -13751,7 +13724,7 @@ function openReinstallModal(srvId, nodeId = null) {
       </div>
 
       <p class="mu" style="font-size:13px; line-height:1.5; margin-bottom:16px;">
-        Reinstalls the server executable from official upstream releases (Steel) or mcjarfiles.com (Java engines).
+        Reinstalls the server executable from official upstream releases (Steel) or MCJars (Java engines).
       </p>
 
       <form class="np-modal-form" id="reinstall-form" data-srv-id="${esc(targetId)}" data-node-id="${esc(targetNodeId)}" data-orig-type="${esc(curType)}" data-selected-type="${esc(curType)}" onsubmit="submitReinstall(event, this.dataset.srvId, this.dataset.nodeId)">
@@ -13804,14 +13777,9 @@ function openReinstallModal(srvId, nodeId = null) {
           </label>
         </div>
 
-        <div class="np-modal-half" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 8px; padding: 11px 14px; margin-bottom: 20px;">
-          <label class="row np-check-row" style="cursor:pointer; font-size:13px; gap:10px; align-items:flex-start;">
-            <input type="checkbox" id="reinst-sync-java" checked style="margin-top:2px;">
-            <div>
-              <b style="color: var(--tx); display: block;">Sync Java Runtime (<span id="reinst-java-rec">Java ${esc(recJava)}</span>)</b>
-              <span class="mu" style="font-size:12px;">Choose the Java version this release needs automatically.</span>
-            </div>
-          </label>
+        <div class="np-modal-half artifact-note">
+          <b>Java: <span id="reinst-java-rec">Identified after download</span></b>
+          <p>Your Java selection is preserved. Choose Auto (detected build) in Settings to resolve the exact runtime from installed build metadata.</p>
         </div>
 
         <div data-operation-progress></div>
@@ -13833,6 +13801,7 @@ function openReinstallModal(srvId, nodeId = null) {
 async function submitReinstall(e, srvId, nodeId = 'local') {
   e.preventDefault();
   const targetNodeId = nodeId || 'local';
+  const reinstallToken = S.token, reinstallUser = S.user?.id;
   const operationKey = `${targetNodeId}:${srvId}`;
   if (!S.reinstallingServers) S.reinstallingServers = new Set();
   if (S.reinstallingServers.has(operationKey)) {
@@ -13849,7 +13818,6 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
   const preserveWorld = $('#reinst-world')?.checked ?? true;
   const preserveConfig = $('#reinst-config')?.checked ?? true;
   const preservePlugins = !isSteelEngine(software) && ($('#reinst-plugins')?.checked ?? true);
-  const syncJava = !isSteelEngine(software) && ($('#reinst-sync-java')?.checked ?? false);
   const wipeFiles = $('#reinst-wipe-files')?.checked ?? false;
 
   toast(`Initiating reinstallation of ${software} ${version}...`);
@@ -13864,38 +13832,19 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
         preserve_config: preserveConfig,
         preserve_plugins: preservePlugins,
         wipe_files: wipeFiles
-      })
+      }),
+      isCurrent: () => S.token === reinstallToken && S.user?.id === reinstallUser
     });
 
-    const targetSrv = findServerRef(srvId, targetNodeId) || curServer();
+    const targetSrv = findServerRef(srvId, targetNodeId);
     if (targetSrv) {
       targetSrv.type = software;
       targetSrv.version = res?.version || version;
       if (res?.jar_file) targetSrv.jar_file = res.jar_file;
+      if (typeof res?.java_path === 'string') targetSrv.java_path = res.java_path;
     }
 
-    if (syncJava && targetSrv) {
-      const recJava = getRecommendedJavaForMcVersion(version, software);
-      if (resolveJavaSelectValue(targetSrv.java_path || '', targetSrv.version || '', targetSrv.type || '') !== recJava) {
-        await api(nodeApiPath(targetNodeId, `/api/servers/${encodeURIComponent(srvId)}`), {
-          method: 'PUT',
-          body: JSON.stringify({
-            name: targetSrv.name,
-            description: targetSrv.description,
-            type: targetSrv.type,
-            version: targetSrv.version,
-            jar_file: targetSrv.jar_file || 'server.jar',
-            port: targetSrv.port,
-            memory_min: targetSrv.memory_min,
-            memory_max: targetSrv.memory_max,
-            java_path: recJava,
-            java_args: targetSrv.java_args,
-            auto_restart: targetSrv.auto_restart
-          })
-        }).catch(() => {});
-        targetSrv.java_path = recJava;
-      }
-    }
+    if (targetSrv) window.NPServerArtifact?.installed(targetSrv, res);
 
     if ($('#reinstall-form') === form) closeModal();
     toast(`Server reinstalled successfully (${software} ${version})!`, 'ok');
@@ -13904,11 +13853,12 @@ async function submitReinstall(e, srvId, nodeId = 'local') {
     if (cur && cur.id === srvId && (cur.node_id || 'local') === targetNodeId) {
       S.ver = targetSrv?.version || version;
       S.core = software.charAt(0).toUpperCase() + software.slice(1);
+      await refreshServerStatus();
+      if (S.view === 'fi') loadFileList(S.currentDir);
+      R();
     }
-    await refreshServerStatus();
-    if (S.view === 'fi') loadFileList(S.currentDir);
-    R();
   } catch (err) {
+    if (S.token !== reinstallToken || S.user?.id !== reinstallUser) return;
     toast(err.message || 'Server reinstallation failed', 'bad');
     if ($('#reinstall-form') === form) uiAlert({
       title: 'Server Reinstallation Failed',
@@ -16827,6 +16777,7 @@ async function submit2FALogin(tempToken) {
 }
 
 async function logout() {
+  window.NPServerArtifact?.reset();
   resetServerAccess();
   if (!await guardEditorLeave()) return;
   const brandName = (getBrand('brand_name') || 'NeoPanel').trim() || 'NeoPanel';
@@ -17609,6 +17560,7 @@ function clientRequestPermission(suffix, method = 'GET') {
   if (path === '/permissions' || (path === '/features' && read)) return '';
   if (path === '/automation') return read ? '' : 'settings.edit';
   if (path.startsWith('/world-conversion')) return read ? 'files.view' : 'files.edit';
+  if (path === '/artifact') return 'files.view';
   if (path.startsWith('/files')) {
     if (path === '/files/trash' || path.startsWith('/files/trash/')) return 'files.delete';
     if (read) return 'files.view';

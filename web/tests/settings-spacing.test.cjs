@@ -28,6 +28,8 @@ function fixture(type = 'paper') {
     onReinstallEngineChange() {}, loadVersionsCatalog() {}, setTimeout() {}, enhanceSelects() {}};
   c.window = c;
   vm.runInNewContext(section('const ENGINE_ICONS =', 'function onPlayerHeadError('), c);
+  c.S.token = 'fixture'; c.hasServerPermission = () => true;
+  vm.runInNewContext(fs.readFileSync(path.join(root, 'js/server-artifact.js'), 'utf8'), c);
   vm.runInNewContext(fs.readFileSync(path.join(root, 'js/server-automation.js'), 'utf8'), c);
   vm.runInNewContext(fs.readFileSync(path.join(root, 'js/proxy-settings.js'), 'utf8'), c);
   vm.runInNewContext(`var settingsView = {${section('  set() {', '\n  },')}\n}};`, c);
@@ -50,9 +52,11 @@ async function load(page, html, theme) {
 
 test('reinstall checkbox rows opt out of wrapping; startup layout is explicit', () => {
   const html = fixture().reinstall();
-  for (const id of ['reinst-world', 'reinst-config', 'reinst-plugins', 'reinst-sync-java']) {
+  for (const id of ['reinst-world', 'reinst-config', 'reinst-plugins']) {
     assert.match(html, new RegExp(`<label[^>]*class="[^"]*np-check-row[^>]*>\\s*<input[^>]*id="${id}"`));
   }
+  assert.doesNotMatch(html, /id="reinst-sync-java"/);
+  assert.match(html, /Your Java selection is preserved/);
   assert.match(organizer, /np-startup-grid/);
 });
 
@@ -62,7 +66,7 @@ test('browser: reinstall checkboxes stay beside multiline text at every width', 
       await page.setViewportSize({width,height:1000});
       await load(page, fixture().reinstall(), theme);
       await page.addScriptTag({content:dropdowns + '\nenhanceSelects(document);'});
-      const rows = await page.evaluate(() => ['reinst-world','reinst-config','reinst-plugins','reinst-sync-java'].map(id => {
+      const rows = await page.evaluate(() => ['reinst-world','reinst-config','reinst-plugins'].map(id => {
         const input = document.getElementById(id), text = input.nextElementSibling;
         const a = input.getBoundingClientRect(), b = text.getBoundingClientRect();
         return {id, input:{x:a.x,y:a.y,right:a.right,bottom:a.bottom,width:a.width}, text:{x:b.x,y:b.y}, wrap:getComputedStyle(input.closest('label')).flexWrap};

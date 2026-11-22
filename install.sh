@@ -432,108 +432,19 @@ step_isolation() (
   log_info "This verifies host capability and service identity, not all service-unit restrictions or every Java/plugin workload."
 )
 
-has_java_version() {
-  local ver="$1"
-  local d
-  for d in /usr/lib/jvm/* /opt/java/*; do
-    [ -d "$d" ] || continue
-    case "$(basename "$d")" in
-      *"-${ver}-"*|*"-${ver}"|"java-${ver}"*|"jdk-${ver}"*|"jre-${ver}"*|"temurin-${ver}"*)
-        if [ -x "$d/bin/java" ] && "$d/bin/java" -version >/dev/null 2>&1; then
-          return 0
-        fi
-        if [ -x "$d/jre/bin/java" ] && "$d/jre/bin/java" -version >/dev/null 2>&1; then
-          return 0
-        fi
-        ;;
-    esac
-  done
-  return 1
-}
-
-install_java_25() {
-  if has_java_version "25"; then
-    return 0
-  fi
-
-  # Remove any empty/broken directory left by an earlier failed download
-  if [ -e "/usr/lib/jvm/java-25-temurin" ] && [ ! -x "/usr/lib/jvm/java-25-temurin/bin/java" ]; then
-    rm -rf "/usr/lib/jvm/java-25-temurin"
-  fi
-
-  # Try Ubuntu apt repository if OpenJDK 25 is available
-  if [ "$PKG_MGR" = "apt" ] && apt-cache show openjdk-25-jre-headless >/dev/null 2>&1; then
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-      openjdk-25-jre-headless || true
-    if has_java_version "25"; then
-      return 0
-    fi
-  fi
-
-  local arch="x64"
-  if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
-    arch="aarch64"
-  fi
-
-  mkdir -p /usr/lib/jvm
-  local tmp_tar="/tmp/neopanel-temurin-25.tar.gz"
-  local stage_dir="/usr/lib/jvm/.java-25-temurin.stage"
-  local urls=(
-    "https://api.adoptium.net/v3/binary/latest/25/ga/linux/${arch}/jre/hotspot/normal/eclipse"
-    "https://api.adoptium.net/v3/binary/latest/25/ga/linux/${arch}/jdk/hotspot/normal/eclipse"
-    "https://api.adoptium.net/v3/binary/latest/25/ea/linux/${arch}/jre/hotspot/normal/eclipse"
-    "https://api.adoptium.net/v3/binary/latest/25/ea/linux/${arch}/jdk/hotspot/normal/eclipse"
-  )
-
-  local url
-  for url in "${urls[@]}"; do
-    rm -f "$tmp_tar"
-    rm -rf "$stage_dir"
-    echo "[INFO] Attempting Java 25 download from: $url"
-    if curl -fsSL --retry 2 --connect-timeout 15 --max-time 300 -o "$tmp_tar" "$url"; then
-      if tar -tzf "$tmp_tar" >/dev/null 2>&1; then
-        mkdir -p "$stage_dir"
-        if tar -xzf "$tmp_tar" -C "$stage_dir" --strip-components=1 && \
-           [ -x "$stage_dir/bin/java" ] && \
-           "$stage_dir/bin/java" -version >/dev/null 2>&1; then
-          rm -rf "/usr/lib/jvm/java-25-temurin"
-          mv "$stage_dir" "/usr/lib/jvm/java-25-temurin"
-          chmod -R a+rX "/usr/lib/jvm/java-25-temurin"
-          rm -f "$tmp_tar"
-          echo "[INFO] Java 25 installed at /usr/lib/jvm/java-25-temurin"
-          return 0
-        fi
-      fi
-    fi
-  done
-
-  rm -f "$tmp_tar"
-  rm -rf "$stage_dir"
-  echo "[WARN] Failed to auto-install Java 25 from Adoptium." >&2
-  return 1
-}
-
+# Java provisioning is shared with Windows and the backend: official metadata,
+# checksums, bounded extraction, exact-major verification and transactional install.
+# A fresh install builds the backend first; updates use the freshly built binary.
 step_java() {
-  detect_os_pkg_manager
-  case "$PKG_MGR" in
-    apt)
-      apt-get update -y -q
-      apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-        openjdk-21-jre-headless openjdk-17-jre-headless openjdk-8-jre-headless || true
-      ;;
-    dnf|yum)
-      $PKG_MGR install -y java-21-openjdk-headless java-17-openjdk-headless java-1.8.0-openjdk-headless || true
-      ;;
-    pacman)
-      pacman -Sy --noconfirm jre21-openjdk-headless jre17-openjdk-headless jre8-openjdk-headless || true
-      ;;
-    apk)
-      apk add openjdk21-jre-headless openjdk17-jre-headless openjdk8-jre-base || true
-      ;;
-  esac
-
-  # Install latest Java 25 runtime cleanly
-  install_java_25 || true
+  local binary="${1:-$INSTALL_DIR/$BINARY_NAME}"
+  if [ ! -x "$binary" ]; then
+    echo "[ERROR] Java provisioning requires an installed NeoPanel binary at $binary. Install/update NeoPanel first, then run '$INSTALL_DIR/$BINARY_NAME java install-all' (or rerun --java)." >&2
+    return 1
+  fi
+  if ! "$binary" java install-all; then
+    echo "[ERROR] Required Java runtime provisioning/verification failed. See the missing family above; fix permissions or upstream/platform availability and rerun --java. No service restart was requested by this step." >&2
+    return 1
+  fi
 }
 
 go_compiler_supported() {
@@ -992,9 +903,9 @@ run_full_installation() {
   run_step 0 10 "Updating system & installing base utilities" "step_prerequisites"
   run_step 10 15 "Installing & testing Bubblewrap sandbox" "step_isolation fresh"
   log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
-  run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
-  run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
-  run_step 55 75 "Compiling NeoPanel panel & daemon binary" "step_build_neopanel"
+  run_step 15 35 "Preparing Go compilation toolchain" "step_go_compiler"
+  run_step 35 60 "Compiling NeoPanel panel & daemon binary" "step_build_neopanel"
+  run_step 60 75 "Installing & verifying all required Java runtimes" "step_java"
   run_step 75 85 "Creating configuration & systemd service" "step_config_service '$bind_host' '$PANEL_PORT' '$TURNSTILE_ENABLED' '$TURNSTILE_SITE_KEY' '$TURNSTILE_SECRET_KEY' 'panel' ''"
 
   if [[ "$use_ssl" =~ ^[Yy]$ ]]; then
@@ -1183,9 +1094,9 @@ run_node_installation() {
   run_step 0 10 "Updating system & installing base utilities" "step_prerequisites"
   run_step 10 15 "Installing & testing Bubblewrap sandbox" "step_isolation fresh"
   log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
-  run_step 15 35 "Installing Minecraft Java runtimes (25, 21, 17 & 8)" "step_java"
-  run_step 35 55 "Preparing Go compilation toolchain" "step_go_compiler"
-  run_step 55 75 "Compiling NeoPanel Node Daemon (-tags node)" "step_build_neopanel"
+  run_step 15 35 "Preparing Go compilation toolchain" "step_go_compiler"
+  run_step 35 60 "Compiling NeoPanel Node Daemon (-tags node)" "step_build_neopanel"
+  run_step 60 75 "Installing & verifying all required Java runtimes" "step_java"
   run_step 75 85 "Configuring Cluster Node Daemon & systemd" "step_config_service '$bind_host' '$PANEL_PORT' 'false' '' '' 'node' '$node_tok'"
 
   local fw_include_http="false"
@@ -1313,17 +1224,9 @@ interactive_connect_node_wizard() {
 # -----------------------------------------------------------------------------
 
 step_update_ensure_java() {
-  if ! has_java_version "21" || ! has_java_version "17" || ! has_java_version "8"; then
-    apt-get update -y -q || true
-    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
-      openjdk-21-jre-headless openjdk-17-jre-headless openjdk-8-jre-headless || true
-  fi
-  if ! has_java_version "25"; then
-    if ! command -v curl &>/dev/null || ! command -v tar &>/dev/null; then
-      apt-get update -y -q && apt-get install -y -q curl tar ca-certificates || true
-    fi
-    install_java_25 || true
-  fi
+  # The old installed binary may not support java install-all yet. Verify using
+  # the new binary before publishing it or requesting any existing restart.
+  step_java "$BUILD_DIR/neopanel_new"
 }
 
 step_update_fetch() {
@@ -1404,13 +1307,13 @@ update_neopanel() {
 
   run_step 0 10 "Installing & testing Bubblewrap sandbox" "step_isolation installed"
   log_info "Bubblewrap host check passed; existing node isolation settings are unchanged."
-  run_step 10 25 "Ensuring Java 25, 21, 17 & 8 runtimes" "step_update_ensure_java"
-  run_step 25 45 "Fetching latest updates from GitHub" "step_update_fetch"
+  run_step 10 35 "Fetching latest updates from GitHub" "step_update_fetch"
   if [ "$INSTALL_ROLE" = "node" ]; then
-    run_step 45 80 "Compiling fresh Cluster Node binary (-tags node)" "step_update_compile"
+    run_step 35 65 "Compiling fresh Cluster Node binary (-tags node)" "step_update_compile"
   else
-    run_step 45 80 "Compiling fresh NeoPanel binary" "step_update_compile"
+    run_step 35 65 "Compiling fresh NeoPanel binary" "step_update_compile"
   fi
+  run_step 65 80 "Installing & verifying all required Java runtimes" "step_update_ensure_java"
   run_step 80 100 "Restarting service and verifying health" "step_update_swap"
 
   echo -e "\n${GREEN}${BOLD}================================================================${NC}"
@@ -1549,7 +1452,7 @@ Maintenance & CLI Shortcuts:
   --show-token              Show this host's security.node_token
   --rotate-token            Rotate node_token and restart service
   --create-api-key [name]   Generate a new Admin API Key in Master SQLite
-  --java                    Install/repair Java 25, 21, 17 & 8 runtimes
+  --java                    Install/verify required Java 8, 11, 16, 17, 21 & 25 (requires NeoPanel binary)
   --firewall                Apply UFW firewall rules
   --turnstile               Configure Cloudflare Turnstile on Panel
   -h, --help                Show this help
@@ -1564,7 +1467,7 @@ interactive_menu() {
   echo -e "  ${GREEN}[3]${NC}  Update NeoPanel to Latest Version (Preserves Panel / Node Mode)"
   echo -e "  ${GREEN}[4]${NC}  Connect / Pair a Remote Node (CLI Wizard)"
   echo -e "  ${GREEN}[5]${NC}  Show Node Token or Generate CLI API Key"
-  echo -e "  ${GREEN}[6]${NC}  Install Java Runtimes (Java 25, 21, 17 & 8)"
+  echo -e "  ${GREEN}[6]${NC}  Install Java Runtimes (Java 8, 11, 16, 17, 21 & 25)"
   echo -e "  ${GREEN}[7]${NC}  Configure / Reconfigure Let's Encrypt SSL (Caddy)"
   echo -e "  ${GREEN}[8]${NC}  Configure UFW Firewall"
   echo -e "  ${GREEN}[9]${NC}  Configure Cloudflare Turnstile Bot Protection"
@@ -1619,7 +1522,7 @@ interactive_menu() {
     6)
       check_root
       print_banner
-      run_step 0 100 "Installing Java 25, 21, 17 & 8 runtimes" "step_java"
+      run_step 0 100 "Installing & verifying all required Java runtimes" "step_java"
       log_success "Java installed successfully."
       ;;
     7)
@@ -1891,7 +1794,7 @@ else
       ;;
     java)
       check_root
-      run_step 0 100 "Installing Java 25, 21, 17 & 8 runtimes" "step_java"
+      run_step 0 100 "Installing & verifying all required Java runtimes" "step_java"
       ;;
     firewall)
       check_root

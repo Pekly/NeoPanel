@@ -30,6 +30,7 @@ Windows receives occasional updates; Linux remains the primary hosting platform.
 
 ```powershell
 cd .\dist\windows-node
+.\NeoPanel-node.exe java install-all
 .\NeoPanel-node.exe -init
 .\NeoPanel-node.exe node-token --raw
 .\NeoPanel-node.exe -host 127.0.0.1 -port 8081
@@ -38,6 +39,14 @@ cd .\dist\windows-node
 Keep the node token private. Default storage is `%LOCALAPPDATA%\NeoPanel-node`,
 separate from `%LOCALAPPDATA%\NeoPanel-Desktop`. The last command runs the worker
 in the foreground. Use Ctrl+C for graceful shutdown rather than killing it.
+
+Provision Java before starting the worker. `java install-all` verifies all supported
+families (8, 11, 16, 17, 21, 25) and exits nonzero if any cannot be installed.
+`java list` reports local availability without downloads. Use the same hosting
+account and `NEOPANEL_JAVA_DIR`, if configured, for provisioning and hosting.
+Alternatively, run `scripts\install-java.ps1 -BinaryPath <existing-backend.exe>`
+from the repository. Neither command nor helper starts a service or game server.
+Older runtime availability can differ on Windows ARM64; failures are not ignored.
 
 For a head on another machine, replace `127.0.0.1` with the worker's LAN/VPN
 interface address and deliberately restrict its firewall to the head. Use HTTPS
@@ -57,8 +66,10 @@ the head's HTTP address.
   Host untrusted workloads on properly isolated Linux workers.
 - CPU quotas and task-count limits are not enforced on Windows. Per-process
   network accounting is unavailable; CPU and RAM reporting use host APIs.
-- Java is required for Java servers. Choose a compatible runtime through the head
-  and review the Minecraft EULA before starting Minecraft.
+- Java servers default to **Auto**, using verified JAR/build requirements rather
+  than always Java 25. Manual runtimes remain unchanged. Unknown JARs may require
+  an explicit choice; see [Java and custom-JAR identity](new-server-defaults.md).
+  Review the Minecraft EULA before starting Minecraft.
 - Back up the database, configuration, worlds, credentials, and sibling
   `servers-trash` folder before upgrading. Gracefully stop the worker with Ctrl+C
   and wait for cleanup, replace the EXE, then restart. With restart recovery

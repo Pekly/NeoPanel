@@ -85,6 +85,7 @@ type ProcessInstance struct {
 	isolationEngine           string
 	tasksMax                  int
 	allowInsecureGameFallback bool
+	resolveAutoJava           func(*database.Server) (string, error)
 }
 
 func NewProcessInstance(server *database.Server, workingDir string, startupTimeout time.Duration, onReady func(string), onExit func(string, bool, bool, bool, time.Duration)) *ProcessInstance {
@@ -258,7 +259,27 @@ func (p *ProcessInstance) Start() error {
 		}
 		p.broadcast("[NeoPanel] Starting Steel native server (no Java runtime required)...")
 	} else {
-		javaBinary, javaLabel = ResolveJavaBinary(srv.JavaPath)
+		selection := srv.JavaPath
+		if strings.EqualFold(strings.TrimSpace(selection), "auto") {
+			// Keep managed API/SFTP writers out from inspection through process launch.
+			releaseFiles, leaseErr := rooted.TryExclusiveMutation(p.workingDir)
+			if leaseErr != nil {
+				return fmt.Errorf("Auto Java cannot inspect busy server files; retry after the active file operation finishes")
+			}
+			defer releaseFiles()
+			if p.resolveAutoJava == nil {
+				return fmt.Errorf("Auto Java requires verified JAR metadata; inspect this server through the panel first")
+			}
+			selection, err = p.resolveAutoJava(&srv)
+			if err != nil {
+				p.broadcast("[NeoPanel] " + err.Error())
+				return err
+			}
+		}
+		javaBinary, javaLabel = ResolveJavaBinary(selection)
+		if strings.EqualFold(strings.TrimSpace(srv.JavaPath), "auto") && detectJavaBinaryMajor(javaBinary) != selection {
+			return fmt.Errorf("Auto Java requires Java %s, but a verified runtime is unavailable. Ask an administrator to run 'neopanel java install-all' on this host", selection)
+		}
 		p.broadcast(fmt.Sprintf("\x1b[36m[NeoPanel] Starting instance using %s (%s)...\x1b[0m", javaLabel, javaBinary))
 
 		// Validate Java binary existence
@@ -272,7 +293,7 @@ func (p *ProcessInstance) Start() error {
 			p.broadcast(fmt.Sprintf("\x1b[31mThe specified Java binary does not exist or is not executable on this host:\x1b[0m"))
 			p.broadcast(fmt.Sprintf("  \x1b[33;1mPath:  %s\x1b[0m", javaBinary))
 			p.broadcast(fmt.Sprintf("  \x1b[33;1mLabel: %s\x1b[0m", javaLabel))
-			p.broadcast("\x1b[36m👉 Solution: Open Server -> Settings and choose or install a Java runtime (Java 25, 21, 17, or 8), or run 'sudo neopanel-installer --java' on your VPS.\x1b[0m")
+			p.broadcast("\x1b[36mSolution: Choose an installed runtime in Server Settings, or ask an administrator to run 'neopanel java install-all' on this host (Java 8, 11, 16, 17, 21, 25).\x1b[0m")
 			p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 			return fmt.Errorf("Java binary '%s' (%s) was not found. Please install it or verify your Java settings in Settings", javaBinary, javaLabel)
 		}
@@ -288,7 +309,7 @@ func (p *ProcessInstance) Start() error {
 			p.broadcast("\x1b[31mCould not locate the executable JAR file in server directory:\x1b[0m")
 			p.broadcast(fmt.Sprintf("  \x1b[33;1mExpected file: %s\x1b[0m", srv.JarFile))
 			p.broadcast(fmt.Sprintf("  \x1b[33;1mFull path:     %s\x1b[0m", jarPath))
-			p.broadcast("\x1b[36m👉 Solution: Click 'Reinstall Server' in Settings to cleanly download an official JAR from mcjarfiles.com, or upload your server JAR to the root folder via the File Manager.\x1b[0m")
+			p.broadcast("\x1b[36mSolution: Use Reinstall Server to download a distribution through mcjars.app/api, or upload your server JAR to the root folder in Files.\x1b[0m")
 			p.broadcast("\x1b[31;1m========================================================================\x1b[0m")
 			return fmt.Errorf("server JAR file '%s' not found. Please upload it or use 'Reinstall Server'", srv.JarFile)
 		}

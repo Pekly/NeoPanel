@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,11 +14,10 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"time"
 )
 
 type JavaRuntimeInfo struct {
-	Version   string `json:"version"`    // "25", "21", "17", "8"
+	Version   string `json:"version"`    // Managed majors: 8, 11, 16, 17, 21, 25
 	Name      string `json:"name"`       // "Java 25 (Latest LTS • Minecraft 26+)"
 	Path      string `json:"path"`       // "/usr/lib/jvm/java-25-temurin/bin/java"
 	IsDefault bool   `json:"is_default"` // true if default system java
@@ -33,14 +32,22 @@ type premadeJavaDef struct {
 var canonicalPremadeJavas = []premadeJavaDef{
 	{Version: "25", Name: "Java 25 (Latest LTS • Minecraft 26+)"},
 	{Version: "21", Name: "Java 21 (LTS • Minecraft 1.20.5 - 1.21.x)"},
-	{Version: "17", Name: "Java 17 (LTS • Minecraft 1.17 - 1.20.4)"},
+	{Version: "17", Name: "Java 17 (LTS • Minecraft 1.18 - 1.20.4)"},
+	{Version: "16", Name: "Java 16 (Minecraft 1.17)"},
+	{Version: "11", Name: "Java 11 (LTS)"},
 	{Version: "8", Name: "Java 8 (Legacy • Minecraft 1.8 - 1.16.5)"},
 }
 
 var (
 	javaInstallMu sync.Mutex
 	javaVersionRe = regexp.MustCompile(`"([^"]+)"`)
-	javaSupported = map[string]bool{"25": true, "21": true, "17": true, "8": true}
+	javaSupported = func() map[string]bool {
+		m := make(map[string]bool)
+		for _, def := range canonicalPremadeJavas {
+			m[def.Version] = true
+		}
+		return m
+	}()
 )
 
 func premadeDisplayName(ver string) string {
@@ -59,7 +66,7 @@ func parseJavaTag(versionOrPath string) string {
 	}
 
 	switch v {
-	case "25", "21", "17", "11", "8":
+	case "25", "21", "17", "16", "11", "8":
 		return v
 	case "1.8":
 		return "8"
@@ -80,7 +87,7 @@ func matchJavaMajorInString(s string) string {
 	if containsBoundedToken(lower, "1.8") {
 		return "8"
 	}
-	for _, ver := range []string{"25", "21", "17", "11", "8"} {
+	for _, ver := range SupportedJavaMajors() {
 		if containsBoundedToken(lower, ver) {
 			return ver
 		}
@@ -114,14 +121,7 @@ func detectJavaBinaryMajor(binPath string) string {
 	if !isExecutableBinary(binPath) {
 		return ""
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2500*time.Millisecond)
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, binPath, "-version").CombinedOutput()
-	if err != nil && len(out) == 0 {
-		return ""
-	}
-	return parseJavaVersionOutput(string(out))
+	return probeJavaMajor(binPath)
 }
 
 func parseJavaVersionOutput(out string) string {
@@ -199,7 +199,7 @@ func ResolveJavaBinary(versionOrPath string) (binaryPath string, displayLabel st
 		candidates := getLinuxJavaCandidates(targetTag)
 		for _, cand := range candidates {
 			if isExecutableBinary(cand) {
-				if maj := detectJavaBinaryMajor(cand); maj == "" || maj == targetTag {
+				if maj := detectJavaBinaryMajor(cand); maj == targetTag {
 					return cand, "OpenJDK " + targetTag
 				}
 			}
@@ -235,10 +235,10 @@ func ResolveJavaBinary(versionOrPath string) (binaryPath string, displayLabel st
 		}
 	}
 
-	// Return canonical expected path (non-existent) so Start() surfaces a clear "Java Runtime Not Found" error
-	// instead of silently running e.g. a Java 25 server under Java 21.
+	// Never return a canonical path that may contain an unverified/wrong-major
+	// executable. Missing explicit families fail closed on both platforms.
 	if runtime.GOOS == "linux" && javaSupported[targetTag] {
-		return "/usr/lib/jvm/java-" + targetTag + "-temurin/bin/java", "Java " + targetTag + " (Not Installed)"
+		return "", "Java " + targetTag + " (Not Installed)"
 	}
 
 	if lp, err := exec.LookPath("java"); err == nil && !javaSupported[targetTag] {
@@ -281,13 +281,19 @@ func javaRuntimeMountArgs(binary, serverDir string) []string {
 }
 
 func scanLinuxJVMsForMajor(targetTag string) string {
-	roots := []string{"/usr/lib/jvm", "/opt/java", "/usr/java"}
+	return scanLinuxJavaRoots(targetTag, []string{"/usr/lib/jvm", "/opt/java", "/usr/java"}, detectJavaBinaryMajor)
+}
+
+func scanLinuxJavaRoots(targetTag string, roots []string, detect func(string) string) string {
 	for _, root := range roots {
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			continue
 		}
 		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
 			fullDir := filepath.Join(root, e.Name())
 			fi, err := os.Stat(fullDir)
 			if err != nil || !fi.IsDir() {
@@ -298,7 +304,7 @@ func scanLinuxJVMsForMajor(targetTag string) string {
 				if !isExecutableBinary(javaBin) {
 					continue
 				}
-				if matchJavaMajorInString(e.Name()) == targetTag || detectJavaBinaryMajor(javaBin) == targetTag {
+				if detect(javaBin) == targetTag {
 					return javaBin
 				}
 			}
@@ -389,7 +395,7 @@ func DetectInstalledJavas() []JavaRuntimeInfo {
 
 	// 1. Detect Linux /usr/lib/jvm & /opt/java directories (real directories first, then symlinks)
 	if runtime.GOOS == "linux" {
-		for _, root := range []string{"/usr/lib/jvm", "/opt/java"} {
+		for _, root := range []string{"/usr/lib/jvm", "/opt/java", "/usr/java"} {
 			entries, err := os.ReadDir(root)
 			if err != nil {
 				continue
@@ -418,16 +424,12 @@ func DetectInstalledJavas() []JavaRuntimeInfo {
 						}
 					}
 
-					maj := matchJavaMajorInString(dirName)
-					if maj == "" {
-						maj = detectJavaBinaryMajor(javaBin)
-					}
-
+					maj := detectJavaBinaryMajor(javaBin)
 					switch maj {
-					case "25", "21", "17", "8":
+					case "25", "21", "17", "16", "11", "8":
 						record(maj, premadeDisplayName(maj), javaBin, false)
 					case "":
-						record(dirName, dirName, javaBin, false)
+						continue
 					default:
 						record(maj, "OpenJDK "+maj+" ("+dirName+")", javaBin, false)
 					}
@@ -501,7 +503,7 @@ func DetectInstalledJavas() []JavaRuntimeInfo {
 	return ordered
 }
 
-// GetPremadeJavaStatuses returns the canonical latest premade Java runtimes (25, 21, 17, 8)
+// GetPremadeJavaStatuses returns the supported managed Java runtimes
 // along with whether each runtime is currently installed on the host.
 func GetPremadeJavaStatuses() []JavaRuntimeInfo {
 	installed := DetectInstalledJavas()
@@ -530,12 +532,12 @@ func GetPremadeJavaStatuses() []JavaRuntimeInfo {
 	return out
 }
 
-// InstallJavaRuntime downloads and installs an official Eclipse Temurin Java runtime (25, 21, 17, or 8)
+// InstallJavaRuntime downloads and installs a supported official Eclipse Temurin runtime
 // into /usr/lib/jvm on Linux or the per-user managed runtime directory on Windows.
 func InstallJavaRuntime(version string) (JavaRuntimeInfo, error) {
 	ver := strings.TrimSpace(version)
 	if !javaSupported[ver] {
-		return JavaRuntimeInfo{}, fmt.Errorf("unsupported Java version '%s' (supported: 25, 21, 17, 8)", version)
+		return JavaRuntimeInfo{}, fmt.Errorf("unsupported Java version %q (supported: %s)", version, strings.Join(SupportedJavaMajors(), ", "))
 	}
 	if !CanAutoInstallJava() {
 		return JavaRuntimeInfo{}, fmt.Errorf("automatic runtime installation is unsupported on %s/%s", runtime.GOOS, runtime.GOARCH)
@@ -549,233 +551,253 @@ func InstallJavaRuntime(version string) (JavaRuntimeInfo, error) {
 			return st, nil
 		}
 	}
+	root := "/usr/lib/jvm"
 	if runtime.GOOS == "windows" {
-		root, err := windowsJavaInstallRoot()
+		var err error
+		root, err = windowsJavaInstallRoot()
 		if err != nil {
 			return JavaRuntimeInfo{}, err
 		}
-		return installWindowsJava(ver, runtime.GOARCH, root, defaultWindowsJavaInstaller())
 	}
+	deps := defaultWindowsJavaInstaller()
+	deps.detect = detectJavaBinaryMajor
+	return installTemurinJava(ver, runtime.GOOS, runtime.GOARCH, root, deps)
+}
 
-	arch := "x64"
-	switch runtime.GOARCH {
-	case "amd64":
-		arch = "x64"
-	case "arm64":
-		arch = "aarch64"
-	default:
-		return JavaRuntimeInfo{}, fmt.Errorf("unsupported CPU architecture for auto-install: %s", runtime.GOARCH)
+// SupportedJavaMajors returns a copy of the deterministic managed-runtime catalog.
+func SupportedJavaMajors() []string {
+	versions := make([]string, 0, len(canonicalPremadeJavas))
+	for _, def := range canonicalPremadeJavas {
+		versions = append(versions, def.Version)
 	}
+	return versions
+}
 
-	urls := []string{
-		fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%s/ga/linux/%s/jre/hotspot/normal/eclipse", ver, arch),
-		fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%s/ga/linux/%s/jdk/hotspot/normal/eclipse", ver, arch),
-		fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%s/ea/linux/%s/jre/hotspot/normal/eclipse", ver, arch),
-		fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%s/ea/linux/%s/jdk/hotspot/normal/eclipse", ver, arch),
-	}
+// InstallRequiredJavaRuntimes provisions and verifies every required family on this host.
+// Existing exact-major installations are reused. A partial failure is never success.
+func InstallRequiredJavaRuntimes() error {
+	return installRequiredJavaRuntimes(ResolveJavaBinary, detectJavaBinaryMajor, InstallJavaRuntime)
+}
 
-	_ = os.MkdirAll("/usr/lib/jvm", 0755)
-	destDir := fmt.Sprintf("/usr/lib/jvm/java-%s-temurin", ver)
-	stageDir := fmt.Sprintf("/usr/lib/jvm/.java-%s-temurin.stage-%d", ver, time.Now().UnixNano())
-	defer os.RemoveAll(stageDir)
-
-	client := &http.Client{Timeout: 5 * time.Minute}
-	var lastErr error
-
-	for _, dlURL := range urls {
-		tmpTar, err := os.CreateTemp("", "neopanel-java-*.tar.gz")
+func installRequiredJavaRuntimes(resolve func(string) (string, string), detect func(string) string, install func(string) (JavaRuntimeInfo, error)) error {
+	for _, ver := range SupportedJavaMajors() {
+		bin, _ := resolve(ver)
+		if bin != "" && detect(bin) == ver {
+			continue
+		}
+		info, err := install(ver)
 		if err != nil {
-			return JavaRuntimeInfo{}, err
+			return fmt.Errorf("required Java %s is unavailable: %w", ver, err)
 		}
-		tmpTarPath := tmpTar.Name()
-
-		req, err := http.NewRequest("GET", dlURL, nil)
-		if err != nil {
-			tmpTar.Close()
-			_ = os.Remove(tmpTarPath)
-			lastErr = err
-			continue
+		if !info.Installed || info.Version != ver || detect(info.Path) != ver {
+			return fmt.Errorf("required Java %s failed exact-major verification", ver)
 		}
-		req.Header.Set("User-Agent", "NeoPanel/1.0 (+https://github.com/Pekly/NeoPanel)")
-
-		resp, err := client.Do(req)
-		if err != nil {
-			tmpTar.Close()
-			_ = os.Remove(tmpTarPath)
-			lastErr = err
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			resp.Body.Close()
-			tmpTar.Close()
-			_ = os.Remove(tmpTarPath)
-			lastErr = fmt.Errorf("HTTP %d from %s", resp.StatusCode, dlURL)
-			continue
-		}
-
-		_, copyErr := io.Copy(tmpTar, resp.Body)
-		resp.Body.Close()
-		tmpTar.Close()
-		if copyErr != nil {
-			_ = os.Remove(tmpTarPath)
-			lastErr = copyErr
-			continue
-		}
-
-		_ = os.RemoveAll(stageDir)
-		if err := extractTarGzStripped(tmpTarPath, stageDir); err != nil {
-			_ = os.Remove(tmpTarPath)
-			lastErr = err
-			continue
-		}
-		_ = os.Remove(tmpTarPath)
-
-		javaBin := filepath.Join(stageDir, "bin", "java")
-		if !isExecutableBinary(javaBin) {
-			javaBin = filepath.Join(stageDir, "jre", "bin", "java")
-		}
-		if !isExecutableBinary(javaBin) {
-			lastErr = fmt.Errorf("extracted archive did not contain bin/java")
-			continue
-		}
-		if maj := detectJavaBinaryMajor(javaBin); maj == "" {
-			lastErr = fmt.Errorf("downloaded java binary failed execution check")
-			continue
-		}
-
-		// Replace any empty or stale broken destination before moving staging dir into place
-		_ = os.RemoveAll(destDir)
-		if err := os.Rename(stageDir, destDir); err != nil {
-			return JavaRuntimeInfo{}, fmt.Errorf("failed to finalize Java %s directory: %w", ver, err)
-		}
-
-		finalBin := filepath.Join(destDir, "bin", "java")
-		if !isExecutableBinary(finalBin) {
-			finalBin = filepath.Join(destDir, "jre", "bin", "java")
-		}
-		return JavaRuntimeInfo{
-			Version:   ver,
-			Name:      premadeDisplayName(ver),
-			Path:      finalBin,
-			Installed: true,
-		}, nil
 	}
-
-	if lastErr == nil {
-		lastErr = fmt.Errorf("no valid Adoptium build available")
-	}
-	return JavaRuntimeInfo{}, fmt.Errorf("failed to install Java %s: %w", ver, lastErr)
+	return nil
 }
 
 func extractTarGzStripped(archivePath, destDir string) error {
+	return extractJavaTarGz(context.Background(), archivePath, destDir)
+}
+
+// Extract a single stripped top-level directory. Internal file links used by
+// older JREs are materialized as bounded copies, never filesystem links. Escapes,
+// directory links, link cycles and special files are rejected.
+func extractJavaTarGz(ctx context.Context, archivePath, destDir string) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-
-	gzr, err := gzip.NewReader(f)
+	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return fmt.Errorf("invalid gzip stream: %w", err)
+		return err
 	}
-	defer gzr.Close()
-
+	defer gz.Close()
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}
-	cleanDest := filepath.Clean(destDir)
-
-	type pendingHardLink struct {
-		target string
-		linkTo string
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return err
 	}
-	var hardLinks []pendingHardLink
-
-	tr := tar.NewReader(gzr)
-	for {
-		hdr, err := tr.Next()
+	defer root.Close()
+	// Also cap decompressed metadata/padding, not only regular file contents.
+	limited := &io.LimitedReader{R: gz, N: javaExpandedLimit + javaZIPMetadataLimit + 1}
+	tr := tar.NewReader(limited)
+	top := ""
+	seen := make(map[string]bool)
+	var expanded int64
+	type fileLink struct{ name, target string }
+	var links []fileLink
+	regular := make(map[string]bool)
+	for count := 0; ; count++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		h, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return err
 		}
-
-		rel := stripFirstPathSegment(hdr.Name)
-		if rel == "" || rel == "." {
+		if count >= javaEntryLimit {
+			return fmt.Errorf("Java archive entry limit exceeded")
+		}
+		name := strings.TrimSuffix(h.Name, "/")
+		if strings.ContainsAny(name, "\\:\x00") {
+			return fmt.Errorf("unsafe Java archive path %q", h.Name)
+		}
+		parts := strings.Split(name, "/")
+		for _, part := range parts {
+			if part == "" || part == "." || part == ".." {
+				return fmt.Errorf("unsafe Java archive path %q", h.Name)
+			}
+		}
+		if top == "" {
+			top = parts[0]
+		}
+		if top != parts[0] {
+			return fmt.Errorf("multiple Java archive roots")
+		}
+		if h.Typeflag != tar.TypeDir && h.Typeflag != tar.TypeReg && h.Typeflag != tar.TypeRegA && h.Typeflag != tar.TypeSymlink && h.Typeflag != tar.TypeLink {
+			return fmt.Errorf("Java archive special files are not allowed: %q", h.Name)
+		}
+		if len(parts) == 1 {
+			if h.Typeflag != tar.TypeDir {
+				return fmt.Errorf("Java archive lacks top-level directory")
+			}
 			continue
 		}
-		cleanRel := filepath.Clean(filepath.FromSlash(rel))
-		if cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(os.PathSeparator)) || filepath.IsAbs(cleanRel) {
-			return fmt.Errorf("unsafe tar path: %s", hdr.Name)
+		rel := filepath.Join(parts[1:]...)
+		if !filepath.IsLocal(rel) || seen[rel] {
+			return fmt.Errorf("unsafe or duplicate Java archive path %q", h.Name)
 		}
-		targetPath := filepath.Join(cleanDest, cleanRel)
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			mode := os.FileMode(hdr.Mode) & 0777
-			if mode == 0 {
-				mode = 0755
+		seen[rel] = true
+		if h.Typeflag == tar.TypeSymlink || h.Typeflag == tar.TypeLink {
+			if h.Linkname == "" || strings.ContainsAny(h.Linkname, "\\:\x00") || strings.HasPrefix(h.Linkname, "/") {
+				return fmt.Errorf("unsafe Java archive link %q", h.Name)
 			}
-			if err := os.MkdirAll(targetPath, mode|0700); err != nil {
+			var target string
+			if h.Typeflag == tar.TypeLink {
+				if !strings.HasPrefix(h.Linkname, top+"/") {
+					return fmt.Errorf("Java hardlink outside archive root")
+				}
+				target = filepath.Clean(filepath.FromSlash(strings.TrimPrefix(h.Linkname, top+"/")))
+			} else {
+				target = filepath.Join(filepath.Dir(rel), filepath.FromSlash(h.Linkname))
+			}
+			if !filepath.IsLocal(target) {
+				return fmt.Errorf("escaping Java archive link %q", h.Name)
+			}
+			links = append(links, fileLink{rel, target})
+			continue
+		}
+		if h.Typeflag == tar.TypeDir {
+			if err := root.MkdirAll(rel, 0755); err != nil {
 				return err
 			}
-		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			continue
+		}
+		if h.Size < 0 || h.Size > javaDownloadLimit || expanded > javaExpandedLimit-h.Size {
+			return fmt.Errorf("Java archive expanded size limit exceeded")
+		}
+		expanded += h.Size
+		if err := root.MkdirAll(filepath.Dir(rel), 0755); err != nil {
+			return err
+		}
+		mode := os.FileMode(0644) | (os.FileMode(h.Mode) & 0111)
+		out, err := root.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.CopyN(out, tr, h.Size)
+		closeErr := out.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		regular[rel] = true
+	}
+	// Drain to validate gzip CRC, within the same decompression budget.
+	if _, err := io.Copy(io.Discard, limited); err != nil {
+		return err
+	}
+	if limited.N <= 0 {
+		return fmt.Errorf("Java archive decompression limit exceeded")
+	}
+	// Resolve only to files from this archive. Copying instead of creating links
+	// also prevents symlink-chain tricks and keeps publication safe after rename.
+	for len(links) > 0 {
+		pending := make([]fileLink, 0, len(links))
+		for _, link := range links {
+			if err := ctx.Err(); err != nil {
 				return err
 			}
-			mode := os.FileMode(hdr.Mode) & 0777
-			if mode == 0 {
-				mode = 0644
+			if !regular[link.target] {
+				pending = append(pending, link)
+				continue
 			}
-			out, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+			in, err := root.Open(link.target)
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
+			st, err := in.Stat()
+			if err != nil {
+				in.Close()
 				return err
 			}
-			out.Close()
-			_ = os.Chmod(targetPath, mode)
-		case tar.TypeSymlink:
-			if filepath.IsAbs(hdr.Linkname) {
-				return fmt.Errorf("unsafe absolute symlink in archive: %s -> %s", hdr.Name, hdr.Linkname)
+			if !st.Mode().IsRegular() || st.Size() > javaDownloadLimit || expanded > javaExpandedLimit-st.Size() {
+				in.Close()
+				return fmt.Errorf("invalid or excessive Java archive file link")
 			}
-			resolvedSym := filepath.Clean(filepath.Join(filepath.Dir(targetPath), filepath.FromSlash(hdr.Linkname)))
-			if resolvedSym != cleanDest && !strings.HasPrefix(resolvedSym, cleanDest+string(os.PathSeparator)) {
-				return fmt.Errorf("unsafe escaping symlink in archive: %s -> %s", hdr.Name, hdr.Linkname)
-			}
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			expanded += st.Size()
+			if err := root.MkdirAll(filepath.Dir(link.name), 0755); err != nil {
+				in.Close()
 				return err
 			}
-			_ = os.Remove(targetPath)
-			if err := os.Symlink(hdr.Linkname, targetPath); err != nil {
+			out, err := root.OpenFile(link.name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, st.Mode().Perm())
+			if err != nil {
+				in.Close()
 				return err
 			}
-		case tar.TypeLink:
-			linkRel := stripFirstPathSegment(hdr.Linkname)
-			if linkRel != "" && linkRel != "." {
-				cleanLinkRel := filepath.Clean(filepath.FromSlash(linkRel))
-				if !strings.HasPrefix(cleanLinkRel, "..") && !filepath.IsAbs(cleanLinkRel) {
-					hardLinks = append(hardLinks, pendingHardLink{
-						target: targetPath,
-						linkTo: filepath.Join(cleanDest, cleanLinkRel),
-					})
-				}
+			_, copyErr := io.CopyN(out, in, st.Size())
+			in.Close()
+			closeErr := out.Close()
+			if copyErr != nil {
+				return copyErr
 			}
+			if closeErr != nil {
+				return closeErr
+			}
+			regular[link.name] = true
 		}
+		if len(pending) == len(links) {
+			return fmt.Errorf("Java archive has unresolved/cyclic or directory links")
+		}
+		links = pending
 	}
-
-	for _, hl := range hardLinks {
-		_ = os.MkdirAll(filepath.Dir(hl.target), 0755)
-		_ = os.Remove(hl.target)
-		if err := os.Link(hl.linkTo, hl.target); err != nil {
+	// The Linux installer commonly runs as root for an unprivileged service.
+	// Do not let a restrictive installer umask leave published runtimes private.
+	return fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
 			return err
 		}
-	}
-
-	return nil
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return root.Chmod(name, 0755)
+		}
+		st, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		return root.Chmod(name, 0644|(st.Mode().Perm()&0111))
+	})
 }
 
 func stripFirstPathSegment(p string) string {

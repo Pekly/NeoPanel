@@ -57,7 +57,7 @@ const cases = [
   ['openAddUserModal', undefined, ['add-user-form', 'nu-username', 'nu-firstname', 'nu-lastname', 'nu-email', 'nu-password', 'nu-role', 'nu-avatar-file', 'nu-submit-btn']],
   ['openEditUserModal', 1, ['edit-user-form', 'eu-username', 'eu-firstname', 'eu-lastname', 'eu-email', 'eu-password', 'eu-role', 'eu-submit-btn']],
   ['openCreateDatabaseModal', undefined, ['db-new-name', 'db-new-engine', 'db-new-maxconn', 'db-create-btn']],
-  ['openReinstallModal', 'demo', ['reinstall-form', 'reinst-wipe-warn', 'reinst-steel-note', 'reinst-software', 'reinst-ver-sel', 'reinst-version', 'reinst-world', 'reinst-config', 'reinst-plugins', 'reinst-sync-java', 'reinst-submit-btn']],
+  ['openReinstallModal', 'demo', ['reinstall-form', 'reinst-wipe-warn', 'reinst-steel-note', 'reinst-software', 'reinst-ver-sel', 'reinst-version', 'reinst-world', 'reinst-config', 'reinst-plugins', 'reinst-java-rec', 'reinst-submit-btn']],
 ];
 
 for (const [name, arg, ids] of cases) {

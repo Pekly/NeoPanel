@@ -33,6 +33,7 @@ import (
 	"github.com/Pekly/NeoPanel/internal/proxyconfig"
 	"github.com/Pekly/NeoPanel/internal/rooted"
 	"github.com/Pekly/NeoPanel/internal/runner"
+	"github.com/Pekly/NeoPanel/internal/serverjar"
 )
 
 type ServerHandler struct {
@@ -59,8 +60,9 @@ func NewServerHandler(cfg *config.Config, db *database.DB, manager *runner.Serve
 
 type ServerWithStats struct {
 	*database.Server
-	Stats database.ServerStats `json:"stats"`
-	MOTD  string               `json:"motd,omitempty"`
+	Stats    database.ServerStats `json:"stats"`
+	MOTD     string               `json:"motd,omitempty"`
+	Artifact *serverjar.Info      `json:"artifact,omitempty"`
 }
 
 func readServerMOTD(workingDir string, serverType ...string) string {
@@ -118,9 +120,10 @@ func (h *ServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		result[i] = ServerWithStats{
-			Server: s,
-			Stats:  h.manager.GetStats(s),
-			MOTD:   readServerMOTD(workDir, s.Type),
+			Server:   s,
+			Stats:    h.manager.GetStats(s),
+			MOTD:     readServerMOTD(workDir, s.Type),
+			Artifact: h.manager.ArtifactSummary(s),
 		}
 	}
 
@@ -156,9 +159,10 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, ServerWithStats{
-		Server: server,
-		Stats:  h.manager.GetStats(server),
-		MOTD:   readServerMOTD(h.manager.GetWorkingDir(server.ID), server.Type),
+		Server:   server,
+		Stats:    h.manager.GetStats(server),
+		MOTD:     readServerMOTD(h.manager.GetWorkingDir(server.ID), server.Type),
+		Artifact: h.manager.ArtifactSummary(server),
 	})
 }
 
@@ -227,7 +231,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !downloader.IsNativeSoftware(req.Type) && strings.TrimSpace(req.JavaPath) == "" {
-		req.JavaPath = "25"
+		req.JavaPath = "auto"
 	}
 
 	// Generate clean unique server ID (e.g. srv-3f8a1e)
@@ -280,33 +284,16 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if !saved {
 			_ = os.RemoveAll(workingDir)
+			h.manager.ForgetArtifact(srvID)
 		}
 	}()
 
-	if downloader.IsNativeSoftware(req.Type) {
-		// Native installs are synchronous so failures are visible and start cannot race a download.
-		if req.AutoDownload {
-			if err := downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile); err != nil {
-				writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Steel installation failed: " + err.Error()})
-				return
-			}
-			if err := runner.SyncSteelPort(workingDir, req.Port); err != nil {
-				writeServerOperationError(w, err)
-				return
-			}
-		}
-	} else if proxyconfig.Supported(req.Type) {
+	if proxyconfig.Supported(req.Type) {
 		if _, err := proxyconfig.Ensure(workingDir, req.Type, req.Port); err != nil {
 			writeServerOperationError(w, err)
 			return
 		}
-		if req.AutoDownload {
-			if err := downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile); err != nil {
-				writeError(w, http.StatusBadGateway, "Proxy installation failed: "+err.Error())
-				return
-			}
-		}
-	} else {
+	} else if !downloader.IsNativeSoftware(req.Type) {
 		// Create initial server.properties with the chosen port
 		root, err := rooted.Open(workingDir)
 		if err != nil {
@@ -328,7 +315,24 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Downloads begin only after the server and primary allocation commit.
+		// Prepare configuration before downloading the selected distribution.
+	}
+	if req.AutoDownload && req.Type != "custom" {
+		info, err := downloader.DownloadServerJarWithInfo(r.Context(), req.Type, req.Version, workingDir, server.JarFile)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "Server installation failed. Check the selected build and retry; no server was created.")
+			return
+		}
+		if downloader.IsNativeSoftware(req.Type) {
+			if err := runner.SyncSteelPort(workingDir, req.Port); err != nil {
+				writeServerOperationError(w, err)
+				return
+			}
+		}
+		if err := h.manager.RecordArtifactInfo(server, info); err != nil {
+			writeServerOperationError(w, err)
+			return
+		}
 	}
 
 	if err := h.db.CreateServer(server); err != nil {
@@ -337,17 +341,15 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 	saved = true
 
-	// CreateServer atomically records the primary allocation; errors are never ignored.
-	if req.AutoDownload && req.Type != "custom" && !downloader.IsNativeSoftware(req.Type) && !proxyconfig.Supported(req.Type) {
-		go func() { _ = downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile) }()
-	}
+	// Installation and primary allocation errors are reported synchronously.
 
 	logAudit(h.db, r, "server_create", fmt.Sprintf("Created server '%s' (%s %s, port %d, %d MiB RAM)", server.Name, server.Type, server.Version, server.Port, server.MemoryMaxMB))
 
 	writeJSON(w, http.StatusCreated, ServerWithStats{
-		Server: server,
-		Stats:  h.manager.GetStats(server),
-		MOTD:   readServerMOTD(workingDir, server.Type),
+		Server:   server,
+		Stats:    h.manager.GetStats(server),
+		MOTD:     readServerMOTD(workingDir, server.Type),
+		Artifact: h.manager.ArtifactSummary(server),
 	})
 }
 
@@ -482,6 +484,7 @@ func (h *ServerHandler) UpdateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.manager.UpdateInstanceServer(server)
+	h.manager.InvalidateArtifact(server.ID)
 
 	logAudit(h.db, r, "server_update", fmt.Sprintf("Updated settings for server '%s' (%s)", server.Name, server.ID))
 
