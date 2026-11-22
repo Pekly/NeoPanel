@@ -1900,7 +1900,7 @@ label.f {
   margin-bottom: 14px;
 }
 
-label.f span {
+label.f > span {
   display: block;
   color: var(--tx-muted);
   margin-bottom: 5px;
