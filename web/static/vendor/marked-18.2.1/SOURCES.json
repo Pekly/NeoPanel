@@ -1,0 +1,18 @@
+{
+  "package": "marked",
+  "version": "18.2.1",
+  "registry": "https://registry.npmjs.org/",
+  "integrity": "sha512-ii4bxCTCqqwpT86XZWgJNs+ZnAIZksmLGYMViWA7PDIXYIeNo1x6cDdX3JOip9NM/cI6p8z57FxliACboTruMA==",
+  "files": [
+    {
+      "source": "lib/marked.umd.js",
+      "file": "marked.umd.js",
+      "sha256": "bb95d4c15f1289f78486eaacebf3bb18688475ed58a040ef762ed49337090542"
+    },
+    {
+      "source": "LICENSE",
+      "file": "LICENSE",
+      "sha256": "8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c"
+    }
+  ]
+}

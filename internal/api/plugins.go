@@ -50,7 +50,7 @@ func (h *PluginHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	res, err := downloader.SearchModrinthPluginsPage(r.Context(), q, limit, offset, loader, version, sortBy, projType)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "code": "plugin_catalog_unavailable"})
 		return
 	}
 
@@ -359,9 +359,24 @@ func (h *PluginHandler) Versions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid Modrinth project slug is required"})
 		return
 	}
-	versions, err := downloader.CompatibleModrinthVersionsContext(r.Context(), slug, srv.Type, srv.Version)
+	versionID, latest := r.URL.Query().Get("version_id"), r.URL.Query().Get("latest")
+	if (versionID != "" && !downloader.ValidModrinthIdentifier(versionID)) || (latest != "" && latest != "true") || (versionID != "" && latest != "") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Choose latest=true or a valid version_id"})
+		return
+	}
+	var versions []downloader.ModrinthVersion
+	if latest == "true" || versionID != "" {
+		var selected *downloader.ModrinthVersion
+		selected, err = downloader.ResolveModrinthVersionContext(r.Context(), slug, srv.Type, versionID)
+		versions = []downloader.ModrinthVersion{}
+		if selected != nil {
+			versions = append(versions, *selected)
+		}
+	} else {
+		versions, err = downloader.CompatibleModrinthVersionsContext(r.Context(), slug, srv.Type, srv.Version)
+	}
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "code": "plugin_catalog_unavailable"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"versions": versions, "minecraft_version": srv.Version, "loader": srv.Type})
@@ -393,7 +408,7 @@ func (h *PluginHandler) Project(w http.ResponseWriter, r *http.Request) {
 	}
 	detail, err := downloader.GetModrinthProjectDetail(r.Context(), slug, srv.Type, srv.Version)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error(), "code": "plugin_catalog_unavailable"})
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)

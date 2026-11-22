@@ -294,3 +294,16 @@ test('user error advice avoids operator maintenance while retaining uncertainty 
   assert.match(q.errorAdvice({status:503,message:'offline'}),/may already/);
   assert.match(q.countdownSection(),/Continues if you close this tab; cancelled if the hosting service restarts/);
 });
+
+test('Modrinth catalog failures do not mark a reachable server disconnected; real worker failures still do',()=>{
+  const {c,q}=setup(), base=c.srvApiPath(c.curServer(),'');
+  const provider=Object.assign(Error('Modrinth metadata unavailable'),{status:502,data:{code:'plugin_catalog_unavailable'}});
+  for(const suffix of ['/plugins/project?slug=voicechat','/plugins/versions?slug=voicechat']) {
+    q.requestResult(base+suffix,provider,c.S.token);assert.equal(q.connectionBlocked(),false);
+  }
+  q.requestResult(base+'/plugins/project?slug=voicechat',Object.assign(Error('Worker unreachable'),{status:502}),c.S.token);
+  assert.equal(q.connectionBlocked(),true);
+  q.requestResult(base+'/plugins/project?slug=voicechat',provider,c.S.token);assert.equal(q.connectionBlocked(),true,'provider error must not clear genuine lost connection');
+  q.requestResult(base,null,c.S.token);assert.equal(q.connectionBlocked(),false);
+  q.requestResult(base+'/plugins/project?slug=voicechat',Error('Failed to fetch'),c.S.token);assert.equal(q.connectionBlocked(),true);
+});

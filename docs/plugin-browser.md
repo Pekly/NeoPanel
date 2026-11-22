@@ -10,7 +10,7 @@ Open **Server → Plugins** (or **Mods** for a modded server). Install and state
 - The loader selector puts **Auto (All)** first and the current server software directly after it. Choosing a browse loader does not change the server software or the installation target.
 - The Minecraft-version filter is a **search filter**, not an installation constraint.
 
-Project text and URLs are untrusted provider content. NeoPanel does not embed the external Modrinth page or execute project HTML/scripts. External links open separately; descriptions use the panel's safe formatting subset rather than allowing arbitrary embedded HTML.
+Descriptions and release notes render standard Markdown: tables, nested lists/emphasis, reference links, badges, fenced code, and safe author HTML such as images and collapsible sections. Pinned local Marked and DOMPurify assets parse and sanitize the content; no rendering CDN is required. Scripts, event handlers, arbitrary CSS, forms, iframes, SVG markup, unsafe links and DOM IDs are removed. External links open separately and images use no-referrer. The preview is bounded to 100,000 characters per text; unavailable rendering assets fail closed to escaped text.
 
 ## Install latest or choose a version
 
@@ -18,7 +18,9 @@ Project text and URLs are untrusted provider content. NeoPanel does not embed th
 
 **Install selected version** installs the chosen release instead. The backend still verifies that it belongs to the requested project and supports the server's software. The version list labels the author's release channel and advertised game versions; inspect these before choosing.
 
-Project pages retain up to 500 recent releases, always including the newest eligible release for the server software. A notice identifies shortened histories; the Modrinth link opens the complete history. Browse results load 24 at a time and retain up to 1,000 results before asking you to refine the search.
+Project pages fetch 50-release upstream pages and retain up to 500 recent releases, including the newest eligible release when its independent software-filtered check succeeds. Requests share a 30-second deadline, a 4 MiB per-response limit and a 16 MiB total metadata budget. Large multi-loader catalogs no longer require one oversized response. Explicit installation revalidates the exact version directly against the project and software. A notice identifies shortened histories; the Modrinth link opens the complete history. Browse results load 24 at a time and retain up to 1,000 results before asking you to refine the search.
+
+If creators, version history, or the latest-release check is unavailable, the description and other available data remain visible with **Retry missing data**. An unknown latest release is not presented as “no eligible release.” Typed Modrinth catalog errors no longer mark the game connection as lost; real panel/worker/WebSocket failures still use the connection warning and paused controls.
 
 Software rules remain in force: Paper can use Paper/Spigot/Bukkit releases; Purpur and Leaf use the Paper family; Waterfall uses BungeeCord; Folia requires an explicit Folia tag. A Fabric build is not interchangeable with Forge or a Bukkit plugin. Steel does not load Java plugins/mods.
 

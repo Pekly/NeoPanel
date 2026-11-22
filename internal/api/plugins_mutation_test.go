@@ -36,12 +36,15 @@ func TestPluginMutationsRespectExclusiveServerLease(t *testing.T) {
 			return nil, fmt.Errorf("mock provider unavailable")
 		}
 		data := ""
-		switch r.URL.String() {
-		case "https://api.modrinth.com/v2/project/example":
+		switch r.URL.Host + r.URL.Path {
+		case "api.modrinth.com/v2/project/example":
 			data = `{"id":"P1","slug":"example"}`
-		case "https://api.modrinth.com/v2/project/P1/version":
+		case "api.modrinth.com/v2/project/P1/version":
+			if r.URL.Query().Get("limit") != "50" || r.URL.Query().Get("loaders") != `["paper","spigot","bukkit"]` {
+				t.Fatal(r.URL)
+			}
 			data = `[{"id":"v1","project_id":"P1","loaders":["paper"],"files":[{"filename":"installed.jar","url":"https://cdn.modrinth.com/installed.jar","size":3}]}]`
-		case "https://cdn.modrinth.com/installed.jar":
+		case "cdn.modrinth.com/installed.jar":
 			data = "jar"
 		default:
 			t.Fatalf("unexpected provider request: %s", r.URL)
