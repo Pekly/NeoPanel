@@ -1,0 +1,50 @@
+/* Loading contract: workbench semantic colors and type, 4/8px rhythm,
+   quiet 4px bars / panel radius. Neutral shapes, never pretend controls or data.
+   Static by design: no shimmer, distraction or motion in either reduced mode. */
+.np-loading { min-width: 0; width: 100%; grid-column: 1 / -1; }
+.np-loading-status { color: var(--tx-muted); font: 400 13px/1.5 var(--font-sans); margin-bottom: 16px; overflow-wrap: anywhere; }
+.np-load-shapes { display: grid; gap: 12px; min-width: 0; }
+.np-load-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: center; padding: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg); }
+.np-load-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.np-load-copy, .np-load-meta { display: grid; gap: 8px; min-width: 0; width: 100%; }
+.np-load-bar { display: block; height: 8px; width: 100%; border-radius: 4px; background: color-mix(in srgb, var(--tx-muted) 16%, transparent); }
+.np-load-title { height: 12px; width: 72%; }
+.np-load-short { width: 48%; }
+.np-load-icon { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 8px; }
+.np-load-item:nth-child(even) .np-load-title { width: 60%; }
+.np-load-item:nth-child(3n) .np-load-short { width: 64%; }
+.np-loading-tiles .np-load-shapes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.np-loading-icons .np-load-shapes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 144px), 1fr)); }
+.np-loading-tiles .np-load-item, .np-loading-icons .np-load-item { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.np-loading-icons .np-load-head { flex-direction: column; gap: 16px; }
+.np-loading-icons .np-load-icon { width: 48px; height: 48px; flex-basis: 48px; }
+.np-loading-icons :is(.np-load-title, .np-load-short) { margin-inline: auto; }
+.np-loading-icons .np-load-meta { max-width: 96px; margin-inline: auto; }
+.np-loading-files.np-loading-list .np-load-item { padding: 12px 8px; border-width: 0 0 1px; border-radius: 0; background: none; }
+.np-loading-files.np-loading-tiles .np-load-meta { display: none; }
+.np-loading-plugins .np-load-icon, .np-loading-installed .np-load-icon { width: 48px; height: 48px; flex-basis: 48px; }
+.np-loading-plugins.np-loading-list .np-load-item { min-height: 112px; }
+.np-loading-installed .np-load-meta { gap: 12px; }
+.np-loading-players .np-load-icon { border-radius: 4px; }
+.np-loading-activity .np-load-icon { width: 8px; height: 8px; flex-basis: 8px; border-radius: 50%; }
+.np-loading-activity .np-load-item { border-width: 0 0 1px; border-radius: 0; background: none; padding-inline: 0; }
+.np-loading-schedules .np-load-icon { border-radius: 50%; }
+.np-loading-databases .np-load-icon { border-radius: 50% / 20%; }
+.np-loading-servers.np-loading-tiles .np-load-shapes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.np-loading-servers .np-load-item { border-radius: var(--np-radius); }
+.np-loading-servers:not(.np-loading-list) .np-load-item { padding: 0 0 20px; gap: 20px; }
+.np-loading-servers:not(.np-loading-list) :is(.np-load-head, .np-load-meta) { width: auto; margin-inline: 20px; }
+.np-load-cover { height: 96px; background: var(--card-inner); border-radius: var(--np-radius) var(--np-radius) 0 0; border-bottom: 1px solid var(--border); }
+.np-loading-servers.np-loading-list .np-load-cover { display: none; }
+.np-loading-boot .np-load-shapes { gap: 24px; }
+.np-load-boot-heading { display: grid; gap: 12px; padding: 8px 0 16px; max-width: 360px; }
+.np-load-boot-heading .np-load-title { height: 24px; }
+.np-load-boot-panels { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; }
+.np-load-boot-panels .np-load-item { grid-template-columns: minmax(0, 1fr); align-content: start; gap: 24px; padding: 24px; min-height: 240px; border-radius: var(--np-radius); }
+@media (max-width: 600px) {
+  .np-load-item { gap: 16px; padding: 12px; }
+  .np-loading-list .np-load-item { grid-template-columns: minmax(0, 1fr) minmax(0, .4fr); }
+  .np-loading-plugins.np-loading-list .np-load-item, .np-loading-installed.np-loading-list .np-load-item { grid-template-columns: minmax(0, 1fr); }
+  .np-load-boot-panels { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .np-load-boot-panels .np-load-item { min-height: 168px; padding: 20px; }
+}

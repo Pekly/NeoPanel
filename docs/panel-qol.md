@@ -8,6 +8,9 @@ These features live in the shared web panel. They do not remove or change Window
 - Refreshing Files restores the last directory and open text file after checking access. Existing unsaved-draft recovery asks before restoring a draft, including a warning when the server copy changed.
 - Pin servers with the star on their card. Pins sort first; **Pinned only** filters the list. Sort by name, status, or location. Search, location, sorting, and pins are saved for your account in this browser. The location selector lists only hosts containing your servers and stays locked when they are all on one host. Layout buttons keep a stable toolbar position.
 - The address button in the server header copies the Minecraft player connection address, not the panel URL. Its label stays consistent during live updates. Card addresses remain copyable.
+- The first page load shows a neutral skeleton before authentication finishes, without cached account or server information. Login/setup screens remove it; the normal workspace replaces it when ready.
+- Server cards, Files, plugin lists, players, backups, schedules, databases and activity use layout-matched skeletons while initially loading. Existing results stay visible where background refreshes already retain data. Buttons and short operations keep compact progress indicators; errors and retry controls are not replaced with skeletons.
+- Loading placeholders are decorative and non-interactive, with a separate accessible status. They adapt to light/dark themes and small screens, and respect both system and panel reduced-motion settings. They do not add requests, fake completion percentages or artificial delays.
 
 ## Files and plugin browsing
 

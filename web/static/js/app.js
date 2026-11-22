@@ -2555,7 +2555,8 @@ function head(name) {
   return `<span class="head-wrap" title="${esc(raw)}"><img class="head" src="${primaryUrl}" alt="${esc(raw)}" loading="lazy" data-fallback="${fallbackUrl}" onerror="onPlayerHeadError(this, this.dataset.fallback)"><span class="head-fallback" style="background:hsl(${h} 45% 42%);">${esc(initial)}</span></span>`;
 }
 
-function loaderHtml(label = 'Loading...') {
+function loaderHtml(label = 'Loading...', kind, mode = 'list') {
+  if (kind && window.NPLoading) return window.NPLoading.html(kind, label, mode);
   return `<div class="np-loader-box" role="status" aria-live="polite">
     <div class="np-spinner"></div>
     <span>${esc(label)}</span>
@@ -5539,7 +5540,7 @@ function getFilteredActivity(scope = 'all') {
 function renderDashRecentActivityHtml() {
   const rows = Array.isArray(S.acct.act) ? S.acct.act.slice(0, 6) : [];
   if (S.loading?.activity && rows.length === 0) {
-    return loaderHtml('Loading recent activity...');
+    return loaderHtml('Loading recent activity...', 'activity');
   }
   if (rows.length === 0) {
     return `<div class="mu" style="font-size: 12.5px; line-height: 1.5; padding: 6px 0;">
@@ -5608,7 +5609,7 @@ function buildActivityStatsHtml(scope = 'all') {
 function renderActivityRowsHtml(rows, showActor = true) {
   const cols = showActor ? 5 : 4;
   if (S.loading?.activity && !rows.length) {
-    return `<tr><td colspan="${cols}">${loaderHtml('Loading audit trail...')}</td></tr>`;
+    return `<tr><td colspan="${cols}">${loaderHtml('Loading audit trail...', 'activity')}</td></tr>`;
   }
   if (!rows.length) {
     const hasFilter = Boolean((S.actFilter?.q || '').trim()) || (S.actFilter?.category || 'all') !== 'all';
@@ -5909,16 +5910,7 @@ const V = {
     <div class="dash-grid">
       <!-- Left Column: Server Cards Grid -->
       <div id="srv-card-grid" class="np-server-grid ${gridCls}" style="${gridStyle}">
-        ${S.loading?.dash && S.servers.length === 0 ? [1, 2, 3].map(() => `
-          <div class="np-skeleton-card">
-            <div class="np-skeleton" style="height: 120px; border-radius: 0;"></div>
-            <div style="padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 12px;">
-              <div class="np-skeleton" style="height: 18px; width: 65%;"></div>
-              <div class="np-skeleton" style="height: 12px; width: 45%;"></div>
-              <div class="np-skeleton" style="height: 28px; width: 100%; margin-top: 6px;"></div>
-            </div>
-          </div>
-        `).join('') : visibleServers.map(({ s, origIdx }) => {
+        ${S.loading?.dash && S.servers.length === 0 ? loaderHtml('Loading servers...', 'servers', dashVm) : visibleServers.map(({ s, origIdx }) => {
           const nid = s.node_id || 'local';
           const nodeName = displayNodeName(nid, s.node_name || getNodeById(nid)?.name);
           const isRemote = nid !== 'local';
@@ -6132,8 +6124,8 @@ const V = {
     let body = '';
 
     if (t === 'online') {
-      if (S.loading?.players) {
-        body = `<div class="card">${loaderHtml('Loading player lists...')}</div>`;
+      if (S.loading?.players && !S.players.length) {
+        body = `<div class="card">${loaderHtml('Loading player lists...', 'players', vm)}</div>`;
       } else if (!S.players.length) {
         const slpHint = onlineCnt > 0
           ? `<div style="font-weight:600; color:var(--tx); margin-bottom:6px;">${onlineCnt} player${onlineCnt === 1 ? '' : 's'} connected (SLP reported ${onlineCnt}/${maxPl})</div><div>Click <b>Sync (/list)</b> above to query exact online player names from the server console.</div>`
@@ -6390,7 +6382,7 @@ const V = {
                 </td>
               </tr>`;
             }).join('')}
-            ${S.loading?.files ? `<tr><td colspan="7">${loaderHtml('Loading directory contents...')}</td></tr>` : !sortedFiles.length && !isSubdir ? '<tr><td colspan="7" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
+            ${S.loading?.files ? `<tr><td colspan="7">${loaderHtml('Loading directory contents...', sortedFiles.length ? undefined : 'files', vm)}</td></tr>` : !sortedFiles.length && !isSubdir ? '<tr><td colspan="7" class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</td></tr>' : ''}
           </tbody>
         </table>
       </div>`;
@@ -6405,7 +6397,7 @@ const V = {
             </label>
             <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
           </div>` : ''}
-        ${S.loading?.files ? loaderHtml('Loading directory contents...') : ''}
+        ${S.loading?.files ? loaderHtml('Loading directory contents...', sortedFiles.length ? undefined : 'files', vm) : ''}
         ${`<div class="vm-icons-grid">
             ${!isSubdir ? `<button type="button" class="vm-icon-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-file-center"><span class="fi-badge np-trash-badge lg">${ic('trash', 24)}</span><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></button>` : ''}
             ${isSubdir ? `
@@ -6455,7 +6447,7 @@ const V = {
             </label>
             <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
           </div>` : ''}
-        ${S.loading?.files ? loaderHtml('Loading directory contents...') : ''}
+        ${S.loading?.files ? loaderHtml('Loading directory contents...', sortedFiles.length ? undefined : 'files', vm) : ''}
         ${`<div class="vm-tiles-grid">
             ${!isSubdir ? `<button type="button" class="vm-tile-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-tile-file-row"><span class="fi-badge np-trash-badge md">${ic('trash', 18)}</span><span class="vm-tile-file-info"><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></span></button>` : ''}
             ${isSubdir ? `
@@ -6574,11 +6566,11 @@ const V = {
     const storeGridStyle = storeVm === 'list' ? 'display: flex; flex-direction: column; gap: 10px;' : '';
     const storeBodyHtml = Array.isArray(S.lastModrinthHits)
       ? renderModrinthHitsHtml(S.lastModrinthHits)
-      : loaderHtml(`Loading top ${nounsLow} from Modrinth...`);
+      : loaderHtml(`Loading top ${nounsLow} from Modrinth...`, 'plugins', storeVm);
 
     let installedBodyHtml = '';
-    if (S.loading?.plugins) {
-      installedBodyHtml = `<div class="card">${loaderHtml(`Loading installed ${nounsLow}...`)}</div>`;
+    if (S.loading?.plugins && !S.plugins.length) {
+      installedBodyHtml = `<div class="card">${loaderHtml(`Loading installed ${nounsLow}...`, 'installed', instVm)}</div>`;
     } else if (!filteredInstalled.length) {
       installedBodyHtml = `<div class="card" style="padding: 32px; text-align: center;">
         <div class="mu" style="margin-bottom: 12px;">${S.plugins.length ? `No installed ${nounsLow} match your filter.` : `No ${nounsLow} installed yet in ${targetFolder}.`}</div>
@@ -6810,8 +6802,8 @@ const V = {
   bk() {
     const vm = getViewMode('bk', 'list');
     let body = '';
-    if (S.loading?.backups) {
-      body = `<div class="card">${loaderHtml('Loading server backups...')}</div>`;
+    if (S.loading?.backups && !S.bk.length) {
+      body = `<div class="card">${loaderHtml('Loading server backups...', 'backups', vm)}</div>`;
     } else if (!S.bk.length) {
       body = `<div class="card mu" style="text-align:center;padding:28px;"><div class="np-empty-icon" aria-hidden="true">${ic('archive', 30)}</div><h3 class="np-empty-title">No backups yet</h3><p>Create your first archive to protect your world.</p></div>`;
     } else if (vm === 'icons' || vm === 'tiles') {
@@ -6893,7 +6885,7 @@ const V = {
         </div>
       </div>
 
-      ${isLoading ? `<div class="card">${loaderHtml('Loading automated schedules...')}</div>` : (
+      ${isLoading ? `<div class="card">${loaderHtml('Loading automated schedules...', 'schedules')}</div>` : (
         schedules.length === 0 ? `
           <div class="card mu np-empty-state">
             <div class="np-empty-icon" aria-hidden="true">${ic('clock', 24)}</div>
@@ -7074,8 +7066,8 @@ const V = {
     </div>`;
 
     let dbBody = '';
-    if (S.loading?.databases) {
-      dbBody = `<div class="card">${loaderHtml('Loading server databases...')}</div>`;
+    if (S.loading?.databases && !list.length) {
+      dbBody = `<div class="card">${loaderHtml('Loading server databases...', 'databases', vm)}</div>`;
     } else if (!list.length) {
       dbBody = emptyHtml;
     } else if (vm === 'icons' || vm === 'tiles') {
@@ -16412,7 +16404,7 @@ async function checkAuth() {
   if (savedMode) setAppearanceMode(savedMode, true);
   if (localStorage.getItem('neopanel_compact') === 'true') toggleCompact(true);
   if (localStorage.getItem('neopanel_priv') === 'true') togglePrivacy(true);
-  if (await openPendingInvitation()) { finishPageProgress(); return; }
+  if (await openPendingInvitation()) { $('#main .np-loading-boot')?.remove(); finishPageProgress(); return; }
 
   let route = parseCurrentRoute(window.location.pathname + window.location.search, window.location.hash);
   if (route.safeMode) S.modsSafeMode = true;
@@ -16545,6 +16537,7 @@ async function checkAuth() {
 }
 
 function showSetupScreen() {
+  $('#main .np-loading-boot')?.remove();
   $('#login')?.remove();
   const footTxt = (getBrand('footer_text') || '[NeoPanel](https://github.com/Pekly/NeoPanel/)© 2026').trim();
   const d = document.createElement('div');
@@ -16650,6 +16643,7 @@ async function submitSetup() {
 }
 
 function showLoginScreen() {
+  $('#main .np-loading-boot')?.remove();
   if ($('#login')) return;
   const maintEnabled = Boolean(S.maintPublicInfo?.enabled || S.branding?.maintenance_enabled);
   const b = S.branding || DEFAULT_BRANDING;

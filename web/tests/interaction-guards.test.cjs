@@ -59,7 +59,7 @@ test('store layout switches are local even before the first search finishes', ()
 function searchSetup() {
   const clock = timers(), requests = [];
   const c = vm.createContext({ ...clock, AbortController, URLSearchParams, URL,
-    S: { view: 'plug', token: 'one', q: 'old', plugTab: 'browse' }, server: { id: 'one', node_id: 'local' }, grid: {setAttribute() {}},
+    S: { view: 'plug', token: 'one', q: 'old', plugTab: 'browse' }, server: { id: 'one', node_id: 'local' }, grid: {setAttribute() {}, removeAttribute() {}},
     curServer: () => c.server, hasServerPermission: () => true, getViewMode: () => 'list',
     isSteelEngine: () => false, isModdedEngine: () => false, engineMeta: () => ({ key: 'paper' }),
     document: { addEventListener() {}, getElementById: () => c.grid },
@@ -71,7 +71,7 @@ function searchSetup() {
 }
 test('search completion writes to the current layout grid, not a detached node', async () => {
   const { c, requests, clock } = searchSetup(); const oldGrid = c.grid;
-  const pending = c.searchModrinth(); c.grid = {setAttribute() {}};
+  const pending = c.searchModrinth(); c.grid = {setAttribute() {}, removeAttribute() {}};
   requests[0].resolve({ hits: [{project_id:'result',title:'result'}], total_hits:1 }); await pending;
   assert.match(oldGrid.innerHTML, /Loading page 1/); assert.match(c.grid.innerHTML, /View result/); assert.equal(clock.jobs.size, 0);
 });
