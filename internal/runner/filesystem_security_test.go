@@ -55,7 +55,7 @@ func TestCustomJavaDoesNotExposeAncestorMounts(t *testing.T) {
 	}
 }
 func TestStartupConfigConfinement(t *testing.T) {
-	for _, tc := range []struct{ kind, name, content string }{{"paper", "server.properties", "server-port=1\n"}, {"velocity", "velocity.toml", "bind = \"0.0.0.0:1\"\n"}, {"bungeecord", "config.yml", "  host: 0.0.0.0:25577\n"}} {
+	for _, tc := range []struct{ kind, name, content string }{{"paper", "server.properties", "server-port=1\n"}, {"velocity", "velocity.toml", "bind = \"0.0.0.0:1\"\n"}, {"bungeecord", "config.yml", "listeners:\n- host: 0.0.0.0:25577\n"}} {
 		t.Run(tc.kind, func(t *testing.T) {
 			dir := t.TempDir()
 			outside := filepath.Join(t.TempDir(), "victim")

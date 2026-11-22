@@ -211,6 +211,10 @@ func (r *Router) registerRoutes(db *database.DB) {
 	// Server Quick Configs & Optimization Presets
 	r.mux.HandleFunc("GET /api/servers/{id}/configs", r.requireAuth(r.servers.GetQuickConfigs))
 	r.mux.HandleFunc("POST /api/servers/{id}/configs", r.requireAuth(r.servers.UpdateQuickConfigs))
+	r.mux.HandleFunc("GET /api/servers/{id}/proxy-config", r.requireAuth(r.servers.GetProxyConfig))
+	r.mux.HandleFunc("POST /api/servers/{id}/proxy-config/initialize", r.requireAuth(r.servers.InitializeProxyConfig))
+	r.mux.HandleFunc("PUT /api/servers/{id}/proxy-config", r.requireAuth(r.servers.SaveProxyConfig))
+	r.mux.HandleFunc("POST /api/servers/{id}/proxy-config/secret", r.requireAuth(r.servers.RevealProxySecret))
 
 	// Subusers & Permission Management
 	r.mux.HandleFunc("GET /api/servers/{id}/subusers", r.requireAuth(r.subusers.ListSubusers))
@@ -726,6 +730,14 @@ func serverActionPermission(method, suffix string) string {
 		return "console.command"
 	case "sftp":
 		return "sftp.access"
+	case "proxy-config":
+		if suffix == "proxy-config/secret" {
+			return "settings.edit+files.view"
+		}
+		if read {
+			return "settings.view"
+		}
+		return "settings.edit"
 	case "configs", "properties", "ports", "subdomain", "software", "reinstall":
 		if read {
 			return "settings.view"

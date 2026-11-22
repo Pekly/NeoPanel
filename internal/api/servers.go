@@ -30,6 +30,7 @@ import (
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/downloader"
+	"github.com/Pekly/NeoPanel/internal/proxyconfig"
 	"github.com/Pekly/NeoPanel/internal/rooted"
 	"github.com/Pekly/NeoPanel/internal/runner"
 )
@@ -62,7 +63,13 @@ type ServerWithStats struct {
 	MOTD  string               `json:"motd,omitempty"`
 }
 
-func readServerMOTD(workingDir string) string {
+func readServerMOTD(workingDir string, serverType ...string) string {
+	if len(serverType) > 0 && proxyconfig.Supported(serverType[0]) {
+		if snapshot, err := proxyconfig.Read(workingDir, serverType[0], 25565); err == nil && snapshot.Exists {
+			return snapshot.Config.MOTD
+		}
+		return ""
+	}
 	if strings.TrimSpace(workingDir) == "" {
 		return ""
 	}
@@ -113,7 +120,7 @@ func (h *ServerHandler) ListServers(w http.ResponseWriter, r *http.Request) {
 		result[i] = ServerWithStats{
 			Server: s,
 			Stats:  h.manager.GetStats(s),
-			MOTD:   readServerMOTD(workDir),
+			MOTD:   readServerMOTD(workDir, s.Type),
 		}
 	}
 
@@ -151,7 +158,7 @@ func (h *ServerHandler) GetServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ServerWithStats{
 		Server: server,
 		Stats:  h.manager.GetStats(server),
-		MOTD:   readServerMOTD(h.manager.GetWorkingDir(server.ID)),
+		MOTD:   readServerMOTD(h.manager.GetWorkingDir(server.ID), server.Type),
 	})
 }
 
@@ -207,7 +214,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 		req.Type = "paper"
 	}
 	if strings.TrimSpace(req.Version) == "" {
-		if downloader.IsNativeSoftware(req.Type) {
+		if downloader.IsNativeSoftware(req.Type) || proxyconfig.Supported(req.Type) {
 			req.Version = "latest"
 		} else {
 			req.Version = "1.20.4"
@@ -259,7 +266,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workingDir := h.manager.GetWorkingDir(srvID)
-	if err := os.MkdirAll(workingDir, 0755); err != nil {
+	if err := os.Mkdir(workingDir, 0755); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to create server directory"})
 		return
 	}
@@ -274,6 +281,19 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := runner.SyncSteelPort(workingDir, req.Port); err != nil {
 				writeServerOperationError(w, err)
+				return
+			}
+		}
+	} else if proxyconfig.Supported(req.Type) {
+		if _, err := proxyconfig.Ensure(workingDir, req.Type, req.Port); err != nil {
+			_ = os.RemoveAll(workingDir)
+			writeServerOperationError(w, err)
+			return
+		}
+		if req.AutoDownload {
+			if err := downloader.DownloadServerJar(req.Type, req.Version, workingDir, server.JarFile); err != nil {
+				_ = os.RemoveAll(workingDir)
+				writeError(w, http.StatusBadGateway, "Proxy installation failed: "+err.Error())
 				return
 			}
 		}
@@ -320,7 +340,7 @@ func (h *ServerHandler) CreateServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, ServerWithStats{
 		Server: server,
 		Stats:  h.manager.GetStats(server),
-		MOTD:   readServerMOTD(workingDir),
+		MOTD:   readServerMOTD(workingDir, server.Type),
 	})
 }
 
@@ -759,6 +779,16 @@ func removeHostPort(port int) {
 }
 
 func (h *ServerHandler) updateServerPropertiesPort(serverID string, port int) error {
+	srv, err := h.db.GetServer(serverID)
+	if err != nil {
+		return err
+	}
+	if proxyconfig.Supported(srv.Type) {
+		if _, err := proxyconfig.Ensure(h.manager.GetWorkingDir(serverID), srv.Type, port); err != nil {
+			return err
+		}
+		return proxyconfig.SyncPort(h.manager.GetWorkingDir(serverID), srv.Type, port)
+	}
 	root, err := rooted.Open(h.manager.GetWorkingDir(serverID))
 	if err != nil {
 		return err
@@ -1063,7 +1093,7 @@ func (h *ServerHandler) DeleteServerIcon(w http.ResponseWriter, r *http.Request)
 // GetQuickConfigs reads server.properties and eula.txt for easy web editing
 func (h *ServerHandler) GetQuickConfigs(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
-	if rejectSteelJavaConfig(h.db, serverID, w) {
+	if rejectUnsupportedJavaConfig(h.db, serverID, w) {
 		return
 	}
 	workDir := h.manager.GetWorkingDir(serverID)
@@ -1155,7 +1185,7 @@ func (h *ServerHandler) GetQuickConfigs(w http.ResponseWriter, r *http.Request) 
 // UpdateQuickConfigs updates key server properties and applies optimization presets
 func (h *ServerHandler) UpdateQuickConfigs(w http.ResponseWriter, r *http.Request) {
 	serverID := getURLParam(r, "id")
-	if rejectSteelJavaConfig(h.db, serverID, w) {
+	if rejectUnsupportedJavaConfig(h.db, serverID, w) {
 		return
 	}
 	workDir := h.manager.GetWorkingDir(serverID)
