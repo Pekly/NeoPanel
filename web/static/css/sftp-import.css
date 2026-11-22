@@ -1,0 +1,54 @@
+/* Native NeoPanel surfaces and typography; 4/8px rhythm, no new theme. */
+.sfi-modal { color: var(--tx); font-size: 13px; padding: 24px; }
+.sfi-modal [hidden] { display: none !important; }
+.sfi-modal h2 { font-size: 20px; margin: 0; }
+.sfi-modal h3 { font-size: 14px; margin: 0 0 16px; }
+.sfi-modal p { margin: 8px 0; line-height: 1.6; overflow-wrap: anywhere; }
+.sfi-modal .mu { font-size: 12px; }
+.sfi-modal fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
+.sfi-section { padding: 24px 0; border-bottom: 1px solid var(--border); }
+.sfi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sfi-grid > *, .sfi-row > * { min-width: 0; }
+.sfi-modal .f { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; }
+.sfi-modal input:not([type="checkbox"]), .sfi-modal textarea, .sfi-modal select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+.sfi-modal textarea { resize: vertical; min-height: 80px; }
+.sfi-modal input[type="checkbox"] { width: 16px; height: 16px; flex: 0 0 16px; accent-color: var(--ac); margin: 2px 0; }
+.sfi-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.sfi-row .btn { flex-shrink: 0; }
+.sfi-check { display: flex; align-items: flex-start; gap: 8px; line-height: 1.5; cursor: pointer; margin-bottom: 16px; }
+.sfi-notice, .sfi-job { padding: 16px; border: 1px solid var(--border); background: var(--card-inner); border-radius: 8px; margin-top: 16px; }
+.sfi-notice .sfi-row { margin-bottom: 8px; }
+.sfi-notice p { color: var(--tx-muted); font-size: 12px; }
+.sfi-preview { margin: 16px 0; border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.sfi-entries { max-height: 240px; overflow-y: auto; }
+.sfi-entry { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 8px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.sfi-entry span { overflow-wrap: anywhere; }
+.sfi-entry:hover { background: var(--card-hover); }
+.sfi-entry:has(:checked) { background: var(--ac-subtle); }
+.sfi-entry:active { background: var(--card-hover); }
+.sfi-modal details > summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
+.sfi-modal details[open] > summary { margin-bottom: 8px; }
+.sfi-presets { justify-content: flex-start; }
+.sfi-presets .sfi-check { margin-bottom: 0; }
+.sfi-modal progress { width: 100%; accent-color: var(--ac); height: 8px; }
+.sfi-error { color: var(--er); border-left: 3px solid var(--er); padding: 8px 12px; }
+.sfi-modal footer { margin: 16px 0 0; }
+.sfi-modal footer p { flex: 1 1 320px; }
+.sfi-modal :is(input, textarea, select, button, summary):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+.sfi-modal .btn { transition: background-color 100ms ease-out, border-color 100ms ease-out; }
+.sfi-modal :disabled { cursor: not-allowed; }
+.sfi-modal .btn:active:not(:disabled) { transform: translateY(1px); }
+.sfi-job:not([hidden]) { animation: sfi-appear 180ms cubic-bezier(.2,.85,.3,1.1) both; }
+.sfi-sr { position: absolute; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); white-space: nowrap; }
+@keyframes sfi-appear { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 700px) {
+  .sfi-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .sfi-modal .sfi-row { align-items: flex-start; }
+  .sfi-modal footer .btn { width: 100%; }
+  .sfi-entry { grid-template-columns: 16px minmax(0, 1fr); gap: 8px; }
+  .sfi-entry small { grid-column: 2; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sfi-modal, .sfi-modal *, .sfi-modal .btn { animation: none !important; transition: none !important; }
+  .sfi-modal .btn:active:not(:disabled) { transform: none; }
+}

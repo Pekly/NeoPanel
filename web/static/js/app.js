@@ -6528,6 +6528,7 @@ const V = {
           <button class="btn" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}>${ic('trash', 14)} Trash</button>
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
           <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
+          ${['files.view', 'files.edit', 'sftp.access'].every(p => hasServerPermission(p)) ? `<button type="button" class="btn" onclick="window.NPSFTPImport.open()" style="height: 36px;">${ic('download', 14)} Import SFTP</button>` : ''}
           <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
         </div>
       </div>
@@ -17783,6 +17784,10 @@ function assertClientRequestAccess(endpoint, options = {}) {
   const match = path.match(/^(?:\/api\/nodes\/([^/]+)\/proxy)?\/api\/servers\/([^/]+)(.*)$/);
   if (!match || match[3] === '/permissions' || S.user?.role === 'admin') return;
   const srv = { id: decodeURIComponent(match[2]), node_id: decodeURIComponent(match[1] || 'local') };
+  if (/^\/files\/import-sftp(?:\/|$)/.test(match[3])) {
+    for (const required of ['files.view', 'files.edit', 'sftp.access']) if (!hasServerPermission(required, srv)) throw Object.assign(new Error('Access restricted: ' + required + ' required'), { status: 403 });
+    return; // Cancelling an import is not deleting destination files.
+  }
   const permission = clientRequestPermission(match[3], method);
   if (match[3] === '/power/countdown' && method === 'POST' && !hasServerPermission('console.command', srv)) throw Object.assign(new Error('Access restricted: console.command required'), { status: 403 });
   if (match[3] === '/automation' && method === 'PATCH' && !hasServerPermission('server.power', srv)) throw Object.assign(new Error('Access restricted: server.power required'), { status: 403 });
