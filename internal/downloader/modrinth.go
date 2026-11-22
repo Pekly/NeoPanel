@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
@@ -118,18 +117,8 @@ func SearchModrinthPlugins(query string, limit int, loader string, mcVersion str
 	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/search?query=%s&facets=%s&index=%s&limit=%d",
 		url.QueryEscape(query), url.QueryEscape(facets), url.QueryEscape(index), limit)
 
-	resp, err := httpGet(apiURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("modrinth search returned status %s", resp.Status)
-	}
-
 	var result ModrinthSearchResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := metadataJSON(apiURL, &result); err != nil {
 		return nil, err
 	}
 
@@ -142,16 +131,8 @@ func CompatibleModrinthVersions(project, loader, mcVersion string) ([]ModrinthVe
 		return nil, fmt.Errorf("project and server Minecraft version are required")
 	}
 	apiURL := fmt.Sprintf("https://api.modrinth.com/v2/project/%s/version", url.PathEscape(project))
-	resp, err := httpGet(apiURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Modrinth returned status %s", resp.Status)
-	}
 	var versions []ModrinthVersion
-	if err := json.NewDecoder(resp.Body).Decode(&versions); err != nil {
+	if err := metadataJSON(apiURL, &versions); err != nil {
 		return nil, err
 	}
 	return filterCompatibleVersions(versions, loader, mcVersion), nil
