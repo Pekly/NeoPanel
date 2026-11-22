@@ -13,7 +13,7 @@ A number counts once, whether its protocol is TCP, UDP, or both. New reservation
 
 ## Does assigning a port apply it?
 
-- **Additional port:** reserves the number in the panel. Configure the plugin or service to listen on that number. Allocation itself does not create a listener.
+- **Additional port:** assigns another port to the same server. Multiple ports can work simultaneously; the server or a plugin must listen on each number using its selected protocol. NeoPanel uses host networking, not a one-port-only container mapping. Allocation does not automatically configure arbitrary plugins or translate one network protocol into another.
 - **Primary port:** the server must be stopped. NeoPanel updates `server.properties`, the Steel configuration, or the relevant proxy configuration together with the allocation change. It applies on the next manual start; the panel does not restart the server automatically.
 - A newly added primary retains the previous allocation as an extra port, consuming another allowance slot.
 - The primary-port field in general settings is read-only. Generic server PUT cannot bypass allocation rules or edit the allowance; use the dedicated Network endpoints.
@@ -21,6 +21,18 @@ A number counts once, whether its protocol is TCP, UDP, or both. New reservation
 Configuration failure rolls back the database change and restores the previous file contents. If file rollback itself fails, further operations remain blocked in that daemon until an administrator repairs the configuration. Filesystem publication and SQLite are not one crash-durable transaction.
 
 Firewall helpers remain best-effort. Allocation does not prove that NAT, host firewall, DNS, or an external connection is working. No live firewall/network reachability checks are performed by allocation tests.
+
+### Java on 25565 and Bedrock on 19132, together
+
+1. Keep the Java server's primary port at **25565/TCP**.
+2. Set its total allowance to at least two and allocate **19132/UDP** to the same server. An administrator can choose this exact number; members receive a free number from the configured pool instead.
+3. Install a Bedrock bridge supported by the server software, such as the appropriate Geyser plugin. Configure its Bedrock listener to use **19132/UDP** (or the assigned extra port), bound to the intended host interface. Do not change the Java primary port to 19132.
+4. Start/restart manually when the plugin configuration requires it. Java and Bedrock listeners then run in the same server process at the same time. Authentication/bridge setup is still required by the plugin.
+5. Allow/forward **both 25565/TCP and 19132/UDP** in the hosting provider, host firewall and router, as applicable. Forward to the hosting worker's address, not a separate panel machine. An HTTP reverse proxy or web-only CDN does not provide these game-protocol listeners.
+
+Assigning 19132 does not install Geyser, make a Java-only listener speak Bedrock, or redirect UDP packets into a TCP listener. Port ownership prevents new panel allocations colliding on that node, but does not reserve an OS socket against external processes. Verify plugin startup/bind logs and actual external connectivity on your deployment.
+
+Regression tests cover the two allocations coexisting, a correctly requested UDP firewall rule, unchanged primary configuration, and same-node collision rejection. The firewall hook is mocked: these tests do not claim live Geyser or Internet reachability.
 
 ## API
 

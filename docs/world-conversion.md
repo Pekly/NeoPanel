@@ -2,6 +2,8 @@
 
 World conversion is a stopped-server tool, not a game launch. It never automatically stops, starts, restarts, replaces, or changes the software/version of a server. Conversion can lose entities, structures, custom dimensions and plugin/mod data. Keep independent backups and inspect exported worlds before using them.
 
+Open it from the server's root **Files → World tools → Convert world**. The entry also provides access to existing-job status and cancellation when new conversion is unavailable; the controls inside still enforce permissions and host support.
+
 ## Supported hosts and resource policy
 
 - **Linux only for execution:** unified cgroup v2, usable systemd scopes, Bubblewrap with `--size`, `/bin/sh`, `cp`, and `tar`. Missing or unusable enforcement fails closed, regardless of the game's insecure-fallback setting. Merely finding the tools does not establish enforcement: a fixed bootstrap checks the actual `memory.max` and `cpu.max` of its scope before executing the converter.

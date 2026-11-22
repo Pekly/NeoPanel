@@ -27,7 +27,7 @@ func portAllocationMessage(primary bool) string {
 	if primary {
 		return "Primary configuration saved for the next manual start. No process was started or restarted; external reachability is not verified."
 	}
-	return "Port reserved only. Configure your plugin or service to listen on this port; allocation does not create a listener or verify external reachability."
+	return "Additional port assigned to this server. Multiple ports can be used simultaneously when the server or its plugins listen on each port with the selected protocol. External firewall and router access is not verified."
 }
 func writePortError(w http.ResponseWriter, err error) {
 	status := http.StatusBadRequest

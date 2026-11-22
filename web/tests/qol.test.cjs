@@ -124,7 +124,7 @@ test('cancelling queued/active uploads settles worker and does not upload cancel
 });
 test('plugin toggle calls API and rolls back on failure', async () => {
   const { c } = setup();
-  const start = app.indexOf('async function togglePlugin('), end = app.indexOf('\nlet searchTimeout', start);
+  const start = app.indexOf('async function togglePlugin('), end = app.indexOf('\nfunction searchModrinthDebounced', start);
   vm.runInContext(app.slice(start, end), c);
   c.S.plugins = [['example.jar', 'installed', true, '', false]];
   let request;

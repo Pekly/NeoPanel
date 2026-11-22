@@ -58,41 +58,43 @@ test('store layout switches are local even before the first search finishes', ()
 });
 function searchSetup() {
   const clock = timers(), requests = [];
-  const c = vm.createContext({ ...clock, AbortController, URLSearchParams,
+  const c = vm.createContext({ ...clock, AbortController, URLSearchParams, URL,
     S: { view: 'plug', token: 'one', q: 'old', plugTab: 'browse' }, server: { id: 'one', node_id: 'local' }, grid: {},
-    curServer: () => c.server, sameQolServer: (a, b) => a?.id === b?.id && a?.node_id === b?.node_id,
+    curServer: () => c.server, hasServerPermission: () => true, getViewMode: () => 'list',
     isSteelEngine: () => false, isModdedEngine: () => false, engineMeta: () => ({ key: 'paper' }),
-    $: () => c.grid, loaderHtml: () => 'loading', renderModrinthHitsHtml: hits => hits.join(','), applyPermissionControls() {},
+    document: { addEventListener() {}, getElementById: () => c.grid },
     api(url, options) { const request = { ...deferred(), url, options }; requests.push(request); return request.promise; } });
-  vm.runInContext(section('let modrinthSearchSequence', 'function setPlugSkipConfirm('), c);
+  c.window = c;
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/js/plugin-details.js'), 'utf8'), c);
+  c.searchModrinth = c.NPPlugins.search;
   return { c, clock, requests };
 }
 test('search completion writes to the current layout grid, not a detached node', async () => {
   const { c, requests, clock } = searchSetup(); const oldGrid = c.grid;
   const pending = c.searchModrinth(); c.grid = {};
-  requests[0].resolve({ hits: ['result'] }); await pending;
-  assert.equal(oldGrid.innerHTML, 'loading'); assert.equal(c.grid.innerHTML, 'result'); assert.equal(clock.jobs.size, 0);
+  requests[0].resolve({ hits: [{project_id:'result',title:'result'}], total_hits:1 }); await pending;
+  assert.match(oldGrid.innerHTML, /Loading projects/); assert.match(c.grid.innerHTML, /View result/); assert.equal(clock.jobs.size, 0);
 });
 test('older searches are aborted and cannot overwrite a newer query', async () => {
   const { c, requests } = searchSetup();
   const first = c.searchModrinth(); c.S.q = 'new'; const second = c.searchModrinth();
   assert.equal(requests[0].options.signal.aborted, true);
-  requests[1].resolve({ hits: ['new'] }); await second;
-  requests[0].resolve({ hits: ['stale'] }); await first;
-  assert.equal(c.grid.innerHTML, 'new'); assert.equal(c.S.lastModrinthHits[0], 'new');
+  requests[1].resolve({ hits: [{project_id:'new',title:'new'}], total_hits:1 }); await second;
+  requests[0].resolve({ hits: [{project_id:'stale',title:'stale'}], total_hits:1 }); await first;
+  assert.match(c.grid.innerHTML, /View new/); assert.equal(c.S.lastModrinthHits[0].project_id, 'new');
 });
 test('responses cannot populate another server/session or overwrite a pending typed query', async () => {
   for (const change of [c => { c.server = { id: 'two' }; }, c => { c.S.token = 'two'; }, c => { c.S.q = 'typing'; }]) {
     const { c, requests } = searchSetup(); const pending = c.searchModrinth(); change(c);
-    requests[0].resolve({ hits: ['stale'] }); await pending;
-    assert.equal(c.S.lastModrinthHits, null); assert.equal(c.grid.innerHTML, 'loading');
+    requests[0].resolve({ hits: [{project_id:'stale',title:'stale'}], total_hits:1 }); await pending;
+    assert.equal(c.S.lastModrinthHits.length, 0); assert.match(c.grid.innerHTML, /Loading projects/);
   }
 });
 test('search deadline aborts the request and failure clears its timer', async () => {
   const { c, clock, requests } = searchSetup(); const pending = c.searchModrinth(); clock.flush();
   assert.equal(requests[0].options.signal.aborted, true);
   requests[0].reject(new Error('aborted')); await pending;
-  assert.match(c.grid.innerHTML, /timed out/); assert.equal(clock.jobs.size, 0);
+  assert.match(c.grid.innerHTML, /Retry/); assert.equal(clock.jobs.size, 0);
 });
 test('dashboard refresh is single-flight, cooled down, and reports results only after completion', async () => {
   let now = 1000; const requests = [], messages = [], controls = [{ setAttribute() {}, removeAttribute() {} }];
