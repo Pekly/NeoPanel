@@ -18,6 +18,7 @@ import (
 
 	"github.com/Pekly/NeoPanel/internal/database"
 	"github.com/Pekly/NeoPanel/internal/downloader"
+	"github.com/Pekly/NeoPanel/internal/proxyconfig"
 	"github.com/Pekly/NeoPanel/internal/rooted"
 )
 
@@ -1081,6 +1082,11 @@ func syncServerPort(workingDir, serverType string, port int) error {
 		return fmt.Errorf("invalid server port")
 	}
 	st := strings.ToLower(serverType)
+	if proxyconfig.Supported(st) {
+		if _, err := proxyconfig.Ensure(workingDir, st, port); err != nil {
+			return err
+		}
+	}
 	switch st {
 	case "velocity":
 		return syncVelocityPort(workingDir, port)
@@ -1126,59 +1132,11 @@ func syncPropertiesPort(workingDir string, port int) error {
 }
 
 func syncVelocityPort(workingDir string, port int) error {
-	root, err := rooted.Open(workingDir)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	cfgPath := "velocity.toml"
-	content, err := root.ReadFile(cfgPath)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(content), "\n")
-	found := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		key, _, ok := strings.Cut(trimmed, "=")
-		if ok && strings.TrimSpace(key) == "bind" {
-			lines[i] = fmt.Sprintf("bind = \"0.0.0.0:%d\"", port)
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("velocity.toml is missing bind; cannot synchronize port")
-	}
-	return root.WriteFile(cfgPath, []byte(strings.Join(lines, "\n")), 0644)
+	return proxyconfig.SyncPort(workingDir, "velocity", port)
 }
 
 func syncBungeePort(workingDir string, port int) error {
-	root, err := rooted.Open(workingDir)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	cfgPath := "config.yml"
-	content, err := root.ReadFile(cfgPath)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(content), "\n")
-	found := false
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "host:") {
-			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-			lines[i] = fmt.Sprintf("%shost: 0.0.0.0:%d", indent, port)
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("config.yml is missing listener host; cannot synchronize port")
-	}
-	return root.WriteFile(cfgPath, []byte(strings.Join(lines, "\n")), 0644)
+	return proxyconfig.SyncPort(workingDir, "bungeecord", port)
 }
 
 // buildCommand constructs the execution command for the server process.

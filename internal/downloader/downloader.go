@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Pekly/NeoPanel/internal/proxyconfig"
 	"github.com/Pekly/NeoPanel/internal/rooted"
 	"net/http"
 	"os"
@@ -28,7 +29,7 @@ func httpGet(url string) (*http.Response, error) {
 }
 
 // DownloadServerJar installs the server distribution (a native binary for Steel).
-// Java distributions also get an automatically accepted eula.txt.
+// World-server distributions also get an automatically accepted eula.txt.
 func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 	if err := ValidateSoftware(flavor, version); err != nil {
 		return err
@@ -83,8 +84,7 @@ func DownloadServerJar(flavor, version, destDir, jarFileName string) error {
 		return fmt.Errorf("failed to download file from %s: %w", downloadURL, err)
 	}
 
-	// Automatically agree to Minecraft EULA
-	return root.WriteFile("eula.txt", []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
+	return acceptWorldServerEULA(root, flavor)
 }
 
 // DownloadWithMCJarFiles downloads a Minecraft server JAR from mcjarfiles.com REST API.
@@ -185,6 +185,13 @@ func downloadMCJarFiles(flavor, version string, root *rooted.Root, jarFileName s
 
 	if _, err := root.Copy(context.Background(), jarFileName, resp.Body, 1<<30, 0644); err != nil {
 		return err
+	}
+	return acceptWorldServerEULA(root, flavor)
+}
+
+func acceptWorldServerEULA(root *rooted.Root, flavor string) error {
+	if proxyconfig.Supported(flavor) {
+		return nil
 	}
 	return root.WriteFile("eula.txt", []byte("# EULA auto-accepted by NeoPanel\neula=true\n"), 0644)
 }
