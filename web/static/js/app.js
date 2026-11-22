@@ -4890,10 +4890,10 @@ function refreshOpenVersionSelects() {
   const engineCS = $('#cs-type')?.value || 'paper';
   const csSel = $('#cs-ver-sel');
   if (csSel) {
-    const curVal = $('#cs-ver')?.value?.trim() || csSel.value || '1.21.11';
-    const vers = getAllMcVersions(engineCS);
+    const curVal = $('#cs-ver')?.value?.trim() || csSel.value || 'latest';
+    const vers = Array.from(new Set(['latest', ...getAllMcVersions(engineCS)]));
     const list = (curVal && !vers.includes(curVal)) ? [curVal, ...vers] : vers;
-    csSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    csSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVal ? 'selected' : ''}>${v === 'latest' ? 'Latest available' : esc(v)}</option>`).join('');
     if (typeof csSel._cselectRebuild === 'function') csSel._cselectRebuild();
   }
   const reinstSel = $('#reinst-ver-sel');
@@ -12412,10 +12412,9 @@ function syncCreateJavaFromVersion(ver) {
   });
   const sel = $('#cs-java');
   if (!sel || sel.dataset.userPicked === '1') return;
-  const rec = getRecommendedJavaForMcVersion(v, engine);
-  if (sel.value !== rec) {
-    sel.value = rec;
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  if (sel.value !== '25') {
+    sel.value = '25';
+    if (typeof sel._cselectRebuild === 'function') sel._cselectRebuild();
   }
 }
 
@@ -12454,38 +12453,27 @@ function setCreateEngine(type) {
   const note = $('#cs-steel-note');
   if (note) { note.style.display = native ? '' : 'none'; note.innerHTML = native ? steelConfigNotice(false) : ''; }
   const label = $('#cs-version-label');
-  if (label) label.textContent = native ? 'Steel Release Tag' : 'Minecraft Version (Recent & Popular)';
-  $$('.ver-pill').forEach(btn => { btn.style.display = native ? 'none' : ''; });
-  if (verInp) verInp.placeholder = native ? 'latest or official Steel release tag' : 'Minecraft version or latest';
-  if (native) { if (verInp) verInp.value = 'latest'; loadSteelVersions(); }
-  else if (isSteelEngine(previousType) && verInp) verInp.value = '1.21.11';
+  if (label) label.textContent = native ? 'Steel release' : 'Version';
+  if (verInp) {
+    verInp.placeholder = native ? 'latest or official Steel release tag' : 'Specific version or latest';
+    if (previousType !== type || !verInp.value.trim()) verInp.value = 'latest';
+  }
   if (native) {
-    // Steel release tags are independent of Minecraft versions.
+    loadSteelVersions();
   } else if (type === 'velocity') {
-    if (verInp) verInp.value = '3.4.0-SNAPSHOT';
     if (portInp) portInp.value = '25565';
     setCreateRam(1024);
-  } else if (type === 'waterfall') {
-    if (verInp) verInp.value = '1.20';
+  } else if (type === 'waterfall' || type === 'bungeecord') {
     if (portInp) portInp.value = '25577';
     setCreateRam(1024);
-  } else if (type === 'bungeecord') {
-    if (verInp) verInp.value = 'latest';
-    if (portInp) portInp.value = '25577';
-    setCreateRam(1024);
-  } else if (verInp) {
-    const cur = verInp.value.trim();
-    if (!cur || cur === '3.4.0-SNAPSHOT' || cur === 'latest' || cur === '1.20') {
-      verInp.value = '1.21.11';
-    }
   }
 
   const csVerSel = $('#cs-ver-sel');
   if (csVerSel) {
-    const curVer = verInp?.value?.trim() || '1.21.11';
-    const vers = getAllMcVersions(type);
+    const curVer = verInp?.value?.trim() || 'latest';
+    const vers = Array.from(new Set(['latest', ...getAllMcVersions(type)]));
     const list = (curVer && !vers.includes(curVer)) ? [curVer, ...vers] : vers;
-    csVerSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVer ? 'selected' : ''}>${esc(v)}</option>`).join('');
+    csVerSel.innerHTML = list.map(v => `<option value="${esc(v)}" ${v === curVer ? 'selected' : ''}>${v === 'latest' ? 'Latest available' : esc(v)}</option>`).join('');
     if (typeof csVerSel._cselectRebuild === 'function') csVerSel._cselectRebuild();
   }
   syncCreateJavaFromVersion(verInp?.value || '');
@@ -12544,7 +12532,8 @@ function openCreateServerModal() {
     : (nodesList.find(n => n.id === 'local')?.id || nodesList[0].id);
   const nextPort = getNextSuggestedPort(defaultNodeId);
   const defaultRam = Number(S.brandingDaemon?.default_ram_mb) || Number(S.adminDaemonCfg?.defaultRamMB) || 2048;
-  const initialVers = getAllMcVersions('paper');
+  const initialVers = Array.from(new Set(['latest', ...getAllMcVersions('paper')]));
+  const canAssignOwner = S.user?.role === 'admin' && Array.isArray(S.adminUsers) && S.adminUsers.length > 0;
 
   container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
     <div class="card pbox" style="padding:26px; max-width:680px; max-height:88vh; overflow-y:auto;">
@@ -12556,7 +12545,7 @@ function openCreateServerModal() {
         <button class="btn sm" onclick="closeModal()" aria-label="Close modal">✕</button>
       </div>
 
-      <form class="np-modal-form" onsubmit="handleCreateServer(event)">
+      <form class="np-modal-form" id="create-server-form" onsubmit="handleCreateServer(event)">
         <!-- Instance Name & Target Node -->
         <div class="${nodesList.length > 1 ? 'grid g2 np-modal-fields' : ''}" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
@@ -12595,34 +12584,27 @@ function openCreateServerModal() {
         </div>
         <div id="cs-steel-note" style="display:none; margin-bottom:14px;"></div>
 
-        <!-- Version Searchable Catalog + Custom Input + Popular Pills -->
-        <div class="np-modal-half" style="margin-bottom:14px;">
-          <div class="row sb" style="margin-bottom:6px; flex-wrap:wrap; gap:6px;">
-            <span id="cs-version-label" class="mu" style="font-size:13px; font-weight:600;">Minecraft Version (Recent &amp; Popular)</span>
-            <div class="row" style="gap:4px; flex-wrap:wrap;">
-              ${['1.21.11', '1.21.8', '1.21.4', '1.20.4', '1.20.1', '1.19.4', '1.16.5', '1.12.2', '1.8.9'].map(v => `
-                <button type="button" class="btn sm ver-pill ${v === '1.21.11' ? 'pr' : ''}" data-ver="${v}" onclick="setCreateVersion('${v}')">${v}</button>
-              `).join('')}
-            </div>
-          </div>
-          <div class="np-modal-fields" style="display:grid; grid-template-columns: minmax(145px, 185px) 1fr; gap:8px;">
+        <!-- Latest is resolved for the selected software when files are downloaded. -->
+        <div class="np-modal-half np-create-version" style="margin-bottom:14px;">
+          <label for="cs-ver-sel" id="cs-version-label" class="np-create-label">Version</label>
+          <div class="np-modal-fields" style="grid-template-columns: minmax(145px, 185px) 1fr; gap:8px;">
             <select id="cs-ver-sel" data-searchable="1" onchange="setCreateVersion(this.value)">
-              ${initialVers.map(v => `<option value="${esc(v)}" ${v === '1.21.11' ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+              ${initialVers.map(v => `<option value="${esc(v)}" ${v === 'latest' ? 'selected' : ''}>${v === 'latest' ? 'Latest available' : esc(v)}</option>`).join('')}
             </select>
-            <input type="text" id="cs-ver" value="1.21.11" required placeholder="e.g. 1.21.11, 1.20.4, 1.16.5, 1.12.2, 1.8.9, or custom" oninput="onCreateVersionInput(this.value)">
+            <input type="text" id="cs-ver" value="latest" required aria-label="Specific version or latest" placeholder="Specific version or latest" oninput="onCreateVersionInput(this.value)">
           </div>
         </div>
 
         <!-- Custom Port Allocation -->
-        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:10px;">
+        <div class="grid g2 np-modal-fields np-modal-half np-create-connection" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
-            <span>Custom Port (1024 - 65535)</span>
+            <span>Port</span>
             <input type="number" id="cs-port" value="${nextPort}" min="1024" max="65535" required>
           </label>
           <label class="f" style="margin-bottom:0;">
             <span>Java Runtime</span>
             <select id="cs-java" onchange="this.dataset.userPicked='1'">
-              ${renderJavaSelectOptions('21', false, '1.21.11', 'paper', defaultNodeId)}
+              ${renderJavaSelectOptions('25', false, 'latest', 'paper', defaultNodeId)}
             </select>
           </label>
         </div>
@@ -12630,50 +12612,39 @@ function openCreateServerModal() {
           ${renderJavaAvailabilityStrip(defaultNodeId)}
         </div>
 
-        <!-- Memory Allocation Pills -->
-        <div class="np-modal-half" style="margin-bottom:14px;">
-          <div class="row sb np-modal-wrap" style="margin-bottom:6px;">
-            <span class="mu" style="font-size:13px; font-weight:600;">Memory Allocation</span>
-            <div class="row np-modal-wrap" style="gap:4px;">
+        <div class="np-modal-fields np-create-resources" style="margin-bottom:14px;">
+          <div class="np-create-resource">
+            <label for="cs-mem" class="np-create-resource-title">Memory (MB)</label>
+            <input type="number" id="cs-mem" value="${defaultRam}" min="512" max="65536" step="512" required placeholder="RAM in MB">
+            <div class="row np-create-presets">
               <button type="button" class="btn sm ram-pill ${defaultRam === 1024 ? 'pr' : ''}" data-ram="1024" onclick="setCreateRam(1024)">1 GB</button>
               <button type="button" class="btn sm ram-pill ${defaultRam === 2048 ? 'pr' : ''}" data-ram="2048" onclick="setCreateRam(2048)">2 GB</button>
               <button type="button" class="btn sm ram-pill ${defaultRam === 4096 ? 'pr' : ''}" data-ram="4096" onclick="setCreateRam(4096)">4 GB</button>
               <button type="button" class="btn sm ram-pill ${defaultRam === 8192 ? 'pr' : ''}" data-ram="8192" onclick="setCreateRam(8192)">8 GB</button>
             </div>
           </div>
-          <input type="number" id="cs-mem" value="${defaultRam}" min="512" max="65536" step="512" required placeholder="RAM in MB">
-        </div>
-
-        <!-- Resource Limits: CPU Percentage & Storage Allocation -->
-        <div class="grid g2 np-modal-fields np-modal-half" style="margin-bottom:14px;">
-          <label class="f" style="margin-bottom:0;">
-            <div class="row sb np-modal-wrap" style="margin-bottom:4px;">
-              <span>CPU Limit (%)</span>
-              <span class="mu" style="font-size:11.5px;">0% = Unlimited</span>
-            </div>
-            <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
-              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-cpu').value=0">Unlimited</button>
-              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-cpu').value=100">100% (1 Core)</button>
-              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-cpu').value=200">200% (2 Cores)</button>
-            </div>
+          <div class="np-create-resource">
+            <label for="cs-cpu" class="np-create-resource-title">CPU limit (%)<small>0 = Unlimited</small></label>
             <input type="number" id="cs-cpu" value="0" min="0" max="3200" step="10" placeholder="0 for unlimited">
-          </label>
-          <label class="f" style="margin-bottom:0;">
-            <div class="row sb np-modal-wrap" style="margin-bottom:4px;">
-              <span>Storage / Disk Limit (MB)</span>
-              <span class="mu" style="font-size:11.5px;">0 = Unlimited</span>
+            <div class="row np-create-presets">
+              <button type="button" class="btn sm" onclick="$('#cs-cpu').value=0">Unlimited</button>
+              <button type="button" class="btn sm" onclick="$('#cs-cpu').value=100">100% (1 core)</button>
+              <button type="button" class="btn sm" onclick="$('#cs-cpu').value=200">200% (2 cores)</button>
             </div>
-            <div class="row" style="gap:5px; margin-bottom:6px; flex-wrap:wrap;">
-              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=0">Unlimited</button>
-              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=5120">5 GB</button>
-              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=10240">10 GB</button>
-              <button type="button" class="btn sm" style="font-size:11px; padding:3px 7px;" onclick="$('#cs-disk').value=20480">20 GB</button>
+          </div>
+          <div class="np-create-resource">
+            <label for="cs-disk" class="np-create-resource-title">Storage limit (MB)<small>0 = Unlimited</small></label>
+            <input type="number" id="cs-disk" value="0" min="0" step="512" placeholder="0 for unlimited">
+            <div class="row np-create-presets">
+              <button type="button" class="btn sm" onclick="$('#cs-disk').value=0">Unlimited</button>
+              <button type="button" class="btn sm" onclick="$('#cs-disk').value=5120">5 GB</button>
+              <button type="button" class="btn sm" onclick="$('#cs-disk').value=10240">10 GB</button>
+              <button type="button" class="btn sm" onclick="$('#cs-disk').value=20480">20 GB</button>
             </div>
-            <input type="number" id="cs-disk" value="0" min="0" step="512" placeholder="0 for unlimited (in MB)">
-          </label>
+          </div>
         </div>
 
-        ${(S.user?.role === 'admin' && Array.isArray(S.adminUsers) && S.adminUsers.length > 0) ? `
+        ${canAssignOwner ? `
         <!-- Server Ownership (Admin Only) -->
         <div class="np-modal-half" style="margin-bottom:14px;">
           <label class="f" style="margin-bottom:0;">
@@ -12688,17 +12659,17 @@ function openCreateServerModal() {
         </div>` : ''}
 
         <!-- EULA & Optimization Flags -->
-        <div class="np-modal-half" style="background:var(--pn2); border:1px solid var(--ln); border-radius:8px; padding:12px; margin-bottom:16px;">
-          <label class="row" style="margin-bottom:8px; cursor:pointer;">
-            <input type="checkbox" id="cs-eula" checked style="width:auto; margin-right:8px;">
+        <div class="${canAssignOwner ? 'np-modal-half' : 'np-modal-wide'}" style="background:var(--pn2); border:1px solid var(--ln); border-radius:8px; padding:12px; margin-bottom:16px;">
+          <label class="row np-check-row" style="margin-bottom:8px; cursor:pointer; gap:10px;">
+            <input type="checkbox" id="cs-eula" checked>
             <span>Automatically agree to Mojang EULA (<code>eula=true</code>)</span>
           </label>
-          <label class="row" style="margin-bottom:8px; cursor:pointer;">
-            <input type="checkbox" id="cs-dl" checked style="width:auto; margin-right:8px;">
+          <label class="row np-check-row" style="margin-bottom:8px; cursor:pointer; gap:10px;">
+            <input type="checkbox" id="cs-dl" checked>
             <span>Automatically download official server executable immediately</span>
           </label>
-          <label class="row" style="cursor:pointer;">
-            <input type="checkbox" id="cs-aikar" checked style="width:auto; margin-right:8px;">
+          <label class="row np-check-row" style="cursor:pointer; gap:10px;">
+            <input type="checkbox" id="cs-aikar" checked>
             <span>Apply Aikar's optimized G1GC flags</span>
           </label>
         </div>
@@ -12741,11 +12712,11 @@ async function handleCreateServer(e) {
   const targetNodeId = $('#cs-node')?.value || 'local';
   const name = $('#cs-name')?.value.trim() || 'Minecraft Server';
   const type = $('#cs-type')?.value || 'paper';
-  const version = $('#cs-ver')?.value.trim() || (isSteelEngine(type) ? 'latest' : '1.21.11');
+  const version = $('#cs-ver')?.value.trim() || 'latest';
   const memoryMax = parseInt($('#cs-mem')?.value) || 2048;
   const memoryMin = isSteelEngine(type) ? 0 : Math.min(1024, memoryMax);
   const port = parseInt($('#cs-port')?.value) || 25565;
-  const javaPath = isSteelEngine(type) ? '' : ($('#cs-java')?.value || '21');
+  const javaPath = isSteelEngine(type) ? '' : ($('#cs-java')?.value || '25');
   const autoDownload = $('#cs-dl')?.checked ?? true;
   const useAikar = $('#cs-aikar')?.checked;
   const cpuLimit = parseInt($('#cs-cpu')?.value) || 0;

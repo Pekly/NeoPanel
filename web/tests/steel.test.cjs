@@ -138,7 +138,7 @@ test('creation toggles native controls and sends latest with resource memory but
   assert.equal(payload.java_path, ''); assert.equal(payload.java_args, '');
   assert.equal(payload.jar_file, undefined, 'backend chooses host executable filename');
   c.setCreateEngine('paper');
-  assert.equal(version.value, '1.21.11'); assert.equal(java.disabled, false);
+  assert.equal(version.value, 'latest'); assert.equal(java.disabled, false); assert.equal(java.value, '25');
 });
 
 test('reinstall defaults to latest, warns across engine families and never syncs Java for Steel', async () => {
