@@ -270,3 +270,19 @@ test('pending project renders a safe clicked-result preview and skeleton, never 
   const pending=c.NPPlugins.open('project-0');const html=c.NPPlugins.render();assert.match(html,/np-project-loading/);assert.match(html,/aria-busy="true"/);assert.match(html,/role="status"/);assert.match(html,/aria-hidden="true"/);assert.match(html,/&lt;img/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<img|<script|user:pass|data-np-install|downloads|followers/);assert.equal(c.NPPlugins.isOpen(),true);
   resolve(project());await pending;assert.doesNotMatch(c.NPPlugins.render(),/np-project-loading/);assert.match(c.NPPlugins.render(),/data-np-install/);
 });
+
+test('Browse defaults to Tiles and retains explicit saved layouts',()=>{
+  for(const saved of [null,'list','icons','tiles','invalid','blocked']) {
+    const {c}=harness();
+    c.localStorage={getItem:key=>{if(saved==='blocked')throw Error('storage unavailable');return key==='neopanel_vm_plug_store'?saved:null;}};
+    vm.runInNewContext(section('function getViewMode(', 'let viewModeTimer'),c);
+    const expected=['list','icons','tiles'].includes(saved)?saved:'tiles';
+    const html=c.NPPlugins.hitsHtml([hit(0)]);
+    assert.match(html,new RegExp(`np-project-result ${{list:'plugin-card',icons:'vm-icon-card',tiles:'vm-tile-card'}[expected]}`));
+    assert.equal(c.getViewMode('fi','list'),'list','Files retains its own fallback');
+  }
+  for(const scope of ['plug_store','plug_inst']) {
+    assert.match(app,new RegExp(`getViewMode\\('${scope}', 'tiles'\\)`));
+    assert.match(app,new RegExp(`renderViewModeToggle\\('${scope}', 'tiles'\\)`));
+  }
+});
