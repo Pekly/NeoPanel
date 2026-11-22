@@ -61,6 +61,11 @@ html body .pal {
 .pbox > .row.sb > button { flex-shrink: 0; }
 .pbox .ui-modal-actions { flex-wrap: wrap; }
 
+/* Wrap a checkbox caption, not the checkbox/caption pair. */
+.pbox .np-check-row { flex-wrap: nowrap; align-items: flex-start; }
+.pbox .np-check-row > input[type="checkbox"] { flex: 0 0 auto; margin-top: 2px; }
+.pbox .np-check-row > :not(input) { flex: 1; min-width: 0; line-height: 1.5; }
+
 @media (max-width: 700px) {
   :root { --np-modal-gutter: 16px; }
   html body .pal { padding-inline: 12px; }
