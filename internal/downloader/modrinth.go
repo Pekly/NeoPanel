@@ -22,16 +22,18 @@ type ModrinthSearchResult struct {
 }
 
 type ModrinthPluginHit struct {
-	ProjectID   string   `json:"project_id"`
-	Slug        string   `json:"slug"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Categories  []string `json:"categories"`
-	Downloads   int64    `json:"downloads"`
-	Follows     int64    `json:"follows"`
-	IconURL     string   `json:"icon_url"`
-	Author      string   `json:"author"`
-	Versions    []string `json:"versions"`
+	ProjectID       string   `json:"project_id"`
+	Slug            string   `json:"slug"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	Categories      []string `json:"categories"`
+	Downloads       int64    `json:"downloads"`
+	Follows         int64    `json:"follows"`
+	IconURL         string   `json:"icon_url"`
+	Author          string   `json:"author"`
+	Versions        []string `json:"versions"`
+	FeaturedGallery string   `json:"featured_gallery"`
+	Gallery         []string `json:"gallery"`
 }
 
 type ModrinthVersion struct {
@@ -144,6 +146,15 @@ func SearchModrinthPluginsPage(ctx context.Context, query string, limit, offset 
 	}
 	if result.Hits == nil {
 		result.Hits = []ModrinthPluginHit{}
+	}
+	for i := range result.Hits {
+		// Search already carries artwork: avoid a details request for every card.
+		if len(result.Hits[i].Gallery) > 8 {
+			result.Hits[i].Gallery = result.Hits[i].Gallery[:8]
+		}
+		if result.Hits[i].Gallery == nil {
+			result.Hits[i].Gallery = []string{}
+		}
 	}
 	return &result, nil
 }

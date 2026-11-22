@@ -6,7 +6,8 @@ Open **Server → Plugins** (or **Mods** for a modded server). Install and state
 
 - Click a result's card, title or icon to open its project page **inside NeoPanel**. Its Install button is a separate action.
 - The project page presents Modrinth's description, gallery, changelogs and versions, plus compatibility metadata, creators, tags, license and project links when supplied by the author. Missing fields are shown as unavailable or omitted, not invented.
-- Back returns to the browse results. **Load more** appends another page instead of replacing the current list. Changing the search or filters starts a new result set.
+- Browse uses numbered pages with Previous/Next navigation rather than an accumulating **Load more** list. **View** chooses 10, 20 (default), 50 or 100 projects per page. Back from a project preserves the current page and filters; changing search, filters, sort or page size starts at page one.
+- List and tile cards use the project's featured gallery image as background artwork, with a gallery-image fallback when available. Text remains on a readable overlay; projects without usable artwork retain the normal card background. Icon view stays compact. Artwork comes from the search response, without one extra metadata request per card.
 - The loader selector puts **Auto (All)** first and the current server software directly after it. Choosing a browse loader does not change the server software or the installation target.
 - The Minecraft-version filter is a **search filter**, not an installation constraint.
 
@@ -18,7 +19,7 @@ Descriptions and release notes render standard Markdown: tables, nested lists/em
 
 **Install selected version** installs the chosen release instead. The backend still verifies that it belongs to the requested project and supports the server's software. The version list labels the author's release channel and advertised game versions; inspect these before choosing.
 
-Project pages fetch 50-release upstream pages and retain up to 500 recent releases, including the newest eligible release when its independent software-filtered check succeeds. Requests share a 30-second deadline, a 4 MiB per-response limit and a 16 MiB total metadata budget. Large multi-loader catalogs no longer require one oversized response. Explicit installation revalidates the exact version directly against the project and software. A notice identifies shortened histories; the Modrinth link opens the complete history. Browse results load 24 at a time and retain up to 1,000 results before asking you to refine the search.
+Project pages fetch 50-release upstream pages and retain up to 500 recent releases, including the newest eligible release when its independent software-filtered check succeeds. Requests share a 30-second deadline, a 4 MiB per-response limit and a 16 MiB total metadata budget. Large multi-loader catalogs no longer require one oversized response. Explicit installation revalidates the exact version directly against the project and software. A notice identifies shortened histories; the Modrinth link opens the complete history. Browse retains only the current result page and makes up to 10,000 results accessible; larger result sets ask you to refine the search.
 
 If creators, version history, or the latest-release check is unavailable, the description and other available data remain visible with **Retry missing data**. An unknown latest release is not presented as “no eligible release.” Typed Modrinth catalog errors no longer mark the game connection as lost; real panel/worker/WebSocket failures still use the connection warning and paused controls.
 

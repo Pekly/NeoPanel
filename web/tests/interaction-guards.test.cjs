@@ -59,7 +59,7 @@ test('store layout switches are local even before the first search finishes', ()
 function searchSetup() {
   const clock = timers(), requests = [];
   const c = vm.createContext({ ...clock, AbortController, URLSearchParams, URL,
-    S: { view: 'plug', token: 'one', q: 'old', plugTab: 'browse' }, server: { id: 'one', node_id: 'local' }, grid: {},
+    S: { view: 'plug', token: 'one', q: 'old', plugTab: 'browse' }, server: { id: 'one', node_id: 'local' }, grid: {setAttribute() {}},
     curServer: () => c.server, hasServerPermission: () => true, getViewMode: () => 'list',
     isSteelEngine: () => false, isModdedEngine: () => false, engineMeta: () => ({ key: 'paper' }),
     document: { addEventListener() {}, getElementById: () => c.grid },
@@ -71,9 +71,9 @@ function searchSetup() {
 }
 test('search completion writes to the current layout grid, not a detached node', async () => {
   const { c, requests, clock } = searchSetup(); const oldGrid = c.grid;
-  const pending = c.searchModrinth(); c.grid = {};
+  const pending = c.searchModrinth(); c.grid = {setAttribute() {}};
   requests[0].resolve({ hits: [{project_id:'result',title:'result'}], total_hits:1 }); await pending;
-  assert.match(oldGrid.innerHTML, /Loading projects/); assert.match(c.grid.innerHTML, /View result/); assert.equal(clock.jobs.size, 0);
+  assert.match(oldGrid.innerHTML, /Loading page 1/); assert.match(c.grid.innerHTML, /View result/); assert.equal(clock.jobs.size, 0);
 });
 test('older searches are aborted and cannot overwrite a newer query', async () => {
   const { c, requests } = searchSetup();
@@ -87,7 +87,7 @@ test('responses cannot populate another server/session or overwrite a pending ty
   for (const change of [c => { c.server = { id: 'two' }; }, c => { c.S.token = 'two'; }, c => { c.S.q = 'typing'; }]) {
     const { c, requests } = searchSetup(); const pending = c.searchModrinth(); change(c);
     requests[0].resolve({ hits: [{project_id:'stale',title:'stale'}], total_hits:1 }); await pending;
-    assert.equal(c.S.lastModrinthHits.length, 0); assert.match(c.grid.innerHTML, /Loading projects/);
+    assert.equal(c.S.lastModrinthHits.length, 0); assert.match(c.grid.innerHTML, /Loading page 1/);
   }
 });
 test('search deadline aborts the request and failure clears its timer', async () => {
