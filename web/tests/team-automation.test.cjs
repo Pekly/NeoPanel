@@ -99,7 +99,9 @@ test('running servers cannot reach the restore POST',async()=>{
 });
 test('restore requires confirmation and reports retained safety copy',async()=>{
   const {c}=setup();const calls=[];c.api=async(url,opts)=>{calls.push({url,opts});return opts?.method==='POST'?{safety_copy:'alpha.previous-test'}:{stats:{status:'stopped'}};};c.uiConfirm=async()=>false;await c.restoreBackup('backup.tar.gz');assert.equal(calls.length,1);
-  c.uiConfirm=async()=>true;await c.restoreBackup('backup.tar.gz');assert.equal(calls.length,3);assert.deepEqual(JSON.parse(calls[2].opts.body),{name:'backup.tar.gz',confirm:true});assert.match(c.renderRestoreNotice(),/alpha.previous-test/);
+  c.uiConfirm=async()=>true;await c.restoreBackup('backup.tar.gz');assert.equal(calls.length,3);assert.deepEqual(JSON.parse(calls[2].opts.body),{name:'backup.tar.gz',confirm:true});
+  assert.doesNotMatch(c.renderRestoreNotice(),/alpha.previous-test/);assert.match(c.renderRestoreNotice(),/kept for recovery/);
+  c.S.user.role='admin';await c.restoreBackup('backup.tar.gz');assert.match(c.renderRestoreNotice(),/alpha.previous-test/);
 });
 
 test('future invitation expiry is an explicit date, not a past-file relative label',()=>{
@@ -204,4 +206,17 @@ test('API errors preserve retry metadata for invitation controls', async () => {
   c.fetch=async()=>({ok:false,status:429,json:async()=>details});
   vm.runInContext(app.slice(app.indexOf('async function api('),app.indexOf('function curServer()')),c);
   await assert.rejects(c.api('/api/team/invitations',{suppressToast:true}),error=>error.status===429 && error.data===details);
+});
+
+test('restore notice works without a host path and errors give role-appropriate next steps',()=>{
+  const {c}=setup();
+  vm.runInContext("AutomationUI.lastRestore={server:{id:'one'},safetyCopy:'',previousFilesPreserved:true}",c);
+  c.curServer=()=>({id:'one'});
+  assert.match(c.renderRestoreNotice(),/kept for recovery/);
+  for(const status of [400,403,404,409,500]) {
+    const message=c.restoreErrorMessage({status,message:'host /private/data/.restore-copy failed'});
+    assert.doesNotMatch(message,/private\/data|\.restore-copy/);
+    assert.ok(message.length>20);
+  }
+  c.S.user.role='admin';assert.match(c.restoreErrorMessage({message:'host diagnostic'}),/host diagnostic/);
 });

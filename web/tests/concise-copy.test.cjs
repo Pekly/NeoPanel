@@ -36,6 +36,11 @@ test('restore confirmation keeps file loss, stopped-server and disk warnings', a
   assert.match(text, /server stopped/i);
   assert.match(text, /safety copy.*disk space/i);
   vm.runInContext("AutomationUI.lastRestore = { server: { id: 'one' }, safetyCopy: 'safety-copy' };", c);
+  const userNotice = plain(c.renderRestoreNotice());
+  assert.doesNotMatch(userNotice, /safety-copy|host’s servers directory/);
+  assert.match(userNotice, /previous files were kept for recovery/);
+  assert.match(userNotice, /contact support/);
+  c.S.user.role = 'admin';
   const notice = plain(c.renderRestoreNotice());
   assert.match(notice, /safety-copy/);
   assert.match(notice, /disk space/i);

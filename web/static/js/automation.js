@@ -85,6 +85,15 @@ async function submitScheduleChain(event) {
   } catch (err) { error.textContent = err.message; }
   finally { AutomationUI.saving = false; if (button?.isConnected) setBtnLoading(button, false); }
 }
+function restoreErrorMessage(error) {
+  if (S.user?.role === 'admin') return error.message || 'Backup restore failed.';
+  if ([401, 403].includes(error.status)) return 'You do not have access to restore this backup. Sign in again or ask the server owner.';
+  if (error.status === 404) return 'This backup is unavailable. Refresh the backup list before trying again.';
+  if (error.status === 409) return 'Stop the server and wait for other actions to finish before restoring.';
+  if (error.status === 400) return 'This backup could not be restored. Check your selection or choose another backup.';
+  return 'Restore was not confirmed. Keep the server stopped and contact support before trying again.';
+}
+
 async function restoreBackup(name, button) {
   const srv = curServer();
   if (!srv || !name || AutomationUI.restoring) return;
@@ -99,15 +108,15 @@ async function restoreBackup(name, button) {
     if (!confirmed || !sameQolServer(srv, curServer())) return;
     if (button) setBtnLoading(button, true, 'Restoring…');
     const result = await api(srvApiPath(srv, '/backups/restore'), { method: 'POST', body: JSON.stringify({ name, confirm: true }), suppressToast: true });
-    toast(result.message || 'Backup restored. The server remains stopped.', 'ok');
-    AutomationUI.lastRestore = { server: { ...srv }, safetyCopy: result.safety_copy || '' };
+    toast(S.user?.role === 'admin' ? result.message || 'Backup restored. The server remains stopped.' : 'Backup restored. Check your server before starting it.', 'ok');
+    AutomationUI.lastRestore = { server: { ...srv }, safetyCopy: S.user?.role === 'admin' ? result.safety_copy || '' : '', previousFilesPreserved: result.previous_files_preserved === true || Boolean(result.safety_copy) };
     if (sameQolServer(srv, curServer()) && S.view === 'bk') await loadBackupsList();
-  } catch (err) { toast(err.message || 'Backup restore failed.', 'bad'); }
+  } catch (err) { toast(restoreErrorMessage(err), 'bad'); }
   finally { AutomationUI.restoring = null; if (button?.isConnected) setBtnLoading(button, false); }
 }
 
 function renderRestoreNotice() {
   const restore = AutomationUI.lastRestore;
-  if (!restore?.safetyCopy || !sameQolServer(restore.server, curServer())) return '';
-  return `<div class="card np-restore-notice" role="status"><b>Backup restored — previous files saved</b><p class="mu">Safety copy in the host’s servers directory: <code>${esc(restore.safetyCopy)}</code>. It uses disk space. Check the restored server before deleting the copy manually.</p></div>`;
+  if (!(restore?.previousFilesPreserved || restore?.safetyCopy) || !sameQolServer(restore.server, curServer())) return '';
+  return `<div class="card np-restore-notice" role="status"><b>Backup restored — previous files saved</b><p class="mu">${S.user?.role === 'admin' && restore.safetyCopy ? `Safety copy in the host’s servers directory: <code>${esc(restore.safetyCopy)}</code>. It uses disk space. Check the restored server before deleting the copy manually.` : 'Check the restored server before starting it. Your previous files were kept for recovery; contact support if you need them.'}</p></div>`;
 }
