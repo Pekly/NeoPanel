@@ -26,7 +26,7 @@ Software rules remain in force: Paper can use Paper/Spigot/Bukkit releases; Purp
 
 **Newest does not guarantee runtime compatibility.** A plugin/mod author may require a different Minecraft version, Java version, dependency, or configuration. Read the compatibility metadata and release notes, back up important data, and choose a suitable release when needed. Dependencies are displayed as metadata; they are not silently installed.
 
-Installation preserves the existing bounded download, confined destination and no-overwrite safeguards. Existing enabled/disabled files are not silently replaced. NeoPanel does not start or restart the game automatically; restart manually when ready and inspect its startup log.
+New installation preserves the existing bounded download, confined destination and no-overwrite safeguards. Existing enabled/disabled files are not silently replaced. Deliberate replacement uses the separate [installed-plugin identification and bulk-update workflow](installed-plugin-updates.md), with source verification/confirmation, a stopped server, and backups. NeoPanel does not start or restart the game automatically; restart manually when ready and inspect its startup log.
 
 ## File tools
 

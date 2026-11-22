@@ -183,6 +183,7 @@
       const payload = {slug}; if (versionId) payload.version_id = versionId;
       await installRequest(srvApiPath(ctx.srv, '/plugins/install'), {method:'POST',body:JSON.stringify(payload)}, live);
       if (!live()) return;
+      window.NPInstalledPlugins?.invalidate();
       installed.add(key); toast(`Installed ${title || slug}. Restart server to apply.`, 'ok');
       await loadPluginsList();
     } catch (_) { if (live()) toast('Installation could not be confirmed. Check installed files before trying again.', 'bad'); }

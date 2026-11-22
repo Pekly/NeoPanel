@@ -6650,6 +6650,7 @@ const V = {
         `).join('')}
       </div>`;
     }
+    if (!isBrowse && window.NPInstalledPlugins) installedBodyHtml = NPInstalledPlugins.render();
 
     return `${srvh()}
     <div class="np-plugins-workspace">
@@ -9330,6 +9331,7 @@ window.addEventListener('hashchange', () => {
 // --- Main Render Function (R) ---
 window.R = function() {
   window.NPPlugins?.sync();
+  window.NPInstalledPlugins?.sync();
   window.NPFeatures?.sync();
   window.NPProxySettings?.sync();
   captureEditor();
@@ -11187,6 +11189,7 @@ async function loadPluginsList(skipRender = false) {
       const meta = p.size ? formatFileSize(p.size) : (p.version || 'installed');
       return [fname, meta, p.enabled !== false, p.modified || '', false];
     });
+    window.NPInstalledPlugins?.sync();
   } catch (e) {} finally {
     if (context && !context.live()) return;
     S.loading.plugins = false;
@@ -11204,6 +11207,8 @@ async function loadPluginsList(skipRender = false) {
 async function deletePlugin(name) {
   const srv = curServer();
   if (!srv || !name) return;
+  const context = window.NPInstalledPlugins?.capture();
+  if (!hasServerPermission('files.delete')) return;
   const isMod = isModdedEngine(srv.type || S.core);
   const noun = isMod ? 'Mod' : 'Plugin';
   const nounLow = isMod ? 'mod' : 'plugin';
@@ -11215,10 +11220,13 @@ async function deletePlugin(name) {
     isDanger: true,
     icon: 'trash'
   });
-  if (!ok) return;
+  if (!ok || (context && !context.live()) || !hasServerPermission('files.delete')) return;
+  window.NPInstalledPlugins?.invalidate();
+  const requestContext = window.NPInstalledPlugins?.capture();
 
   try {
-    await api(srvApiPath(srv, `/plugins?filename=${encodeURIComponent(name)}`), { method: 'DELETE' });
+    await api(srvApiPath(srv, `/plugins?filename=${encodeURIComponent(name)}`), { method: 'DELETE', isCurrent: requestContext?.live });
+    if (requestContext ? !requestContext.live() : !sameQolServer(srv, curServer())) return;
     toast(`Removed ${nounLow} ${name}`);
     loadPluginsList();
   } catch (e) {}
@@ -11227,11 +11235,14 @@ async function deletePlugin(name) {
 async function togglePlugin(idx, enabled) {
   const srv = curServer();
   const plugin = S.plugins[idx];
-  if (!srv || !plugin || plugin[4]) return;
+  if (!srv || !plugin || plugin[4] || !hasServerPermission('files.edit')) return;
+  window.NPInstalledPlugins?.invalidate();
+  const context = window.NPInstalledPlugins?.capture();
   plugin[4] = true;
   R();
   try {
-    const result = await api(srvApiPath(srv, '/plugins/toggle'), { method: 'POST', body: JSON.stringify({ filename: plugin[0], enabled }) });
+    const result = await api(srvApiPath(srv, '/plugins/toggle'), { method: 'POST', body: JSON.stringify({ filename: plugin[0], enabled }), isCurrent: context?.live });
+    if (context && !context.live()) return;
     plugin[0] = result.filename;
     plugin[2] = result.enabled;
     toast(`${result.filename} ${result.enabled ? 'enabled' : 'disabled'}. Restart server to apply.`, 'ok');

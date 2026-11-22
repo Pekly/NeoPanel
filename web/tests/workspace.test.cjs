@@ -298,7 +298,7 @@ test('user error advice avoids operator maintenance while retaining uncertainty 
 test('Modrinth catalog failures do not mark a reachable server disconnected; real worker failures still do',()=>{
   const {c,q}=setup(), base=c.srvApiPath(c.curServer(),'');
   const provider=Object.assign(Error('Modrinth metadata unavailable'),{status:502,data:{code:'plugin_catalog_unavailable'}});
-  for(const suffix of ['/plugins/project?slug=voicechat','/plugins/versions?slug=voicechat']) {
+  for(const suffix of ['/plugins/project?slug=voicechat','/plugins/versions?slug=voicechat','/plugins/catalog?offset=0','/plugins/identify','/plugins/update']) {
     q.requestResult(base+suffix,provider,c.S.token);assert.equal(q.connectionBlocked(),false);
   }
   q.requestResult(base+'/plugins/project?slug=voicechat',Object.assign(Error('Worker unreachable'),{status:502}),c.S.token);
