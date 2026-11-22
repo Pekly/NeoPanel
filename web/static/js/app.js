@@ -13960,22 +13960,22 @@ function openReinstallModal(srvId, nodeId = null) {
 
         <div class="np-modal-half" style="background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:14px;">
           <b style="font-size:13px; color:#fff; display:block; margin-bottom:8px;">Preservation Options</b>
-          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
+          <label class="row np-check-row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-world" checked>
             <span>Preserve Worlds (Java: <code>world*</code>; Steel: <code>saves/</code>; no format conversion)</span>
           </label>
-          <label class="row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
+          <label class="row np-check-row" style="cursor:pointer; margin-bottom:8px; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-config" checked>
             <span>Preserve Configurations (Java properties/YAML; Steel: <code>config/config.toml</code>; no format conversion)</span>
           </label>
-          <label class="row" style="cursor:pointer; font-size:13px; gap:10px;">
+          <label class="row np-check-row" style="cursor:pointer; font-size:13px; gap:10px;">
             <input type="checkbox" id="reinst-plugins" checked>
             <span>Preserve Plugins &amp; Mods (keep <code>plugins</code>, <code>mods</code> folders)</span>
           </label>
         </div>
 
         <div class="np-modal-half" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-radius: 8px; padding: 11px 14px; margin-bottom: 20px;">
-          <label class="row" style="cursor:pointer; font-size:13px; gap:10px; align-items:flex-start;">
+          <label class="row np-check-row" style="cursor:pointer; font-size:13px; gap:10px; align-items:flex-start;">
             <input type="checkbox" id="reinst-sync-java" checked style="margin-top:2px;">
             <div>
               <b style="color: var(--tx); display: block;">Sync Java Runtime (<span id="reinst-java-rec">Java ${esc(recJava)}</span>)</b>
@@ -17983,6 +17983,7 @@ function organizeServerSettings(root) {
   wrapper.prepend(nav);
   groups.forEach(([, cards], i) => {
     const panel = document.createElement('section'); panel.className = 'np-server-settings-group'; panel.dataset.settingsPanel = String(i); panel.hidden = i !== selected;
+    if (i === 1 && cards.every(Boolean)) panel.classList.add('np-startup-grid');
     cards.filter(Boolean).forEach(card => panel.append(card)); wrapper.append(panel);
   });
   wrapper.querySelectorAll(':scope > .grid, :scope > .stp-top-grid').forEach(el => { if (!el.children.length) el.remove(); });

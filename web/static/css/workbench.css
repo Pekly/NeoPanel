@@ -452,6 +452,13 @@ html body #pal .pit:focus-visible { outline-offset: -2px; }
 .np-server-settings-group[data-settings-panel="2"] { grid-template-columns: minmax(0, 1fr); }
 .np-server-settings-group input, .np-server-settings-group select { min-width: 0; }
 .np-server-settings-group .row { flex-wrap: wrap; }
+/* Java and automation share a column instead of following the allocation card's height. */
+@media (min-width: 901px) {
+  .np-server-settings-group.np-startup-grid { grid-template-areas: "runtime allocation" "automation allocation"; grid-template-rows: min-content 1fr; }
+  .np-startup-grid > .card:has(#prop-java) { grid-area: runtime; }
+  .np-startup-grid > .card:has(#prop-jar) { grid-area: allocation; }
+  .np-startup-grid > #server-automation-settings { grid-area: automation; }
+}
 @media (max-width: 900px) { .np-server-settings-group { grid-template-columns: minmax(0, 1fr); } }
 .np-community-fields { display: grid; gap: 16px; border: 0; margin: 0; padding: 0; min-width: 0; }
 .np-community-fields:disabled { opacity: .7; }
