@@ -9,6 +9,12 @@ These features live in the shared web panel. They do not remove or change Window
 - Pin servers with the star on their card. Pins sort first; **Pinned only** filters the list. Sort by name, status, or location. Search, location, sorting, and pins are saved for your account in this browser. The location selector lists only hosts containing your servers and stays locked when they are all on one host. Layout buttons keep a stable toolbar position.
 - The address button in the server header copies the Minecraft player connection address, not the panel URL. Its label stays consistent during live updates. Card addresses remain copyable.
 
+## Files and plugin browsing
+
+- Trash is the first navigation item in the root Files listing, outside normal file selection and bulk operations.
+- Open **Files → World tools → Convert world** for world conversion and existing-job monitoring.
+- Plugin results open an in-panel project page; **Load more** extends the search list. Default Install selects the newest release for the actual server software without requiring an exact Minecraft-version tag. Explicit release selection remains available. See the [plugin browser guide](plugin-browser.md) for compatibility caveats and details.
+
 ## Text editor
 
 - **Save** is unavailable when there are no changes, a save is pending, or the file is read-only. Ctrl+S also avoids unchanged writes.

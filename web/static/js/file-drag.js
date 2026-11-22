@@ -55,6 +55,8 @@
   }
   function targetAt(target) {
     const el = element(target);
+    // Synthetic navigation entries must never fall through to root uploads.
+    if (el?.closest('.np-trash-entry')) return null;
     // Breadcrumbs may sit next to (rather than inside) the collection.
     const explicit = el?.closest('[data-drop-path]');
     if (explicit && explicit.closest('#main') && document.querySelector('.np-files-workspace')) {

@@ -1834,6 +1834,7 @@ function syncActiveServerState(srv) {
     S.selectedFiles = new Set();
     S.bk = [];
     S.plugins = [];
+    window.NPPlugins?.reset();
     S.lastModrinthHits = null;
     S.plugLoader = '';
     S.plugVer = '';
@@ -3306,7 +3307,7 @@ async function computeGravatarHash(email) {
 // --- API Client ---
 async function api(endpoint, options = {}) {
   assertClientRequestAccess(endpoint, options);
-  const { suppressToast, ...fetchOpts } = options || {};
+  const { suppressToast, isCurrent, ...fetchOpts } = options || {};
   const headers = { ...(fetchOpts.headers || {}) };
   if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
   if (!headers['Content-Type'] && !(fetchOpts.body instanceof FormData)) {
@@ -3317,6 +3318,7 @@ async function api(endpoint, options = {}) {
 
   try {
     const res = await fetch(endpoint, { ...fetchOpts, headers });
+    if (isCurrent && !isCurrent()) throw new DOMException('Request context changed', 'AbortError');
     if (res.status === 401) {
       logout();
       const error = new Error('Session expired. Please sign in again.');
@@ -3324,6 +3326,7 @@ async function api(endpoint, options = {}) {
       throw error;
     }
     const data = await res.json().catch(() => ({}));
+    if (isCurrent && !isCurrent()) throw new DOMException('Request context changed', 'AbortError');
     if (!res.ok) {
       const error = new Error(data.error || `HTTP ${res.status}`);
       error.status = res.status;
@@ -3333,6 +3336,7 @@ async function api(endpoint, options = {}) {
     window.NPWorkspace?.requestResult(endpoint, null, requestToken);
     return data;
   } catch (err) {
+    if (isCurrent && !isCurrent()) throw err;
     window.NPWorkspace?.requestResult(endpoint, err, requestToken);
     if (!suppressToast && err.message && !err.message.includes('Session expired')) {
       toast(window.NPWorkspace ? `${err.message} ${window.NPWorkspace.errorAdvice(err)}` : err.message, 'error');
@@ -6350,6 +6354,7 @@ const V = {
             </tr>
           </thead>
           <tbody>
+            ${!isSubdir ? `<tr class="np-trash-entry"><td class="file-select-cell"></td><td colspan="6"><button type="button" class="np-file-open" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="fi-badge dir">${ic('folder', 15)}</span><span>Trash <small class="mu">· Recently deleted files</small></span></button></td></tr>` : ''}
             ${isSubdir ? `
               <tr data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <td class="file-select-cell"></td>
@@ -6400,9 +6405,9 @@ const V = {
             </label>
             <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
           </div>` : ''}
-        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!sortedFiles.length && !isSubdir)
-          ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
-          : `<div class="vm-icons-grid">
+        ${S.loading?.files ? loaderHtml('Loading directory contents...') : ''}
+        ${`<div class="vm-icons-grid">
+            ${!isSubdir ? `<button type="button" class="vm-icon-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-file-center"><span class="fi-badge dir lg">${ic('folder', 24)}</span><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></button>` : ''}
             ${isSubdir ? `
               <div class="vm-icon-card vm-file-card" data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <div class="vm-file-head"><span></span><span></span></div>
@@ -6437,6 +6442,7 @@ const V = {
               </div>`;
             }).join('')}
           </div>`}
+        ${!S.loading?.files && !sortedFiles.length ? '<p class="mu" style="padding: 24px 0; text-align: center;">No files in this folder. Use Upload or New file to add one.</p>' : ''}
       </div>`;
     } else {
       filesContainerHtml = `
@@ -6449,9 +6455,9 @@ const V = {
             </label>
             <span class="mu" style="font-size: 12px;">Right-click or use &vellip; for options</span>
           </div>` : ''}
-        ${S.loading?.files ? loaderHtml('Loading directory contents...') : (!sortedFiles.length && !isSubdir)
-          ? '<div class="mu" style="text-align:center; padding: 32px;">This folder is empty. Drag and drop files here or click Upload.</div>'
-          : `<div class="vm-tiles-grid">
+        ${S.loading?.files ? loaderHtml('Loading directory contents...') : ''}
+        ${`<div class="vm-tiles-grid">
+            ${!isSubdir ? `<button type="button" class="vm-tile-card vm-file-card np-trash-entry" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}><span class="vm-tile-file-row"><span class="fi-badge dir md">${ic('folder', 18)}</span><span class="vm-tile-file-info"><span class="vm-file-name">Trash</span><span class="vm-file-meta">Recently deleted files</span></span></span></button>` : ''}
             ${isSubdir ? `
               <div class="vm-tile-card vm-file-card" data-drop-path="${esc(pathParts.slice(0, -1).join('/'))}" onclick="browseFolder('..')">
                 <div class="vm-tile-file-row">
@@ -6490,6 +6496,7 @@ const V = {
               </div>`;
             }).join('')}
           </div>`}
+        ${!S.loading?.files && !sortedFiles.length ? '<p class="mu" style="padding: 24px 0; text-align: center;">No files in this folder. Use Upload or New file to add one.</p>' : ''}
       </div>`;
     }
 
@@ -6525,16 +6532,15 @@ const V = {
           </div>
           ${renderViewModeToggle('files', 'list')}
           <button type="button" id="file-reload-btn" class="btn" onclick="reloadFileList()" ${S.loading?.files || S.fileReloading ? 'disabled' : ''} aria-busy="${Boolean(S.fileReloading)}" title="Reload this folder">${ic('refresh', 14)} Reload</button>
-          <button class="btn" onclick="openFileTrash()" ${hasServerPermission('files.delete') ? '' : 'disabled'}>${ic('trash', 14)} Trash</button>
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
           <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
           ${['files.view', 'files.edit', 'sftp.access'].every(p => hasServerPermission(p)) ? `<button type="button" class="btn" onclick="window.NPSFTPImport.open()" style="height: 36px;">${ic('download', 14)} Import SFTP</button>` : ''}
-          ${hasServerPermission('files.view') ? `<button type="button" class="btn" onclick="window.NPWorldConversion.open()" style="height:36px;">${ic('refresh', 14)} Convert world</button>` : ''}
           <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
         </div>
       </div>
 
       ${filesContainerHtml}
+      ${!isSubdir && hasServerPermission('files.view') ? `<details class="np-world-tools"><summary>World tools</summary><div><button type="button" class="btn sm" onclick="window.NPWorldConversion.open()">${ic('refresh', 14)} Convert world</button><span class="mu">Convert a copy, monitor jobs, or cancel an active conversion.</span></div></details>` : ''}
 
       <!-- Floating Bulk Action Bar -->
       <div id="file-bulk-bar-root">${renderFileBulkBarHtml()}</div>
@@ -6544,6 +6550,8 @@ const V = {
   plug() {
     const srv = curServer();
     if (isSteelEngine(srv?.type)) return `${srvh()}${steelConfigNotice()}`;
+    const projectDetails = window.NPPlugins?.render();
+    if (projectDetails) return `${srvh()}${projectDetails}`;
     const engSlug = String(srv?.type || S.core || 'paper').toLowerCase().trim();
     const isMod = isModdedEngine(engSlug);
     const nounSing = isMod ? 'Mod' : 'Plugin';
@@ -6558,7 +6566,7 @@ const V = {
       .filter(({ p }) => !instFilter || String(p[0] || '').toLowerCase().includes(instFilter));
     const storeVm = getViewMode('plug_store', 'list');
     const instVm = getViewMode('plug_inst', 'list');
-    const storeVersions = getAllMcVersions(S.plugLoader || (isMod ? engSlug : ''));
+    const storeVersions = getAllMcVersions(S.plugLoader || '');
     const verChoices = (S.plugVer && !storeVersions.includes(S.plugVer)) ? [S.plugVer, ...storeVersions] : storeVersions;
 
     const storeGridClass = storeVm === 'icons' ? 'vm-icons-grid wide' : (storeVm === 'tiles' ? 'vm-tiles-grid' : '');
@@ -6669,34 +6677,15 @@ const V = {
         <!-- Browse Modrinth Filter & Search Bar -->
         <div class="row" style="gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
           <div style="position: relative; flex: 1; min-width: 240px;">
-            <input type="text" id="store-search" placeholder="${isMod ? 'Search mods on Modrinth (e.g. Lithium, FerriteCore, Simple Voice Chat)...' : 'Search plugins on Modrinth (e.g. EssentialsX, LuckPerms, WorldEdit)...'}" value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 40px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
+            <input type="text" id="store-search" aria-label="Search Modrinth projects" placeholder="${isMod ? 'Search mods on Modrinth (e.g. Lithium, FerriteCore, Simple Voice Chat)...' : 'Search plugins on Modrinth (e.g. EssentialsX, LuckPerms, WorldEdit)...'}" value="${esc(S.q || '')}" oninput="S.q=this.value; searchModrinthDebounced();" style="height: 40px; font-size: 14px; padding-left: 38px; border-radius: 10px;">
             <span style="position: absolute; left: 12px; top: 11px; color: var(--tx-muted);">${ic('search', 16)}</span>
           </div>
 
-          <select style="width: auto; min-width: 155px; height: 40px; font-size: 13px;" onchange="S.plugLoader=this.value; refreshOpenVersionSelects(); searchModrinth();">
-            <option value="" ${!S.plugLoader ? 'selected' : ''}>Loader: Auto (${isMod ? engineMeta(engSlug).label : 'All'})</option>
-            ${isMod ? `
-              <option value="fabric" ${S.plugLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
-              <option value="neoforge" ${S.plugLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
-              <option value="forge" ${S.plugLoader === 'forge' ? 'selected' : ''}>Forge</option>
-              <option value="paper" ${S.plugLoader === 'paper' ? 'selected' : ''}>Paper</option>
-              <option value="purpur" ${S.plugLoader === 'purpur' ? 'selected' : ''}>Purpur</option>
-            ` : `
-              <option value="paper" ${S.plugLoader === 'paper' ? 'selected' : ''}>Paper</option>
-              <option value="purpur" ${S.plugLoader === 'purpur' ? 'selected' : ''}>Purpur</option>
-              <option value="spigot" ${S.plugLoader === 'spigot' ? 'selected' : ''}>Spigot</option>
-              <option value="bukkit" ${S.plugLoader === 'bukkit' ? 'selected' : ''}>Bukkit</option>
-              <option value="folia" ${S.plugLoader === 'folia' ? 'selected' : ''}>Folia</option>
-              <option value="velocity" ${S.plugLoader === 'velocity' ? 'selected' : ''}>Velocity</option>
-              <option value="waterfall" ${S.plugLoader === 'waterfall' ? 'selected' : ''}>Waterfall</option>
-              <option value="bungeecord" ${S.plugLoader === 'bungeecord' ? 'selected' : ''}>BungeeCord</option>
-              <option value="fabric" ${S.plugLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
-              <option value="neoforge" ${S.plugLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
-              <option value="forge" ${S.plugLoader === 'forge' ? 'selected' : ''}>Forge</option>
-            `}
+          <select aria-label="Browse by loader" style="width: auto; min-width: 155px; height: 40px; font-size: 13px;" onchange="S.plugLoader=this.value; refreshOpenVersionSelects(); searchModrinth();">
+            ${NPPlugins.loaderOptions()}
           </select>
 
-          <select id="plug-ver-sel" data-searchable="1" style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugVer=this.value; searchModrinth();">
+          <select id="plug-ver-sel" aria-label="Browse by Minecraft version" data-searchable="1" style="width: auto; min-width: 145px; height: 40px; font-size: 13px;" onchange="S.plugVer=this.value; searchModrinth();">
             <option value="" ${!S.plugVer ? 'selected' : ''}>Version: Any</option>
             ${verChoices.map(v => `<option value="${esc(v)}" ${S.plugVer === v ? 'selected' : ''}>${esc(v)}</option>`).join('')}
           </select>
@@ -6716,7 +6705,7 @@ const V = {
             <input type="checkbox" id="plug-confirm-toggle" ${S.skipPlugConfirm ? 'checked' : ''} onchange="setPlugSkipConfirm(this.checked)">
             <span>Install ${nounsLow} immediately without confirmation prompt</span>
           </label>
-          <span class="mu" style="font-size: 11.5px;">Direct Modrinth ${nounSing.toLowerCase()} install into <code class="mono">${targetFolder}</code></span>
+          <span class="mu" style="font-size: 11.5px;">Filters affect browsing only. Install selects the latest release for your server software; it may not support your current Minecraft version. Runtime compatibility is not guaranteed.</span>
         </div>
 
         <div id="store-grid" class="${storeGridClass}" style="${storeGridStyle}">
@@ -7033,7 +7022,7 @@ const V = {
             `).join('')}
           </tbody>
         </table>
-        <p class="mu" style="font-size:12px;margin-top:12px;">Primary changes require the server to be stopped and apply on its next start. Extra ports are reservations: configure your plugin or service to listen on them.</p>
+        <p class="mu" style="font-size:12px;margin-top:12px;">Multiple ports can serve this server simultaneously. Configure each plugin or service to listen on its assigned port and protocol—for example, Java on 25565/TCP and Geyser on 19132/UDP. External firewall/router access is not verified. Primary changes require a stopped server and apply on its next start.</p>
       </div>
 
       <!-- Secondary Row: SFTP Access & Common Ports -->
@@ -9340,6 +9329,7 @@ window.addEventListener('hashchange', () => {
 
 // --- Main Render Function (R) ---
 window.R = function() {
+  window.NPPlugins?.sync();
   window.NPFeatures?.sync();
   window.NPProxySettings?.sync();
   captureEditor();
@@ -11183,12 +11173,13 @@ async function loadPluginsList(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
   if (isSteelEngine(srv.type)) return;
+  const context = window.NPPlugins?.capture();
   if (!S.loading) S.loading = {};
   S.loading.plugins = true;
   if (!skipRender && S.view === 'plug' && (S.plugTab || 'browse') === 'installed') R();
   try {
-    const data = await api(srvApiPath(srv, '/plugins'));
-    if (!sameQolServer(srv, curServer())) return;
+    const data = await api(srvApiPath(srv, '/plugins'), { suppressToast: true, isCurrent: context?.live });
+    if (context ? !context.live() : !sameQolServer(srv, curServer())) return;
     const list = Array.isArray(data) ? data : (data?.plugins || []);
     S.plugins = list.map(p => {
       if (typeof p === 'string') return [p, 'installed', true, ''];
@@ -11197,6 +11188,7 @@ async function loadPluginsList(skipRender = false) {
       return [fname, meta, p.enabled !== false, p.modified || '', false];
     });
   } catch (e) {} finally {
+    if (context && !context.live()) return;
     S.loading.plugins = false;
     if (!skipRender) {
       if (S.view === 'plug' && (S.plugTab || 'browse') === 'browse') {
@@ -11250,144 +11242,11 @@ async function togglePlugin(idx, enabled) {
   }
 }
 
-let searchTimeout = null;
-function searchModrinthDebounced() {
-  clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(() => searchModrinth(), 350);
-}
-
-function renderModrinthHitsHtml(hits) {
-  const list = Array.isArray(hits) ? hits : [];
-  const storeVm = getViewMode('plug_store', 'list');
-  const isMod = isModdedEngine(curServer()?.type || S.core);
-  if (!list.length) {
-    return `<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">No matching ${isMod ? 'mods' : 'plugins'} found on Modrinth.</div>`;
-  }
-  return list.map(hit => {
-    const titleLow = String(hit.title || '').toLowerCase();
-    const slugLow = String(hit.slug || '').toLowerCase();
-    const isInstalled = S.plugins.some(p => {
-      const fname = String(p[0] || '').toLowerCase();
-      return (titleLow && fname.includes(titleLow.replace(/\s+/g, ''))) || (slugLow && fname.includes(slugLow));
-    });
-    const icon = hit.icon_url
-      ? `<img src="${esc(hit.icon_url)}" class="plugin-icon" onerror="this.src='/favicon.svg'">`
-      : `<div class="plugin-icon" style="display:grid; place-items:center; color:var(--ac); font-size:20px;">🧩</div>`;
-    const slugVal = hit.slug || hit.project_id || hit.id || '';
-    const srv = curServer();
-    const isInstalling = Boolean(S.installingPlugins && S.installingPlugins.has(`${srv?.node_id || 'local'}:${srv?.id}:${slugVal}`));
-    const btnPad = storeVm === 'icons' ? 'min-width: 88px; font-size: 12px; padding: 5px 10px;' : 'min-width: 112px;';
-    const actionHtml = isInstalled
-      ? '<span class="badge online"><i class="dot"></i>Installed</span>'
-      : isInstalling
-        ? `<button class="btn ${storeVm === 'icons' ? 'sm ' : ''}pr is-loading" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" disabled aria-busy="true" style="${btnPad} justify-content: center;"><span class="np-spinner-sm"></span> Installing...</button>`
-        : `<button class="btn ${storeVm === 'icons' ? 'sm ' : ''}pr" data-slug="${esc(slugVal)}" data-title="${esc(hit.title)}" onclick="installPlugin(this.dataset.slug, this.dataset.title, this)" style="${btnPad} justify-content: center;">${ic('download', 14)} Install</button>`;
-
-    if (storeVm === 'icons') {
-      return `
-      <div class="vm-icon-card">
-        <div class="vm-plug-icon-center">
-          ${icon}
-          <b class="plugin-title" style="font-size: 13.5px;" title="${esc(hit.title)}">${esc(hit.title)}</b>
-          <div class="mu" style="font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;">by ${esc(hit.author || 'Author')}</div>
-        </div>
-        <div class="vm-item-foot">
-          <span class="mu" style="font-size: 11px;">&darr; ${formatNum(hit.downloads)}</span>
-          ${actionHtml}
-        </div>
-      </div>`;
-    }
-
-    if (storeVm === 'tiles') {
-      return `
-      <div class="vm-tile-card">
-        <div class="vm-item-head" style="align-items: flex-start;">
-          <div style="display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1;">
-            ${icon}
-            <div style="min-width: 0;">
-              <b class="vm-item-title" style="display: block;" title="${esc(hit.title)}">${esc(hit.title)}</b>
-              <div class="mu" style="font-size: 12px; margin-top: 2px;">by ${esc(hit.author || 'Author')}</div>
-            </div>
-          </div>
-        </div>
-        <div class="plugin-desc" style="display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal;">${esc(hit.description || '')}</div>
-        <div class="vm-item-foot">
-          <div class="row" style="gap: 8px; font-size: 11.5px;">
-            <span class="mu">&darr; ${formatNum(hit.downloads)}</span>
-            <span class="chip">Modrinth</span>
-          </div>
-          ${actionHtml}
-        </div>
-      </div>`;
-    }
-
-    return `
-    <div class="plugin-card">
-      <div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
-        ${icon}
-        <div style="min-width: 0;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 2px; flex-wrap: wrap;">
-            <b class="plugin-title">${esc(hit.title)}</b>
-            <span class="mu" style="font-size: 12.5px;">by ${esc(hit.author || 'Author')}</span>
-          </div>
-          <div class="plugin-desc">${esc(hit.description || '')}</div>
-          <div class="row" style="gap: 10px; font-size: 11.5px; margin-top: 5px; flex-wrap: wrap;">
-            <span class="mu">&darr; ${formatNum(hit.downloads)}</span>
-            <span class="mu">&hearts; ${formatNum(hit.follows || 0)} follows</span>
-            <span class="chip">Modrinth</span>
-          </div>
-        </div>
-      </div>
-      <div style="flex-shrink: 0;">
-        ${actionHtml}
-      </div>
-    </div>`;
-  }).join('');
-}
-
-let modrinthSearchSequence = 0;
-let modrinthSearchController = null;
+function searchModrinthDebounced() { return NPPlugins.debounce(); }
+function renderModrinthHitsHtml(hits) { return NPPlugins.hitsHtml(hits); }
 async function searchModrinth(skipDomWrite = false) {
-  const srv = curServer();
-  if (isSteelEngine(srv?.type)) return;
-  const sequence = ++modrinthSearchSequence;
-  modrinthSearchController?.abort();
-  const controller = new AbortController();
-  modrinthSearchController = controller;
-  const timer = setTimeout(() => controller.abort(), 20000);
-  const token = S.token;
-  const queryKey = () => JSON.stringify([S.q, S.plugLoader, S.plugVer, S.plugSort]);
-  const key = queryKey();
-  const live = () => sequence === modrinthSearchSequence && token === S.token && sameQolServer(srv, curServer()) && key === queryKey();
-  const isMod = isModdedEngine(srv?.type || S.core);
-  const engSlug = engineMeta(srv?.type || S.core).key;
-  const currentGrid = () => !skipDomWrite && S.view === 'plug' && (S.plugTab || 'browse') === 'browse' ? $('#store-grid') : null;
-  const grid = currentGrid();
-  S.lastModrinthHits = null;
-  if (grid) grid.innerHTML = loaderHtml(`Searching Modrinth ${isMod ? 'mods' : 'plugins'}...`);
-  try {
-    const params = new URLSearchParams({
-      query: S.q || '', type: isMod ? 'mod' : 'plugin',
-      loader: S.plugLoader || (isMod ? (engSlug === 'leaf' ? '' : engSlug) : ''),
-      version: S.plugVer || '', sort: S.plugSort || 'relevance', limit: '24'
-    });
-    const res = await api(`/api/plugins/search?${params.toString()}`, { signal: controller.signal, suppressToast: true });
-    if (!live()) return;
-    S.lastModrinthHits = Array.isArray(res.hits) ? res.hits : [];
-    const target = currentGrid();
-    if (target) {
-      target.innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
-      applyPermissionControls(target);
-    }
-  } catch (e) {
-    if (!live()) return;
-    S.lastModrinthHits = [];
-    const target = currentGrid();
-    if (target) target.innerHTML = '<div class="mu" style="padding:24px; text-align:center; grid-column:1/-1;">Search failed or timed out. Change the search to try again.</div>';
-  } finally {
-    clearTimeout(timer);
-    if (modrinthSearchController === controller) modrinthSearchController = null;
-  }
+  if (isSteelEngine(curServer()?.type)) return;
+  return NPPlugins.search(skipDomWrite);
 }
 
 function setPlugSkipConfirm(val) {
@@ -11400,47 +11259,8 @@ function setPlugSkipConfirm(val) {
   if (toggleEl) toggleEl.checked = S.skipPlugConfirm;
 }
 
-async function installPlugin(projectSlug, title, btnEl) {
-  const srv = curServer();
-  if (!srv || !projectSlug) return;
-  if (isSteelEngine(srv.type)) { toast('Java plugins and mods are incompatible with Steel.', 'bad'); return; }
-  if (!S.installingPlugins) S.installingPlugins = new Set();
-  const installKey = `${srv.node_id || 'local'}:${srv.id}:${projectSlug}`;
-  if (S.installingPlugins.has(installKey)) return;
-  S.installingPlugins.add(installKey);
-  if (btnEl) setBtnLoading(btnEl, true, 'Checking…');
-  try {
-    const result = await api(srvApiPath(srv, `/plugins/versions?slug=${encodeURIComponent(projectSlug)}`));
-    const versions = result.versions || [];
-    if (!sameQolServer(srv, curServer())) return;
-    if (!versions.length) {
-      await uiAlert({ title: 'No compatible release', message: `No release of <b>${esc(title || projectSlug)}</b> explicitly supports Minecraft <b>${esc(result.minecraft_version)}</b> and <b>${esc(result.loader)}</b>. Nothing was installed.` });
-      return;
-    }
-    let selected = versions[0];
-    if (!S.skipPlugConfirm) {
-      const confirmation = uiConfirm({
-        title: 'Install compatible release',
-        message: `<p>Install <b>${esc(title || projectSlug)}</b> on <b>${esc(srv.name)}</b>?</p><p class="mu">Minecraft ${esc(result.minecraft_version)} · ${esc(result.loader)}. Restart required after installation.</p><label class="f"><span>Compatible release</span><select id="plugin-release">${versions.map(v => `<option value="${esc(v.id)}">${esc(v.version_number)} — ${esc(v.name)}</option>`).join('')}</select></label>`,
-        confirmText: 'Download & Install', cancelText: 'Cancel'
-      });
-      $('#plugin-release').onchange = event => { selected = versions.find(v => v.id === event.target.value) || versions[0]; };
-      if (!await confirmation) return;
-    }
-    if (!sameQolServer(srv, curServer())) return;
-    if (btnEl) setBtnLoading(btnEl, true, 'Installing…');
-    await api(srvApiPath(srv, '/plugins/install'), { method: 'POST', body: JSON.stringify({ slug: projectSlug, version_id: selected.id }) });
-    toast(`Installed ${title || projectSlug} ${selected.version_number}. Restart server to apply.`, 'ok');
-    if (sameQolServer(srv, curServer())) await loadPluginsList();
-  } catch (_) { /* api displays actionable errors. */ }
-  finally {
-    S.installingPlugins.delete(installKey);
-    if (btnEl && document.body.contains(btnEl)) setBtnLoading(btnEl, false);
-    if (sameQolServer(srv, curServer()) && S.view === 'plug' && $('#store-grid') && Array.isArray(S.lastModrinthHits)) {
-      $('#store-grid').innerHTML = renderModrinthHitsHtml(S.lastModrinthHits);
-      applyPermissionControls($('#store-grid'));
-    }
-  }
+async function installPlugin(projectSlug, title, btnEl, versionId) {
+  return NPPlugins.install(projectSlug, title, btnEl, versionId);
 }
 
 // --- Backups ---
@@ -17709,6 +17529,7 @@ function accessIdentity(srv = curServer()) {
 }
 function resetServerAccess() {
   if (typeof resetFileTrash === 'function') resetFileTrash();
+  window.NPPlugins?.reset();
   window.NPFileDrag?.cancel();
   S.serverAccess?.controller?.abort();
   S.serverAccess = null;

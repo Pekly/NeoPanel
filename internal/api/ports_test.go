@@ -75,7 +75,7 @@ func TestPortAPIQuotaRandomAndSummary(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Port != 30001 || got.ListenerConfigured || !strings.Contains(got.Message, "reserved only") {
+	if got.Port != 30001 || got.ListenerConfigured || !strings.Contains(got.Message, "Multiple ports can be used simultaneously") {
 		t.Fatal(got)
 	}
 	if w = f.request("POST", "/api/servers/alpha/ports", `{"port":42000}`, "admin"); w.Code != 201 {
@@ -317,5 +317,56 @@ func TestPortAPISetPrimaryAndMissingVelocityRollback(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(f.manager.GetWorkingDir("alpha"), name)); !os.IsNotExist(err) {
 			t.Fatal("rollback left initialized file", name, err)
 		}
+	}
+}
+
+func TestPortAPIJavaAndBedrockAllocationsCoexist(t *testing.T) {
+	f := portAPIFixture(t)
+	if err := f.db.SetServerPortAllowance("alpha", 2); err != nil {
+		t.Fatal(err)
+	}
+	properties := filepath.Join(f.manager.GetWorkingDir("alpha"), "server.properties")
+	before, err := os.ReadFile(properties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requested []database.ServerPort
+	f.router.servers.allowPort = func(port int, protocol string) {
+		requested = append(requested, database.ServerPort{Port: port, Protocol: protocol})
+	}
+	w := f.request("POST", "/api/servers/alpha/ports", `{"port":19132,"protocol":"udp","notes":"Bedrock / Geyser"}`, "admin")
+	if w.Code != http.StatusCreated {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if len(requested) != 1 || requested[0].Port != 19132 || requested[0].Protocol != "udp" {
+		t.Fatalf("wrong host firewall request: %+v", requested)
+	}
+	srv, err := f.db.GetServer("alpha")
+	if err != nil || srv.Port != 25565 || srv.PortsUsed != 2 {
+		t.Fatalf("primary listener changed: %+v, %v", srv, err)
+	}
+	after, err := os.ReadFile(properties)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("extra UDP allocation changed Java configuration: %s, %v", after, err)
+	}
+	ports, err := f.db.ListServerPorts("alpha")
+	if err != nil || len(ports) != 2 {
+		t.Fatalf("ports: %+v, %v", ports, err)
+	}
+	var primary, bedrock bool
+	for _, p := range ports {
+		primary = primary || (p.Port == 25565 && p.IsPrimary)
+		bedrock = bedrock || (p.Port == 19132 && p.Protocol == "udp" && !p.IsPrimary)
+	}
+	if !primary || !bedrock {
+		t.Fatalf("both allocations must remain assigned: %+v", ports)
+	}
+	// A second server on the same node cannot claim the assigned extra port.
+	w = f.request("POST", "/api/servers", `{"name":"port-collision","type":"custom","port":19132}`, "admin")
+	if w.Code < 400 {
+		t.Fatal("another server claimed the UDP allocation", w.Body.String())
+	}
+	if f.manager.GetStatus("alpha") != "offline" {
+		t.Fatal("allocating an extra port started the server")
 	}
 }
