@@ -1,0 +1,44 @@
+/* Use the panel's semantic surfaces, type and controls; 4/8px spacing. */
+.proxy-settings { padding: 20px; min-width: 0; color: var(--tx); }
+.proxy-settings h2 { margin: 0; font-size: 16px; }
+.proxy-settings h3 { margin: 16px 0 8px; font-size: 14px; }
+.proxy-settings p { font-size: 12px; line-height: 1.6; margin: 8px 0 12px; overflow-wrap: anywhere; }
+.proxy-heading, .proxy-actions, .proxy-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.proxy-heading h3, .proxy-heading p { margin: 0; }
+.proxy-heading { margin-bottom: 12px; }
+.proxy-fields { border: 0; min-width: 0; padding: 0; margin: 0; }
+.proxy-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.proxy-settings .f { min-width: 0; margin: 0 0 12px; }
+.proxy-settings input:not([type=checkbox]), .proxy-settings select { width: 100%; min-width: 0; box-sizing: border-box; }
+.proxy-settings input[readonly] { color: var(--tx-muted); }
+.proxy-settings .btn { white-space: normal; overflow-wrap: anywhere; min-height: 36px; }
+.proxy-settings :is(button, input, select, summary):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+.proxy-settings .proxy-hint { margin-top: -4px; }
+.proxy-list { display: grid; gap: 8px; margin-bottom: 12px; }
+.proxy-row, .proxy-order, .proxy-empty { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.proxy-order { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.proxy-order .f { margin-bottom: 4px; }
+.proxy-actions { justify-content: flex-start; }
+.proxy-check { display: flex; align-items: center; gap: 12px; font-size: 13px; line-height: 1.5; margin: 16px 0; }
+.proxy-check input { width: 16px; height: 16px; flex: 0 0 auto; accent-color: var(--ac); }
+.proxy-settings details { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.proxy-settings summary { cursor: pointer; font-weight: 600; font-size: 13px; padding: 4px 0; overflow-wrap: anywhere; }
+.proxy-settings details[open] > summary { margin-bottom: 12px; }
+.proxy-settings .proxy-error { color: var(--er); }
+.proxy-status { font-weight: 600; }
+.proxy-footer, .proxy-secret { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+.proxy-footer [data-action=save] { background: var(--ac); color: #fff; font-weight: 700; }
+.proxy-footer [data-action=save]:not(:disabled):hover { background: var(--ac-hover); }
+.proxy-settings :disabled { cursor: not-allowed; opacity: .6; }
+.proxy-settings fieldset:disabled { opacity: 1; }
+.proxy-settings .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; clip-path: inset(50%); white-space: nowrap; }
+.proxy-settings .btn:not(:disabled):active { transform: translateY(1px); }
+.proxy-settings .btn { transition: background-color 100ms ease-out, border-color 100ms ease-out, transform 100ms ease-out; }
+.proxy-settings .proxy-new { animation: proxy-row-enter 180ms cubic-bezier(.2, .85, .25, 1.12) both; }
+@keyframes proxy-row-enter { from { opacity: .25; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 600px) {
+  .proxy-settings { padding: 16px; }
+  .proxy-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .proxy-footer { align-items: stretch; flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) { .proxy-settings .btn { transition: none; transform: none; } .proxy-settings .proxy-new { animation: none; } }
