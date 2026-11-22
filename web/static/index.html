@@ -31,6 +31,7 @@
   <link rel="stylesheet" href="/css/plugin-details.css">
   <link rel="stylesheet" href="/css/installed-plugins.css">
   <link rel="stylesheet" href="/css/plugin-identities.css">
+  <link rel="stylesheet" href="/css/loading.css">
   <style id="custom-brand-css"></style>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
 </head>
@@ -42,9 +43,16 @@
 
     <!-- Main Workspace View -->
     <main id="main" tabindex="-1">
-      <div class="np-page-loader" role="status" aria-live="polite">
-        <div class="np-spinner"></div>
-        <span>Loading NeoPanel...</span>
+      <!-- Neutral pre-auth shell: no account, server or cached private data. -->
+      <div class="np-loading np-loading-boot">
+        <div class="np-loading-status" role="status" aria-live="polite">Loading NeoPanel...</div>
+        <div class="np-load-shapes" aria-hidden="true">
+          <div class="np-load-boot-heading"><span class="np-load-bar np-load-title"></span><span class="np-load-bar np-load-short"></span></div>
+          <div class="np-load-boot-panels">
+            <div class="np-load-item"><span class="np-load-bar np-load-title"></span><div class="np-load-copy"><span class="np-load-bar"></span><span class="np-load-bar"></span><span class="np-load-bar np-load-short"></span></div><div class="np-load-copy"><span class="np-load-bar"></span><span class="np-load-bar np-load-short"></span></div></div>
+            <div class="np-load-item"><span class="np-load-bar np-load-title"></span><div class="np-load-copy"><span class="np-load-bar"></span><span class="np-load-bar np-load-short"></span></div><div class="np-load-copy"><span class="np-load-bar"></span><span class="np-load-bar np-load-short"></span></div></div>
+          </div>
+        </div>
       </div>
     </main>
   </div>
@@ -72,6 +80,7 @@
   <div id="upload-progress-widget" class="upload-progress-widget" style="display:none;"></div>
 
   <!-- App Core Script -->
+  <script src="/js/loading.js"></script>
   <script src="/js/qol.js"></script>
   <script src="/js/file-preview.js"></script>
   <script src="/js/team.js"></script>

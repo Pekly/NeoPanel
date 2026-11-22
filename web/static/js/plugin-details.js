@@ -66,6 +66,8 @@
   function hitsHtml(hits) {
     const st = search?.key === queryKey() ? search : null;
     const list = st ? arr(st.shown?.hits) : arr(hits), mode = getViewMode('plug_store', 'list');
+    // No results yet: a bounded shape, not empty space. Keep previous pages usable on refresh.
+    if (st?.busy && !st.shown && window.NPLoading) return window.NPLoading.html('plugins', `Loading page ${st.page}…`, mode);
     const cards = list.map((h, i) => {
       const slug = h.slug || h.project_id || h.id || '';
       const banner = mode !== 'icons' && (url(h.featured_gallery) || arr(h.gallery).slice(0,8).map(url).find(Boolean));
@@ -83,7 +85,8 @@
     if (host) {
       const focused = document.activeElement, inPager = focused?.closest?.('.np-project-pagination');
       host.innerHTML = hitsHtml(S.lastModrinthHits);
-      host.setAttribute('aria-busy', String(!!search?.busy));
+      // Live loading/error copy must not sit inside an aria-busy subtree.
+      host.removeAttribute('aria-busy');
       if (inPager) (host.querySelector('[data-np-search]') || host.querySelector('[aria-current="page"]:not(:disabled)') || host.querySelector('.np-project-pagination'))?.focus({preventScroll:true});
     }
   }
