@@ -116,7 +116,10 @@ func TestModrinthRootPinnedAcrossRequest(t *testing.T) {
 				}
 				swapped = true
 			}
-			data = `[{"id":"release","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"plugin.jar","url":"https://mock.invalid/plugin.jar","size":3}]}]`
+			data = `[{"id":"release","project_id":"project","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"plugin.jar","url":"https://cdn.modrinth.com/plugin.jar","size":3}]}]`
+		}
+		if r.URL.Path == "/v2/project/project" {
+			data = `{"id":"project","slug":"project"}`
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(data))}, nil
 	})}

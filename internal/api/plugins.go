@@ -42,15 +42,15 @@ func (h *PluginHandler) Search(w http.ResponseWriter, r *http.Request) {
 	version := r.URL.Query().Get("version")
 	sortBy := r.URL.Query().Get("sort")
 	projType := r.URL.Query().Get("type")
-	limitStr := r.URL.Query().Get("limit")
-	limit := 24
-	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-		limit = l
+	limit, offset, err := pluginSearchPage(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 
-	res, err := downloader.SearchModrinthPlugins(q, limit, loader, version, sortBy, projType)
+	res, err := downloader.SearchModrinthPluginsPage(r.Context(), q, limit, offset, loader, version, sortBy, projType)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -136,15 +136,15 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slug := strings.TrimSpace(req.Slug)
+	slug := req.Slug
 	if slug == "" {
-		slug = strings.TrimSpace(req.ProjectID)
+		slug = req.ProjectID
 	}
 	if slug == "" {
-		slug = strings.TrimSpace(req.ID)
+		slug = req.ID
 	}
-	if slug == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid project slug is required"})
+	if !downloader.ValidModrinthIdentifier(slug) || (req.VersionID != "" && !downloader.ValidModrinthIdentifier(req.VersionID)) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid project and version identifiers are required (1-128 ASCII letters, digits, underscores or hyphens)"})
 		return
 	}
 
@@ -161,13 +161,19 @@ func (h *PluginHandler) Install(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	pluginsDir, err := h.pluginDir(serverID, folderName)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	defer pluginsDir.Close()
-	filename, err := downloader.DownloadModrinthPluginRoot(slug, pluginsDir, srv.Type, srv.Version, req.VersionID)
+	filename, err := downloader.DownloadModrinthPluginRootContext(r.Context(), slug, pluginsDir, srv.Type, srv.Version, req.VersionID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -211,6 +217,12 @@ func (h *PluginHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	dir, err := h.pluginDir(serverID, folderName)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -312,6 +324,12 @@ func (h *PluginHandler) Toggle(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	releaseMutation, err := rooted.TryMutation(h.manager.GetWorkingDir(serverID))
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	defer releaseMutation()
 	dir, err := h.pluginDir(serverID, folder)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -336,7 +354,12 @@ func (h *PluginHandler) Versions(w http.ResponseWriter, r *http.Request) {
 	if rejectSteelPlugins(srv, w) {
 		return
 	}
-	versions, err := downloader.CompatibleModrinthVersions(r.URL.Query().Get("slug"), srv.Type, srv.Version)
+	slug := r.URL.Query().Get("slug")
+	if !downloader.ValidModrinthIdentifier(slug) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid Modrinth project slug is required"})
+		return
+	}
+	versions, err := downloader.CompatibleModrinthVersionsContext(r.Context(), slug, srv.Type, srv.Version)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -350,4 +373,46 @@ func rejectSteelPlugins(srv *database.Server, w http.ResponseWriter) bool {
 		return true
 	}
 	return false
+}
+
+// Project exposes only public, allowlisted Modrinth metadata. Its text and links
+// must still be treated as untrusted by clients rendering Markdown or HTML.
+func (h *PluginHandler) Project(w http.ResponseWriter, r *http.Request) {
+	srv, err := h.db.GetServer(getURLParam(r, "id"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Server not found"})
+		return
+	}
+	if rejectSteelPlugins(srv, w) {
+		return
+	}
+	slug := r.URL.Query().Get("slug")
+	if !downloader.ValidModrinthIdentifier(slug) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Valid Modrinth project slug is required"})
+		return
+	}
+	detail, err := downloader.GetModrinthProjectDetail(r.Context(), slug, srv.Type, srv.Version)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func pluginSearchPage(r *http.Request) (int, int, error) {
+	limit, offset := 24, 0
+	for key, dest := range map[string]*int{"limit": &limit, "offset": &offset} {
+		if raw := r.URL.Query().Get(key); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil {
+				return 0, 0, fmt.Errorf("%s must be an integer", key)
+			}
+			*dest = n
+		}
+	}
+	if limit <= 0 {
+		limit = 24
+	}
+	limit, offset = downloader.BoundModrinthPage(limit, offset)
+	return limit, offset, nil
 }

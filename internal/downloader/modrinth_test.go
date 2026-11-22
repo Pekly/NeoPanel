@@ -13,17 +13,17 @@ import (
 func TestCompatiblePluginVersions(t *testing.T) {
 	var versions []ModrinthVersion
 	if err := json.Unmarshal([]byte(`[
- {"id":"new","game_versions":["1.21.4"],"loaders":["paper"],"files":[{"filename":"new.jar"}]},
- {"id":"right","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"right.jar"}]},
- {"id":"fabric","game_versions":["1.20.1"],"loaders":["fabric"],"files":[{"filename":"mod.jar"}]},
- {"id":"folia","game_versions":["1.20.1"],"loaders":["folia"],"files":[{"filename":"folia.jar"}]},
- {"id":"unsafe","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"../escape.jar"}]}
+ {"id":"right","date_published":"2024-01-01T00:00:00Z","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"right.jar","url":"https://cdn.modrinth.com/right.jar"}]},
+ {"id":"new","date_published":"2025-01-01T00:00:00Z","game_versions":["1.21.4"],"loaders":["paper"],"files":[{"filename":"new.jar","url":"https://cdn.modrinth.com/new.jar"}]},
+ {"id":"fabric","game_versions":["1.20.1"],"loaders":["fabric"],"files":[{"filename":"mod.jar","url":"https://cdn.modrinth.com/mod.jar"}]},
+ {"id":"folia","game_versions":["1.20.1"],"loaders":["folia"],"files":[{"filename":"folia.jar","url":"https://cdn.modrinth.com/folia.jar"}]},
+ {"id":"unsafe","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"../escape.jar","url":"https://cdn.modrinth.com/escape.jar"}]}
  ]`), &versions); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct{ loader, version, want string }{
-		{"paper", "1.20.1", "right"}, {"purpur", "1.20.1", "right"}, {"leafmc", "1.20.1", "right"},
-		{"fabric", "1.20.1", "fabric"}, {"folia", "1.20.1", "folia"}, {"forge", "1.20.1", ""}, {"paper", "1.19.4", ""},
+		{"paper", "1.20.1", "new,right"}, {"purpur", "1.20.1", "new,right"}, {"leafmc", "1.20.1", "new,right"},
+		{"fabric", "1.20.1", "fabric"}, {"folia", "1.20.1", "folia"}, {"forge", "1.20.1", ""}, {"paper", "1.19.4", "new,right"},
 	} {
 		t.Run(tc.loader+tc.version, func(t *testing.T) {
 			got := filterCompatibleVersions(versions, tc.loader, tc.version)
@@ -33,7 +33,11 @@ func TestCompatiblePluginVersions(t *testing.T) {
 				}
 				return
 			}
-			if len(got) != 1 || got[0].ID != tc.want {
+			ids := make([]string, 0, len(got))
+			for _, v := range got {
+				ids = append(ids, v.ID)
+			}
+			if strings.Join(ids, ",") != tc.want {
 				t.Fatalf("got %+v, want %s", got, tc.want)
 			}
 		})
@@ -51,7 +55,10 @@ func TestPluginDownloadPublication(t *testing.T) {
 	httpClient = &http.Client{Transport: modrinthTransport(func(r *http.Request) (*http.Response, error) {
 		data := body
 		if strings.Contains(r.URL.Path, "/version") {
-			data = `[{"id":"release","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"plugin.jar","url":"https://cdn.modrinth.com/plugin.jar","size":8,"primary":true}]}]`
+			data = `[{"id":"release","project_id":"project","game_versions":["1.20.1"],"loaders":["paper"],"files":[{"filename":"plugin.jar","url":"https://cdn.modrinth.com/plugin.jar","size":8,"primary":true}]}]`
+		}
+		if r.URL.Path == "/v2/project/project" {
+			data = `{"id":"project","slug":"project"}`
 		}
 		return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(data)), Header: make(http.Header)}, nil
 	})}
