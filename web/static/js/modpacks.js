@@ -285,7 +285,7 @@
 
   function render() {
     const root = document.getElementById('modpacks-tab-root');
-    if (root && S.view === 'plug' && S.plugTab === 'modpacks') {
+    if (root && ((typeof S !== 'undefined' && S.view === 'modpacks') || (typeof S !== 'undefined' && S.view === 'plug' && S.plugTab === 'modpacks'))) {
       const srv = typeof curServer === 'function' ? curServer() : null;
       root.innerHTML = renderModpacksTab(srv);
     }

@@ -203,3 +203,76 @@ test('Sync DNS button handles subdomain validation, unconfigured token, and sync
   await ctx.window.NPCloudflareDNS.syncDNS(btn);
   assert.ok(ctx.toasts.some(t => t.msg.includes('Please set a subdomain label')), 'Validation toast triggered');
 });
+
+test('1-Click Modpacks is available only to modded servers and appears in sidebar under Mods', () => {
+  const ctx = createTestContext();
+  vm.createContext(ctx);
+
+  let currentServer = { id: 'srv-mod', type: 'fabric', jar_file: 'fabric-server.jar' };
+  ctx.curServer = () => currentServer;
+  ctx.accessIdentity = () => 'k';
+  ctx.location = { pathname: '/server/srv-mod/console' };
+  ctx.window.location = ctx.location;
+  ctx.S = {
+    token: 'token',
+    view: 'con',
+    core: 'paper',
+    servers: [currentServer],
+    cs: 0,
+    user: { id: 1, role: 'admin' },
+    branding: {},
+    acct: {},
+    serverAccess: { status: 'ready', key: 'k', data: { is_admin: true, permissions: [] } }
+  };
+  ctx.hasServerPermission = () => true;
+  ctx.routeUrl = (view) => `/server/srv-mod/${view}`;
+  ctx.handleNavClick = () => false;
+  ctx.brandLogoHtml = () => '';
+  ctx.withSafeModeQuery = (u) => u;
+  ctx.av = () => '';
+  ctx.renderFooterHtml = () => '';
+  ctx.renderModSidebarItemsHtml = () => '';
+
+  function section(start, end) {
+    const a = appJs.indexOf(start);
+    const b = appJs.indexOf(end, a);
+    assert.ok(a >= 0 && b > a, `missing section: ${start}`);
+    return appJs.slice(a, b);
+  }
+
+  vm.runInContext(section('function isModdedEngine(', 'function isSteelEngine('), ctx);
+  vm.runInContext(section('const PG = [', 'const CMDS = ['), ctx);
+  vm.runInContext(section('function serverPagePermission(', 'function canCreateServers('), ctx);
+  vm.runInContext(section('function navHtml() {', 'function normalizeRoute('), ctx);
+
+  // 1. Modded Server (Fabric):
+  assert.equal(ctx.isServerModded(currentServer), true);
+  assert.equal(ctx.canServerPage('modpacks'), true);
+
+  const navMod = ctx.navHtml();
+  assert.match(navMod, /data-feature-page="plug"[\s\S]*?>[\s\S]*?<span>Mods<\/span>/);
+  assert.match(navMod, /data-feature-page="modpacks"[\s\S]*?>[\s\S]*?<span>1-Click Modpacks<\/span>/);
+
+  const plugIdx = navMod.indexOf('data-feature-page="plug"');
+  const modpackIdx = navMod.indexOf('data-feature-page="modpacks"');
+  const verIdx = navMod.indexOf('data-feature-page="ver"');
+  assert.ok(plugIdx >= 0 && modpackIdx > plugIdx && verIdx > modpackIdx, '1-Click Modpacks is placed just under Mods and before Software');
+
+  // 2. Non-modded Server (Paper):
+  currentServer = { id: 'srv-paper', type: 'paper', jar_file: 'server.jar' };
+  assert.equal(ctx.isServerModded(currentServer), false);
+  assert.equal(ctx.canServerPage('modpacks'), false);
+
+  const navPaper = ctx.navHtml();
+  assert.match(navPaper, /data-feature-page="plug"[\s\S]*?>[\s\S]*?<span>Plugins<\/span>/);
+  assert.equal(navPaper.includes('data-feature-page="modpacks"'), false, '1-Click Modpacks must NOT be in sidebar for non-modded server');
+  assert.equal(navPaper.includes('1-Click Modpacks'), false);
+
+  // 3. Modded Server by Jar File (Custom type, but fabric jar):
+  currentServer = { id: 'srv-custom', type: 'custom', jar_file: 'fabric-loader-1.21.jar' };
+  assert.equal(ctx.isServerModded(currentServer), true);
+  assert.equal(ctx.canServerPage('modpacks'), true);
+  const navCustom = ctx.navHtml();
+  assert.match(navCustom, /data-feature-page="modpacks"/);
+});
+

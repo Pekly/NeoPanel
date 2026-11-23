@@ -133,9 +133,18 @@ function detectJarEngine(filename = '') {
   return curServer()?.type || 'vanilla';
 }
 
-function isModdedEngine(type) {
+function isModdedEngine(type, jarFile = '') {
   const k = String(type || '').toLowerCase().trim();
-  return k === 'fabric' || k === 'forge' || k === 'neoforge';
+  if (k === 'fabric' || k === 'forge' || k === 'neoforge' || k === 'quilt') return true;
+  const j = String(jarFile || '').toLowerCase().trim();
+  if (j && (j.includes('fabric') || j.includes('forge') || j.includes('neoforge') || j.includes('quilt') || j.includes('mrpack'))) return true;
+  return false;
+}
+
+function isServerModded(srv) {
+  const s = srv || (typeof curServer === 'function' ? curServer() : null);
+  if (!s) return false;
+  return isModdedEngine(s.type || (typeof S !== 'undefined' ? S.core : ''), s.jar_file || s.jarFile || '');
 }
 
 function isSteelEngine(type) {
@@ -1475,7 +1484,8 @@ const VIEW_TO_SLUG = {
   admin: 'admin',
   acc: 'account',
   client: 'client-area',
-  mod: 'mod'
+  mod: 'mod',
+  modpacks: 'modpacks'
 };
 
 const SLUG_TO_VIEW = Object.fromEntries(
@@ -1485,6 +1495,7 @@ const SLUG_TO_VIEW = Object.fromEntries(
 );
 SLUG_TO_VIEW.store = 'plug';
 SLUG_TO_VIEW.mods = 'plug';
+SLUG_TO_VIEW.modpack = 'modpacks';
 SLUG_TO_VIEW.startup = 'set';
 SLUG_TO_VIEW.stp = 'set';
 SLUG_TO_VIEW.servers = 'dash';
@@ -1805,7 +1816,7 @@ function parseCurrentRoute(urlOrPath = window.location.pathname + window.locatio
 }
 
 function getViewDisplayLabel(view) {
-  const isMod = isModdedEngine(curServer()?.type || S.core);
+  const isMod = isServerModded();
   const map = {
     dash: 'Servers',
     con: 'Console',
@@ -1821,6 +1832,7 @@ function getViewDisplayLabel(view) {
     stp: 'Settings',
     pl: 'Players',
     plug: isMod ? 'Mods' : 'Plugins',
+    modpacks: '1-Click Modpacks',
     ver: 'Software',
     admin: 'Admin',
     acc: 'Account',
@@ -6677,9 +6689,11 @@ const V = {
           <button class="btn ${S.plugTab === 'installed' ? 'pr' : ''} sm" onclick="setPlugTab('installed')">
             ${ic('puzzle', 14)} Installed <span id="plug-installed-count" class="chip" style="margin-left: 4px; padding: 1px 7px;">${S.plugins.length}</span>
           </button>
-          <button class="btn ${S.plugTab === 'modpacks' ? 'pr' : ''} sm" onclick="setPlugTab('modpacks')">
+          ${isMod ? `
+          <button class="btn ${S.plugTab === 'modpacks' ? 'pr' : ''} sm" onclick="go('modpacks')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> 1-Click Modpacks
           </button>
+          ` : ''}
         </div>
       </div>
 
@@ -6740,6 +6754,45 @@ const V = {
 
         ${installedBodyHtml}
       `)}
+    </div>`;
+  },
+
+  modpacks() {
+    const srv = curServer();
+    if (!srv) return '';
+    const isMod = isServerModded(srv);
+    if (!isMod) {
+      return `${srvh()}
+      <div class="card mu" style="text-align: center; padding: 48px 20px; margin-top: 14px;">
+        <div class="np-empty-icon" aria-hidden="true" style="margin-bottom: 12px;">${ic('package', 44)}</div>
+        <h2 style="margin: 0 0 6px; color: var(--tx);">1-Click Modpacks Unavailable</h2>
+        <p style="max-width: 480px; margin: 0 auto 16px; line-height: 1.5;">
+          1-Click Modpacks are only available for modded servers (Fabric, Forge, NeoForge, or Quilt). Your server is currently running <b>${esc(srv.type || 'standard')}</b>.
+        </p>
+        <button type="button" class="btn pr" onclick="go('ver')">${ic('cpu', 14)} Switch Software</button>
+      </div>`;
+    }
+
+    return `${srvh()}
+    <div class="np-plugins-workspace" style="margin-top: 14px;">
+      <div class="np-slot-container" data-np-slot="modpacks:top" style="margin-bottom: 12px;"></div>
+      <div class="row sb np-section-heading">
+        <div>
+          <h2>1-Click Modpacks</h2>
+          <div class="mu" style="font-size: 12.5px; margin-top: 3px;">
+            Search and install complete Modrinth modpack archives (.mrpack) with automatic server overrides.
+            <div style="margin-top:6px;">Server must be completely stopped before installing a modpack.</div>
+          </div>
+        </div>
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
+          <button class="btn sm" onclick="go('plug')">
+            ${ic('puzzle', 14)} Manage Individual Mods
+          </button>
+        </div>
+      </div>
+      <div id="modpacks-tab-root">
+        ${window.NPModpacks ? (window.NPModpacks.load(srv), window.NPModpacks.renderTab(srv)) : ''}
+      </div>
     </div>`;
   },
 
@@ -9284,18 +9337,31 @@ function navHtml() {
   </a>
 
   ${(() => {
-    const isModSrv = isModdedEngine(curServer()?.type || S.core);
-    return PG.map(([key, label, iconName, grp]) => {
+    const srv = curServer();
+    const isModSrv = isServerModded(srv);
+    return PG.flatMap(([key, label, iconName, grp]) => {
       const header = grp !== group ? `<div class="ng">${grp}</div>` : '';
       group = grp;
       const active = S.view === key ? 'on' : '';
       const href = routeUrl(key);
       const displayLabel = (key === 'plug' && isModSrv) ? 'Mods' : label;
-      return `${header}
+      const mainItem = `${header}
     <a class="nav-item ${active}" data-feature-page="${key}" ${canServerPage(key) ? `href="${esc(href)}"` : 'aria-disabled="true" tabindex="0" title="Access restricted — permission required"'} onclick="return handleNavClick(event, '${key}')" ${active ? 'aria-current="page"' : ''}>
       ${ic(iconName, 16)}
       <span>${displayLabel}</span>
     </a>`;
+
+      if (key === 'plug' && isModSrv) {
+        const mpActive = S.view === 'modpacks' ? 'on' : '';
+        const mpHref = routeUrl('modpacks');
+        const mpItem = `
+    <a class="nav-item ${mpActive}" data-feature-page="modpacks" ${canServerPage('modpacks') ? `href="${esc(mpHref)}"` : 'aria-disabled="true" tabindex="0" title="Access restricted — permission required"'} onclick="return handleNavClick(event, 'modpacks')" ${mpActive ? 'aria-current="page"' : ''}>
+      ${ic('package', 16)}
+      <span>1-Click Modpacks</span>
+    </a>`;
+        return [mainItem, mpItem];
+      }
+      return [mainItem];
     }).join('');
   })()}
 
@@ -9323,6 +9389,9 @@ function normalizeRoute(view) {
   }
   if (view === 'mods') {
     return 'plug';
+  }
+  if (view === 'modpack') {
+    return 'modpacks';
   }
   if (view === 'stp' || view === 'startup') {
     return 'set';
@@ -9522,6 +9591,9 @@ window.onEnterView = function(view) {
     loadPluginsList();
     loadVersionsCatalog();
     if ((S.plugTab || 'browse') === 'browse') searchModrinth();
+  }
+  else if (view === 'modpacks') {
+    if (window.NPModpacks) window.NPModpacks.load(curServer());
   }
   else if (view === 'bk') loadBackupsList();
   else if (view === 'sc') loadServerSchedules();
@@ -12117,7 +12189,7 @@ async function switchServer(index) {
 // --- Command Palette (Ctrl + K) ---
 function paletteItems() {
   const q = (S.pq || '').toLowerCase();
-  const isModSrv = isModdedEngine(curServer()?.type || S.core);
+  const isModSrv = isServerModded();
   const clientLabel = (getBrand('client_area_label') || 'Client Area').trim() || 'Client Area';
   const showClientArea = getBrand('show_client_area_button') !== false;
   const modCmds = Array.isArray(window.NP?._paletteCommands)
@@ -12125,6 +12197,7 @@ function paletteItems() {
     : [];
   const items = [
     ...PG.filter(p => canServerPage(p[0])).map(p => ['Pages', (p[0] === 'plug' && isModSrv) ? 'Mods' : p[1], 'Go to page', () => go(p[0])]),
+    ...(isModSrv && canServerPage('modpacks') ? [['Pages', '1-Click Modpacks', 'Browse and install complete Modrinth modpacks', () => go('modpacks')]] : []),
     ...(showClientArea ? [['Pages', clientLabel, 'External storefront and billing', () => go('client')]] : []),
     ...(S.user?.role === 'admin' ? [['Pages', 'Admin', 'Panel settings, nodes, and users', () => go('admin')]] : []),
     ['Pages', 'Account', 'Profile, appearance, and security', () => go('acc')],
@@ -17122,6 +17195,7 @@ window.syncReinstallSelectFromInput = syncReinstallSelectFromInput;
 window.refreshOpenVersionSelects = refreshOpenVersionSelects;
 window.renderModrinthHitsHtml = renderModrinthHitsHtml;
 window.isModdedEngine = isModdedEngine;
+window.isServerModded = isServerModded;
 window.engineMeta = engineMeta;
 window.engineIcon = engineIcon;
 window.onPlayerHeadError = onPlayerHeadError;
@@ -17547,7 +17621,7 @@ function resetServerAccess() {
 }
 function serverPagePermission(view) {
   if (view === 'act' && !window.location.pathname.startsWith('/server/')) return '';
-  return ({ con: 'console.view', pl: 'console.view', act: 'console.view', fi: 'files.view', plug: 'files.view', bk: 'backup.manage', db: 'database.manage', sc: 'schedules.manage', team: 'subusers.manage', set: 'settings.view', stp: 'settings.view', net: 'settings.view', ver: 'settings.view', sub: 'settings.view', sftp: 'sftp.access' })[view] || '';
+  return ({ con: 'console.view', pl: 'console.view', act: 'console.view', fi: 'files.view', plug: 'files.view', modpacks: 'files.view', bk: 'backup.manage', db: 'database.manage', sc: 'schedules.manage', team: 'subusers.manage', set: 'settings.view', stp: 'settings.view', net: 'settings.view', ver: 'settings.view', sub: 'settings.view', sftp: 'sftp.access' })[view] || '';
 }
 function hasServerPermission(permission, srv = curServer()) {
   if (!srv?.id || !S.token || !S.user) return false;
@@ -17558,6 +17632,7 @@ function hasServerPermission(permission, srv = curServer()) {
 function canServerPage(view) {
   if (window.NPWorkspace?.maintenanceLimited() && !window.NPWorkspace.maintenanceAllowed(view)) return false;
   if (view === 'con' && hasServerPermission('server.power')) return true;
+  if (view === 'modpacks' && !isServerModded()) return false;
   const permission = serverPagePermission(view);
   return !permission || hasServerPermission(permission);
 }
