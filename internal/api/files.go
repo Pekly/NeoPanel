@@ -477,6 +477,16 @@ func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Enforce server disk quota limit
+	srv, srvErr := h.db.GetServer(serverID)
+	if srvErr == nil && srv != nil && srv.DiskLimitMB > 0 {
+		curBytes := runner.CalculateDirSizeMB(h.manager.GetWorkingDir(serverID)) * (1 << 20)
+		if curBytes+handler.Size > srv.DiskLimitMB*(1<<20) {
+			writeError(w, http.StatusInsufficientStorage, fmt.Sprintf("Upload rejected: server disk limit exceeded (%d MB limit)", srv.DiskLimitMB))
+			return
+		}
+	}
+
 	destRel := filepath.Join(targetDir, handler.Filename)
 	fullPath, err := root.Path(destRel)
 	if err != nil {

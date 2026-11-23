@@ -243,6 +243,13 @@ func (p *ProcessInstance) Start() error {
 		timeout = DefaultStartupTimeout
 	}
 	p.mu.Unlock()
+	if srv.DiskLimitMB > 0 {
+		curMB := calculateDirSizeMB(p.workingDir)
+		if curMB > srv.DiskLimitMB {
+			p.broadcast(fmt.Sprintf("[NeoPanel] Start refused: server disk limit exceeded (%d MB used / %d MB limit). Please delete unused files.", curMB, srv.DiskLimitMB))
+			return fmt.Errorf("server disk limit exceeded: %d MB used of %d MB limit", curMB, srv.DiskLimitMB)
+		}
+	}
 	if err := checkServerWorldLocks(p.workingDir, srv.Type); err != nil {
 		p.broadcast("[NeoPanel] Start refused: " + err.Error())
 		return err
@@ -1087,7 +1094,7 @@ func (p *ProcessInstance) Subscribe() (chan string, func()) {
 	return ch, unsubscribe
 }
 
-func calculateDirSizeMB(path string) int64 {
+func CalculateDirSizeMB(path string) int64 {
 	var totalSize int64
 	_ = filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
 		if err == nil && info != nil && !info.IsDir() {
@@ -1096,6 +1103,10 @@ func calculateDirSizeMB(path string) int64 {
 		return nil
 	})
 	return totalSize / (1024 * 1024)
+}
+
+func calculateDirSizeMB(path string) int64 {
+	return CalculateDirSizeMB(path)
 }
 
 func syncServerPort(workingDir, serverType string, port int) error {

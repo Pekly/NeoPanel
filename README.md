@@ -71,9 +71,29 @@ Back up your worlds, configuration, and database before updating. Update the pan
 
 On Linux, configuration is in `/etc/neopanel/config.yaml`, server data is under `/var/lib/neopanel`, and installer logs are in `/var/lib/neopanel/installer/install.log`.
 
-## Sharing access and keeping data safe
+## Granular permissions and team access
 
-Admins manage the panel and create servers. Other users can access servers they own or have been invited to. Set account roles in **Admin → Users** and manage each server's permissions from its **Team** page.
+Global accounts have two roles: **Admin** (panel settings, node configuration, and creating servers) and **User** (accessing owned or shared servers).
+
+Access to individual servers is completely granular. Server owners and admins can invite teammates from the **Team** tab and assign any combination of **13 granular permissions**:
+
+- **Console**: `console.view` (live terminal monitoring), `console.command` (send stdin commands)
+- **Power**: `server.power` (start, stop, restart, kill)
+- **File Manager**: `files.view` (browse files), `files.edit` (create, edit, unzip, upload), `files.delete` (delete files and purge trash)
+- **Backups**: `backup.manage` (create, download, restore, delete local and cloud S3 backups)
+- **Databases**: `database.manage` (create, view credentials, reset passwords, delete databases)
+- **Schedules**: `schedules.manage` (create, trigger, pause, delete cron tasks)
+- **Team**: `subusers.manage` (invite members and manage granular permissions)
+- **Configuration**: `settings.view` (inspect properties & network), `settings.edit` (modify flags, JVM runtime, config)
+- **SFTP**: `sftp.access` (direct SFTP client connectivity)
+
+## Security architecture and sandbox model
+
+- **Filesystem Isolation**: On Linux, servers run in unprivileged [Bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) containers. Only the server's working directory is mounted read-write. Host paths (`/usr`, `/bin`, `/lib`) are mounted read-only, sensitive paths (`/etc/shadow`, `/etc/sudoers`) are masked with `/dev/null`, and all Linux capabilities are dropped (`--cap-drop ALL`).
+- **Resource Ceilings**: Bubblewrap runs within systemd scopes (`systemd-run --scope`) to enforce strict cgroup v2 CPU quotas (`CPUQuota`), process count ceilings (`TasksMax`), and hard memory limits (`MemoryMax` with zero swap allowance).
+- **Network Architecture**: The sandbox uses `--share-net` so Minecraft servers can listen on their allocated ports and authenticate player sessions with Mojang API servers (`sessionserver.mojang.com`) without container NAT overhead. To prevent untrusted plugins from scanning host loopback services, administrators can isolate internal services (e.g., binding databases to Unix sockets) or configure local firewall egress filters.
+- **Disk Limits**: Server disk quotas (`DiskLimitMB`) are strictly checked across all operations: pre-flight checks before server startup, File Manager uploads, SFTP transfers, backup creations, restores, world conversions, and plugin updates. A background watchdog inspects running servers every 20 seconds; servers exceeding quota receive in-game warnings and trigger `save-all`, and runaway servers exceeding 115% of quota are halted to prevent host storage exhaustion.
+- **Service Sandboxing**: The systemd service (`neopanel.service`) includes strict sandboxing directives (`ProtectSystem=strict`, `ProtectHome=true`, `PrivateTmp=true`, `ProtectKernelTunables=true`) restricting panel writes exclusively to `/var/lib/neopanel`, `/etc/neopanel`, and runtime paths.
 
 A few things worth setting up before inviting people:
 

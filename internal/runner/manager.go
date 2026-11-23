@@ -604,6 +604,7 @@ func (m *ServerManager) startIdleWatchdog() {
 				return
 			case <-ticker.C:
 				m.checkIdleTimeouts()
+				m.checkDiskLimits()
 				if m.trash != nil {
 					if err := m.trash.Sweep(128); err != nil {
 						log.Printf("Trash cleanup: %v", err)

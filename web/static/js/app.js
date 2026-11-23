@@ -10074,25 +10074,6 @@ async function deleteClusterNode(nodeId, name) {
 async function bulkRestartServers() {
   toast('Restarting all cluster instances...');
   for (const s of S.servers) {
-    await api(srvApiPath(s, '/power'), { method: 'POST', body: JSON.stringify({ action: 'restart' }) }).catch(() => {});
-  }
-  toast('All servers restarted');
-}
-
-async function bulkStopServers() {
-  const count = S.servers.length;
-  if (!count) return;
-  const ok = await uiConfirm({
-    title: 'Stop All Server Instances',
-    message: `Are you sure you want to stop all <b>${count}</b> server instance${count > 1 ? 's' : ''} across the cluster? Connected players on all servers will be disconnected.`,
-    confirmText: `Stop All (${count})`,
-    cancelText: 'Cancel',
-    isDanger: true,
-    icon: 'alert'
-  });
-  if (!ok) return;
-
-  toast('Stopping all cluster instances...');
   for (const s of S.servers) {
     await api(srvApiPath(s, '/power'), { method: 'POST', body: JSON.stringify({ action: 'stop' }) }).catch(() => {});
   }

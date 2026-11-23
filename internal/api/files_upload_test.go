@@ -233,3 +233,36 @@ func TestUploadChromeMultipartWire(t *testing.T) {
 		t.Fatal("upload leaked to root", err)
 	}
 }
+
+func TestUploadDiskLimitExceeded(t *testing.T) {
+	f := newReliabilityFixture(t)
+	srv, err := f.db.GetServer("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Restrict disk quota to 1 MB
+	srv.DiskLimitMB = 1
+	if err := f.db.UpdateServer(srv); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := f.manager.GetWorkingDir("alpha")
+	// Pre-fill directory with 2 MB file so disk usage exceeds limit
+	filler := make([]byte, 2*1024*1024)
+	if err := os.WriteFile(filepath.Join(dir, "large_existing.bin"), filler, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := uploadRequest(t, "", "new_file.txt")
+	req.Header.Set("Authorization", "Bearer "+f.tokens["owner"])
+	w := httptest.NewRecorder()
+	f.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInsufficientStorage {
+		t.Fatalf("expected HTTP 507 Insufficient Storage, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "disk limit exceeded") {
+		t.Fatalf("expected error body to contain 'disk limit exceeded', got: %s", w.Body.String())
+	}
+}
+

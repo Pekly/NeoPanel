@@ -109,3 +109,43 @@ func (p *ProcessInstance) stopIfIdle(runID uint64, timeout time.Duration, shutti
 	})
 	return stopped, err
 }
+
+func (m *ServerManager) checkDiskLimits() {
+	if m.isShuttingDown() {
+		return
+	}
+	m.mu.RLock()
+	instances := make(map[string]*ProcessInstance, len(m.instances))
+	for id, inst := range m.instances {
+		instances[id] = inst
+	}
+	m.mu.RUnlock()
+
+	for id, inst := range instances {
+		if m.isShuttingDown() {
+			return
+		}
+		inst.mu.RLock()
+		srv := inst.server
+		cachedDiskMB := inst.cachedDiskMB
+		status := inst.status
+		inst.mu.RUnlock()
+
+		if srv == nil || srv.DiskLimitMB <= 0 || (status != "online" && status != "starting") {
+			continue
+		}
+
+		if cachedDiskMB > srv.DiskLimitMB {
+			inst.broadcast(fmt.Sprintf("[NeoPanel] WARNING: Disk limit exceeded (%d MB used / %d MB limit). Auto-saving world.", cachedDiskMB, srv.DiskLimitMB))
+			_ = inst.WriteCommand("save-all")
+
+			if cachedDiskMB > (srv.DiskLimitMB * 115 / 100) {
+				inst.broadcast(fmt.Sprintf("[NeoPanel] CRITICAL: Disk limit severely exceeded (%d MB used / %d MB limit). Halting server to protect host disk.", cachedDiskMB, srv.DiskLimitMB))
+				log.Printf("server %s exceeded disk quota (%d MB > %d MB limit); halting instance", id, cachedDiskMB, srv.DiskLimitMB)
+				go func(target *ProcessInstance) {
+					_ = target.Stop(true)
+				}(inst)
+			}
+		}
+	}
+}
