@@ -483,6 +483,7 @@ function onSubdomainFieldChange() {
 async function loadSubdomainData(skipRender = false) {
   const srv = curServer();
   if (!srv) return;
+  window.NPCloudflareDNS?.loadStatus(srv.id);
   S.subdomainLoading = true;
   if (!skipRender && S.view === 'sub' && !S.subdomainData) R();
   try {
@@ -6660,13 +6661,18 @@ const V = {
           <button class="btn ${isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('browse')">
             ${ic('store', 14)} Browse Store
           </button>
-          <button class="btn ${!isBrowse ? 'pr' : ''} sm" onclick="setPlugTab('installed')">
+          <button class="btn ${S.plugTab === 'installed' ? 'pr' : ''} sm" onclick="setPlugTab('installed')">
             ${ic('puzzle', 14)} Installed <span id="plug-installed-count" class="chip" style="margin-left: 4px; padding: 1px 7px;">${S.plugins.length}</span>
+          </button>
+          <button class="btn ${S.plugTab === 'modpacks' ? 'pr' : ''} sm" onclick="setPlugTab('modpacks')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> 1-Click Modpacks
           </button>
         </div>
       </div>
 
-      ${isBrowse ? `
+      ${S.plugTab === 'modpacks' ? `
+        <div id="modpacks-tab-root">${window.NPModpacks ? (window.NPModpacks.load(srv), window.NPModpacks.renderTab(srv)) : ''}</div>
+      ` : (isBrowse ? `
         <!-- Browse Modrinth Filter & Search Bar -->
         <div class="row np-store-toolbar" style="gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
           <div style="position: relative; flex: 1; min-width: min(240px, 100%);">
@@ -6720,7 +6726,7 @@ const V = {
         </div>
 
         ${installedBodyHtml}
-      `}
+      `)}
     </div>`;
   },
 
@@ -6799,6 +6805,14 @@ const V = {
   },
 
   bk() {
+    const srv = typeof curServer === 'function' ? curServer() : null;
+    if (typeof window !== 'undefined' && window.NPCloudBackups && srv) {
+      window.NPCloudBackups.load(srv.id);
+    }
+    const tabsHeader = (typeof window !== 'undefined' && window.NPCloudBackups) ? window.NPCloudBackups.renderTabsHeader(srv) : '';
+    if (typeof window !== 'undefined' && window.NPCloudBackups?.getActiveTab() === 'cloud') {
+      return `${srvh()}${renderRestoreNotice()}<div style="margin-top:14px;">${tabsHeader}${window.NPCloudBackups.renderCloudStorageView(srv)}</div>`;
+    }
     const vm = getViewMode('bk', 'list');
     let body = '';
     if (S.loading?.backups && !S.bk.length) {
@@ -6821,6 +6835,7 @@ const V = {
             </div>
             <div class="mu" style="font-size: 12px;">${esc(bDate)}</div>
             <div class="vm-item-foot">
+              ${typeof window !== 'undefined' && window.NPCloudBackups ? window.NPCloudBackups.renderUploadButton(bName) : ''}
               <button class="btn sm" data-name="${esc(bName)}" onclick="downloadBackup(this.dataset.name)">${ic('download', 13)} Download</button>
               <button class="btn sm" data-backup-name="${esc(bName)}" onclick="restoreBackup(this.dataset.backupName, this)">${ic('refresh', 13)} Restore</button>
               <button class="btn sm dg" data-name="${esc(bName)}" onclick="deleteBackup(this.dataset.name)">${ic('trash', 13)} Delete</button>
@@ -6839,6 +6854,7 @@ const V = {
               <td class="mu">${b.created_at ? new Date(b.created_at).toLocaleString() : b[2]}</td>
               <td style="text-align:right">
                 <div class="row" style="justify-content:flex-end">
+                  ${typeof window !== 'undefined' && window.NPCloudBackups ? window.NPCloudBackups.renderUploadButton(b.name || b[0]) : ''}
                   <button class="btn sm" data-name="${esc(b.name || b[0])}" onclick="downloadBackup(this.dataset.name)">${ic('download', 14)} Download</button>
                   <button class="btn sm" data-backup-name="${esc(b.name || b[0])}" onclick="restoreBackup(this.dataset.backupName, this)">${ic('refresh', 14)} Restore</button>
                   <button class="btn sm dg" data-name="${esc(b.name || b[0])}" onclick="deleteBackup(this.dataset.name)">${ic('trash', 14)} Delete</button>
@@ -6850,7 +6866,8 @@ const V = {
       </table></div>`;
     }
     return `${srvh()}${renderRestoreNotice()}` + `
-    <div class="row sb" style="margin-top:14px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+    <div style="margin-top:14px;">${tabsHeader}</div>
+    <div class="row sb" style="margin-top:10px; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
       <span class="mu">${S.bk.length} backups recorded</span>
       <div class="row" style="gap:8px;">
         ${renderViewModeToggle('bk', 'list')}
@@ -7335,6 +7352,7 @@ const V = {
           <b>Cloudflare Tip:</b> Set your Minecraft <code>A</code> / <code>CNAME</code> proxy status to <b>DNS Only (grey cloud)</b>. Orange-cloud HTTP proxying blocks Minecraft Java TCP traffic!
         </div>
       </div>
+      <div id="cf-dns-root">${window.NPCloudflareDNS ? window.NPCloudflareDNS.renderSection(curServer(), draft, fqdn) : ''}</div>
     </div>`;
   },
 
@@ -10342,7 +10360,11 @@ async function closeEditor() {
 }
 
 function setPlugTab(tab) {
-  const nextTab = tab === 'installed' ? 'installed' : 'browse';
+  const nextTab = tab === 'installed' ? 'installed' : (tab === 'modpacks' ? 'modpacks' : 'browse');
+  S.plugTab = nextTab;
+  if (nextTab === 'modpacks') {
+    window.NPModpacks?.load(curServer());
+  }
   applyRoute(routeUrl('plug', { plugTab: nextTab }));
 }
 

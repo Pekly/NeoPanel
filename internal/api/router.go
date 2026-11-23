@@ -38,6 +38,7 @@ type Router struct {
 	sftpImports      *sftpImportHandler
 	worldConversions *worldConversionHandler
 	plugins          *PluginHandler
+	modpacks         *ModpackHandler
 	backups          *BackupHandler
 	players          *PlayerHandler
 	software         *SoftwareHandler
@@ -64,6 +65,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 	consoleHandler := NewConsoleHandler(db, authHandler, manager)
 	fileHandler := NewFileHandler(db, manager)
 	pluginHandler := NewPluginHandler(db, manager)
+	modpackHandler := NewModpackHandler(db, manager)
 	backupHandler := NewBackupHandler(cfg, db, manager)
 	playerHandler := NewPlayerHandler(db, manager)
 	softwareHandler := NewSoftwareHandler(db, manager)
@@ -89,6 +91,7 @@ func NewRouter(cfg *config.Config, db *database.DB, manager *runner.ServerManage
 		sftpImports:      newSFTPImportHandler(cfg, db, manager),
 		worldConversions: newWorldConversionHandler(cfg, db, manager),
 		plugins:          pluginHandler,
+		modpacks:         modpackHandler,
 		backups:          backupHandler,
 		players:          playerHandler,
 		software:         softwareHandler,
@@ -304,12 +307,25 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/plugins/identify", r.requireAuth(r.plugins.Identify))
 	r.mux.HandleFunc("POST /api/servers/{id}/plugins/update", r.requireAuth(r.plugins.Update))
 
+	// Modrinth Modpacks routes
+	r.mux.HandleFunc("GET /api/modpacks/search", r.requireAuth(r.modpacks.Search))
+	r.mux.HandleFunc("GET /api/servers/{id}/modpack", r.requireAuth(r.modpacks.GetInstalled))
+	r.mux.HandleFunc("POST /api/servers/{id}/modpack/install", r.requireAuth(r.modpacks.Install))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/modpack", r.requireAuth(r.modpacks.DeleteInstalled))
+
 	// Backups routes
 	r.mux.HandleFunc("GET /api/servers/{id}/backups", r.requireAuth(r.backups.List))
 	r.mux.HandleFunc("POST /api/servers/{id}/backups", r.requireAuth(r.backups.Create))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/backups", r.requireAuth(r.backups.Delete))
 	r.mux.HandleFunc("GET /api/servers/{id}/backups/download", r.requireAuth(r.backups.Download))
 	r.mux.HandleFunc("POST /api/servers/{id}/backups/restore", r.requireAuth(r.backups.Restore))
+	r.mux.HandleFunc("GET /api/servers/{id}/backups/cloud", r.requireAuth(r.backups.ListCloudBackups))
+	r.mux.HandleFunc("POST /api/servers/{id}/backups/{name}/cloud/upload", r.requireAuth(r.backups.UploadBackupToCloud))
+	r.mux.HandleFunc("POST /api/servers/{id}/backups/{name}/cloud/restore", r.requireAuth(r.backups.RestoreCloudBackup))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/backups/cloud/{name}", r.requireAuth(r.backups.DeleteCloudBackup))
+	r.mux.HandleFunc("GET /api/admin/backups/cloud", r.requireAdmin(r.backups.GetAdminCloudBackupConfig))
+	r.mux.HandleFunc("POST /api/admin/backups/cloud", r.requireAdmin(r.backups.SaveAdminCloudBackupConfig))
+	r.mux.HandleFunc("POST /api/admin/backups/cloud/test", r.requireAdmin(r.backups.TestAdminCloudBackup))
 
 	// Players routes
 	r.mux.HandleFunc("GET /api/servers/{id}/players", r.requireAuth(r.players.GetPlayers))
@@ -336,6 +352,12 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("GET /api/servers/{id}/subdomain", r.requireAuth(r.subdomains.GetSubdomain))
 	r.mux.HandleFunc("PUT /api/servers/{id}/subdomain", r.requireAuth(r.subdomains.UpdateSubdomain))
 	r.mux.HandleFunc("POST /api/servers/{id}/subdomain/verify", r.requireAuth(r.subdomains.VerifySubdomainDNS))
+	r.mux.HandleFunc("GET /api/servers/{id}/subdomain/cloudflare", r.requireAuth(r.subdomains.GetCloudflareStatus))
+	r.mux.HandleFunc("POST /api/servers/{id}/subdomain/cloudflare/sync", r.requireAuth(r.subdomains.SyncCloudflareDNS))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/subdomain/cloudflare", r.requireAuth(r.subdomains.DeleteCloudflareDNS))
+	r.mux.HandleFunc("GET /api/admin/dns/cloudflare", r.requireAdmin(r.subdomains.GetAdminCloudflareConfig))
+	r.mux.HandleFunc("POST /api/admin/dns/cloudflare", r.requireAdmin(r.subdomains.SaveAdminCloudflareConfig))
+	r.mux.HandleFunc("POST /api/admin/dns/cloudflare/test", r.requireAdmin(r.subdomains.TestCloudflareToken))
 
 	// SFTP details endpoint
 	r.mux.HandleFunc("GET /api/servers/{id}/sftp", r.requireAuth(func(w http.ResponseWriter, req *http.Request) {
@@ -746,7 +768,7 @@ func serverActionPermission(method, suffix string) string {
 			}
 		}
 		return "files.edit"
-	case "plugins":
+	case "plugins", "modpack":
 		if read {
 			return "files.view"
 		}

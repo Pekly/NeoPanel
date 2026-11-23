@@ -9,7 +9,10 @@ The backend is written in Go, with the web interface and a SQLite database built
 ## What you can do
 
 - Run Paper, Purpur, Fabric, Forge, NeoForge, Vanilla, proxies such as Velocity, and [Steel](https://steelmc.dev/).
+- Install complete Modrinth modpacks in 1-click with automatic client-mod filtering and loader alignment.
 - Manage Java versions, server settings, files, plugins, and mods without leaving the panel.
+- Store backups locally or push offsite to S3-compatible cloud storage (Cloudflare R2, AWS, Backblaze B2).
+- Automate custom domain routing with direct Cloudflare DNS & SRV record synchronization.
 - Create backups and schedules, or warn players before a planned restart with a countdown you can cancel.
 - Give friends or teammates access to individual servers, with control over what each person can do.
 - Pin your usual servers, filter console output, and pick up where you left off after refreshing the page.
@@ -80,7 +83,7 @@ A few things worth setting up before inviting people:
 - Don't run two panel instances against the same database or server folders.
 - For untrusted Linux workloads, use Bubblewrap isolation. Resource limits alone aren't a filesystem sandbox.
 
-More help: [invitations](docs/invitation-account-lifecycle.md), [file previews](docs/file-previews.md), [Trash](internal/trash/README.md), [server deletion](docs/server-deletion.md), and [workspace and console controls](docs/panel-qol.md).
+More help: [invitations](docs/invitation-account-lifecycle.md), [Cloudflare DNS](docs/cloudflare-dns.md), [1-Click Modpacks](docs/modpacks.md), [Cloud Backups](docs/cloud-backups.md), [file previews](docs/file-previews.md), [Trash](internal/trash/README.md), [server deletion](docs/server-deletion.md), and [workspace and console controls](docs/panel-qol.md).
 
 ## Working on NeoPanel
 

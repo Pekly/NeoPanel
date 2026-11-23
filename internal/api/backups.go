@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -113,6 +114,23 @@ func (h *BackupHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logAudit(h.db, r, "backup_create", fmt.Sprintf("Created backup '%s' (%s) for %s (%s)", baseName, formatBytesAudit(size), srv.Name, serverID))
+
+	// Trigger asynchronous auto-upload to Cloud storage if enabled
+	cfg := h.loadCloudConfig()
+	if cfg.Enabled && cfg.AutoUpload && cfg.Bucket != "" && cfg.AccessKey != "" && cfg.SecretKey != "" {
+		go func(srvID, bName string) {
+			localPath := filepath.Join(h.getBackupsDir(srvID), bName)
+			data, err := os.ReadFile(localPath)
+			if err != nil {
+				return
+			}
+			client := NewS3Client(cfg)
+			cloudKey := fmt.Sprintf("%s/%s/%s", cfg.Prefix, srvID, bName)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			_ = client.PutObject(ctx, cloudKey, data, "application/gzip")
+		}(serverID, baseName)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"message": "Backup created successfully",

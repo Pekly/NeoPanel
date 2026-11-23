@@ -85,6 +85,8 @@ func SearchModrinthPluginsPage(ctx context.Context, query string, limit, offset 
 		pt := strings.ToLower(strings.TrimSpace(projectType[0]))
 		if pt == "mod" || pt == "mods" {
 			reqType = "mod"
+		} else if pt == "modpack" || pt == "modpacks" {
+			reqType = "modpack"
 		} else if pt == "plugin" || pt == "plugins" {
 			reqType = "plugin"
 		}
@@ -97,7 +99,14 @@ func SearchModrinthPluginsPage(ctx context.Context, query string, limit, offset 
 		}
 	}
 
-	if reqType == "mod" {
+	if reqType == "modpack" {
+		facetGroups = append(facetGroups, `["project_type:modpack"]`)
+		if loaderLow != "" && loaderLow != "any" && loaderLow != "all" {
+			if loaderLow == "fabric" || loaderLow == "forge" || loaderLow == "neoforge" || loaderLow == "quilt" {
+				facetGroups = append(facetGroups, fmt.Sprintf(`["categories:%s"]`, loaderLow))
+			}
+		}
+	} else if reqType == "mod" {
 		facetGroups = append(facetGroups, `["project_type:mod"]`)
 		if loaderLow != "" && loaderLow != "any" && loaderLow != "all" {
 			if loaderLow == "fabric" || loaderLow == "forge" || loaderLow == "neoforge" || loaderLow == "quilt" {
@@ -161,6 +170,17 @@ func SearchModrinthPluginsPage(ctx context.Context, query string, limit, offset 
 
 // CompatibleModrinthVersions returns releases supporting the actual server loader.
 // Minecraft versions are informational, not an installation restriction.
+func GetModrinthProjectVersions(ctx context.Context, identifier string) ([]ModrinthVersion, error) {
+	ctx, cancel := modrinthMetadataContext(ctx)
+	defer cancel()
+	p, err := fetchModrinthProject(ctx, identifier)
+	if err != nil {
+		return nil, err
+	}
+	versions, _, err := fetchModrinthVersions(ctx, p.ID, nil)
+	return versions, err
+}
+
 func CompatibleModrinthVersions(project, loader, mcVersion string) ([]ModrinthVersion, error) {
 	return CompatibleModrinthVersionsContext(context.Background(), project, loader, mcVersion)
 }
