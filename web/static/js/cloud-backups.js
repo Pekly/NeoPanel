@@ -5,13 +5,57 @@
   let cloudLoading = false;
   let activeTab = 'local'; // 'local' or 'cloud'
 
+  function openModal(html) {
+    if (typeof window !== 'undefined' && typeof window.openModal === 'function') {
+      window.openModal(html);
+      return;
+    }
+    const container = document.getElementById('modal-container') || document.body;
+    if (!container) return;
+    const trimmed = typeof html === 'string' ? html.trim() : '';
+    if (trimmed.startsWith('<div class="pal"') || trimmed.startsWith("<div class='pal'")) {
+      container.innerHTML = trimmed;
+    } else {
+      container.innerHTML = `<div class="pal" onclick="if(event.target===this && typeof closeModal === 'function')closeModal()">${html}</div>`;
+    }
+  }
+
+  function closeModal() {
+    if (typeof window !== 'undefined' && typeof window.closeModal === 'function') {
+      window.closeModal();
+      return;
+    }
+    const container = document.getElementById('modal-container');
+    if (container) container.innerHTML = '';
+  }
+
+  function setBtnLoading(btn, isLoading, text) {
+    if (typeof window !== 'undefined' && typeof window.setBtnLoading === 'function') {
+      window.setBtnLoading(btn, isLoading, text);
+      return;
+    }
+    if (!btn) return;
+    btn.disabled = isLoading;
+    if (isLoading && text) {
+      btn._origText = btn.innerHTML;
+      btn.textContent = text;
+    } else if (!isLoading && btn._origText !== undefined) {
+      btn.innerHTML = btn._origText;
+      delete btn._origText;
+    }
+  }
+
   async function loadCloudBackups(serverId, force = false) {
     if (!serverId) return;
     if (cloudBackups && !force) return;
 
     cloudLoading = true;
     try {
-      const res = await api(`/api/servers/${encodeURIComponent(serverId)}/backups/cloud`);
+      const srv = typeof curServer === 'function' ? curServer() : null;
+      const url = (srv && typeof srvApiPath === 'function')
+        ? srvApiPath(srv, '/backups/cloud')
+        : `/api/servers/${encodeURIComponent(serverId)}/backups/cloud`;
+      const res = await api(url);
       cloudBackups = res;
     } catch (e) {
       cloudBackups = { enabled: false, backups: [] };
@@ -138,12 +182,15 @@
   }
 
   async function uploadBackup(name, btnEl) {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
 
     if (btnEl) setBtnLoading(btnEl, true, 'Uploading…');
     try {
-      const res = await api(`/api/servers/${encodeURIComponent(srv.id)}/backups/${encodeURIComponent(name)}/cloud/upload`, {
+      const url = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, `/backups/${encodeURIComponent(name)}/cloud/upload`)
+        : `/api/servers/${encodeURIComponent(srv.id)}/backups/${encodeURIComponent(name)}/cloud/upload`;
+      const res = await api(url, {
         method: 'POST'
       });
       toast(res?.message || 'Backup uploaded to cloud storage!', 'ok');
@@ -156,33 +203,39 @@
   }
 
   async function restore(name) {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
     if (!confirm(`Are you sure you want to restore ${name} from cloud storage? Current files will be replaced.`)) return;
 
     try {
-      const res = await api(`/api/servers/${encodeURIComponent(srv.id)}/backups/${encodeURIComponent(name)}/cloud/restore`, {
+      const url = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, `/backups/cloud/${encodeURIComponent(name)}/restore`)
+        : `/api/servers/${encodeURIComponent(srv.id)}/backups/cloud/${encodeURIComponent(name)}/restore`;
+      const res = await api(url, {
         method: 'POST'
       });
       toast(res?.message || 'Server restored successfully!', 'ok');
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Failed to restore cloud backup', 'bad');
     }
   }
 
   async function deleteBackup(name) {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
     if (!confirm(`Delete cloud backup ${name}?`)) return;
 
     try {
-      await api(`/api/servers/${encodeURIComponent(srv.id)}/backups/cloud/${encodeURIComponent(name)}`, {
+      const url = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, `/backups/cloud/${encodeURIComponent(name)}`)
+        : `/api/servers/${encodeURIComponent(srv.id)}/backups/cloud/${encodeURIComponent(name)}`;
+      await api(url, {
         method: 'DELETE'
       });
       toast('Cloud backup deleted', 'ok');
       await loadCloudBackups(srv.id, true);
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Failed to delete cloud backup', 'bad');
     }
@@ -192,10 +245,12 @@
     let cfg = { enabled: false, endpoint: '', bucket: '', region: 'us-east-1', access_key: '', secret_key: '', prefix: 'backups', auto_upload: false, retention_days: 30 };
     try {
       cfg = await api('/api/admin/backups/cloud');
-    } catch (_) {}
+    } catch (e) {
+      toast(e.message || 'Failed to load cloud backup settings', 'bad');
+    }
 
     const html = `
-      <div class="modal-box card" style="max-width: 540px; padding: 24px;">
+      <div class="card pbox" style="max-width: 540px; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div class="row sb" style="margin-bottom: 16px;">
           <h2 style="margin: 0; font-size: 18px; color: var(--tx); display: flex; align-items: center; gap: 8px;">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
@@ -345,9 +400,9 @@
       });
       toast('Cloud storage settings saved!', 'ok');
       closeModal();
-      const srv = curServer();
+      const srv = typeof curServer === 'function' ? curServer() : null;
       if (srv) await loadCloudBackups(srv.id, true);
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Failed to save cloud storage settings', 'bad');
     } finally {
@@ -357,11 +412,11 @@
 
   function setTab(tab) {
     activeTab = tab;
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (tab === 'cloud' && srv) {
       loadCloudBackups(srv.id);
     }
-    R();
+    if (typeof R === 'function') R();
   }
 
   function getActiveTab() {
@@ -370,7 +425,7 @@
 
   function render() {
     // Triggers redraw if in bk view
-    if (S.view === 'bk') R();
+    if (typeof S !== 'undefined' && S.view === 'bk' && typeof R === 'function') R();
   }
 
   window.NPCloudBackups = {

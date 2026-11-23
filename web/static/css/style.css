@@ -4851,6 +4851,14 @@ a.sift-server-card {
   border: 1px solid var(--border);
   flex-shrink: 0;
 }
+@media (max-width: 768px) {
+  .vm-toggle,
+  [data-view-toggle] {
+    display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+  }
+}
 
 .vm-btn {
   all: unset;

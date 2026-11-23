@@ -10,13 +10,56 @@
   let searchCategory = '';
   let searchTimer = null;
 
+  function openModal(html) {
+    if (typeof window !== 'undefined' && typeof window.openModal === 'function') {
+      window.openModal(html);
+      return;
+    }
+    const container = document.getElementById('modal-container') || document.body;
+    if (!container) return;
+    const trimmed = typeof html === 'string' ? html.trim() : '';
+    if (trimmed.startsWith('<div class="pal"') || trimmed.startsWith("<div class='pal'")) {
+      container.innerHTML = trimmed;
+    } else {
+      container.innerHTML = `<div class="pal" onclick="if(event.target===this && typeof closeModal === 'function')closeModal()">${html}</div>`;
+    }
+  }
+
+  function closeModal() {
+    if (typeof window !== 'undefined' && typeof window.closeModal === 'function') {
+      window.closeModal();
+      return;
+    }
+    const container = document.getElementById('modal-container');
+    if (container) container.innerHTML = '';
+  }
+
+  function setBtnLoading(btn, isLoading, text) {
+    if (typeof window !== 'undefined' && typeof window.setBtnLoading === 'function') {
+      window.setBtnLoading(btn, isLoading, text);
+      return;
+    }
+    if (!btn) return;
+    btn.disabled = isLoading;
+    if (isLoading && text) {
+      btn._origText = btn.innerHTML;
+      btn.textContent = text;
+    } else if (!isLoading && btn._origText !== undefined) {
+      btn.innerHTML = btn._origText;
+      delete btn._origText;
+    }
+  }
+
   async function loadModpacks(srv, force = false) {
     if (!srv) return;
     if (modpacksData && !force) return;
 
     loading = true;
     try {
-      const installedPromise = api(`/api/servers/${encodeURIComponent(srv.id)}/modpack`).catch(() => ({ installed: false }));
+      const instUrl = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, '/modpack')
+        : `/api/servers/${encodeURIComponent(srv.id)}/modpack`;
+      const installedPromise = api(instUrl).catch(() => ({ installed: false }));
       const searchPromise = api(`/api/modpacks/search?query=${encodeURIComponent(searchQuery)}&loader=${encodeURIComponent(searchLoader)}&category=${encodeURIComponent(searchCategory)}&limit=18`);
 
       const [inst, search] = await Promise.all([installedPromise, searchPromise]);
@@ -38,18 +81,26 @@
     const meta = installedModpack?.metadata;
 
     return `
-      <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 16px;">
+      <div style="margin-top: 14px;">
         ${isInst ? `
-          <div class="card" style="padding: 18px 20px; border-left: 3px solid var(--accent); background: var(--card-bg);">
-            <div class="row sb" style="flex-wrap: wrap; gap: 10px;">
-              <div>
-                <div class="row" style="gap: 8px; margin-bottom: 4px;">
-                  <span class="badge online"><i class="dot"></i>Active Modpack</span>
-                  <span class="chip mono sm">${esc(meta.loader || 'fabric').toUpperCase()} ${esc(meta.game_version || '')}</span>
-                </div>
-                <h3 style="margin: 0 0 4px; font-size: 18px; color: var(--tx);">${esc(meta.name || 'Installed Modpack')}</h3>
-                <div class="mu" style="font-size: 12.5px;">
-                  ${meta.server_mods_count || 0} server mods active &bull; ${meta.client_mods_skipped || 0} client mods excluded &bull; Installed ${esc(new Date(meta.installed_at).toLocaleDateString())}
+          <div class="card" style="padding: 18px 20px; margin-bottom: 16px; border-left: 3px solid var(--ac);">
+            <div class="row sb" style="flex-wrap: wrap; gap: 12px;">
+              <div style="display: flex; gap: 14px; align-items: center;">
+                ${meta.icon_url ? `
+                  <img src="${esc(meta.icon_url)}" alt="${esc(meta.title)}" style="width: 52px; height: 52px; border-radius: 10px; object-fit: cover;">
+                ` : `
+                  <div style="width: 52px; height: 52px; border-radius: 10px; background: var(--border); display: flex; align-items: center; justify-content: center;">
+                    ${ic('box', 28)}
+                  </div>
+                `}
+                <div>
+                  <div class="row" style="gap: 8px; align-items: center;">
+                    <h3 style="margin: 0; font-size: 17px; color: var(--tx);">${esc(meta.title)}</h3>
+                    <span class="badge online"><i class="dot"></i>Active Modpack</span>
+                  </div>
+                  <div class="mu" style="font-size: 12.5px; margin-top: 2px;">
+                    ${esc(meta.version_name || meta.version_id)} &bull; ${esc(meta.loaders?.join(', ') || 'Any loader')} &bull; Minecraft ${esc(meta.game_versions?.join(', ') || 'Any')}
+                  </div>
                 </div>
               </div>
               <div class="row" style="gap: 8px;">
@@ -59,24 +110,25 @@
           </div>
         ` : ''}
 
-        <div class="card" style="padding: 16px 20px;">
-          <div class="row sb" style="flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
-            <div style="flex: 1; min-width: 240px; position: relative;">
-              <input type="text" id="modpack-search-input" value="${esc(searchQuery)}" placeholder="Search 1-Click Modpacks (e.g. Cobblemon, Better MC, ATM)…" oninput="window.NPModpacks.onSearchInput(this.value)" style="width: 100%;">
-            </div>
-            <div class="row" style="gap: 8px; flex-wrap: wrap;">
-              <select id="modpack-loader-select" onchange="window.NPModpacks.onLoaderChange(this.value)" style="padding: 6px 10px; font-size: 13px;">
-                <option value="" ${!searchLoader ? 'selected' : ''}>All Loaders</option>
-                <option value="fabric" ${searchLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
-                <option value="forge" ${searchLoader === 'forge' ? 'selected' : ''}>Forge</option>
-                <option value="neoforge" ${searchLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
-              </select>
-            </div>
+        <div class="row sb" style="flex-wrap: wrap; gap: 10px; margin-bottom: 14px;">
+          <div class="row" style="gap: 8px; flex: 1; max-width: 450px;">
+            <input type="text" id="modpack-search-input" value="${esc(searchQuery)}" placeholder="Search Modrinth modpacks (e.g. Cobblemon, All the Mods, Origins)…" style="flex: 1;" oninput="window.NPModpacks.onSearchInput(this.value)">
           </div>
+          <div class="row" style="gap: 8px;">
+            <select id="modpack-loader-select" onchange="window.NPModpacks.onLoaderChange(this.value)" style="min-width: 120px;">
+              <option value="" ${searchLoader === '' ? 'selected' : ''}>All Loaders</option>
+              <option value="fabric" ${searchLoader === 'fabric' ? 'selected' : ''}>Fabric</option>
+              <option value="forge" ${searchLoader === 'forge' ? 'selected' : ''}>Forge</option>
+              <option value="neoforge" ${searchLoader === 'neoforge' ? 'selected' : ''}>NeoForge</option>
+              <option value="quilt" ${searchLoader === 'quilt' ? 'selected' : ''}>Quilt</option>
+            </select>
+          </div>
+        </div>
 
-          <div class="row" style="gap: 6px; flex-wrap: wrap; font-size: 12px;">
-            ${['All', 'Adventure', 'Optimization', 'Magic', 'Technology', 'Quests', 'Survival'].map(cat => {
-              const active = (cat === 'All' && !searchCategory) || (searchCategory.toLowerCase() === cat.toLowerCase());
+        <div style="margin-bottom: 16px; overflow-x: auto; white-space: nowrap; padding-bottom: 4px;">
+          <div class="row" style="gap: 6px;">
+            ${['All', 'Adventure', 'Tech', 'Magic', 'Quests', 'Challenging', 'Multiplayer', 'Optimization'].map(cat => {
+              const active = (cat === 'All' && !searchCategory) || searchCategory.toLowerCase() === cat.toLowerCase();
               return `<button type="button" class="chip ${active ? 'active' : ''}" onclick="window.NPModpacks.onCategoryChange('${cat === 'All' ? '' : cat}')" style="cursor: pointer; border: 1px solid var(--border);">${esc(cat)}</button>`;
             }).join('')}
           </div>
@@ -142,26 +194,26 @@
     searchQuery = val.trim();
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
-      loadModpacks(curServer(), true);
+      loadModpacks(typeof curServer === 'function' ? curServer() : null, true);
     }, 350);
   }
 
   function onLoaderChange(val) {
     searchLoader = val;
-    loadModpacks(curServer(), true);
+    loadModpacks(typeof curServer === 'function' ? curServer() : null, true);
   }
 
   function onCategoryChange(val) {
     searchCategory = val;
-    loadModpacks(curServer(), true);
+    loadModpacks(typeof curServer === 'function' ? curServer() : null, true);
   }
 
   function confirmInstall(identifier, title) {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
 
     const html = `
-      <div class="modal-box card" style="max-width: 480px; padding: 24px;">
+      <div class="card pbox" style="max-width: 480px; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div class="row sb" style="margin-bottom: 14px;">
           <h2 style="margin: 0; font-size: 18px; color: var(--tx); display: flex; align-items: center; gap: 8px;">
             ${ic('download', 18)} Install Modpack: ${esc(title)}
@@ -189,21 +241,24 @@
   }
 
   async function executeInstall(identifier) {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
 
     const btn = document.getElementById('modpack-do-install-btn');
     if (btn) setBtnLoading(btn, true, 'Installing Modpack…');
 
     try {
-      const res = await api(`/api/servers/${encodeURIComponent(srv.id)}/modpack/install`, {
+      const url = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, '/modpack/install')
+        : `/api/servers/${encodeURIComponent(srv.id)}/modpack/install`;
+      const res = await api(url, {
         method: 'POST',
         body: JSON.stringify({ slug: identifier })
       });
       toast(res?.message || 'Modpack installed successfully!', 'ok');
       closeModal();
       await loadModpacks(srv, true);
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Modpack installation failed', 'bad');
       if (btn) setBtnLoading(btn, false);
@@ -211,15 +266,18 @@
   }
 
   async function unlinkModpack() {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
     if (!confirm('Unlink this modpack metadata? (Mod files will remain in your mods folder).')) return;
 
     try {
-      await api(`/api/servers/${encodeURIComponent(srv.id)}/modpack`, { method: 'DELETE' });
+      const url = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, '/modpack')
+        : `/api/servers/${encodeURIComponent(srv.id)}/modpack`;
+      await api(url, { method: 'DELETE' });
       toast('Modpack unlinked', 'ok');
       await loadModpacks(srv, true);
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Failed to unlink modpack', 'bad');
     }
@@ -228,7 +286,8 @@
   function render() {
     const root = document.getElementById('modpacks-tab-root');
     if (root && S.view === 'plug' && S.plugTab === 'modpacks') {
-      root.innerHTML = renderModpacksTab(curServer());
+      const srv = typeof curServer === 'function' ? curServer() : null;
+      root.innerHTML = renderModpacksTab(srv);
     }
   }
 

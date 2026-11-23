@@ -497,6 +497,14 @@ html[data-theme="light"] .steel-info-badge { color: #92400e; }
 
 /* Collection layouts: distinct densities, shared hierarchy, theme-aware surfaces. */
 .vm-toggle { position: relative; isolation: isolate; display: inline-grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; }
+@media (max-width: 768px) {
+  .vm-toggle,
+  [data-view-toggle] {
+    display: none !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+  }
+}
 .vm-indicator { position: absolute; z-index: -1; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 2); border-radius: 6px; background: var(--ac); box-shadow: 0 2px 8px var(--ac-glow); transform: translateX(calc(var(--vm-index, 0) * 100%)); pointer-events: none; }
 .vm-toggle .vm-btn { justify-content: center; }
 .vm-toggle .vm-btn.on { background: transparent; box-shadow: none; }

@@ -5,11 +5,55 @@
   let cfLoading = false;
   let cfSyncing = false;
 
+  function openModal(html) {
+    if (typeof window !== 'undefined' && typeof window.openModal === 'function') {
+      window.openModal(html);
+      return;
+    }
+    const container = document.getElementById('modal-container') || document.body;
+    if (!container) return;
+    const trimmed = typeof html === 'string' ? html.trim() : '';
+    if (trimmed.startsWith('<div class="pal"') || trimmed.startsWith("<div class='pal'")) {
+      container.innerHTML = trimmed;
+    } else {
+      container.innerHTML = `<div class="pal" onclick="if(event.target===this && typeof closeModal === 'function')closeModal()">${html}</div>`;
+    }
+  }
+
+  function closeModal() {
+    if (typeof window !== 'undefined' && typeof window.closeModal === 'function') {
+      window.closeModal();
+      return;
+    }
+    const container = document.getElementById('modal-container');
+    if (container) container.innerHTML = '';
+  }
+
+  function setBtnLoading(btn, isLoading, text) {
+    if (typeof window !== 'undefined' && typeof window.setBtnLoading === 'function') {
+      window.setBtnLoading(btn, isLoading, text);
+      return;
+    }
+    if (!btn) return;
+    btn.disabled = isLoading;
+    if (isLoading && text) {
+      btn._origText = btn.innerHTML;
+      btn.textContent = text;
+    } else if (!isLoading && btn._origText !== undefined) {
+      btn.innerHTML = btn._origText;
+      delete btn._origText;
+    }
+  }
+
   async function loadCloudflareStatus(serverId) {
     if (!serverId) return;
     try {
       cfLoading = true;
-      const res = await api(`/api/servers/${encodeURIComponent(serverId)}/subdomain/cloudflare`);
+      const srv = typeof curServer === 'function' ? curServer() : null;
+      const url = (srv && typeof srvApiPath === 'function')
+        ? srvApiPath(srv, '/subdomain/cloudflare')
+        : `/api/servers/${encodeURIComponent(serverId)}/subdomain/cloudflare`;
+      const res = await api(url);
       cfStatus = res;
     } catch (e) {
       cfStatus = { configured: false, sync: null };
@@ -71,34 +115,59 @@
   }
 
   async function syncDNS(btnEl) {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
+
+    if (typeof onSubdomainFieldChange === 'function') {
+      try { onSubdomainFieldChange(); } catch (_) {}
+    }
+
+    const labelInput = document.getElementById('sub-label');
+    const baseInput = document.getElementById('sub-base');
+    const targetInput = document.getElementById('sub-target');
+
     const draft = S.subdomainDraft || {};
-    const fqdn = (draft.label && draft.base_domain)
-      ? `${draft.label}.${draft.base_domain}`
-      : (draft.base_domain || '');
+    const label = (labelInput ? labelInput.value.trim().toLowerCase() : draft.label) || '';
+    const baseDomain = (baseInput ? baseInput.value.trim().toLowerCase() : draft.base_domain) || '';
+    const targetHost = (targetInput ? targetInput.value.trim() : draft.target_host) || '';
+
+    const fqdn = (label && baseDomain)
+      ? `${label}.${baseDomain}`
+      : (baseDomain || '');
 
     if (!fqdn) {
       toast('Please set a subdomain label and base domain first.', 'bad');
       return;
     }
 
+    if (cfStatus && cfStatus.configured === false) {
+      toast('Cloudflare API token is not configured yet.', 'bad');
+      if (S.user?.role === 'admin') {
+        openConfigModal();
+      }
+      return;
+    }
+
     cfSyncing = true;
     if (btnEl) setBtnLoading(btnEl, true, 'Syncing…');
     try {
-      const res = await api(`/api/servers/${encodeURIComponent(srv.id)}/subdomain/cloudflare/sync`, {
+      const url = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, '/subdomain/cloudflare/sync')
+        : `/api/servers/${encodeURIComponent(srv.id)}/subdomain/cloudflare/sync`;
+
+      const res = await api(url, {
         method: 'POST',
         body: JSON.stringify({
           fqdn,
-          target_host: draft.target_host || ''
+          target_host: targetHost
         })
       });
       toast(res?.message || 'DNS successfully synchronized with Cloudflare!', 'ok');
       await loadCloudflareStatus(srv.id);
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Failed to sync with Cloudflare', 'bad');
-      if (e.message && e.message.includes('API token is not configured') && S.user?.role === 'admin') {
+      if (e.message && (e.message.includes('API token is not configured') || e.message.includes('Cloudflare API token')) && S.user?.role === 'admin') {
         openConfigModal();
       }
     } finally {
@@ -108,18 +177,22 @@
   }
 
   async function deleteDNS(btnEl) {
-    const srv = curServer();
+    const srv = typeof curServer === 'function' ? curServer() : null;
     if (!srv) return;
     if (!confirm('Are you sure you want to remove these DNS records from Cloudflare?')) return;
 
     if (btnEl) setBtnLoading(btnEl, true, 'Removing…');
     try {
-      const res = await api(`/api/servers/${encodeURIComponent(srv.id)}/subdomain/cloudflare`, {
+      const url = (typeof srvApiPath === 'function')
+        ? srvApiPath(srv, '/subdomain/cloudflare')
+        : `/api/servers/${encodeURIComponent(srv.id)}/subdomain/cloudflare`;
+
+      const res = await api(url, {
         method: 'DELETE'
       });
       toast(res?.message || 'Cloudflare DNS records removed.', 'ok');
       await loadCloudflareStatus(srv.id);
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Failed to remove Cloudflare records', 'bad');
     } finally {
@@ -134,7 +207,7 @@
     } catch (_) {}
 
     const html = `
-      <div class="modal-box card" style="max-width: 520px; padding: 24px;">
+      <div class="card pbox" style="max-width: 520px; padding: 24px; max-height: 90vh; overflow-y: auto;">
         <div class="row sb" style="margin-bottom: 16px;">
           <h2 style="margin: 0; font-size: 18px; color: var(--tx); display: flex; align-items: center; gap: 8px;">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f38020" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
@@ -213,9 +286,9 @@
       });
       toast('Cloudflare settings saved successfully', 'ok');
       closeModal();
-      const srv = curServer();
+      const srv = typeof curServer === 'function' ? curServer() : null;
       if (srv) await loadCloudflareStatus(srv.id);
-      R();
+      if (typeof R === 'function') R();
     } catch (e) {
       toast(e.message || 'Failed to save Cloudflare settings', 'bad');
     } finally {
@@ -226,8 +299,8 @@
   function updateUI() {
     const container = document.getElementById('cf-dns-root');
     if (container && S.view === 'sub') {
-      const srv = curServer();
-      container.innerHTML = renderCloudflareSection(srv, S.subdomainDraft, getSubdomainPreviewFqdn(S.subdomainDraft));
+      const srv = typeof curServer === 'function' ? curServer() : null;
+      container.innerHTML = renderCloudflareSection(srv, S.subdomainDraft, typeof getSubdomainPreviewFqdn === 'function' ? getSubdomainPreviewFqdn(S.subdomainDraft) : '');
     }
   }
 

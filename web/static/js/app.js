@@ -1375,7 +1375,18 @@ function finishPageProgress() {
   }, 280);
 }
 
+function isMobileView() {
+  if (typeof window === 'undefined') return false;
+  if (window.__forceMobileView) return true;
+  try {
+    if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) return true;
+    if (typeof window.innerWidth === 'number' && window.innerWidth > 0 && window.innerWidth <= 768) return true;
+  } catch (_) {}
+  return false;
+}
+
 function getViewMode(scope, fallback = 'list') {
+  if (typeof isMobileView === 'function' && isMobileView()) return 'tiles';
   fallback = ['list', 'tiles'].includes(fallback) ? fallback : 'list';
   if (!S.viewModes) S.viewModes = {};
   const cached = S.viewModes[scope];
@@ -1396,6 +1407,7 @@ function getViewMode(scope, fallback = 'list') {
 
 let viewModeTimer = null;
 function setViewMode(scope, mode) {
+  if (typeof isMobileView === 'function' && isMobileView()) return;
   if (!['list', 'tiles'].includes(mode)) return;
   const toggle = Array.from(document.querySelectorAll('.vm-toggle')).find(el => el.dataset.scope === scope);
   if (!toggle) return;
@@ -1425,6 +1437,7 @@ function setViewMode(scope, mode) {
 }
 
 function renderViewModeToggle(scope, fallback = 'list') {
+  if (typeof isMobileView === 'function' && isMobileView()) return '';
   const cur = getViewMode(scope, fallback);
   const opts = [
     ['list', 'viewList', 'List'],
@@ -16959,6 +16972,8 @@ window.togglePrivacy = togglePrivacy;
 window.toggleTheme = toggleTheme;
 window.openCreateServerModal = openCreateServerModal;
 window.closeModal = closeModal;
+window.setBtnLoading = setBtnLoading;
+window.isMobileView = isMobileView;
 window.handleCreateServer = handleCreateServer;
 window.submitSetup = submitSetup;
 window.submitLogin = submitLogin;
@@ -17469,6 +17484,25 @@ document.addEventListener('click', (e) => {
 });
 
 window.addEventListener('resize', closeAllCustomSelects);
+if (typeof window !== 'undefined' && window.matchMedia) {
+  try {
+    const mql = window.matchMedia('(max-width: 768px)');
+    let wasMob = mql.matches;
+    const handleMobChange = (e) => {
+      if (e.matches !== wasMob) {
+        wasMob = e.matches;
+        if (typeof R === 'function' && S && S.view) {
+          R();
+        }
+      }
+    };
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', handleMobChange);
+    } else if (typeof mql.addListener === 'function') {
+      mql.addListener(handleMobChange);
+    }
+  } catch (_) {}
+}
 document.addEventListener('scroll', (e) => {
   if (e.target && e.target.closest && e.target.closest('.cselect-menu')) return;
   if (document.querySelector('.cselect-wrap.open, .cselect-menu.cselect-portaled')) {
