@@ -319,8 +319,8 @@
   window.addEventListener('click', event => { document.querySelectorAll('.np-compact-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; }); });
   window.addEventListener('keydown', event => { if (event.key === 'Escape') document.querySelectorAll('.np-compact-menu[open]').forEach(menu => { menu.open = false; menu.querySelector('summary')?.focus(); }); });
   window.addEventListener('offline', syncControls);
-  window.addEventListener('online', () => { if (S.token) retryConnection(); });
+  window.addEventListener('online', () => { if (typeof S !== 'undefined' && S.token) retryConnection(); });
   window.addEventListener('beforeunload', () => { captureEditor(); remember(); });
-  setInterval(() => { if (S.token && S.view === 'con') paintCountdown(); }, 1000);
-  setInterval(() => { if (S.token && !document.hidden) pollCountdown(); }, 5000);
+  setInterval(() => { if (typeof S !== 'undefined' && S.token && S.view === 'con') paintCountdown(); }, 1000);
+  setInterval(() => { if (typeof S !== 'undefined' && S.token && !document.hidden) pollCountdown(); }, 5000);
 })();

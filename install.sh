@@ -764,7 +764,7 @@ LimitNOFILE=65535
 
 # Security hardening: restrict filesystem access outside NeoPanel state
 ProtectSystem=strict
-ReadWritePaths=${DATA_DIR} ${CONFIG_DIR} /etc/caddy /var/log /tmp /run
+ReadWritePaths=${DATA_DIR} ${CONFIG_DIR} -/etc/caddy /var/log /tmp /run
 ProtectHome=true
 PrivateTmp=true
 ProtectKernelTunables=true
