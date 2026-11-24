@@ -33,9 +33,9 @@ var canonicalPremadeJavas = []premadeJavaDef{
 	{Version: "25", Name: "Java 25 (Latest LTS • Minecraft 26+)"},
 	{Version: "21", Name: "Java 21 (LTS • Minecraft 1.20.5 - 1.21.x)"},
 	{Version: "17", Name: "Java 17 (LTS • Minecraft 1.18 - 1.20.4)"},
-	{Version: "16", Name: "Java 16 (Minecraft 1.17)"},
-	{Version: "11", Name: "Java 11 (LTS)"},
-	{Version: "8", Name: "Java 8 (Legacy • Minecraft 1.8 - 1.16.5)"},
+	{Version: "16", Name: "Java 16 (Minecraft 1.17 • Optional)"},
+	{Version: "11", Name: "Java 11 (LTS • Optional)"},
+	{Version: "8", Name: "Java 8 (Legacy • Minecraft 1.8 - 1.16.5 • Optional)"},
 }
 
 var (
@@ -573,14 +573,26 @@ func SupportedJavaMajors() []string {
 	return versions
 }
 
-// InstallRequiredJavaRuntimes provisions and verifies every required family on this host.
+// RequiredJavaMajors returns the default required Java runtimes (25, 21, 17).
+// Java 11 and 8 are legacy and optional; they are downloaded automatically on-demand.
+func RequiredJavaMajors() []string {
+	return []string{"25", "21", "17"}
+}
+
+// IsOptionalJavaMajor returns true if the Java major is legacy/optional.
+func IsOptionalJavaMajor(ver string) bool {
+	v := strings.TrimSpace(ver)
+	return v == "8" || v == "11" || v == "1.8" || v == "16"
+}
+
+// InstallRequiredJavaRuntimes provisions and verifies default required families (25, 21, 17) on this host.
 // Existing exact-major installations are reused. A partial failure is never success.
 func InstallRequiredJavaRuntimes() error {
 	return installRequiredJavaRuntimes(ResolveJavaBinary, detectJavaBinaryMajor, InstallJavaRuntime)
 }
 
 func installRequiredJavaRuntimes(resolve func(string) (string, string), detect func(string) string, install func(string) (JavaRuntimeInfo, error)) error {
-	for _, ver := range SupportedJavaMajors() {
+	for _, ver := range RequiredJavaMajors() {
 		bin, _ := resolve(ver)
 		if bin != "" && detect(bin) == ver {
 			continue

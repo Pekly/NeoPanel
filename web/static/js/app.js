@@ -242,11 +242,27 @@ function engineIcon(type, size = 16, withBg = false) {
 }
 
 function serverArtifactLabel(srv, size = 13) {
-  return window.NPServerArtifact?.label(srv, size) || `${engineIcon('custom', size)} Custom`;
+  const d = window.NPServerArtifact?.display(srv);
+  if (d && d.software !== 'custom' && d.software !== 'unknown') {
+    return window.NPServerArtifact.label(srv, size);
+  }
+  if (srv?.artifact && ['unknown', 'missing', 'error'].includes(srv.artifact.status)) {
+    return window.NPServerArtifact?.label(srv, size) || `${engineIcon('custom', size)} Custom`;
+  }
+  const type = (srv?.type && srv.type !== 'custom') ? srv.type : (typeof detectJarEngine === 'function' ? detectJarEngine(srv?.jar_file || '') : 'custom');
+  const m = engineMeta(type || 'custom');
+  return `${engineIcon(type, size)} <span class="artifact-label">${esc(m.label)}</span>`;
 }
 
 function serverArtifactVersion(srv) {
-  return window.NPServerArtifact?.display(srv).version || 'Unknown version';
+  const d = window.NPServerArtifact?.display(srv);
+  if (d && d.version && d.version !== 'Unknown version') {
+    return d.version;
+  }
+  if (srv?.artifact && ['unknown', 'missing', 'error'].includes(srv.artifact.status)) {
+    return 'Unknown version';
+  }
+  return srv?.version || 'Unknown version';
 }
 
 function javaCommandLabel(value, srv) {

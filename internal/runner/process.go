@@ -284,6 +284,18 @@ func (p *ProcessInstance) Start() error {
 			}
 		}
 		javaBinary, javaLabel = ResolveJavaBinary(selection)
+		targetTag := parseJavaTag(selection)
+		if (!isExecutableBinary(javaBinary) || (targetTag != "default" && detectJavaBinaryMajor(javaBinary) != targetTag)) && javaSupported[targetTag] && CanAutoInstallJava() {
+			p.broadcast(fmt.Sprintf("\x1b[33m[NeoPanel] Java %s is required but not installed on this host. Downloading automatically from official Eclipse Temurin...\x1b[0m", targetTag))
+			if _, installErr := InstallJavaRuntime(targetTag); installErr == nil {
+				javaBinary, javaLabel = ResolveJavaBinary(selection)
+				if isExecutableBinary(javaBinary) {
+					p.broadcast(fmt.Sprintf("\x1b[32m[NeoPanel] Java %s successfully downloaded and installed!\x1b[0m", targetTag))
+				}
+			} else {
+				p.broadcast(fmt.Sprintf("\x1b[33m[NeoPanel] Automatic download of Java %s failed: %v\x1b[0m", targetTag, installErr))
+			}
+		}
 		if strings.EqualFold(strings.TrimSpace(srv.JavaPath), "auto") && detectJavaBinaryMajor(javaBinary) != selection {
 			return fmt.Errorf("Auto Java requires Java %s, but a verified runtime is unavailable. Ask an administrator to run 'neopanel java install-all' on this host", selection)
 		}

@@ -31,7 +31,17 @@
     return srv.artifact && typeof srv.artifact === 'object' ? srv.artifact : null;
   }
   function cached(srv) {
-    const key = context(srv), entry = cache.get(key);
+    const key = context(srv);
+    let entry = cache.get(key);
+    if (!entry && srv?.id && typeof localStorage !== 'undefined') {
+      try {
+        const stored = JSON.parse(localStorage.getItem('np_art_' + (srv.node_id || 'local') + '_' + srv.id) || 'null');
+        if (stored?.key === key && stored?.info) {
+          entry = {state: 'ready', info: stored.info, checked: stored.checked || Date.now()};
+          bounded(cache, key, entry);
+        }
+      } catch (_) {}
+    }
     if (entry && Date.now() - entry.checked >= cacheTTL) { cache.delete(key); return null; }
     return entry;
   }
@@ -126,6 +136,11 @@
         if (!live()) return;
         if (!data || !['identified', 'partial', 'unknown', 'missing', 'error', 'native'].includes(data.status)) throw Error('Invalid artifact response');
         bounded(cache, key, {state: 'ready', info: Object.freeze({...data})});
+        if (typeof localStorage !== 'undefined' && ['identified', 'partial'].includes(data.status)) {
+          try {
+            localStorage.setItem('np_art_' + (srv.node_id || 'local') + '_' + srv.id, JSON.stringify({key, info: data, checked: Date.now()}));
+          } catch (_) {}
+        }
       }).catch(() => { if (live()) bounded(cache, key, {state: 'error'}); })
       .finally(() => {
         clearTimeout(timer);
@@ -137,6 +152,9 @@
     if (!srv) return;
     if (active?.key === context(srv)) dispose();
     cache.delete(context(srv)); delete srv.artifact; bindings.delete(srv);
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.removeItem('np_art_' + (srv.node_id || 'local') + '_' + srv.id); } catch (_) {}
+    }
   }
   function retry() {
     if (!eligible()) return;

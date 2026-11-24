@@ -438,13 +438,15 @@ step_isolation() (
 step_java() {
   local binary="${1:-$INSTALL_DIR/$BINARY_NAME}"
   if [ ! -x "$binary" ]; then
-    echo "[ERROR] Java provisioning requires an installed NeoPanel binary at $binary. Install/update NeoPanel first, then run '$INSTALL_DIR/$BINARY_NAME java install-all' (or rerun --java)." >&2
-    return 1
+    echo "[WARN] Java provisioning skipped: NeoPanel binary not found at $binary" >&2
+    return 0
   fi
+  mkdir -p /usr/lib/jvm
+  echo "[INFO] Provisioning standard Java runtimes (17, 21, 25)..."
   if ! "$binary" java install-all; then
-    echo "[ERROR] Required Java runtime provisioning/verification failed. See the missing family above; fix permissions or upstream/platform availability and rerun --java. No service restart was requested by this step." >&2
-    return 1
+    echo "[WARN] Java runtime provisioning was incomplete or deferred. Missing runtimes (including optional Java 8 and 11) will download automatically on-demand when servers start." >&2
   fi
+  return 0
 }
 
 go_compiler_supported() {
@@ -562,6 +564,7 @@ step_build_neopanel() {
   mkdir -p "$CONFIG_DIR"
   mkdir -p "$DATA_DIR/servers"
   mkdir -p "$DATA_DIR/backups"
+  mkdir -p /usr/lib/jvm
 
   local -a go_tags=()
   if [ "$INSTALL_ROLE" = "node" ]; then
@@ -764,7 +767,7 @@ LimitNOFILE=65535
 
 # Security hardening: restrict filesystem access outside NeoPanel state
 ProtectSystem=strict
-ReadWritePaths=${DATA_DIR} ${CONFIG_DIR} -/etc/caddy /var/log /tmp /run
+ReadWritePaths=${DATA_DIR} ${CONFIG_DIR} -/etc/caddy -/usr/lib/jvm /var/log /tmp /run
 ProtectHome=true
 PrivateTmp=true
 ProtectKernelTunables=true

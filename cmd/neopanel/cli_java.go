@@ -25,7 +25,7 @@ func cliJava(args []string, stdout, stderr io.Writer, deps javaCLI) int {
 	}
 	var installErr error
 	if args[0] == "install-all" {
-		fmt.Fprintln(stdout, "Installing/verifying required Java families: "+strings.Join(runner.SupportedJavaMajors(), ", "))
+		fmt.Fprintln(stdout, "Installing/verifying standard Java families: "+strings.Join(runner.RequiredJavaMajors(), ", "))
 		installErr = deps.installAll()
 	}
 	statuses := make(map[string]runner.JavaRuntimeInfo)
@@ -39,17 +39,26 @@ func cliJava(args []string, stdout, stderr io.Writer, deps javaCLI) int {
 			fmt.Fprintf(stdout, "Java %s: verified (%s)\n", ver, info.Path)
 			verified++
 		} else {
-			fmt.Fprintf(stdout, "Java %s: MISSING\n", ver)
+			opt := ""
+			if runner.IsOptionalJavaMajor(ver) {
+				opt = " (optional • on-demand)"
+			}
+			fmt.Fprintf(stdout, "Java %s: MISSING%s\n", ver, opt)
 		}
 	}
-	fmt.Fprintf(stdout, "Verified %d/%d required Java families.\n", verified, len(runner.SupportedJavaMajors()))
+	fmt.Fprintf(stdout, "Verified %d/%d Java families.\n", verified, len(runner.SupportedJavaMajors()))
 	if installErr != nil {
 		fmt.Fprintf(stderr, "Java provisioning incomplete: %v\n", installErr)
 		return 1
 	}
-	if args[0] == "install-all" && verified != len(runner.SupportedJavaMajors()) {
-		fmt.Fprintln(stderr, "Java provisioning incomplete: required runtimes are still missing.")
-		return 1
+	if args[0] == "install-all" {
+		for _, ver := range runner.RequiredJavaMajors() {
+			info := statuses[ver]
+			if !info.Installed || info.Path == "" {
+				fmt.Fprintf(stderr, "Java provisioning incomplete: required Java %s is still missing.\n", ver)
+				return 1
+			}
+		}
 	}
 	return 0
 }

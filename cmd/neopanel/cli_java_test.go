@@ -20,14 +20,14 @@ func TestCLIJavaProvisionAndList(t *testing.T) {
 				installAll: func() error {
 					calls++
 					if scenario == "partial" {
-						return fmt.Errorf("required Java 16 unavailable")
+						return fmt.Errorf("required Java 21 unavailable")
 					}
 					return nil
 				},
 				statuses: func() []runner.JavaRuntimeInfo {
 					var out []runner.JavaRuntimeInfo
 					for _, ver := range runner.SupportedJavaMajors() {
-						if ver == "16" && scenario != "success" {
+						if ver == "21" && scenario != "success" {
 							continue
 						}
 						out = append(out, runner.JavaRuntimeInfo{Version: ver, Path: "fixture/" + ver, Installed: true})
@@ -49,7 +49,7 @@ func TestCLIJavaProvisionAndList(t *testing.T) {
 			if scenario == "success" && !strings.Contains(stdout.String(), "Verified 6/6") {
 				t.Fatal(stdout.String())
 			}
-			if scenario != "success" && (!strings.Contains(stdout.String(), "Java 16: MISSING") || strings.Contains(stdout.String(), "Verified 6/6")) {
+			if scenario != "success" && (!strings.Contains(stdout.String(), "Java 21: MISSING") || strings.Contains(stdout.String(), "Verified 6/6")) {
 				t.Fatal(stdout.String())
 			}
 		})

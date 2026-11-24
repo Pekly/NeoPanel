@@ -46,7 +46,7 @@ func TestJavaRequiredProvisionMissingAndIdempotence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !reflect.DeepEqual(calls, []string{"21", "16", "11", "8"}) {
+	if !reflect.DeepEqual(calls, []string{"21"}) {
 		t.Fatalf("install order/reuse: %v", calls)
 	}
 }
@@ -56,26 +56,26 @@ func TestJavaRequiredPartialFailureAndWrongMajor(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			var calls []string
 			detect := func(bin string) string {
-				if bin == "16" && scenario == "wrong-major" {
+				if bin == "21" && scenario == "wrong-major" {
 					return "17"
 				}
-				if bin == "16" && scenario == "unparseable" {
+				if bin == "21" && scenario == "unparseable" {
 					return ""
 				}
 				return bin
 			}
 			install := func(ver string) (JavaRuntimeInfo, error) {
 				calls = append(calls, ver)
-				if ver == "16" && scenario == "unavailable" {
+				if ver == "21" && scenario == "unavailable" {
 					return JavaRuntimeInfo{}, fmt.Errorf("no build for architecture")
 				}
 				return JavaRuntimeInfo{Version: ver, Path: ver, Installed: true}, nil
 			}
 			err := installRequiredJavaRuntimes(func(string) (string, string) { return "", "" }, detect, install)
-			if err == nil || !strings.Contains(err.Error(), "Java 16") {
+			if err == nil || !strings.Contains(err.Error(), "Java 21") {
 				t.Fatalf("lost failed family: %v", err)
 			}
-			if !reflect.DeepEqual(calls, []string{"25", "21", "17", "16"}) {
+			if !reflect.DeepEqual(calls, []string{"25", "21"}) {
 				t.Fatalf("did not stop at failure: %v", calls)
 			}
 		})
