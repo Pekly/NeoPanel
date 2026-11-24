@@ -10062,14 +10062,6 @@ async function testNodeModalConnection(nodeId = '') {
     if (res.online) {
       const sys = res.system || {};
       const ramGb = sys.total_ram_mb ? (sys.total_ram_mb / 1024).toFixed(1) + ' GB RAM' : '';
-      box.innerHTML = `<div class="node-callout" style="margin:0; border-color: rgba(63,185,80,0.45); background: rgba(63,185,80,0.1);">
-        <b style="color:var(--ok);">Connected!</b> Reachable in <b>${res.latency_ms ?? 0}ms</b> &bull; ${res.server_count ?? 0} server(s)
-        ${sys.cpus ? `<div class="mu mono" style="font-size:11.5px; margin-top:3px;">${esc(sys.os || 'linux')}/${esc(sys.arch || 'amd64')} &bull; ${sys.cpus} vCPU &bull; ${ramGb}</div>` : ''}
-      </div>`;
-    } else {
-      box.innerHTML = `<div class="node-error-note"><b>Connection Failed:</b> ${esc(res.error || 'Unreachable node')}</div>`;
-    }
-  } catch (err) {
     if (box) box.innerHTML = `<div class="node-error-note">${esc(err.message || 'Test failed')}</div>`;
   } finally {
     if (btn) setBtnLoading(btn, false);

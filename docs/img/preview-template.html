@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1280px;
+    height: 640px;
+    overflow: hidden;
+    background: #090d16;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: #f1f5f9;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 50px 65px;
+  }
+
+  /* Background ambiance & grid */
+  .bg-grid {
+    position: absolute;
+    inset: 0;
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse at 50% 50%, black 50%, transparent 95%);
+    pointer-events: none;
+  }
+  .glow-emerald {
+    position: absolute;
+    top: -120px;
+    left: -100px;
+    width: 550px;
+    height: 550px;
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.22) 0%, rgba(16, 185, 129, 0) 70%);
+    pointer-events: none;
+    filter: blur(40px);
+  }
+  .glow-cyan {
+    position: absolute;
+    bottom: -150px;
+    right: 50px;
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, rgba(6, 182, 212, 0.18) 0%, rgba(6, 182, 212, 0) 70%);
+    pointer-events: none;
+    filter: blur(45px);
+  }
+
+  /* Left column - Branding */
+  .brand-col {
+    position: relative;
+    z-index: 10;
+    width: 520px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .logo-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .logo-icon {
+    width: 52px;
+    height: 52px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2), rgba(6, 182, 212, 0.2));
+    border: 1px solid rgba(16, 185, 129, 0.5);
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.35);
+  }
+  .logo-icon svg {
+    width: 32px;
+    height: 32px;
+  }
+  .brand-name {
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #ffffff 40%, #a7f3d0 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .tagline {
+    font-size: 20px;
+    line-height: 1.4;
+    color: #94a3b8;
+    font-weight: 450;
+  }
+  .tagline strong {
+    color: #e2e8f0;
+    font-weight: 600;
+  }
+
+  /* Feature Pills Grid */
+  .chips-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 4px;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 13px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    color: #cbd5e1;
+    backdrop-filter: blur(10px);
+  }
+  .chip .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 8px #10b981;
+  }
+
+  /* Quick Install Box */
+  .install-box {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(51, 65, 85, 0.8);
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12.5px;
+    color: #38bdf8;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  }
+  .install-prompt {
+    color: #10b981;
+    font-weight: 700;
+  }
+
+  /* Right column - UI Mockup Card */
+  .mockup-col {
+    position: relative;
+    z-index: 10;
+    width: 580px;
+  }
+  .mockup-window {
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    box-shadow: 
+      0 20px 45px -10px rgba(0, 0, 0, 0.6),
+      0 0 35px -5px rgba(16, 185, 129, 0.12);
+    backdrop-filter: blur(20px);
+    overflow: hidden;
+  }
+  .window-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .traffic-lights {
+    display: flex;
+    gap: 7px;
+  }
+  .tl {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+  }
+  .tl.red { background: #ef4444; }
+  .tl.yellow { background: #f59e0b; }
+  .tl.green { background: #10b981; }
+
+  .window-title {
+    font-size: 12px;
+    color: #64748b;
+    font-family: ui-monospace, monospace;
+  }
+
+  .window-content {
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* Stats row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .stat-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 10px 12px;
+    border-radius: 8px;
+  }
+  .stat-lbl {
+    font-size: 11px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+  }
+  .stat-val {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-top: 3px;
+  }
+  .stat-val.online {
+    color: #34d399;
+  }
+
+  /* Server Rows */
+  .server-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+  }
+  .srv-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .srv-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: #1e293b;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+  }
+  .srv-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #f1f5f9;
+  }
+  .srv-meta {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 2px;
+  }
+  .srv-badge {
+    padding: 3px 9px;
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 12px;
+    font-size: 11px;
+    color: #34d399;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .srv-badge::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #34d399;
+  }
+
+  /* Terminal Snippet */
+  .terminal-box {
+    background: #020617;
+    border: 1px solid rgba(51, 65, 85, 0.5);
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #94a3b8;
+  }
+  .term-info { color: #38bdf8; }
+  .term-ok { color: #34d399; }
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="glow-emerald"></div>
+<div class="glow-cyan"></div>
+
+<!-- Left: Branding -->
+<div class="brand-col">
+  <div class="logo-row">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+      </svg>
+    </div>
+    <h1 class="brand-name">NeoPanel</h1>
+  </div>
+
+  <p class="tagline">
+    <strong>Ultra-lightweight Minecraft Server Manager</strong><br>
+    Self-hosted single Go binary with multi-node clusters, 1-click modpacks &amp; zero Docker overhead.
+  </p>
+
+  <div class="chips-grid">
+    <div class="chip"><span class="dot"></span> Go &bull; Single Binary</div>
+    <div class="chip"><span class="dot"></span> No Docker Required</div>
+    <div class="chip"><span class="dot"></span> Multi-Node Worker Clusters</div>
+    <div class="chip"><span class="dot"></span> 1-Click Modpacks</div>
+    <div class="chip"><span class="dot"></span> Cloud S3 &amp; R2 Backups</div>
+    <div class="chip"><span class="dot"></span> Auto Cloudflare DNS</div>
+  </div>
+
+  <div class="install-box">
+    <span class="install-prompt">$</span>
+    <span>curl -sSL https://get.neopanel.dev | sudo bash</span>
+  </div>
+</div>
+
+<!-- Right: Dashboard Mockup -->
+<div class="mockup-col">
+  <div class="mockup-window">
+    <div class="window-bar">
+      <div class="traffic-lights">
+        <div class="tl red"></div>
+        <div class="tl yellow"></div>
+        <div class="tl green"></div>
+      </div>
+      <div class="window-title">neopanel-cluster &bull; 3 Nodes Active</div>
+      <div style="width: 35px;"></div>
+    </div>
+
+    <div class="window-content">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-lbl">Status</div>
+          <div class="stat-val online">Online (20 TPS)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Cluster CPU</div>
+          <div class="stat-val">14% &bull; 8 vCPU</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-lbl">Memory</div>
+          <div class="stat-val">6.4 / 32 GB</div>
+        </div>
+      </div>
+
+      <div class="server-row">
+        <div class="srv-info">
+          <div class="srv-icon">🌲</div>
+          <div>
+            <div class="srv-name">Survival SMP 1.21.4</div>
+            <div class="srv-meta">Paper &bull; node-01 (Frankfurt) &bull; 24 Players</div>
+          </div>
+        </div>
+        <div class="srv-badge">Running</div>
+      </div>
+
+      <div class="server-row">
+        <div class="srv-info">
+          <div class="srv-icon">🚀</div>
+          <div>
+            <div class="srv-name">All The Mods 10 (Modded)</div>
+            <div class="srv-meta">NeoForge 1.21.1 &bull; 1-Click Modpack &bull; 8.0 GB RAM</div>
+          </div>
+        </div>
+        <div class="srv-badge">Running</div>
+      </div>
+
+      <div class="terminal-box">
+        <div><span class="term-info">[INFO]</span> Connected to remote node 'eu-frankfurt-01' (14ms latency)</div>
+        <div><span class="term-ok">[SUCCESS]</span> S3 Cloud Backup verified: world_20261125.tar.zst</div>
+        <div><span class="term-info">[INFO]</span> Done (3.84s)! For help, type "help"</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
