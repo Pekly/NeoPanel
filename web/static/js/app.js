@@ -8065,7 +8065,7 @@ const V = {
 
           <div style="background:rgba(255,255,255,0.015); border:1px solid var(--border); border-radius:8px; padding:16px;">
             <h3 style="margin:0 0 8px; font-size:14px; color:var(--tx);">Update source</h3>
-            <p class="mu" style="font-size:12px; margin:0 0 12px;">Choose the GitHub repository and branch used for updates.</p>
+            <p class="mu" style="font-size:12px; margin:0 0 12px;">Choose the GitHub repository and branch used for updates. When updating the panel, connected cluster worker nodes will also be updated automatically.</p>
             <div class="grid g2" style="gap:12px; margin-bottom:12px;">
               <div>
                 <label class="lbl" style="font-size:12px;">Git Repository URL</label>
@@ -8158,6 +8158,7 @@ const V = {
           </div>
           <div class="row" style="gap: 8px; flex-wrap: wrap;">
             ${renderViewModeToggle('admin_nodes', 'tiles')}
+            <button type="button" class="btn sm" onclick="updateAllClusterNodes()">${ic('refresh', 13)} Update All Nodes</button>
             <button type="button" class="btn sm" onclick="loadAdminNodes(true)">${ic('refresh', 13)} Refresh Nodes</button>
             <button type="button" class="btn sm pr" onclick="openNodeModal()">${ic('plus', 14)} Connect Node</button>
           </div>
@@ -8190,7 +8191,8 @@ const V = {
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="testClusterNode(this.dataset.id, this)">${ic('refresh', 12)} Test</button>
                       ${n.is_local
                         ? `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>`
-                        : `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
+                        : `<button type="button" class="btn sm" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="updateClusterNode(this.dataset.id, this.dataset.name)">${ic('refresh', 12)} Update</button>
+                           <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                            <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)}</button>`}
                     </div>
                   </td>
@@ -8253,6 +8255,7 @@ const V = {
                   ${n.is_local
                     ? `<button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>`
                     : `
+                      <button type="button" class="btn sm" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="updateClusterNode(this.dataset.id, this.dataset.name)">${ic('refresh', 12)} Update</button>
                       <button type="button" class="btn sm" data-id="${esc(n.id)}" onclick="openNodeModal(this.dataset.id)">${ic('edit', 12)} Edit</button>
                       <button type="button" class="btn sm dg" data-id="${esc(n.id)}" data-name="${esc(n.name)}" onclick="deleteClusterNode(this.dataset.id, this.dataset.name)">${ic('trash', 12)} Disconnect</button>
                     `}
@@ -10157,6 +10160,47 @@ async function deleteClusterNode(nodeId, name) {
     toast(`Disconnected node "${name}"`, 'ok');
     await Promise.all([loadDashboard(), loadAdminNodes()]);
   } catch (e) {}
+}
+
+async function updateClusterNode(nodeId, nodeName) {
+  if (!nodeId || nodeId === 'local') {
+    return executePanelUpdate();
+  }
+  const ok = await uiConfirm({
+    title: `Update Node: ${nodeName || nodeId}`,
+    message: `Trigger update on cluster worker node <b>${esc(nodeName || nodeId)}</b>? The node daemon will pull the latest version, recompile with node tags, and restart.`,
+    confirmText: 'Update Node',
+    cancelText: 'Cancel',
+    icon: 'refresh'
+  });
+  if (!ok) return;
+
+  try {
+    toast(`Triggering update for node ${nodeName || nodeId}...`);
+    const res = await api(`/api/nodes/${encodeURIComponent(nodeId)}/update`, { method: 'POST' });
+    toast(res.message || `Update dispatched to node ${nodeName || nodeId}!`, 'ok');
+  } catch (err) {
+    toast(err.message || `Failed to update node ${nodeName || nodeId}`, 'bad');
+  }
+}
+
+async function updateAllClusterNodes() {
+  const ok = await uiConfirm({
+    title: 'Update All Cluster Worker Nodes',
+    message: 'Trigger updates on all connected remote cluster worker nodes? Each worker node will recompile and restart with the latest panel codebase.',
+    confirmText: 'Update All Nodes',
+    cancelText: 'Cancel',
+    icon: 'refresh'
+  });
+  if (!ok) return;
+
+  try {
+    toast('Triggering updates across cluster worker nodes...');
+    const res = await api('/api/cluster/update', { method: 'POST' });
+    toast(res.message || `Updates dispatched to ${res.dispatched || 0} node(s)!`, 'ok');
+  } catch (err) {
+    toast(err.message || 'Failed to trigger cluster updates', 'bad');
+  }
 }
 
 async function bulkRestartServers() {
@@ -17167,6 +17211,8 @@ window.testNodeModalConnection = testNodeModalConnection;
 window.submitNodeModal = submitNodeModal;
 window.testClusterNode = testClusterNode;
 window.deleteClusterNode = deleteClusterNode;
+window.updateClusterNode = updateClusterNode;
+window.updateAllClusterNodes = updateAllClusterNodes;
 window.loadDatabases = loadDatabases;
 window.openCreateDatabaseModal = openCreateDatabaseModal;
 window.submitCreateDatabase = submitCreateDatabase;

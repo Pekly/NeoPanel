@@ -493,6 +493,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("PUT /api/nodes/{id}", r.requireAdmin(r.nodes.UpdateNode))
 	r.mux.HandleFunc("PATCH /api/nodes/{id}/name", r.requireAdmin(r.nodes.RenameNode))
 	r.mux.HandleFunc("DELETE /api/nodes/{id}", r.requireAdmin(r.nodes.DeleteNode))
+	r.mux.HandleFunc("POST /api/nodes/{id}/update", r.requireAdmin(r.nodes.UpdateRemoteNode))
+	r.mux.HandleFunc("POST /api/cluster/update", r.requireAdmin(r.nodes.UpdateAllRemoteNodes))
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"} {
 		r.mux.HandleFunc(method+" /api/nodes/{id}/proxy/{rest...}", r.requireAuth(r.proxyHTTP))
 	}

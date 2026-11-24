@@ -18,6 +18,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Pekly/NeoPanel/internal/api"
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
 )
@@ -397,7 +398,7 @@ func resolveCLIUser(db *database.DB, preferredUsername string) (*database.User, 
 
 func cliNode(defaultConfigPath string, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: neopanel node <connect|list|remove|test> [flags]")
+		fmt.Fprintln(os.Stderr, "Usage: neopanel node <connect|list|remove|test|update> [flags]")
 		return 1
 	}
 	action := strings.ToLower(strings.TrimSpace(args[0]))
@@ -817,6 +818,148 @@ func cliNode(defaultConfigPath string, args []string) int {
 			return 1
 		}
 		fmt.Printf("ONLINE: %s (%dms) — %d vCPU, %d MB RAM, %d server(s)\n", baseURL, latMS, cpus, ramMB, srvCnt)
+		return 0
+
+	case "update", "upgrade":
+		fs := flag.NewFlagSet("node update", flag.ContinueOnError)
+		cfgFlag := fs.String("config", defaultConfigPath, "Path to config.yaml")
+		nodeIDFlag := fs.String("id", "", "Target node ID or name to update")
+		allFlag := fs.Bool("all", false, "Update all connected cluster worker nodes")
+		repoFlag := fs.String("repo", "", "Optional custom repository URL")
+		branchFlag := fs.String("branch", "", "Optional custom branch")
+		masterFlag := fs.String("master", "", "Master Panel base URL for remote API call")
+		apiKeyFlag := fs.String("api-key", os.Getenv("NEOPANEL_API_KEY"), "Master Panel Admin API key")
+		insecure := fs.Bool("insecure", false, "Skip TLS verification")
+		targetArg, parseArgs := splitFirstPositional(rest)
+		if err := fs.Parse(parseArgs); err != nil {
+			return 1
+		}
+		if targetArg == "" && fs.NArg() > 0 {
+			targetArg = fs.Arg(0)
+		}
+		target := strings.TrimSpace(targetArg)
+		if target == "" {
+			target = strings.TrimSpace(*nodeIDFlag)
+		}
+		if target == "" && !*allFlag {
+			fmt.Fprintln(os.Stderr, "Usage: neopanel node update [<node-id-or-name> | --all] [--master <url> --api-key <key>]")
+			return 1
+		}
+
+		repoURL := strings.TrimSpace(*repoFlag)
+		branch := strings.TrimSpace(*branchFlag)
+
+		if strings.TrimSpace(*masterFlag) != "" {
+			normMaster, err := cliNormalizeURL(*masterFlag)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Invalid --master URL: %v\n", err)
+				return 1
+			}
+			if strings.TrimSpace(*apiKeyFlag) == "" {
+				fmt.Fprintln(os.Stderr, "Error: --api-key is required with --master")
+				return 1
+			}
+			client := cliHTTPClient(*insecure, 30*time.Second)
+			reqURL := normMaster + "/api/cluster/update"
+			if !*allFlag {
+				reqURL = normMaster + "/api/nodes/" + url.PathEscape(target) + "/update"
+			}
+			var bodyBytes []byte
+			if repoURL != "" || branch != "" {
+				bodyBytes, _ = json.Marshal(map[string]string{
+					"repo_url": repoURL,
+					"branch":   branch,
+				})
+			}
+			req, _ := http.NewRequest(http.MethodPost, reqURL, bytes.NewReader(bodyBytes))
+			req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(*apiKeyFlag))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to contact Master Panel: %v\n", err)
+				return 1
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				raw, _ := io.ReadAll(resp.Body)
+				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode, strings.TrimSpace(string(raw)))
+				return 1
+			}
+			var result struct {
+				Status     string   `json:"status"`
+				Message    string   `json:"message"`
+				Dispatched int      `json:"dispatched,omitempty"`
+				Nodes      []string `json:"nodes,omitempty"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&result)
+			fmt.Println("[OK]", result.Message)
+			return 0
+		}
+
+		cfgPath := resolveConfigPath(*cfgFlag)
+		cfg, err := config.LoadConfig(cfgPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
+			return 1
+		}
+		db, err := database.InitDB(cfg.Paths.DBPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening database: %v\n", err)
+			return 1
+		}
+		defer db.Close()
+
+		if repoURL == "" || branch == "" {
+			defCfg := api.GetEffectiveUpdateConfig(db)
+			if repoURL == "" {
+				repoURL = defCfg.RepoURL
+			}
+			if branch == "" {
+				branch = defCfg.Branch
+			}
+		}
+
+		if *allFlag {
+			nodes, err := db.ListNodes()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error listing nodes: %v\n", err)
+				return 1
+			}
+			dispatched := 0
+			for _, n := range nodes {
+				if strings.TrimSpace(n.BaseURL) != "" && strings.TrimSpace(n.APIToken) != "" {
+					fmt.Printf("Updating cluster node %q (%s)...\n", n.Name, n.BaseURL)
+					if err := api.TriggerRemoteNodeUpdate(os.Stdout, n, repoURL, branch); err != nil {
+						fmt.Fprintf(os.Stderr, "  -> Failed: %v\n", err)
+					} else {
+						dispatched++
+					}
+				}
+			}
+			fmt.Printf("Dispatched updates to %d worker node(s).\n", dispatched)
+			return 0
+		}
+
+		node, err := db.GetNode(target)
+		if err != nil || node == nil {
+			nodes, _ := db.ListNodes()
+			for _, n := range nodes {
+				if strings.EqualFold(n.Name, target) {
+					node = n
+					break
+				}
+			}
+		}
+		if node == nil {
+			fmt.Fprintf(os.Stderr, "Cluster node %q not found\n", target)
+			return 1
+		}
+		fmt.Printf("Updating cluster node %q (%s)...\n", node.Name, node.BaseURL)
+		if err := api.TriggerRemoteNodeUpdate(os.Stdout, node, repoURL, branch); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to update node: %v\n", err)
+			return 1
+		}
+		fmt.Println("[OK] Update command accepted by node daemon.")
 		return 0
 
 	default:

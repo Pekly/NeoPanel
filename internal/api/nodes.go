@@ -1099,3 +1099,96 @@ func (h *NodeHandler) SyncAuthToNode(ctx context.Context, baseURL, apiToken stri
 	}
 	return nil
 }
+
+func (h *NodeHandler) UpdateRemoteNode(w http.ResponseWriter, r *http.Request) {
+	nodeID := strings.TrimSpace(r.PathValue("id"))
+	if nodeID == "" || nodeID == "local" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Local master node cannot be updated via remote node endpoint; use /api/admin/updates/apply"})
+		return
+	}
+
+	node, err := h.db.GetNode(nodeID)
+	if err != nil || node == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Node not found"})
+		return
+	}
+
+	cfg := getEffectiveUpdateConfig(h.db)
+	repoURL := cfg.RepoURL
+	branch := cfg.Branch
+
+	if r.Body != nil {
+		var req struct {
+			RepoURL string `json:"repo_url"`
+			Branch  string `json:"branch"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			if req.RepoURL != "" && req.Branch != "" {
+				if _, _, ok := parseGithubRepo(req.RepoURL); ok && validUpdateBranch(req.Branch) {
+					repoURL = req.RepoURL
+					branch = req.Branch
+				}
+			}
+		}
+	}
+
+	go func() {
+		_ = TriggerRemoteNodeUpdate(nil, node, repoURL, branch)
+	}()
+
+	logAudit(h.db, r, "admin_node_update", fmt.Sprintf("Triggered remote update for node %s (%s)", node.Name, node.ID))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "updating",
+		"message":  fmt.Sprintf("Update command dispatched to node %s (%s)", node.Name, node.ID),
+		"node_id":  node.ID,
+		"repo_url": repoURL,
+		"branch":   branch,
+	})
+}
+
+func (h *NodeHandler) UpdateAllRemoteNodes(w http.ResponseWriter, r *http.Request) {
+	nodes, err := h.db.ListNodes()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to list nodes"})
+		return
+	}
+
+	cfg := getEffectiveUpdateConfig(h.db)
+	repoURL := cfg.RepoURL
+	branch := cfg.Branch
+
+	if r.Body != nil {
+		var req struct {
+			RepoURL string `json:"repo_url"`
+			Branch  string `json:"branch"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err == nil {
+			if req.RepoURL != "" && req.Branch != "" {
+				if _, _, ok := parseGithubRepo(req.RepoURL); ok && validUpdateBranch(req.Branch) {
+					repoURL = req.RepoURL
+					branch = req.Branch
+				}
+			}
+		}
+	}
+
+	dispatched := 0
+	var updatedNames []string
+	for _, n := range nodes {
+		if strings.TrimSpace(n.BaseURL) != "" && strings.TrimSpace(n.APIToken) != "" {
+			dispatched++
+			updatedNames = append(updatedNames, n.Name)
+			go func(target *database.ClusterNode) {
+				_ = TriggerRemoteNodeUpdate(nil, target, repoURL, branch)
+			}(n)
+		}
+	}
+
+	logAudit(h.db, r, "admin_cluster_update", fmt.Sprintf("Triggered cluster-wide update for %d worker nodes", dispatched))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":     "updating",
+		"message":    fmt.Sprintf("Update dispatched to %d worker node(s)", dispatched),
+		"dispatched": dispatched,
+		"nodes":      updatedNames,
+	})
+}

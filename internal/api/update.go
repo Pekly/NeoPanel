@@ -143,7 +143,13 @@ func getLocalCommit(db *database.DB) string {
 	return ""
 }
 
-func getEffectiveUpdateConfig(db *database.DB) UpdateConfig {
+func GetEffectiveUpdateConfig(db *database.DB) UpdateConfig {
+	if db == nil {
+		return UpdateConfig{
+			RepoURL: defaultUpdateRepoURL,
+			Branch:  defaultUpdateBranch,
+		}
+	}
 	repoURL, _ := db.GetPanelSetting("update_repo_url")
 	if strings.TrimSpace(repoURL) == "" {
 		repoURL = defaultUpdateRepoURL
@@ -156,6 +162,10 @@ func getEffectiveUpdateConfig(db *database.DB) UpdateConfig {
 		RepoURL: strings.TrimSpace(repoURL),
 		Branch:  strings.TrimSpace(branch),
 	}
+}
+
+func getEffectiveUpdateConfig(db *database.DB) UpdateConfig {
+	return GetEffectiveUpdateConfig(db)
 }
 
 func HandleGetUpdateStatus(db *database.DB) http.HandlerFunc {
@@ -309,20 +319,93 @@ func HandleApplyUpdate(db *database.DB) http.HandlerFunc {
 		updateMu.Unlock()
 
 		cfg := getEffectiveUpdateConfig(db)
+		includeNodes := true
+		if r.Body != nil {
+			var reqBody struct {
+				RepoURL      string `json:"repo_url"`
+				Branch       string `json:"branch"`
+				IncludeNodes *bool  `json:"include_nodes"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			if reqBody.RepoURL != "" && reqBody.Branch != "" {
+				if _, _, ok := parseGithubRepo(reqBody.RepoURL); ok && validUpdateBranch(reqBody.Branch) {
+					cfg.RepoURL = reqBody.RepoURL
+					cfg.Branch = reqBody.Branch
+				}
+			}
+			if reqBody.IncludeNodes != nil {
+				includeNodes = *reqBody.IncludeNodes
+			}
+		}
+
 		logAudit(db, r, "admin_update_apply", fmt.Sprintf("Triggered panel binary update from %s (%s)", cfg.RepoURL, cfg.Branch))
 
-		go executeSystemUpdate(db, cfg.RepoURL, cfg.Branch)
+		go executeSystemUpdate(db, cfg.RepoURL, cfg.Branch, includeNodes)
 
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status":   "updating",
-			"message":  "Panel update started in background. Logs are streaming to " + updateLogPath,
+			"message":  "Panel and cluster updates started in background. Logs are streaming to " + updateLogPath,
 			"repo_url": cfg.RepoURL,
 			"branch":   cfg.Branch,
 		})
 	}
 }
 
-func executeSystemUpdate(db *database.DB, repoURL, branch string) {
+func TriggerRemoteNodeUpdate(w io.Writer, node *database.ClusterNode, repoURL, branch string) error {
+	client := &http.Client{Timeout: 15 * time.Second}
+	baseURL := strings.TrimRight(node.BaseURL, "/")
+	if baseURL == "" || strings.TrimSpace(node.APIToken) == "" {
+		return fmt.Errorf("node has invalid URL or missing API token")
+	}
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"repo_url": repoURL,
+		"branch":   branch,
+	})
+
+	// 1. Sync update repository & branch configuration to node
+	cfgReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/admin/updates/config", bytes.NewReader(payload))
+	if err == nil {
+		cfgReq.Header.Set("Authorization", "Bearer "+node.APIToken)
+		cfgReq.Header.Set("Content-Type", "application/json")
+		if resp, err := client.Do(cfgReq); err == nil {
+			_ = resp.Body.Close()
+		}
+	}
+
+	// 2. Trigger update execution on node
+	applyReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/admin/updates/apply", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	applyReq.Header.Set("Authorization", "Bearer "+node.APIToken)
+	applyReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(applyReq)
+	if err != nil {
+		if w != nil {
+			_, _ = fmt.Fprintf(w, "  -> [Node %q] Warning: could not trigger update (%v)\n", node.Name, err)
+		}
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		err := fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+		if w != nil {
+			_, _ = fmt.Fprintf(w, "  -> [Node %q] Warning: node rejected update (%v)\n", node.Name, err)
+		}
+		return err
+	}
+
+	if w != nil {
+		_, _ = fmt.Fprintf(w, "  -> [Node %q] Accepted update command. Node daemon is compiling and updating in background.\n", node.Name)
+	}
+	return nil
+}
+
+func executeSystemUpdate(db *database.DB, repoURL, branch string, includeNodes bool) {
 	defer func() {
 		updateMu.Lock()
 		updateRunning = false
@@ -343,6 +426,28 @@ func executeSystemUpdate(db *database.DB, repoURL, branch string) {
 	if !ok || !validUpdateBranch(branch) {
 		_, _ = logFile.WriteString("\n[NeoPanel Update ERROR] Invalid HTTPS GitHub repository or branch; update refused.\n")
 		return
+	}
+
+	// Propagate update to all cluster worker nodes concurrently
+	if includeNodes && db != nil {
+		nodes, err := db.ListNodes()
+		if err == nil && len(nodes) > 0 {
+			var remoteNodes []*database.ClusterNode
+			for _, n := range nodes {
+				if strings.TrimSpace(n.BaseURL) != "" && strings.TrimSpace(n.APIToken) != "" {
+					remoteNodes = append(remoteNodes, n)
+				}
+			}
+			if len(remoteNodes) > 0 {
+				_, _ = fmt.Fprintf(logFile, "[NeoPanel Update] Propagating update to %d cluster worker node(s)...\n", len(remoteNodes))
+				for _, n := range remoteNodes {
+					_, _ = fmt.Fprintf(logFile, "  -> Dispatched update to node %q (%s)\n", n.Name, n.BaseURL)
+					go func(targetNode *database.ClusterNode) {
+						_ = TriggerRemoteNodeUpdate(logFile, targetNode, repoURL, branch)
+					}(n)
+				}
+			}
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
