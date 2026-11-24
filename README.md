@@ -4,7 +4,12 @@
   <img src="docs/img/github-preview.png" alt="NeoPanel — Ultra-Lightweight Minecraft Server Manager & Cluster Daemon" width="100%">
 </p>
 
-[![Repository size](https://img.shields.io/github/repo-size/Pekly/NeoPanel?style=flat-square)](https://github.com/Pekly/NeoPanel)
+<p align="center">
+  <a href="https://github.com/Pekly/NeoPanel/actions/workflows/ci.yml"><img src="https://github.com/Pekly/NeoPanel/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Pekly/NeoPanel/actions/workflows/codeql.yml"><img src="https://github.com/Pekly/NeoPanel/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
+  <a href="https://github.com/Pekly/NeoPanel"><img src="https://img.shields.io/github/repo-size/Pekly/NeoPanel?style=flat-square" alt="Repository size"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-10b981.svg?style=flat-square" alt="License: MIT"></a>
+</p>
 
 NeoPanel is a web panel for running Minecraft servers. Start a server, watch its console, edit files, install plugins or mods, and manage backups from your browser. You can keep everything on one machine or connect workers on other hosts.
 

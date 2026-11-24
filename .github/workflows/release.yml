@@ -1,0 +1,136 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build Multi-Arch Release Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            archive: tar.gz
+          - os: linux
+            arch: arm64
+            archive: tar.gz
+          - os: windows
+            arch: amd64
+            archive: zip
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+          cache: true
+
+      - name: Determine Version
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "version=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Binaries
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          mkdir -p bin-panel bin-node
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+
+          # Master Panel binary
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o "bin-panel/neopanel${EXT}" ./cmd/neopanel
+
+          # Worker Node Daemon binary
+          go build -tags node -ldflags="-s -w -X main.version=${VERSION}" -o "bin-node/neopanel-node${EXT}" ./cmd/neopanel
+
+      - name: Package Archives
+        id: package
+        env:
+          VERSION: ${{ steps.vars.outputs.version }}
+        run: |
+          mkdir -p dist
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+
+          PANEL_PKG="neopanel_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}"
+          NODE_PKG="neopanel-node_${VERSION}_${{ matrix.os }}_${{ matrix.arch }}"
+
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            zip -j "dist/${PANEL_PKG}.zip" "bin-panel/neopanel${EXT}" README.md
+            zip -j "dist/${NODE_PKG}.zip" "bin-node/neopanel-node${EXT}" README.md
+          else
+            tar -czvf "dist/${PANEL_PKG}.tar.gz" -C bin-panel "neopanel${EXT}"
+            tar -czvf "dist/${NODE_PKG}.tar.gz" -C bin-node "neopanel-node${EXT}"
+          fi
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+          retention-days: 1
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Determine Version
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate Checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          files: release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

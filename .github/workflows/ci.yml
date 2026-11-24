@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test & Verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run Go Vet
+        run: go vet ./...
+
+      - name: Run Go Tests
+        run: go test -v -race ./...
+
+      - name: Check JavaScript Syntax
+        run: |
+          for f in web/static/js/*.js; do
+            node -c "$f"
+          done
+
+      - name: Run Frontend & Integration Test Suites
+        run: node --test web/tests/*.test.cjs
+
+      - name: Run Installer Regression Test Suites
+        run: |
+          bash tests/install-build.test.sh
+          bash tests/install-security.test.sh
+          bash tests/install-isolation.test.sh
+
+  cross-compile:
+    name: Cross-Compile Matrix
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: windows
+            arch: amd64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+          cache: true
+
+      - name: Compile Master Panel (${{ matrix.os }}/${{ matrix.arch }})
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+          go build -ldflags="-s -w" -o dist/neopanel-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/neopanel
+
+      - name: Compile Worker Node Daemon (${{ matrix.os }}/${{ matrix.arch }})
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          EXT=""
+          if [ "${{ matrix.os }}" = "windows" ]; then EXT=".exe"; fi
+          go build -tags node -ldflags="-s -w" -o dist/neopanel-node-${{ matrix.os }}-${{ matrix.arch }}${EXT} ./cmd/neopanel
