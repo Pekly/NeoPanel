@@ -6567,6 +6567,7 @@ const V = {
           <button type="button" id="file-reload-btn" class="btn" onclick="reloadFileList()" ${S.loading?.files || S.fileReloading ? 'disabled' : ''} aria-busy="${Boolean(S.fileReloading)}" title="Reload this folder">${ic('refresh', 14)} Reload</button>
           <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
           <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
+          ${hasServerPermission('files.edit') ? `<button type="button" class="btn" onclick="openUploadUrlModal()" style="height: 36px;" title="Download a file directly from a URL onto this server">${ic('link', 14)} Upload from URL</button>` : ''}
           ${['files.view', 'files.edit', 'sftp.access'].every(p => hasServerPermission(p)) ? `<button type="button" class="btn" onclick="window.NPSFTPImport.open()" style="height: 36px;">${ic('download', 14)} Import SFTP</button>` : ''}
           <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
         </div>
@@ -10062,6 +10063,14 @@ async function testNodeModalConnection(nodeId = '') {
     if (res.online) {
       const sys = res.system || {};
       const ramGb = sys.total_ram_mb ? (sys.total_ram_mb / 1024).toFixed(1) + ' GB RAM' : '';
+      box.innerHTML = `<div class="node-callout" style="margin:0; border-color: rgba(63,185,80,0.45); background: rgba(63,185,80,0.1);">
+        <b style="color:var(--ok);">Connected!</b> Reachable in <b>${res.latency_ms ?? 0}ms</b> &bull; ${res.server_count ?? 0} server(s)
+        ${sys.cpus ? `<div class="mu mono" style="font-size:11.5px; margin-top:3px;">${esc(sys.os || 'linux')}/${esc(sys.arch || 'amd64')} &bull; ${sys.cpus} vCPU &bull; ${ramGb}</div>` : ''}
+      </div>`;
+    } else {
+      box.innerHTML = `<div class="node-error-note"><b>Connection Failed:</b> ${esc(res.error || 'Unreachable node')}</div>`;
+    }
+  } catch (err) {
     if (box) box.innerHTML = `<div class="node-error-note">${esc(err.message || 'Test failed')}</div>`;
   } finally {
     if (btn) setBtnLoading(btn, false);
@@ -11325,6 +11334,127 @@ function uploadFileDialog() {
 }
 
 async function uploadFilesWithProgress(files) { return enqueueUploads(files); }
+
+function openUploadUrlModal() {
+  const container = $('#modal-container');
+  if (!container) return;
+  const curDir = S.currentDir || '';
+  const folderLabel = curDir ? `/${esc(curDir)}` : '/ (server root)';
+
+  container.innerHTML = `<div class="pal" onclick="if(event.target===this)closeModal()">
+    <div class="card pbox" style="padding:26px; max-width:540px; border:1px solid var(--border-light);">
+      <div class="row sb" style="margin-bottom:14px;">
+        <h2 style="font-size:18px; margin:0; color:#fff; display:flex; align-items:center; gap:8px;">
+          ${ic('link', 18)} Upload from Direct Link
+        </h2>
+        <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
+      </div>
+
+      <p class="mu" style="font-size:12.5px; margin:0 0 16px; line-height:1.45;">
+        Download files directly to this server without downloading them to your computer first. Great for plugins, modpacks, worlds, and external assets.
+      </p>
+
+      <form onsubmit="event.preventDefault(); submitUploadFromURL(this);">
+        <label class="f" style="margin-bottom:12px;">
+          <span style="font-size:12.5px; font-weight:600;">Direct Download URL <b style="color:var(--bad);">*</b></span>
+          <input type="url" id="up-url-input" class="mono" required placeholder="https://example.com/downloads/plugin.jar" oninput="onUploadUrlInput(this.value)" autocomplete="off">
+        </label>
+
+        <div class="grid g2" style="gap:12px; margin-bottom:12px;">
+          <label class="f" style="margin:0;">
+            <span style="font-size:12px;">File Name <span class="mu">(optional)</span></span>
+            <input type="text" id="up-url-filename" class="mono" placeholder="Auto-detected from URL" oninput="this.dataset.userEdited='true'">
+          </label>
+          <label class="f" style="margin:0;">
+            <span style="font-size:12px;">Destination Folder</span>
+            <input type="text" class="mono" value="${folderLabel}" disabled style="opacity:0.75; cursor:not-allowed;">
+          </label>
+        </div>
+
+        <label class="row" style="gap:8px; margin-bottom:18px; cursor:pointer; align-items:center;">
+          <input type="checkbox" id="up-url-overwrite">
+          <span style="font-size:12.5px;">Overwrite existing file if it already exists</span>
+        </label>
+
+        <div class="row" style="justify-content:flex-end; gap:8px;">
+          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="submit" id="up-url-submit-btn" class="btn pr">${ic('download', 14)} Download &amp; Save</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+
+  setTimeout(() => $('#up-url-input')?.focus(), 50);
+}
+
+function onUploadUrlInput(val) {
+  const nameInput = $('#up-url-filename');
+  if (!nameInput) return;
+  try {
+    const raw = String(val || '').trim();
+    if (!raw) return;
+    const u = new URL(raw);
+    const pathname = u.pathname || '';
+    const lastSeg = decodeURIComponent(pathname.split('/').pop() || '').trim();
+    if (lastSeg && !nameInput.dataset.userEdited) {
+      nameInput.placeholder = lastSeg;
+    }
+  } catch (e) {}
+}
+
+async function submitUploadFromURL(formEl) {
+  const srv = curServer();
+  if (!srv) return;
+
+  const urlInput = $('#up-url-input');
+  const filenameInput = $('#up-url-filename');
+  const overwriteCheck = $('#up-url-overwrite');
+  const submitBtn = $('#up-url-submit-btn');
+
+  const rawUrl = String(urlInput?.value || '').trim();
+  if (!rawUrl) {
+    toast('Please enter a valid download URL', 'bad');
+    urlInput?.focus();
+    return;
+  }
+
+  const customFilename = String(filenameInput?.value || '').trim();
+  const overwrite = Boolean(overwriteCheck?.checked);
+  const curDir = S.currentDir || '';
+
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<span class="spin"></span> Downloading...`;
+  }
+  toast(`Starting direct download from URL...`);
+
+  try {
+    const res = await api(srvApiPath(srv, '/files/upload-url'), {
+      method: 'POST',
+      body: JSON.stringify({
+        url: rawUrl,
+        filename: customFilename,
+        path: curDir,
+        overwrite: overwrite
+      })
+    });
+
+    closeModal();
+    toast(res.message || `File ${res.filename || ''} downloaded successfully!`, 'ok');
+    await loadFileList(curDir);
+  } catch (err) {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = `${ic('download', 14)} Download &amp; Save`;
+    }
+    toast(err.message || 'Failed to download file from URL', 'bad');
+    uiAlert({
+      title: 'Direct Link Download Failed',
+      message: `Could not download from URL:<br><code style="word-break:break-all; font-size:12px;">${esc(rawUrl)}</code><br><br><b>Error:</b> ${esc(err.message || 'Remote server unreachable or disk limit reached.')}`,
+      type: 'error'
+    });
+  }
+}
 
 function initDragAndDrop() { window.NPFileDrag?.init(); }
 
@@ -17073,6 +17203,9 @@ window.deleteFileItem = deleteFileItem;
 window.promptNewFile = promptNewFile;
 window.promptNewFolder = promptNewFolder;
 window.uploadFileDialog = uploadFileDialog;
+window.openUploadUrlModal = openUploadUrlModal;
+window.onUploadUrlInput = onUploadUrlInput;
+window.submitUploadFromURL = submitUploadFromURL;
 window.deletePlugin = deletePlugin;
 window.togglePlugin = togglePlugin;
 window.searchModrinthDebounced = searchModrinthDebounced;

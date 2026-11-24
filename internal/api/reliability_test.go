@@ -91,7 +91,7 @@ func TestOperationalRoutesRequireMembershipAndAction(t *testing.T) {
 		"GET ", "PUT ", "DELETE ", "POST power", "POST command", "GET icon", "POST icon", "DELETE icon",
 		"GET configs", "POST configs", "GET subusers", "POST subusers", "PUT subusers/1", "DELETE subusers/1", "GET permissions",
 		"GET schedules", "POST schedules", "PUT schedules/missing", "DELETE schedules/missing", "POST schedules/missing/toggle", "POST schedules/missing/run",
-		"GET ports", "POST ports", "DELETE ports/1", "POST ports/1/primary", "GET ws", "GET files", "GET files/content", "POST files/content", "POST files/create", "DELETE files", "POST files/upload", "GET files/download", "POST files/rename", "POST files/move", "POST files/compress", "POST files/archive", "POST files/unzip", "POST files/extract",
+		"GET ports", "POST ports", "DELETE ports/1", "POST ports/1/primary", "GET ws", "GET files", "GET files/content", "POST files/content", "POST files/create", "DELETE files", "POST files/upload", "POST files/upload-url", "POST files/upload-remote", "GET files/download", "POST files/rename", "POST files/move", "POST files/compress", "POST files/archive", "POST files/unzip", "POST files/extract",
 		"GET plugins", "POST plugins/install", "DELETE plugins", "POST plugins/toggle", "GET plugins/versions", "GET backups", "POST backups", "DELETE backups", "GET backups/download", "GET players", "POST players/action", "POST software", "POST reinstall", "GET properties", "POST properties", "GET databases", "POST databases", "DELETE databases/missing", "POST databases/missing/rotate", "GET databases/missing/tables", "POST databases/missing/query", "GET databases/missing/export", "GET subdomain", "PUT subdomain", "POST subdomain/verify", "GET sftp",
 	}
 	for _, route := range routes {

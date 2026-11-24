@@ -278,6 +278,8 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/trash/{trashId}/restore", r.requireAuth(r.files.RestoreTrash))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files/trash/{trashId}", r.requireAuth(r.files.PurgeTrash))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload", r.requireAuth(r.files.Upload))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/upload-url", r.requireAuth(r.files.UploadFromURL))
+	r.mux.HandleFunc("POST /api/servers/{id}/files/upload-remote", r.requireAuth(r.files.UploadFromURL))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/import-sftp", r.requireAuth(r.sftpImports.status))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp", r.requireAuth(r.sftpImports.start))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp/host-key", r.requireAuth(r.sftpImports.hostKey))
