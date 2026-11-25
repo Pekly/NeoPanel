@@ -276,7 +276,7 @@
           const next = validateJob(data, server);
           if (kind === 'cancel' && next.id !== cancelId) throw Error('Unexpected cancellation job ID. Refresh target.');
           showJob(next);
-          if (kind === 'start') clearSecrets();
+          if (kind === 'start') { clearSecrets(); window.syncServerBackgroundTransfers?.(server); }
           else cancelPending = activeStates.has(next.state);
           el('status').textContent = kind === 'start' ? 'Import started. Login details cleared from this form.' : 'Cancelling… wait for confirmation.';
           el('job').scrollIntoView({block:'nearest'});

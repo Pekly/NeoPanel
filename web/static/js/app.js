@@ -4503,6 +4503,7 @@ function connectWs(serverId, isReconnect = false, nodeId = null) {
 
   try {
     const ws = new WebSocket(wsUrl);
+    if (!isReconnect) setTimeout(() => syncServerBackgroundTransfers(curServer()), 100);
     S.activeWs = ws;
 
     ws.onopen = () => {
@@ -5255,7 +5256,8 @@ function srvh() {
       <button class="btn dg" data-power-btn="kill" onclick="power('kill')" title="Stop immediately; unsaved data may be lost">Force stop</button>
       ${S.view === 'con' ? (window.NPWorkspace?.countdownSection() || '') : ''}
     </div>
-  </div>`;
+  </div>
+  <div id="srv-transfer-banner-root">${renderServerTransferBannerHtml(srv)}</div>`;
 }
 
 function toggleCmdMenu() {
@@ -11356,11 +11358,120 @@ function uploadFileDialog() {
 async function uploadFilesWithProgress(files) { return enqueueUploads(files); }
 
 let _urlDownloadPoll = null;
+let _bgTransferTimer = null;
+const _bgActiveImportStates = new Set(['queued', 'scanning', 'transferring', 'publishing']);
+
 function formatTransferSpeed(bps) {
   if (!bps || bps <= 0) return '0 KB/s';
   if (bps >= 1048576) return `${(bps / 1048576).toFixed(1)} MB/s`;
   if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
   return `${bps} B/s`;
+}
+
+function renderServerTransferBannerHtml(srv) {
+  const s = srv || curServer();
+  const st = S.bgTransfers;
+  if (!s || !st || st.serverId !== s.id) return '';
+  const cards = [];
+  const ij = st.importJob;
+  if (ij && _bgActiveImportStates.has(ij.state)) {
+    const pct = ij.bytes_total > 0 ? Math.min(100, Math.round((ij.bytes_done / ij.bytes_total) * 100)) : 0;
+    const label = { queued: 'Import queued...', scanning: 'Scanning remote files...', transferring: 'Importing server files...', publishing: 'Finishing import...' }[ij.state] || 'Importing...';
+    const counts = `${Number(ij.files_done || 0).toLocaleString()} / ${Number(ij.files_total || 0).toLocaleString()} files &bull; ${formatBytes(ij.bytes_done || 0)}${ij.bytes_total > 0 ? ` / ${formatBytes(ij.bytes_total)} (${pct}%)` : ''}`;
+    cards.push(`<div class="card" style="padding:12px 16px; margin-top:10px; border-color:rgba(16,185,129,0.4); background:rgba(16,185,129,0.06);">
+      <div class="row sb" style="gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+        <div class="row" style="gap:8px; min-width:0;">
+          <span class="spin" aria-hidden="true"></span>
+          <b style="font-size:13px; color:var(--tx);">${esc(label)}</b>
+          ${ij.current_path ? `<span class="mu mono" style="font-size:11.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:340px;">${esc(ij.current_path)}</span>` : ''}
+        </div>
+        <div class="row" style="gap:8px;">
+          ${ij.speed_bps > 0 ? `<span class="chip mono" style="font-size:11px;">${formatTransferSpeed(ij.speed_bps)}</span>` : ''}
+          <button type="button" class="btn sm" onclick="window.NPSFTPImport?.open()">Details</button>
+          <button type="button" class="btn sm dg" onclick="cancelBackgroundImport('${esc(ij.id)}')">Cancel</button>
+        </div>
+      </div>
+      <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden; margin-bottom:5px;">
+        <div style="height:100%; width:${ij.bytes_total > 0 ? pct : 25}%; background:var(--ac); transition:width 0.25s ease;"></div>
+      </div>
+      <div class="mu mono" style="font-size:11.5px;">${counts}</div>
+    </div>`);
+  }
+  for (const uj of (st.urlJobs || [])) {
+    if (uj.state !== 'downloading') continue;
+    const pct = uj.bytes_total > 0 ? Math.min(100, Math.round((uj.bytes_done / uj.bytes_total) * 100)) : 0;
+    cards.push(`<div class="card" style="padding:12px 16px; margin-top:10px; border-color:rgba(56,189,248,0.4); background:rgba(56,189,248,0.06);">
+      <div class="row sb" style="gap:10px; flex-wrap:wrap; margin-bottom:6px;">
+        <div class="row" style="gap:8px; min-width:0;">
+          <span class="spin" aria-hidden="true"></span>
+          <b style="font-size:13px; color:var(--tx);">Downloading ${esc(uj.filename || 'file')}...</b>
+        </div>
+        <div class="row" style="gap:8px;">
+          <span class="chip mono" style="font-size:11px;">${formatTransferSpeed(uj.speed_bps)}</span>
+          <button type="button" class="btn sm dg" onclick="cancelUploadFromURL('${esc(uj.id)}')">Cancel</button>
+        </div>
+      </div>
+      <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden; margin-bottom:5px;">
+        <div style="height:100%; width:${uj.bytes_total > 0 ? pct : 25}%; background:var(--ac); transition:width 0.25s ease;"></div>
+      </div>
+      <div class="mu mono" style="font-size:11.5px;">${formatBytes(uj.bytes_done || 0)}${uj.bytes_total > 0 ? ` / ${formatBytes(uj.bytes_total)} (${pct}%)` : ''}</div>
+    </div>`);
+  }
+  return cards.join('');
+}
+
+async function cancelBackgroundImport(jobId) {
+  const srv = curServer();
+  if (!srv || !jobId) return;
+  try {
+    await api(srvApiPath(srv, `/files/import-sftp/${encodeURIComponent(jobId)}`), { method: 'DELETE', suppressToast: true });
+    toast('Import cancellation requested');
+    syncServerBackgroundTransfers(srv);
+  } catch (e) {}
+}
+
+async function syncServerBackgroundTransfers(srvArg) {
+  const srv = srvArg || curServer();
+  if (!srv || !srv.id || !S.token) return;
+  clearTimeout(_bgTransferTimer);
+  _bgTransferTimer = null;
+
+  const canImport = ['files.view', 'files.edit', 'sftp.access'].every(p => hasServerPermission(p, srv));
+  const canUrl = hasServerPermission('files.edit', srv);
+  if (!canImport && !canUrl) return;
+
+  const prev = S.bgTransfers;
+  const prevWasActive = prev && prev.serverId === srv.id && (
+    (prev.importJob && _bgActiveImportStates.has(prev.importJob.state)) ||
+    (prev.urlJobs || []).some(j => j.state === 'downloading')
+  );
+
+  let importJob = null;
+  let urlJobs = [];
+  try {
+    const [impRes, urlRes] = await Promise.all([
+      canImport ? api(srvApiPath(srv, '/files/import-sftp'), { suppressToast: true, optionalMetadata: true }).catch(() => null) : null,
+      canUrl ? api(srvApiPath(srv, '/files/upload-url'), { suppressToast: true, optionalMetadata: true }).catch(() => null) : null
+    ]);
+    if (curServer()?.id !== srv.id) return;
+    if (impRes && impRes.job) importJob = impRes.job;
+    if (urlRes && Array.isArray(urlRes.jobs)) urlJobs = urlRes.jobs;
+  } catch (e) {
+    return;
+  }
+
+  S.bgTransfers = { serverId: srv.id, importJob, urlJobs };
+  const rootEl = $('#srv-transfer-banner-root');
+  if (rootEl) rootEl.innerHTML = renderServerTransferBannerHtml(srv);
+
+  const nowActive = (importJob && _bgActiveImportStates.has(importJob.state)) || urlJobs.some(j => j.state === 'downloading');
+  if (prevWasActive && !nowActive) {
+    if (importJob?.state === 'completed') toast('Background server import completed!', 'ok');
+    if (S.view === 'fi') loadFileList(S.currentDir, true);
+  }
+  if (nowActive) {
+    _bgTransferTimer = setTimeout(() => syncServerBackgroundTransfers(curServer()), 1500);
+  }
 }
 
 function openUploadUrlModal() {
@@ -11527,6 +11638,7 @@ async function submitUploadFromURL(formEl) {
 
     const jobId = startRes.job_id || startRes.job?.id;
     if (startRes.job) renderURLJobProgress(startRes.job);
+    syncServerBackgroundTransfers(srv);
 
     if (!jobId) {
       closeModal();
@@ -17325,6 +17437,9 @@ window.uploadFileDialog = uploadFileDialog;
 window.openUploadUrlModal = openUploadUrlModal;
 window.onUploadUrlInput = onUploadUrlInput;
 window.submitUploadFromURL = submitUploadFromURL;
+window.syncServerBackgroundTransfers = syncServerBackgroundTransfers;
+window.cancelBackgroundImport = cancelBackgroundImport;
+window.cancelUploadFromURL = cancelUploadFromURL;
 window.deletePlugin = deletePlugin;
 window.togglePlugin = togglePlugin;
 window.searchModrinthDebounced = searchModrinthDebounced;

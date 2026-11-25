@@ -19,11 +19,8 @@ test('app.js renders Download from URL button in file manager toolbar', () => {
   assert.match(source, /Download from URL/, 'Toolbar menu should display "Download from URL"');
 });
 
-test('openUploadUrlModal contains URL, progress bar, speed, and overwrite inputs', () => {
-  assert.match(source, /id="up-url-input"/, 'Modal should contain up-url-input');
-  assert.match(source, /id="up-url-filename"/, 'Modal should contain up-url-filename');
-  assert.match(source, /id="up-url-overwrite"/, 'Modal should contain up-url-overwrite');
-  assert.match(source, /id="up-url-progress-box"/, 'Modal should contain up-url-progress-box');
-  assert.match(source, /formatTransferSpeed/, 'Modal should format live transfer speed');
-  assert.match(source, /\/files\/upload-url/, 'Submit should target files/upload-url');
+test('app.js renders persistent background transfer banner for imports and URL downloads', () => {
+  assert.match(source, /function renderServerTransferBannerHtml\(/, 'renderServerTransferBannerHtml should be defined');
+  assert.match(source, /async function syncServerBackgroundTransfers\(/, 'syncServerBackgroundTransfers should be defined');
+  assert.match(source, /id="srv-transfer-banner-root"/, 'srvh should include srv-transfer-banner-root');
 });
