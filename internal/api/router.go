@@ -997,6 +997,31 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 		writeError(w, 502, "Failed to reach node: "+err.Error())
 		return
 	}
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && (req.Method == http.MethodGet || req.Method == http.MethodHead) {
+		peek, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+		if strings.Contains(string(peek), "forwarded user is not synchronized to this node") {
+			if syncErr := r.nodes.SyncAuthToNode(req.Context(), node.BaseURL, node.APIToken); syncErr == nil {
+				retryReq, rErr := http.NewRequestWithContext(req.Context(), req.Method, remote.URL.String(), nil)
+				if rErr == nil {
+					retryReq.Header = remote.Header.Clone()
+					if retryResp, dErr := fileMediaProxyClient(r.nodes.httpClient, req.Method, rest).Do(retryReq); dErr == nil {
+						resp = retryResp
+						goto copyResponse
+					}
+				}
+			}
+		}
+		for _, key := range []string{"Content-Type", "Content-Disposition", "Content-Length", "Cache-Control", "Content-Range", "Accept-Ranges", "Last-Modified", "X-Content-Type-Options", "Content-Security-Policy"} {
+			if v := resp.Header.Get(key); v != "" {
+				w.Header().Set(key, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(peek)
+		return
+	}
+copyResponse:
 	defer resp.Body.Close()
 	if server := removedRemoteServer(req.Method, rest); server != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		if err := r.reconcileRemoteInvitationRemovals(req, node, server); err != nil {

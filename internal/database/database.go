@@ -748,8 +748,13 @@ func (db *DB) UpsertSyncedUser(id int, username, email, passwordHash, role strin
 		return fmt.Errorf("empty username")
 	}
 	now := time.Now().UTC()
+	// Check if a different row already holds this username; if so, remove the stale unexported placeholder.
+	var conflictID int
+	if err := db.conn.QueryRow("SELECT id FROM users WHERE username = ? AND id != ?", username, id).Scan(&conflictID); err == nil {
+		_, _ = db.conn.Exec("DELETE FROM users WHERE id = ? AND NOT EXISTS (SELECT 1 FROM deleted_invitation_users WHERE id=?)", conflictID, conflictID)
+	}
 	var existingID int
-	err := db.conn.QueryRow("SELECT id FROM users WHERE username = ? OR id = ?", username, id).Scan(&existingID)
+	err := db.conn.QueryRow("SELECT id FROM users WHERE id = ?", id).Scan(&existingID)
 	if err == nil {
 		res, updateErr := db.conn.Exec("UPDATE users SET identity_exported=1, username=?, email=?, auth_version=auth_version + CASE WHEN password_hash != ? THEN 1 ELSE 0 END, password_hash=?, role=? WHERE id=? AND NOT EXISTS (SELECT 1 FROM deleted_invitation_users WHERE id=?)", username, email, passwordHash, passwordHash, role, existingID, id)
 		return affectedRow(res, updateErr)

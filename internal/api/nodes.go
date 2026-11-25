@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -227,7 +228,9 @@ func (h *NodeHandler) probeRemote(ctx context.Context, baseURL, apiToken string)
 	}
 
 	go func() {
-		_ = h.SyncAuthToNode(context.Background(), baseURL, apiToken)
+		if syncErr := h.SyncAuthToNode(context.Background(), baseURL, apiToken); syncErr != nil {
+			log.Printf("[WARN] SyncAuthToNode (%s) failed: %v", baseURL, syncErr)
+		}
 	}()
 
 	return true, &sysInfo, srvCount, latency, ""
