@@ -7,7 +7,33 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func waitURLJob(t *testing.T, f *reliabilityFixture, jobID string) URLDownloadJob {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		w := f.request("GET", "/api/servers/alpha/files/upload-url", "", "owner")
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET upload-url failed: %d %s", w.Code, w.Body.String())
+		}
+		var res struct {
+			Jobs []URLDownloadJob `json:"jobs"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("unmarshal jobs: %v", err)
+		}
+		for _, j := range res.Jobs {
+			if j.ID == jobID && (j.State == "completed" || j.State == "failed" || j.State == "cancelled") {
+				return j
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for URL download job %s", jobID)
+	return URLDownloadJob{}
+}
 
 func TestFilesUploadFromURL(t *testing.T) {
 	f := newReliabilityFixture(t)
@@ -58,11 +84,18 @@ func TestFilesUploadFromURL(t *testing.T) {
 		t.Fatalf("expected 403 for unauthorized subuser, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// 4. Remote 404 returns bad gateway
+	// 4. Remote 404 results in failed job
 	body, _ = json.Marshal(map[string]interface{}{"url": mockServer.URL + "/not-found"})
 	w = f.request("POST", "/api/servers/alpha/files/upload-url", string(body), "owner")
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502 for 404 remote, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for async download start, got %d: %s", w.Code, w.Body.String())
+	}
+	var start404 struct {
+		JobID string `json:"job_id"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &start404)
+	if job404 := waitURLJob(t, f, start404.JobID); job404.State != "failed" {
+		t.Fatalf("expected failed state for 404 remote, got %+v", job404)
 	}
 
 	// 5. Successful download using URL path
@@ -72,16 +105,19 @@ func TestFilesUploadFromURL(t *testing.T) {
 		"path": "plugins",
 	})
 	w = f.request("POST", "/api/servers/alpha/files/upload-url", string(body), "owner")
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 for download, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for download, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var res map[string]interface{}
+	var res struct {
+		JobID string `json:"job_id"`
+	}
 	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
-	if res["filename"] != "plugin.jar" {
-		t.Fatalf("expected filename=plugin.jar, got %v", res["filename"])
+	doneJob := waitURLJob(t, f, res.JobID)
+	if doneJob.State != "completed" || doneJob.Filename != "plugin.jar" || doneJob.Percent != 100 {
+		t.Fatalf("expected completed plugin.jar, got %+v", doneJob)
 	}
 
 	// Verify file was written to server working dir
@@ -96,8 +132,15 @@ func TestFilesUploadFromURL(t *testing.T) {
 
 	// 6. Conflict when duplicate without overwrite
 	w = f.request("POST", "/api/servers/alpha/files/upload-url", string(body), "owner")
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409 conflict when file exists, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 for job, got %d", w.Code)
+	}
+	var dupRes struct {
+		JobID string `json:"job_id"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &dupRes)
+	if dupJob := waitURLJob(t, f, dupRes.JobID); dupJob.State != "failed" {
+		t.Fatalf("expected failed conflict when file exists, got %+v", dupJob)
 	}
 
 	// 7. Success with overwrite=true
@@ -107,8 +150,15 @@ func TestFilesUploadFromURL(t *testing.T) {
 		"overwrite": true,
 	})
 	w = f.request("POST", "/api/servers/alpha/files/upload-url", string(bodyOverwrite), "owner")
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 with overwrite, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 with overwrite, got %d: %s", w.Code, w.Body.String())
+	}
+	var owRes struct {
+		JobID string `json:"job_id"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &owRes)
+	if owJob := waitURLJob(t, f, owRes.JobID); owJob.State != "completed" {
+		t.Fatalf("expected completed with overwrite, got %+v", owJob)
 	}
 
 	// 8. Download with filename from Content-Disposition header
@@ -116,12 +166,14 @@ func TestFilesUploadFromURL(t *testing.T) {
 		"url": mockServer.URL + "/with-header",
 	})
 	w = f.request("POST", "/api/servers/alpha/files/upload-url", string(bodyHeader), "owner")
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 with header, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 with header, got %d: %s", w.Code, w.Body.String())
 	}
-	var resHeader map[string]interface{}
+	var resHeader struct {
+		JobID string `json:"job_id"`
+	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resHeader)
-	if resHeader["filename"] != "custom-plugin.jar" {
-		t.Fatalf("expected filename=custom-plugin.jar, got %v", resHeader["filename"])
+	if headerJob := waitURLJob(t, f, resHeader.JobID); headerJob.State != "completed" || headerJob.Filename != "custom-plugin.jar" {
+		t.Fatalf("expected filename=custom-plugin.jar, got %+v", headerJob)
 	}
 }

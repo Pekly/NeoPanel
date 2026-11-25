@@ -19,6 +19,7 @@ import (
 )
 
 type Options struct {
+	Protocol       string   `json:"protocol,omitempty"` // "sftp" (default), "ftp", or "ftps"
 	Host           string   `json:"host"`
 	Port           int      `json:"port"`
 	Username       string   `json:"username"`
@@ -58,12 +59,27 @@ type Progress struct {
 	FilesDone   int    `json:"files_done"`
 	BytesTotal  int64  `json:"bytes_total"`
 	BytesDone   int64  `json:"bytes_done"`
+	SpeedBPS    int64  `json:"speed_bps"`
 }
 
 func problem(s string) error { return errors.New("sftp import: " + s) }
 
-// Validate returns a normalized copy. Port zero defaults to SSH's port 22.
+// Validate returns a normalized copy. Port zero defaults to 22 for SFTP or 21 for FTP/FTPS.
 func Validate(o Options) (Options, error) {
+	o.Protocol = strings.ToLower(strings.TrimSpace(o.Protocol))
+	if o.Protocol == "" {
+		o.Protocol = "sftp"
+	}
+	if o.Protocol != "sftp" && o.Protocol != "ftp" && o.Protocol != "ftps" {
+		return o, problem("unsupported protocol")
+	}
+	if o.Port == 0 {
+		if o.Protocol == "ftp" || o.Protocol == "ftps" {
+			o.Port = 21
+		} else {
+			o.Port = 22
+		}
+	}
 	var err error
 	o.Host, o.Port, err = hostPort(o.Host, o.Port)
 	if err != nil {
@@ -75,20 +91,26 @@ func Validate(o Options) (Options, error) {
 	if len(o.Password) > 4096 || len(o.Passphrase) > 4096 || len(o.PrivateKey) > 65536 {
 		return o, problem("credential too long")
 	}
-	if (o.Password == "") == (o.PrivateKey == "") || (o.PrivateKey == "" && o.Passphrase != "") {
-		return o, problem("provide exactly one password or private key")
-	}
-	if o.PrivateKey != "" {
-		if _, err := signer(o); err != nil {
-			return o, problem("invalid private key or passphrase")
+	if o.Protocol == "ftp" || o.Protocol == "ftps" {
+		if o.Password == "" || o.PrivateKey != "" || o.Passphrase != "" {
+			return o, problem("password authentication required for FTP/FTPS")
 		}
-	}
-	if len(o.Fingerprint) != 50 {
-		return o, problem("valid SHA256 host fingerprint required")
-	}
-	b, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(o.Fingerprint, "SHA256:"))
-	if !strings.HasPrefix(o.Fingerprint, "SHA256:") || err != nil || len(b) != 32 || "SHA256:"+base64.RawStdEncoding.EncodeToString(b) != o.Fingerprint {
-		return o, problem("valid SHA256 host fingerprint required")
+	} else {
+		if (o.Password == "") == (o.PrivateKey == "") || (o.PrivateKey == "" && o.Passphrase != "") {
+			return o, problem("provide exactly one password or private key")
+		}
+		if o.PrivateKey != "" {
+			if _, err := signer(o); err != nil {
+				return o, problem("invalid private key or passphrase")
+			}
+		}
+		if len(o.Fingerprint) != 50 {
+			return o, problem("valid SHA256 host fingerprint required")
+		}
+		b, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(o.Fingerprint, "SHA256:"))
+		if !strings.HasPrefix(o.Fingerprint, "SHA256:") || err != nil || len(b) != 32 || "SHA256:"+base64.RawStdEncoding.EncodeToString(b) != o.Fingerprint {
+			return o, problem("valid SHA256 host fingerprint required")
+		}
 	}
 	if o.RemotePath == "" {
 		o.RemotePath = "."

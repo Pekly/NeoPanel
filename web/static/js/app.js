@@ -289,18 +289,24 @@ function getSftpDetails(srv) {
   const rawHost = (S.sftp?.host || srvHost(s) || window.location.hostname || '127.0.0.1').trim();
   const bracketedHost = rawHost.includes(':') && !rawHost.startsWith('[') ? `[${rawHost}]` : rawHost;
   const port = Number(S.sftp?.port || S.adminDaemonCfg?.sftpPort || S.brandingDaemon?.sftp_port || 2022) || 2022;
+  const ftpPort = Number(S.sftp?.ftp_port || 2121) || 2121;
   const username = S.sftp?.username || `${S.acct.un || 'admin'}.${s ? s.id : 'srv-1'}`;
   const launchUri = S.sftp?.launch_uri || `sftp://${encodeURIComponent(username)}@${bracketedHost}:${port}/`;
+  const ftpLaunchUri = S.sftp?.ftp_launch_uri || `ftp://${encodeURIComponent(username)}@${bracketedHost}:${ftpPort}/`;
   const isRemote = Boolean(s?.node_id && s.node_id !== 'local');
   return {
     host: rawHost,
     bracketedHost,
     port,
+    ftpPort,
     username,
     launchUri,
+    ftpLaunchUri,
     isRemote,
     enabled: S.sftp ? S.sftp.enabled !== false : true,
     listening: S.sftp ? Boolean(S.sftp.listening) : null,
+    ftpEnabled: S.sftp ? Boolean(S.sftp.ftp_enabled) : false,
+    ftpListening: S.sftp ? Boolean(S.sftp.ftp_listening) : null,
     serverId: s?.id || 'srv-1',
     serverName: s?.name || 'Minecraft Server'
   };
@@ -381,15 +387,19 @@ function renderSftpCardHtml(srv, compact = false) {
       </h2>
       ${statusPill}
     </div>
-    <p class="mu" style="font-size: 13px; margin-bottom: 12px;">Transfer files with WinSCP, FileZilla, or another SFTP client.</p>
+    <p class="mu" style="font-size: 13px; margin-bottom: 12px;">Transfer files with WinSCP, FileZilla, or another SFTP / FTP client.</p>
     <div class="mono" style="background: rgba(0, 0, 0, 0.36); border: 1px solid var(--border); padding: 11px 14px; border-radius: 8px; font-size: 12.5px; line-height: 1.8; margin-bottom: 12px; overflow-wrap: anywhere;">
       <div class="row sb" style="gap: 8px;">
-        <span><span class="mu">Connection:</span> <b style="color: var(--tx);">sftp://${esc(d.host)}:${d.port}</b></span>
-        <button type="button" class="btn-ico" data-val="sftp://${esc(d.host)}:${d.port}" onclick="copyDbText(this.dataset.val, 'SFTP Address')" title="Copy Host:Port">${ic('copy', 12)}</button>
+        <span><span class="mu">SFTP:</span> <b style="color: var(--tx);">sftp://${esc(d.host)}:${d.port}</b></span>
+        <button type="button" class="btn-ico" data-val="sftp://${esc(d.host)}:${d.port}" onclick="copyDbText(this.dataset.val, 'SFTP Address')" title="Copy SFTP Host:Port">${ic('copy', 12)}</button>
       </div>
+      ${d.ftpEnabled ? `<div class="row sb" style="gap: 8px;">
+        <span><span class="mu">FTP:</span> <b style="color: var(--tx);">ftp://${esc(d.host)}:${d.ftpPort}</b>${d.ftpListening === true ? ' <span style="color:var(--ok);font-size:11px;">(Live)</span>' : ''}</span>
+        <button type="button" class="btn-ico" data-val="ftp://${esc(d.host)}:${d.ftpPort}" onclick="copyDbText(this.dataset.val, 'FTP Address')" title="Copy FTP Host:Port">${ic('copy', 12)}</button>
+      </div>` : ''}
       <div class="row sb" style="gap: 8px;">
         <span><span class="mu">Username:</span> <b style="color: var(--tx);">${esc(d.username)}</b></span>
-        <button type="button" class="btn-ico" data-val="${esc(d.username)}" onclick="copyDbText(this.dataset.val, 'SFTP Username')" title="Copy Username">${ic('copy', 12)}</button>
+        <button type="button" class="btn-ico" data-val="${esc(d.username)}" onclick="copyDbText(this.dataset.val, 'SFTP/FTP Username')" title="Copy Username">${ic('copy', 12)}</button>
       </div>
     </div>
     <div class="sftp-pass-callout" style="margin-bottom: 14px;">
@@ -6564,12 +6574,22 @@ const V = {
             <button type="button" class="btn sm" onclick="setFileSort(S.fileSort?.by || 'name', S.fileSort?.dir === 'desc' ? 'asc' : 'desc')" style="height: 36px; padding: 0 11px;" title="Toggle ascending / descending order (folders always stay first)">${sortDir === 'asc' ? '&uarr; Asc' : '&darr; Desc'}</button>
           </div>
           ${renderViewModeToggle('files', 'list')}
-          <button type="button" id="file-reload-btn" class="btn" onclick="reloadFileList()" ${S.loading?.files || S.fileReloading ? 'disabled' : ''} aria-busy="${Boolean(S.fileReloading)}" title="Reload this folder">${ic('refresh', 14)} Reload</button>
-          <button class="btn" onclick="promptNewFolder()" style="height: 36px;">${ic('folder', 14)} New folder</button>
-          <button class="btn" onclick="uploadFileDialog()" style="height: 36px;">${ic('upload', 14)} Upload</button>
-          ${hasServerPermission('files.edit') ? `<button type="button" class="btn" onclick="openUploadUrlModal()" style="height: 36px;" title="Download a file directly from a URL onto this server">${ic('link', 14)} Upload from URL</button>` : ''}
-          ${['files.view', 'files.edit', 'sftp.access'].every(p => hasServerPermission(p)) ? `<button type="button" class="btn" onclick="window.NPSFTPImport.open()" style="height: 36px;">${ic('download', 14)} Import SFTP</button>` : ''}
-          <button class="btn pr" onclick="promptNewFile()" style="height: 36px;">${ic('plus', 14)} New file</button>
+          <button type="button" id="file-reload-btn" class="btn" onclick="reloadFileList()" ${S.loading?.files || S.fileReloading ? 'disabled' : ''} aria-busy="${Boolean(S.fileReloading)}" title="Reload this folder" style="height: 36px; padding: 0 11px;">${ic('refresh', 14)}</button>
+          <details class="np-compact-menu">
+            <summary class="btn" style="height: 36px;">${ic('upload', 14)} Upload &amp; Import <span class="np-menu-chevron" aria-hidden="true"></span></summary>
+            <div class="np-menu-panel" style="min-width: 205px; display: flex; flex-direction: column; gap: 6px; right: 0;">
+              <button type="button" class="btn sm" style="justify-content: flex-start;" onclick="this.closest('details').open=false;uploadFileDialog()">${ic('upload', 14)} Upload files</button>
+              ${['files.view', 'files.edit', 'sftp.access'].every(p => hasServerPermission(p)) ? `<button type="button" class="btn sm" style="justify-content: flex-start;" onclick="this.closest('details').open=false;window.NPSFTPImport.open()">${ic('download', 14)} Import SFTP / FTP</button>` : ''}
+              ${hasServerPermission('files.edit') ? `<button type="button" class="btn sm" style="justify-content: flex-start;" onclick="this.closest('details').open=false;openUploadUrlModal()">${ic('link', 14)} Download from URL</button>` : ''}
+            </div>
+          </details>
+          <details class="np-compact-menu">
+            <summary class="btn pr" style="height: 36px;">${ic('plus', 14)} New <span class="np-menu-chevron" aria-hidden="true"></span></summary>
+            <div class="np-menu-panel" style="min-width: 160px; display: flex; flex-direction: column; gap: 6px; right: 0;">
+              <button type="button" class="btn sm" style="justify-content: flex-start;" onclick="this.closest('details').open=false;promptNewFile()">${ic('file', 14)} New file</button>
+              <button type="button" class="btn sm" style="justify-content: flex-start;" onclick="this.closest('details').open=false;promptNewFolder()">${ic('folder', 14)} New folder</button>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -11335,6 +11355,14 @@ function uploadFileDialog() {
 
 async function uploadFilesWithProgress(files) { return enqueueUploads(files); }
 
+let _urlDownloadPoll = null;
+function formatTransferSpeed(bps) {
+  if (!bps || bps <= 0) return '0 KB/s';
+  if (bps >= 1048576) return `${(bps / 1048576).toFixed(1)} MB/s`;
+  if (bps >= 1024) return `${(bps / 1024).toFixed(0)} KB/s`;
+  return `${bps} B/s`;
+}
+
 function openUploadUrlModal() {
   const container = $('#modal-container');
   if (!container) return;
@@ -11345,16 +11373,30 @@ function openUploadUrlModal() {
     <div class="card pbox" style="padding:26px; max-width:540px; border:1px solid var(--border-light);">
       <div class="row sb" style="margin-bottom:14px;">
         <h2 style="font-size:18px; margin:0; color:#fff; display:flex; align-items:center; gap:8px;">
-          ${ic('link', 18)} Upload from Direct Link
+          ${ic('link', 18)} Download from Direct Link
         </h2>
         <button class="btn sm" onclick="closeModal()" aria-label="Close modal">&times;</button>
       </div>
 
       <p class="mu" style="font-size:12.5px; margin:0 0 16px; line-height:1.45;">
-        Download files directly to this server without downloading them to your computer first. Great for plugins, modpacks, worlds, and external assets.
+        Download files directly onto this server from any HTTP/HTTPS link. Shows live progress and download speed.
       </p>
 
-      <form onsubmit="event.preventDefault(); submitUploadFromURL(this);">
+      <div id="up-url-progress-box" hidden style="background:rgba(15,23,42,0.7); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:16px;">
+        <div class="row sb" style="margin-bottom:6px; gap:8px;">
+          <b id="up-url-prog-name" class="mono" style="font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Downloading...</b>
+          <span id="up-url-prog-speed" class="chip mono" style="font-size:11px;">0 KB/s</span>
+        </div>
+        <div style="height:8px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden; margin-bottom:8px;">
+          <div id="up-url-prog-bar" style="height:100%; width:0%; background:var(--ac); transition:width 0.2s ease;"></div>
+        </div>
+        <div class="row sb" style="font-size:11.5px;">
+          <span id="up-url-prog-stats" class="mu mono">Connecting...</span>
+          <button type="button" id="up-url-cancel-btn" class="btn sm dg" style="padding:2px 8px; font-size:11px;" hidden>Cancel</button>
+        </div>
+      </div>
+
+      <form id="up-url-form" onsubmit="event.preventDefault(); submitUploadFromURL(this);">
         <label class="f" style="margin-bottom:12px;">
           <span style="font-size:12.5px; font-weight:600;">Direct Download URL <b style="color:var(--bad);">*</b></span>
           <input type="url" id="up-url-input" class="mono" required placeholder="https://example.com/downloads/plugin.jar" oninput="onUploadUrlInput(this.value)" autocomplete="off">
@@ -11377,7 +11419,7 @@ function openUploadUrlModal() {
         </label>
 
         <div class="row" style="justify-content:flex-end; gap:8px;">
-          <button type="button" class="btn" onclick="closeModal()">Cancel</button>
+          <button type="button" class="btn" onclick="closeModal()">Close</button>
           <button type="submit" id="up-url-submit-btn" class="btn pr">${ic('download', 14)} Download &amp; Save</button>
         </div>
       </form>
@@ -11400,6 +11442,46 @@ function onUploadUrlInput(val) {
       nameInput.placeholder = lastSeg;
     }
   } catch (e) {}
+}
+
+async function cancelUploadFromURL(jobId) {
+  const srv = curServer();
+  if (!srv || !jobId) return;
+  try {
+    await api(srvApiPath(srv, `/files/upload-url/${encodeURIComponent(jobId)}`), { method: 'DELETE', suppressToast: true });
+    toast('Cancelling download...');
+  } catch (e) {}
+}
+
+function renderURLJobProgress(job) {
+  const box = $('#up-url-progress-box');
+  if (!box || !job) return;
+  box.hidden = false;
+  const nameEl = $('#up-url-prog-name');
+  const speedEl = $('#up-url-prog-speed');
+  const barEl = $('#up-url-prog-bar');
+  const statsEl = $('#up-url-prog-stats');
+  const cancelBtn = $('#up-url-cancel-btn');
+
+  if (nameEl) nameEl.textContent = job.filename || 'Downloading...';
+  const pct = job.bytes_total > 0 ? Math.min(100, Math.round((job.bytes_done / job.bytes_total) * 100)) : (job.state === 'completed' ? 100 : 0);
+  if (barEl) {
+    barEl.style.width = `${pct || (job.state === 'downloading' ? 15 : 0)}%`;
+    barEl.style.background = job.state === 'failed' ? 'var(--bad)' : job.state === 'completed' ? 'var(--ok)' : 'var(--ac)';
+  }
+  if (speedEl) {
+    speedEl.textContent = job.state === 'downloading' ? formatTransferSpeed(job.speed_bps) : job.state.toUpperCase();
+  }
+  if (statsEl) {
+    const doneStr = formatBytes(job.bytes_done || 0);
+    const totalStr = job.bytes_total > 0 ? ` / ${formatBytes(job.bytes_total)}` : '';
+    const pctStr = job.bytes_total > 0 ? ` (${pct}%)` : '';
+    statsEl.textContent = job.state === 'failed' ? (job.error || 'Download failed') : `${doneStr}${totalStr}${pctStr}`;
+  }
+  if (cancelBtn) {
+    cancelBtn.hidden = job.state !== 'downloading';
+    cancelBtn.onclick = () => cancelUploadFromURL(job.id);
+  }
 }
 
 async function submitUploadFromURL(formEl) {
@@ -11426,11 +11508,15 @@ async function submitUploadFromURL(formEl) {
     submitBtn.disabled = true;
     submitBtn.innerHTML = `<span class="spin"></span> Downloading...`;
   }
-  toast(`Starting direct download from URL...`);
+  if (_urlDownloadPoll) {
+    clearInterval(_urlDownloadPoll);
+    _urlDownloadPoll = null;
+  }
 
   try {
-    const res = await api(srvApiPath(srv, '/files/upload-url'), {
+    const startRes = await api(srvApiPath(srv, '/files/upload-url'), {
       method: 'POST',
+      suppressToast: true,
       body: JSON.stringify({
         url: rawUrl,
         filename: customFilename,
@@ -11439,20 +11525,53 @@ async function submitUploadFromURL(formEl) {
       })
     });
 
-    closeModal();
-    toast(res.message || `File ${res.filename || ''} downloaded successfully!`, 'ok');
-    await loadFileList(curDir);
+    const jobId = startRes.job_id || startRes.job?.id;
+    if (startRes.job) renderURLJobProgress(startRes.job);
+
+    if (!jobId) {
+      closeModal();
+      toast(startRes.message || 'File downloaded successfully!', 'ok');
+      await loadFileList(curDir);
+      return;
+    }
+
+    _urlDownloadPoll = setInterval(async () => {
+      if (!$('#up-url-progress-box')) {
+        clearInterval(_urlDownloadPoll);
+        _urlDownloadPoll = null;
+        return;
+      }
+      try {
+        const pollRes = await api(srvApiPath(srv, '/files/upload-url'), { suppressToast: true, optionalMetadata: true });
+        const job = (pollRes.jobs || []).find(j => j.id === jobId);
+        if (!job) return;
+        renderURLJobProgress(job);
+
+        if (job.state === 'completed') {
+          clearInterval(_urlDownloadPoll);
+          _urlDownloadPoll = null;
+          toast(job.message || `Downloaded ${job.filename}!`, 'ok');
+          setTimeout(() => {
+            if ($('#up-url-progress-box')) closeModal();
+            loadFileList(curDir);
+          }, 500);
+        } else if (job.state === 'failed' || job.state === 'cancelled') {
+          clearInterval(_urlDownloadPoll);
+          _urlDownloadPoll = null;
+          if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = `${ic('download', 14)} Download &amp; Save`;
+          }
+          toast(job.error || 'Download failed', 'bad');
+        }
+      } catch (e) {}
+    }, 400);
   } catch (err) {
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.innerHTML = `${ic('download', 14)} Download &amp; Save`;
     }
-    toast(err.message || 'Failed to download file from URL', 'bad');
-    uiAlert({
-      title: 'Direct Link Download Failed',
-      message: `Could not download from URL:<br><code style="word-break:break-all; font-size:12px;">${esc(rawUrl)}</code><br><br><b>Error:</b> ${esc(err.message || 'Remote server unreachable or disk limit reached.')}`,
-      type: 'error'
-    });
+    toast(err.message || 'Failed to start download from URL', 'bad');
   }
 }
 

@@ -278,7 +278,9 @@ func (r *Router) registerRoutes(db *database.DB) {
 	r.mux.HandleFunc("POST /api/servers/{id}/files/trash/{trashId}/restore", r.requireAuth(r.files.RestoreTrash))
 	r.mux.HandleFunc("DELETE /api/servers/{id}/files/trash/{trashId}", r.requireAuth(r.files.PurgeTrash))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload", r.requireAuth(r.files.Upload))
+	r.mux.HandleFunc("GET /api/servers/{id}/files/upload-url", r.requireAuth(r.files.GetURLDownloads))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload-url", r.requireAuth(r.files.UploadFromURL))
+	r.mux.HandleFunc("DELETE /api/servers/{id}/files/upload-url/{jobId}", r.requireAuth(r.files.CancelURLDownload))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/upload-remote", r.requireAuth(r.files.UploadFromURL))
 	r.mux.HandleFunc("GET /api/servers/{id}/files/import-sftp", r.requireAuth(r.sftpImports.status))
 	r.mux.HandleFunc("POST /api/servers/{id}/files/import-sftp", r.requireAuth(r.sftpImports.start))
@@ -401,16 +403,38 @@ func (r *Router) registerRoutes(db *database.DB) {
 			Host:   net.JoinHostPort(host, portStr),
 			Path:   "/",
 		}).String()
+		ftpPort := r.cfg.FTP.Port
+		if ftpPort <= 0 {
+			ftpPort = 2121
+		}
+		ftpPortStr := fmt.Sprintf("%d", ftpPort)
+		ftpListening := false
+		if r.cfg.FTP.Enabled {
+			if conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", ftpPortStr), 250*time.Millisecond); dialErr == nil {
+				ftpListening = true
+				_ = conn.Close()
+			}
+		}
+		ftpLaunchURI := (&url.URL{
+			Scheme: "ftp",
+			User:   url.User(sftpUser),
+			Host:   net.JoinHostPort(host, ftpPortStr),
+			Path:   "/",
+		}).String()
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"enabled":       r.cfg.SFTP.Enabled,
-			"listening":     listening,
-			"port":          r.cfg.SFTP.Port,
-			"host":          host,
-			"username":      sftpUser,
-			"launch_uri":    launchURI,
-			"password_hint": "Use your NeoPanel account password (or add an SSH Public Key in Account Settings).",
-			"server_id":     srv.ID,
-			"server_name":   srv.Name,
+			"enabled":        r.cfg.SFTP.Enabled,
+			"listening":      listening,
+			"port":           r.cfg.SFTP.Port,
+			"ftp_enabled":    r.cfg.FTP.Enabled,
+			"ftp_listening":  ftpListening,
+			"ftp_port":       ftpPort,
+			"ftp_launch_uri": ftpLaunchURI,
+			"host":           host,
+			"username":       sftpUser,
+			"launch_uri":     launchURI,
+			"password_hint":  "Use your NeoPanel account password (or add an SSH Public Key in Account Settings).",
+			"server_id":      srv.ID,
+			"server_name":    srv.Name,
 		})
 	}))
 

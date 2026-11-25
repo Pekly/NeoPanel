@@ -19,6 +19,7 @@ type Config struct {
 	Security SecurityConfig `yaml:"security"`
 	Java     JavaConfig     `yaml:"java"`
 	SFTP     SFTPConfig     `yaml:"sftp"`
+	FTP      FTPConfig      `yaml:"ftp"`
 }
 
 type ServerConfig struct {
@@ -34,6 +35,11 @@ type SFTPConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Port    int    `yaml:"port"`
 	KeyPath string `yaml:"key_path"`
+}
+
+type FTPConfig struct {
+	Enabled bool `yaml:"enabled"`
+	Port    int  `yaml:"port"`
 }
 
 type PathsConfig struct {
@@ -117,6 +123,10 @@ func DefaultConfigForRole(role string) *Config {
 			Enabled: sftpEnabled,
 			Port:    2022,
 			KeyPath: filepath.Join(dataDir, "sftp_host_key"),
+		},
+		FTP: FTPConfig{
+			Enabled: sftpEnabled,
+			Port:    2121,
 		},
 	}
 }

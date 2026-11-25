@@ -95,6 +95,9 @@ func Probe(ctx context.Context, options Options, allowedHosts []string) (preview
 	if err != nil {
 		return preview, err
 	}
+	if o.Protocol == "ftp" || o.Protocol == "ftps" {
+		return probeFTP(ctx, o, allowedHosts)
+	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(o.TimeoutMinutes)*time.Minute)
 	defer cancel()
 	defer func() {
@@ -152,6 +155,9 @@ func Transfer(ctx context.Context, options Options, allowedHosts []string, desti
 	o, err := Validate(options)
 	if err != nil {
 		return err
+	}
+	if o.Protocol == "ftp" || o.Protocol == "ftps" {
+		return transferFTP(ctx, o, allowedHosts, destination, progress)
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(o.TimeoutMinutes)*time.Minute)
 	defer cancel()
@@ -373,6 +379,8 @@ func download(ctx context.Context, r *remote, local *os.Root, o Options, it item
 		return problem("cannot set staging permissions")
 	}
 	var copied int64
+	var lastSpeedBytes int64
+	lastSpeedTick := start
 	for {
 		if err = ctx.Err(); err != nil {
 			return err
@@ -392,6 +400,16 @@ func download(ctx context.Context, r *remote, local *os.Root, o Options, it item
 			}
 			copied += int64(n)
 			p.BytesDone += int64(n)
+			now := time.Now()
+			if elapsed := now.Sub(lastSpeedTick); elapsed >= 250*time.Millisecond {
+				p.SpeedBPS = int64(float64(p.BytesDone-lastSpeedBytes) / elapsed.Seconds())
+				lastSpeedBytes = p.BytesDone
+				lastSpeedTick = now
+			} else if p.SpeedBPS == 0 {
+				if tot := now.Sub(start).Seconds(); tot > 0.05 {
+					p.SpeedBPS = int64(float64(p.BytesDone) / tot)
+				}
+			}
 			emit()
 			if o.BandwidthKiB > 0 {
 				// Base pacing on cumulative bytes, avoiding per-chunk rounding drift.

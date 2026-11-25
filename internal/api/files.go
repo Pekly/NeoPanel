@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -18,8 +19,10 @@ import (
 )
 
 type FileHandler struct {
-	db      *database.DB
-	manager *runner.ServerManager
+	db        *database.DB
+	manager   *runner.ServerManager
+	urlJobsMu sync.Mutex
+	urlJobs   map[string]*urlDownloadRecord
 }
 
 func NewFileHandler(db *database.DB, manager *runner.ServerManager) *FileHandler {

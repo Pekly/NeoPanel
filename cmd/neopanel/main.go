@@ -20,6 +20,7 @@ import (
 	"github.com/Pekly/NeoPanel/internal/api"
 	"github.com/Pekly/NeoPanel/internal/config"
 	"github.com/Pekly/NeoPanel/internal/database"
+	"github.com/Pekly/NeoPanel/internal/ftp"
 	"github.com/Pekly/NeoPanel/internal/runner"
 	"github.com/Pekly/NeoPanel/internal/sftp"
 	"github.com/Pekly/NeoPanel/web"
@@ -147,7 +148,7 @@ func main() {
 	}
 	router := api.NewRouter(cfg, db, manager, staticFS)
 
-	// 4. Initialize & Start Built-in SFTP Server (Port 2022)
+	// 4. Initialize & Start Built-in SFTP & FTP Servers (Ports 2022 & 2121)
 	var sftpServer *sftp.SFTPServer
 	if cfg.SFTP.Enabled {
 		var err error
@@ -157,6 +158,18 @@ func main() {
 		} else {
 			if err := sftpServer.Start(); err != nil {
 				log.Printf("[WARN] Failed to start SFTP server: %v", err)
+			}
+		}
+	}
+	var ftpServer *ftp.FTPServer
+	if cfg.FTP.Enabled {
+		var err error
+		ftpServer, err = ftp.NewFTPServer(cfg, db)
+		if err != nil {
+			log.Printf("[WARN] Failed to configure FTP server: %v", err)
+		} else if ftpServer != nil {
+			if err := ftpServer.Start(); err != nil {
+				log.Printf("[WARN] Failed to start FTP server: %v", err)
 			}
 		}
 	}
@@ -175,6 +188,9 @@ func main() {
 	if err != nil {
 		if sftpServer != nil {
 			sftpServer.Stop()
+		}
+		if ftpServer != nil {
+			ftpServer.Stop()
 		}
 		manager.ShutdownAll()
 		log.Fatalf("[FATAL] Could not listen on %s: %v", addr, err)
@@ -197,6 +213,9 @@ func main() {
 
 		if sftpServer != nil {
 			sftpServer.Stop()
+		}
+		if ftpServer != nil {
+			ftpServer.Stop()
 		}
 
 		if err := srv.Shutdown(ctx); err != nil {
@@ -227,6 +246,9 @@ func main() {
 	if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		if sftpServer != nil {
 			sftpServer.Stop()
+		}
+		if ftpServer != nil {
+			ftpServer.Stop()
 		}
 		manager.ShutdownAll()
 		log.Fatalf("[FATAL] Server terminated unexpectedly: %v", err)
