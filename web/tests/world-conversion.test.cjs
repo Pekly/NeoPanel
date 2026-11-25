@@ -96,9 +96,9 @@ test('malformed status and wrong server responses cannot enable mutations',async
   for(const data of [{},status({jobs:[job({server_id:'other'})]}),status({formats:[{}]}),status({jobs:[job(),job()]})]) {const h=harness(fixture(data));h.open();await flush();h.fill();assert.equal(h.nodes.start.disabled,true);assert.match(h.nodes.error.textContent,/Status could not/);}
 });
 test('close, navigation, node, account, role, permission and session changes abort pending status and reject stale responses',async()=>{
-  for(const change of ['close','view','server','node','route','user','role','token','permission','hidden','removed']) {
+  for(const change of ['close','view','server','node','route','user','role','token','permission','removed']) {
     let resolve;const h=harness(()=>new Promise(r=>resolve=r));h.open();const signal=h.calls[0].options.signal;
-    if(change==='close')h.close();if(change==='view')h.c.S.view='con';if(change==='server')h.setServer({id:'other',node_id:'worker'});if(change==='node')h.setServer({id:'server',node_id:'other'});if(change==='route')h.c.location.href+='?changed';if(change==='user')h.c.S.user={id:4,role:'user'};if(change==='role')h.c.S.user.role='admin';if(change==='token')h.c.S.token='new';if(change==='permission')h.granted.length=0;if(change==='hidden')h.c.document.hidden=true;if(change==='removed'){h.modal.isConnected=false;h.mutate();}h.watch();
+    if(change==='close')h.close();if(change==='view')h.c.S.view='con';if(change==='server')h.setServer({id:'other',node_id:'worker'});if(change==='node')h.setServer({id:'server',node_id:'other'});if(change==='route')h.c.location.href+='?changed';if(change==='user')h.c.S.user={id:4,role:'user'};if(change==='role')h.c.S.user.role='admin';if(change==='token')h.c.S.token='new';if(change==='permission')h.granted.length=0;if(change==='removed'){h.modal.isConnected=false;h.mutate();}h.watch();
     assert.equal(signal.aborted,true,change);resolve(status());await flush();assert.equal(h.calls.length,1,change);assert.equal(h.timers.size,0,change);assert.equal(h.intervals.size,0,change);
   }
 });

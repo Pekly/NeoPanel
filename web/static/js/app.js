@@ -18231,3 +18231,16 @@ function displayNodeLocation(node) {
   if (location && location !== node.id) return location;
   return node?.id === 'local' ? 'This machine' : location ? displayNodeName(node.id, node.name) : 'Location not specified';
 }
+
+if (typeof document !== 'undefined') {
+  let _modalMouseDownTarget = null;
+  document.addEventListener('mousedown', e => {
+    _modalMouseDownTarget = e.target;
+  }, true);
+  document.addEventListener('click', e => {
+    if (e.target && e.target.classList && e.target.classList.contains('pal') && _modalMouseDownTarget !== e.target) {
+      e.stopImmediatePropagation();
+      e.stopPropagation();
+    }
+  }, true);
+}

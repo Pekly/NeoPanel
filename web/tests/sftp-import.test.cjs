@@ -133,8 +133,8 @@ test('close, navigation, server/node/session/user changes abort requests and rej
   }
 });
 
-test('hidden tabs close and clear secrets; reopened completed status never restarts or polls', async () => {
-  const h=harness(async()=>status({job:job({state:'completed',files_done:2,bytes_done:1000})}));h.open();await flush();h.nodes.password.value='secret';h.c.document.hidden=true;h.events.visibilitychange();assert.equal(h.nodes.password.value,'');assert.equal(h.intervals.size,0);
+test('switching tabs preserves open modal and form state; reopened completed status never restarts or polls', async () => {
+  const h=harness(async()=>status({job:job({state:'completed',files_done:2,bytes_done:1000})}));h.open();await flush();h.nodes.password.value='secret';h.c.document.hidden=true;h.watch();assert.equal(h.nodes.password.value,'secret');assert.ok(h.container.innerHTML!=='');
   h.c.document.hidden=false;h.open();await flush();assert.equal(h.nodes['job-state'].textContent,'Import complete');assert.equal(h.calls.filter(c=>c.options.method==='POST').length,0);assert.equal([...h.timers.values()].filter(t=>t.ms===1500).length,0);
 });
 

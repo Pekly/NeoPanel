@@ -82,7 +82,6 @@
       for (const [controller, timer] of requests) { clearTimeout(timer); controller.abort(); }
       requests.clear(); observer?.disconnect();
       document.removeEventListener('keydown', keyboard, true);
-      document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', close);
       if (root.isConnected) container.replaceChildren();
       if (dispose === close) dispose = null;
@@ -91,10 +90,9 @@
     dispose = close;
     function live() {
       if (closed) return false;
-      if (!root.isConnected || document.hidden || !contextMatches()) { close(); return false; }
+      if (!root.isConnected || !contextMatches()) { close(); return false; }
       return true;
     }
-    function visibility() { if (document.hidden) close(); }
     function keyboard(event) {
       if (!live()) return;
       if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); close(); return; }
@@ -277,7 +275,6 @@
       }
     }
     document.addEventListener('keydown', keyboard, true);
-    document.addEventListener('visibilitychange', visibility);
     window.addEventListener('pagehide', close);
     observer = new MutationObserver(() => { if (!root.isConnected) close(); });
     observer.observe(document.body, {childList:true, subtree:true});
