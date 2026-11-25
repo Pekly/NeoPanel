@@ -1030,7 +1030,8 @@ func (h *NodeHandler) SyncAuthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, u := range req.Users {
 		if err := h.db.UpsertSyncedUser(u.ID, u.Username, u.Email, u.PasswordHash, u.Role); err != nil {
-			writeError(w, 409, "User synchronization failed")
+			log.Printf("[WARN] UpsertSyncedUser failed for id=%d username=%s: %v", u.ID, u.Username, err)
+			writeError(w, 409, fmt.Sprintf("User synchronization failed for %s: %v", u.Username, err))
 			return
 		}
 	}

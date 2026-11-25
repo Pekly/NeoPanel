@@ -748,10 +748,10 @@ func (db *DB) UpsertSyncedUser(id int, username, email, passwordHash, role strin
 		return fmt.Errorf("empty username")
 	}
 	now := time.Now().UTC()
-	// Check if a different row already holds this username; if so, remove the stale unexported placeholder.
+	// Check if a different row already holds this username; rename the stale placeholder without cascading deletes.
 	var conflictID int
 	if err := db.conn.QueryRow("SELECT id FROM users WHERE username = ? AND id != ?", username, id).Scan(&conflictID); err == nil {
-		_, _ = db.conn.Exec("DELETE FROM users WHERE id = ? AND NOT EXISTS (SELECT 1 FROM deleted_invitation_users WHERE id=?)", conflictID, conflictID)
+		_, _ = db.conn.Exec("UPDATE users SET username = ? WHERE id = ?", fmt.Sprintf("%s_stale_%d", username, conflictID), conflictID)
 	}
 	var existingID int
 	err := db.conn.QueryRow("SELECT id FROM users WHERE id = ?", id).Scan(&existingID)

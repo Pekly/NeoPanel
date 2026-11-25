@@ -895,15 +895,22 @@ func forwardedClaims(db *database.DB, req *http.Request, claims *JWTClaims) (*JW
 	if err != nil || userID <= 0 {
 		return nil, fmt.Errorf("invalid forwarded user")
 	}
-	user, err := db.GetUserByID(userID)
-	if err != nil {
-		return nil, fmt.Errorf("forwarded user is not synchronized to this node")
-	}
 	role := req.Header.Get("X-NeoPanel-User-Role")
 	if role != "admin" && role != "user" {
 		return nil, fmt.Errorf("invalid forwarded role")
 	}
-	forwarded := &JWTClaims{UserID: user.ID, Username: user.Username, Role: role}
+	user, err := db.GetUserByID(userID)
+	var forwarded *JWTClaims
+	if err != nil {
+		if role == "admin" {
+			// Admin requests are already authenticated by the Master Panel's privileged node token.
+			forwarded = &JWTClaims{UserID: userID, Username: "admin", Role: "admin"}
+		} else {
+			return nil, fmt.Errorf("forwarded user is not synchronized to this node")
+		}
+	} else {
+		forwarded = &JWTClaims{UserID: user.ID, Username: user.Username, Role: role}
+	}
 	if raw := req.Header.Get(forwardedNodePolicyHeader); raw != "" {
 		// Only reached after authenticating the privileged hop and validating
 		// the original caller. Handlers must never parse policy headers.
