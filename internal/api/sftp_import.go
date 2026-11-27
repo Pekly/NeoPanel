@@ -329,9 +329,14 @@ func (h *sftpImportHandler) captureAuthority(r *http.Request) (importAuthority, 
 			}
 			user, err := h.db.GetUserByID(claims.UserID)
 			if err != nil {
-				return a, err
+				if claims.Role == "admin" && a.hopIsNode {
+					a.claims.AuthVersion = 0
+				} else {
+					return a, err
+				}
+			} else {
+				a.claims.AuthVersion = user.AuthVersion
 			}
-			a.claims.AuthVersion = user.AuthVersion
 		}
 	} else if claims.APIKey {
 		a.keyHash = tokenHash(requestAuthToken(r))

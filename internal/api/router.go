@@ -1008,14 +1008,16 @@ func (r *Router) proxyHTTP(w http.ResponseWriter, req *http.Request) {
 		peek, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		_ = resp.Body.Close()
 		if strings.Contains(string(peek), "forwarded user is not synchronized to this node") {
-			if syncErr := r.nodes.SyncAuthToNode(req.Context(), node.BaseURL, node.APIToken); syncErr == nil {
-				retryReq, rErr := http.NewRequestWithContext(req.Context(), req.Method, remote.URL.String(), nil)
-				if rErr == nil {
-					retryReq.Header = remote.Header.Clone()
-					if retryResp, dErr := fileMediaProxyClient(r.nodes.httpClient, req.Method, rest).Do(retryReq); dErr == nil {
-						resp = retryResp
-						goto copyResponse
-					}
+			if syncErr := r.nodes.SyncAuthToNode(req.Context(), node.BaseURL, node.APIToken); syncErr != nil {
+				writeError(w, resp.StatusCode, fmt.Sprintf("forwarded user is not synchronized to this node (sync failed: %v)", syncErr))
+				return
+			}
+			retryReq, rErr := http.NewRequestWithContext(req.Context(), req.Method, remote.URL.String(), nil)
+			if rErr == nil {
+				retryReq.Header = remote.Header.Clone()
+				if retryResp, dErr := fileMediaProxyClient(r.nodes.httpClient, req.Method, rest).Do(retryReq); dErr == nil {
+					resp = retryResp
+					goto copyResponse
 				}
 			}
 		}

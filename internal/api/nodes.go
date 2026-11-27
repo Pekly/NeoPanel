@@ -1097,9 +1097,10 @@ func (h *NodeHandler) SyncAuthToNode(ctx context.Context, baseURL, apiToken stri
 	if err != nil {
 		return err
 	}
-	_ = resp.Body.Close()
+	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("node auth synchronization failed: HTTP %d", resp.StatusCode)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("node auth synchronization failed: HTTP %d (%s)", resp.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 	return nil
 }
