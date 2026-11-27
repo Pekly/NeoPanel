@@ -61,6 +61,8 @@ ARG_USE_TURNSTILE=""
 ARG_API_KEY_NAME=""
 PAIR_INSECURE="false"
 ASSUME_YES="false"
+HOST_MODE=""
+HOST_MODE_FILE="$INSTALL_STATE_DIR/host_mode"
 
 # Address-only recovery overrides; do not affect installation/update paths.
 RECOVERY_CONFIG="${NEOPANEL_CONFIG:-$CONFIG_DIR/config.yaml}"
@@ -352,6 +354,10 @@ install_isolation_tools() {
 # Subshell keeps cleanup and temporary state local to this step. No host security
 # policy or saved node isolation setting is modified by this capability test.
 step_isolation() (
+  if [ "${HOST_MODE:-}" = "private" ]; then
+    log_info "Skipping Bubblewrap sandbox setup (Private Host mode selected)."
+    return 0
+  fi
   install_isolation_tools || return 1
   local bwrap_path probe_user=root probe_group="" load_state dynamic_user uid
   bwrap_path="$(command -v bwrap)" || return 1
@@ -600,6 +606,47 @@ step_build_neopanel() {
   write_global_shortcuts
 }
 
+prompt_host_mode() {
+  if [ "$HOST_MODE" = "private" ] || [ "$HOST_MODE" = "public" ]; then
+    return 0
+  fi
+  if [ "$ASSUME_YES" = "true" ]; then
+    HOST_MODE="public"
+    return 0
+  fi
+  echo -e "\n${CYAN}${BOLD}Hosting Environment & Sandbox Isolation${NC}"
+  echo -e "  ${BOLD}1)${NC} Private / Personal Host ${YELLOW}(Friends, private SMP, or restricted VPS — skips Bubblewrap sandbox)${NC}"
+  echo -e "  ${BOLD}2)${NC} Public / Paid Host    ${GREEN}(Multi-tenant or untrusted plugins — enforces Bubblewrap sandbox)${NC}"
+  prompt_user "How will you use this host? (1/2) [default: 1]: " hm_choice
+  hm_choice=${hm_choice:-1}
+  if [ "$hm_choice" = "2" ] || [[ "${hm_choice,,}" == "public" ]] || [[ "${hm_choice,,}" == "paid" ]]; then
+    HOST_MODE="public"
+    log_info "Public / Paid Host mode selected — Bubblewrap sandbox isolation will be enforced."
+  else
+    HOST_MODE="private"
+    log_info "Private Host mode selected — Bubblewrap sandbox isolation will be skipped."
+  fi
+}
+
+detect_host_mode() {
+  if [ "$HOST_MODE" = "private" ] || [ "$HOST_MODE" = "public" ]; then
+    return 0
+  fi
+  if [ -f "$HOST_MODE_FILE" ]; then
+    local saved
+    saved="$(tr -d '[:space:]' < "$HOST_MODE_FILE" 2>/dev/null || true)"
+    if [ "$saved" = "private" ] || [ "$saved" = "public" ]; then
+      HOST_MODE="$saved"
+      return 0
+    fi
+  fi
+  if [ -f "$CONFIG_DIR/config.yaml" ] && grep -qE '^[[:space:]]*allow_insecure_game_fallback:[[:space:]]*true' "$CONFIG_DIR/config.yaml" 2>/dev/null; then
+    HOST_MODE="private"
+  else
+    HOST_MODE="public"
+  fi
+}
+
 prompt_turnstile_setup() {
   echo -e "\n${CYAN}${BOLD}Cloudflare Turnstile Bot Protection${NC}"
   echo -e "${YELLOW}Adds Cloudflare Turnstile challenge verification to your NeoPanel login and setup pages.${NC}"
@@ -695,6 +742,15 @@ step_config_service() {
     srv_mode="standalone"
   fi
 
+  local insecure_fallback_line=""
+  if [ "${HOST_MODE:-}" = "private" ]; then
+    insecure_fallback_line="  allow_insecure_game_fallback: true"
+  fi
+  mkdir -p "$INSTALL_STATE_DIR" 2>/dev/null || true
+  if [ -n "${HOST_MODE:-}" ]; then
+    printf '%s\n' "$HOST_MODE" > "$HOST_MODE_FILE" 2>/dev/null || true
+  fi
+
   if [ "$role" = "node" ]; then
     cat > "$CONFIG_DIR/config.yaml" <<EOF
 server:
@@ -712,6 +768,7 @@ security:
   jwt_secret: "${secret}"
   token_expiration_hours: 72
   node_token: "${node_tok}"
+${insecure_fallback_line}
 
 java:
   default_path: "java"
@@ -733,6 +790,7 @@ security:
   jwt_secret: "${secret}"
   token_expiration_hours: 72
   node_token: "${node_tok}"
+${insecure_fallback_line}
   trusted_proxies: ["127.0.0.1/32", "::1/128"]
   turnstile:
     enabled: ${ts_enabled}
@@ -906,14 +964,20 @@ run_full_installation() {
     prompt_turnstile_setup
   fi
 
+  prompt_host_mode
+
   # Clear terminal for clean, premium progress view
   print_banner
   echo -e "${BOLD}Installing NeoPanel Master Panel...${NC} (Silent background execution, logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
   # Run steps with smooth percentage progress
   run_step 0 10 "Updating system & installing base utilities" "step_prerequisites"
-  run_step 10 15 "Installing & testing Bubblewrap sandbox" "step_isolation fresh"
-  log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
+  run_step 10 15 "Checking host isolation (${HOST_MODE} mode)" "step_isolation fresh"
+  if [ "$HOST_MODE" = "private" ]; then
+    log_info "Private Host mode: Bubblewrap sandbox isolation skipped."
+  else
+    log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
+  fi
   run_step 15 35 "Preparing Go compilation toolchain" "step_go_compiler"
   run_step 35 60 "Compiling NeoPanel panel & daemon binary" "step_build_neopanel"
   run_step 60 75 "Installing & verifying all required Java runtimes" "step_java"
@@ -1099,12 +1163,22 @@ run_node_installation() {
     node_tok=$(generate_node_token)
   fi
 
+  if [ "$streamlined" = "true" ] && [ -z "$HOST_MODE" ]; then
+    HOST_MODE="public"
+  else
+    prompt_host_mode
+  fi
+
   print_banner
   echo -e "${BOLD}Installing NeoPanel Cluster Node Daemon...${NC} (Logs -> ${CYAN}${LOG_FILE}${NC})\n"
 
   run_step 0 10 "Updating system & installing base utilities" "step_prerequisites"
-  run_step 10 15 "Installing & testing Bubblewrap sandbox" "step_isolation fresh"
-  log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
+  run_step 10 15 "Checking host isolation (${HOST_MODE} mode)" "step_isolation fresh"
+  if [ "$HOST_MODE" = "private" ]; then
+    log_info "Private Host mode: Bubblewrap sandbox isolation skipped."
+  else
+    log_info "Bubblewrap host check passed. Select Bubblewrap on the node to require filesystem isolation."
+  fi
   run_step 15 35 "Preparing Go compilation toolchain" "step_go_compiler"
   run_step 35 60 "Compiling NeoPanel Node Daemon (-tags node)" "step_build_neopanel"
   run_step 60 75 "Installing & verifying all required Java runtimes" "step_java"
@@ -1299,6 +1373,7 @@ update_neopanel() {
   print_banner
   check_root
   detect_installed_role
+  detect_host_mode
 
   # Prompt for Cloudflare Turnstile ONLY in full Web Panel mode if upgrading from pre-Turnstile config
   if [ "$INSTALL_ROLE" != "node" ] && [ -f "$CONFIG_DIR/config.yaml" ] && ! grep -q "turnstile:" "$CONFIG_DIR/config.yaml"; then
@@ -1693,6 +1768,14 @@ parse_cli_args() {
         ;;
       --port=*)
         PANEL_PORT="${1#*=}"
+        shift
+        ;;
+      --private|--private-host)
+        HOST_MODE="private"
+        shift
+        ;;
+      --public|--paid|--public-host|--paid-host)
+        HOST_MODE="public"
         shift
         ;;
       --domain)
