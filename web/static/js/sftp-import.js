@@ -24,48 +24,45 @@
   }
   const field = (id, title, type = 'text', extra = '') => `<label class="f"><span>${title}</span><input id="sfi-${id}" type="${type}" ${extra}></label>`;
   function markup(server) {
-    const formatSpeed = bps => {
-      if (!bps || bps <= 0) return '';
-      if (bps >= 1048576) return ` · ${(bps / 1048576).toFixed(1)} MB/s`;
-      if (bps >= 1024) return ` · ${(bps / 1024).toFixed(0)} KB/s`;
-      return ` · ${bps} B/s`;
-    };
     return `<div class="pal" id="sfi-overlay"><section class="pbox sfi-modal" role="dialog" aria-modal="true" aria-labelledby="sfi-title" aria-describedby="sfi-intro" tabindex="-1">
-      <header class="sfi-row"><div><div class="np-eyebrow">Files / Remote transfer</div><h2 id="sfi-title">Import from SFTP / FTP</h2></div><button type="button" class="btn sm" id="sfi-close" aria-label="Close importer">×</button></header>
-      <p id="sfi-intro" class="mu">Copy files directly into <strong>${escape(server.name || server.id)}</strong> over SFTP, FTP, or FTPS.</p>
-      <section class="sfi-notice" aria-label="Destination requirements"><div class="sfi-row"><strong>Use an empty, stopped server</strong><button type="button" class="btn sm" id="sfi-refresh">Refresh</button></div><p id="sfi-target" role="status">Checking your server…</p><details><summary>Why does my new server already have files?</summary><p>New servers include server.properties and eula.txt. Back up and move or remove existing files in Files before importing. Nothing is overwritten.</p></details></section>
+      <header class="sfi-row sfi-header"><div><div class="np-eyebrow">Files / Remote transfer</div><h2 id="sfi-title">Import Server Files</h2></div><button type="button" class="btn sm" id="sfi-close" aria-label="Close importer">×</button></header>
+      <p id="sfi-intro" class="mu">Copy files into <strong>${escape(server.name || server.id)}</strong> from another host. Stop the source server first; source files will not be changed.</p>
+      <section class="sfi-notice sfi-target-bar" aria-label="Destination status"><div class="sfi-row"><div><strong>Destination</strong><p id="sfi-target" role="status">Checking empty, stopped server…</p></div><button type="button" class="btn sm" id="sfi-refresh">Refresh</button></div></section>
       <section id="sfi-job" class="sfi-job" hidden aria-label="Import progress"><h3 id="sfi-job-state" role="status"></h3><progress id="sfi-progress" max="100" aria-label="Bytes transferred"></progress><p id="sfi-counts"></p><p id="sfi-current" class="mono"></p><p id="sfi-job-message" role="status"></p><button type="button" class="btn" id="sfi-cancel" hidden>Cancel import</button></section>
       <form id="sfi-form" autocomplete="off" novalidate>
         <fieldset id="sfi-settings"><legend class="sfi-sr">Source and copy options</legend>
-          <section class="sfi-section"><h3>1. Connect to the source</h3><div class="sfi-grid">
+          <section class="sfi-section"><h3>1. Source Connection</h3><div class="sfi-grid sfi-grid-3">
             <label class="f"><span>Protocol</span><select id="sfi-protocol"><option value="sftp">SFTP (SSH)</option><option value="ftp">FTP</option><option value="ftps">FTPS (TLS)</option></select></label>
             ${field('host','Host','text','required placeholder="sftp.example.com" spellcheck="false"')}
             ${field('port','Port','number','required value="22" min="1" max="65535" step="1"')}
           </div>
-          <div id="sfi-sftp-only">
-            <div class="sfi-row"><button type="button" class="btn sm" id="sfi-fetch">Get fingerprint</button><span class="mu" id="sfi-key-note">No login details are sent yet.</span></div>
-            ${field('fingerprint','Host fingerprint (SHA256)','text','required placeholder="SHA256:…" spellcheck="false" aria-describedby="sfi-verify-note"')}
-            <p id="sfi-verify-note" class="mu">Compare this fingerprint with the one from your provider before continuing.</p>
-            <label class="sfi-check"><input type="checkbox" id="sfi-confirm"><span>I verified the fingerprint with my provider or another trusted source.</span></label>
-          </div>
-          <div class="sfi-grid">${field('username','Username','text','required spellcheck="false" autocomplete="off"')}<label class="f" id="sfi-auth-wrap"><span>Authentication</span><select id="sfi-auth"><option value="password">Password</option><option value="key">Private key</option></select></label></div>
+          <div class="sfi-grid">${field('username','Username','text','required spellcheck="false" autocomplete="off"')}<label class="f" id="sfi-auth-wrap"><span>Auth method</span><select id="sfi-auth"><option value="password">Password</option><option value="key">Private key</option></select></label></div>
           <div id="sfi-password-wrap">${field('password','Password','password','autocomplete="new-password"')}</div>
-          <div id="sfi-key-wrap" hidden><label class="f"><span>Load a local private key (optional, up to 64 KiB)</span><input id="sfi-key-file" type="file" accept=".key,.pem,text/plain"></label><label class="f"><span>Private key (PEM / OpenSSH)</span><textarea id="sfi-private-key" rows="4" spellcheck="false" autocomplete="off"></textarea></label>${field('passphrase','Key passphrase (if encrypted)','password','autocomplete="new-password"')}</div>
-          <p class="mu">Use the SFTP or FTP connection details from your current host.</p></section>
-          <section class="sfi-section"><h3>2. Choose what to copy</h3>${field('remote-path','Source folder','text','value="." required spellcheck="false"')}
-          <div class="sfi-row"><button type="button" class="btn" id="sfi-test" disabled>Test connection</button><span class="mu">Preview files without changing them.</span></div>
-          <div id="sfi-preview" class="sfi-preview" aria-label="Remote directory preview"><p class="mu">Test the connection to see your files. Leave all unchecked to copy everything.</p></div>
-          <details><summary>Advanced copy options</summary><p class="mu">Enter file or folder paths relative to the source folder. Wildcards are not supported.</p><label class="f"><span>Exclude paths (one per line)</span><textarea id="sfi-excludes" rows="3" placeholder="logs&#10;backups" spellcheck="false"></textarea></label>
-          <div class="sfi-row sfi-presets"><span>Also exclude:</span>${['logs','backups','cache'].map(p => `<label class="sfi-check"><input type="checkbox" data-exclude="${p}"><span>${p}/</span></label>`).join('')}</div>
-          <div class="sfi-grid"><label class="sfi-check"><input id="sfi-hidden" type="checkbox"><span>Skip hidden files and folders</span></label><label class="sfi-check"><input id="sfi-times" type="checkbox" checked><span>Preserve modification times</span></label>
-          ${field('max','Maximum copy size (GiB)','number','min="0" step="any" value="10" required aria-describedby="sfi-limits"')}
-          ${field('bandwidth','Bandwidth (MiB/s; 0 = unlimited)','number','value="0" min="0" max="1024" step="any" required')}
-          ${field('timeout','Timeout (minutes)','number','value="60" min="1" max="240" step="1" required')}</div><p class="mu" id="sfi-limits">Checking transfer limits…</p></details></section>
+          <div id="sfi-key-wrap" hidden><label class="f"><span>Load private key file (max 64 KiB)</span><input id="sfi-key-file" type="file" accept=".key,.pem,text/plain"></label><label class="f"><span>Private key (PEM / OpenSSH)</span><textarea id="sfi-private-key" rows="3" spellcheck="false" autocomplete="off"></textarea></label>${field('passphrase','Key passphrase (optional)','password','autocomplete="new-password"')}</div>
+          <div id="sfi-sftp-only" class="sfi-key-box">
+            <div class="sfi-row"><button type="button" class="btn sm" id="sfi-fetch">Get fingerprint</button><span class="mu" id="sfi-key-note">Compare fingerprint with your provider.</span></div>
+            ${field('fingerprint','Host fingerprint (SHA256)','text','required placeholder="SHA256:…" spellcheck="false"')}
+            <label class="sfi-check"><input type="checkbox" id="sfi-confirm"><span>I verified this fingerprint with my provider.</span></label>
+          </div></section>
+          <section class="sfi-section"><h3>2. Files &amp; Destination</h3>
+          <div class="sfi-grid">
+            <label class="f"><span>If destination has files</span><select id="sfi-conflict-mode"><option value="">Keep empty / preserve</option><option value="preserve">Preserve existing files (skip duplicates)</option><option value="replace">Remove &amp; replace existing files</option></select></label>
+            <div class="f"><span>Source folder</span><div class="sfi-inline"><input id="sfi-remote-path" type="text" value="." required spellcheck="false"><button type="button" class="btn" id="sfi-test" disabled>Preview</button></div></div>
+          </div>
+          <div id="sfi-preview" class="sfi-preview" aria-label="Remote directory preview"><p class="mu">Click Preview to browse remote files, or start directly to copy everything.</p></div>
+          <details class="sfi-advanced"><summary>Advanced options</summary>
+            <label class="f"><span>Exclude paths (one per line)</span><textarea id="sfi-excludes" rows="2" placeholder="logs&#10;backups" spellcheck="false"></textarea></label>
+            <div class="sfi-row sfi-presets"><span>Quick exclude:</span>${['logs','backups','cache'].map(p => `<label class="sfi-check"><input type="checkbox" data-exclude="${p}"><span>${p}/</span></label>`).join('')}</div>
+            <div class="sfi-grid"><label class="sfi-check"><input id="sfi-hidden" type="checkbox"><span>Skip hidden files</span></label><label class="sfi-check"><input id="sfi-times" type="checkbox" checked><span>Preserve timestamps</span></label>
+            ${field('max','Max copy size (GiB)','number','min="0" step="any" value="10" required aria-describedby="sfi-limits"')}
+            ${field('bandwidth','Bandwidth (MiB/s, 0 = max)','number','value="0" min="0" max="1024" step="any" required')}
+            ${field('timeout','Timeout (minutes)','number','value="60" min="1" max="240" step="1" required')}</div>
+            <p class="mu" id="sfi-limits">Checking transfer limits…</p>
+          </details></section>
         </fieldset>
-        <section class="sfi-notice"><strong>Before you import</strong><p>Stop the source server for a consistent copy. Its files will not be changed, and this server will not start automatically.</p></section>
         ${S.user?.role === 'admin' ? `<details class="sfi-notice"><summary>Operator details</summary><p>Hosting node: ${escape(server.node_id || 'local')}. Private sources require the node's SFTP allowlist. Imports use staging and share the three-copy restore retention limit. Jobs do not resume after a service restart.</p></details>` : ''}
         <p id="sfi-error" role="alert" class="sfi-error" tabindex="-1" hidden></p><p id="sfi-status" role="status" class="mu"></p>
-        <footer class="sfi-row"><p class="mu">Closing does not cancel the import. Reopen this window to check progress.</p><button type="submit" class="btn pr" id="sfi-start" disabled aria-describedby="sfi-start-reason">Start import</button></footer><p id="sfi-start-reason" class="mu">Checking your server and source verification…</p>
+        <footer class="sfi-row"><p class="mu">Runs in background — you can close this window anytime.</p><button type="submit" class="btn pr" id="sfi-start" disabled aria-describedby="sfi-start-reason">Start import</button></footer><p id="sfi-start-reason" class="mu">Checking your server…</p>
       </form></section></div>`;
   }
 
@@ -193,12 +190,19 @@
         const data = await request();
         if (!data || typeof data.eligible !== 'boolean' || typeof data.reason !== 'string' || !Object.hasOwn(data, 'job') || !data.limits || !Number.isSafeInteger(data.limits.max_bytes) || data.limits.max_bytes < 0 || !Number.isSafeInteger(data.limits.default_bytes) || data.limits.default_bytes < 0 || !Number.isSafeInteger(data.limits.max_entries) || !Number.isSafeInteger(data.limits.max_active)) throw Error('Unexpected destination response. Start is disabled; refresh to retry.');
         const next = data.job === null ? null : validateJob(data.job, server);
-        eligible = data.eligible;
+        const conflictSelect = el('conflict-mode');
+        if (data.stopped && data.has_files && conflictSelect && !conflictSelect.value) {
+          conflictSelect.value = 'preserve';
+        }
+        const selectedMode = conflictSelect?.value || '';
+        eligible = data.eligible || (!!data.stopped && (selectedMode === 'preserve' || selectedMode === 'replace'));
         if (!limits) el('max').value = String(Math.min(data.limits.max_bytes, data.limits.default_bytes || 10 * GiB) / GiB);
         limits = data.limits;
         el('max').max = String(limits.max_bytes / GiB);
         el('limits').textContent = `Up to ${limits.max_bytes / GiB} GiB per import.` + (isAdmin ? ` ${limits.max_entries.toLocaleString()} entries; ${limits.max_active} active imports per node. This does not enforce host disk quotas.` : '');
-        el('target').textContent = eligible ? 'Your server is ready to import.' : data.reason || 'Stop your server and clear its files before importing.';
+        el('target').textContent = eligible
+          ? (data.has_files ? (selectedMode === 'replace' ? 'Server stopped. Existing files will be removed and replaced.' : 'Server stopped. Existing files will be preserved.') : 'Your server is ready to import.')
+          : data.reason || 'Stop your server before importing.';
         if (unknown && next && next.id !== previousJob) { unknown = false; clearSecrets(); el('status').textContent = 'Import found after the unconfirmed start.'; }
         showJob(next);
         if (!unknown && !busy) error();
@@ -231,6 +235,10 @@
       const excludes = el('excludes').value.split(/\r?\n/).filter(p => p.length).map(relativePath);
       root.querySelectorAll('[data-exclude]:checked').forEach(n => excludes.push(n.dataset.exclude));
       const result = {...connection, username, fingerprint: isFTP ? '' : fingerprint, remote_path:el('remote-path').value || '.', include_paths:[...root.querySelectorAll('[data-include]:checked')].map(n => relativePath(n.dataset.include)), exclude_paths:[...new Set(excludes)], skip_hidden:el('hidden').checked, preserve_times:el('times').checked, max_bytes:integer(maxBytes, 1, max, 'Copy size in bytes'), bandwidth_kib:integer(bandwidth, 0, 1048576, 'Bandwidth in KiB/s'), timeout_minutes:integer(Number(el('timeout').value), 1, 240, 'Timeout in minutes')};
+      const conflictMode = el('conflict-mode')?.value || '';
+      if (conflictMode === 'preserve' || conflictMode === 'replace') {
+        result.conflict_mode = conflictMode;
+      }
       if (isFTP) {
         result.protocol = protocol;
       }
@@ -325,6 +333,7 @@
       invalidatePreview(); sync();
     };
     el('confirm').onchange = sync;
+    if (el('conflict-mode')) el('conflict-mode').onchange = () => { refresh(); };
     el('auth').onchange = () => {
       clearSecrets(); keyRead++; invalidatePreview();
       el('key-wrap').hidden = el('auth').value !== 'key';

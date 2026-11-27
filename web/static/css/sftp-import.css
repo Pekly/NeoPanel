@@ -6,8 +6,15 @@
 .sfi-modal p { margin: 8px 0; line-height: 1.6; overflow-wrap: anywhere; }
 .sfi-modal .mu { font-size: 12px; }
 .sfi-modal fieldset { min-width: 0; border: 0; padding: 0; margin: 0; }
-.sfi-section { padding: 24px 0; border-bottom: 1px solid var(--border); }
-.sfi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sfi-section { padding: 18px 0; border-bottom: 1px solid var(--border); }
+.sfi-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.sfi-grid-3 { grid-template-columns: 120px minmax(0, 1fr) 96px; }
+.sfi-inline { display: flex; gap: 8px; align-items: stretch; }
+.sfi-inline input { flex: 1 1 auto; }
+.sfi-key-box { margin-top: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-inner); }
+.sfi-target-bar { margin-top: 12px; padding: 12px 16px; }
+.sfi-target-bar .sfi-row { margin-bottom: 0; }
+.sfi-advanced { margin-top: 8px; }
 .sfi-grid > *, .sfi-row > * { min-width: 0; }
 .sfi-modal .f { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; }
 .sfi-modal input:not([type="checkbox"]), .sfi-modal textarea, .sfi-modal select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
@@ -42,7 +49,7 @@
 .sfi-sr { position: absolute; width: 1px; height: 1px; padding: 0; clip-path: inset(50%); white-space: nowrap; }
 @keyframes sfi-appear { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 700px) {
-  .sfi-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .sfi-grid, .sfi-grid-3 { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .sfi-modal .sfi-row { align-items: flex-start; }
   .sfi-modal footer .btn { width: 100%; }
   .sfi-entry { grid-template-columns: 16px minmax(0, 1fr); gap: 8px; }

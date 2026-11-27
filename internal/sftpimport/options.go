@@ -32,6 +32,7 @@ type Options struct {
 	ExcludePaths   []string `json:"exclude_paths"`
 	SkipHidden     bool     `json:"skip_hidden"`
 	PreserveTimes  bool     `json:"preserve_times"`
+	ConflictMode   string   `json:"conflict_mode,omitempty"` // "", "empty", "preserve", or "replace"
 	MaxBytes       int64    `json:"max_bytes"`
 	BandwidthKiB   int      `json:"bandwidth_kib"`
 	TimeoutMinutes int      `json:"timeout_minutes"`
@@ -131,6 +132,12 @@ func Validate(o Options) (Options, error) {
 			}
 			list[i] = path.Clean(p)
 		}
+	}
+	o.ConflictMode = strings.ToLower(strings.TrimSpace(o.ConflictMode))
+	switch o.ConflictMode {
+	case "", "empty", "preserve", "replace":
+	default:
+		return o, problem("invalid conflict mode")
 	}
 	if o.MaxBytes == 0 {
 		o.MaxBytes = 10 << 30

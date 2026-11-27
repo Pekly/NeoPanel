@@ -107,30 +107,42 @@ func importByteLimit(srv *database.Server) int64 {
 }
 
 // Eligibility is informational; the runner repeats the checks under its operation gate.
-func (h *sftpImportHandler) eligibility(id string) (bool, string) {
+func (h *sftpImportHandler) eligibilityWithMode(id, conflictMode string) (eligible, stopped, hasFiles bool, reason string) {
 	if h.manager.GetStatus(id) != "offline" {
-		return false, "Stop your server before importing files."
+		return false, false, false, "Stop your server before importing files."
 	}
 	dir := h.manager.GetWorkingDir(id)
 	info, err := os.Lstat(dir)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return false, "Server files are unavailable. Contact support."
+		return false, true, false, "Server files are unavailable. Contact support."
 	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return false, "Could not check the server directory."
+		return false, true, false, "Could not check the server directory."
 	}
 	defer root.Close()
 	f, err := root.Open(".")
 	if err != nil {
-		return false, "Could not check the server directory."
+		return false, true, false, "Could not check the server directory."
 	}
 	defer f.Close()
 	names, err := f.Readdirnames(1)
-	if len(names) != 0 || err != io.EOF {
-		return false, "Your server still has files. Back up and move or remove them before importing."
+	if len(names) != 0 {
+		hasFiles = true
+	} else if err != io.EOF {
+		return false, true, false, "Could not check the server directory."
 	}
-	return true, "Ready to import into this empty, stopped server."
+	if hasFiles {
+		switch conflictMode {
+		case "preserve":
+			return true, true, true, "Server is stopped. Existing files will be preserved."
+		case "replace":
+			return true, true, true, "Server is stopped. Existing files will be replaced."
+		default:
+			return false, true, true, "Your server still has files. Choose Preserve or Replace, or remove them before importing."
+		}
+	}
+	return true, true, false, "Ready to import into this empty, stopped server."
 }
 
 func (h *sftpImportHandler) pruneLocked() {
@@ -146,7 +158,7 @@ func (h *sftpImportHandler) status(w http.ResponseWriter, r *http.Request) {
 	if srv == nil {
 		return
 	}
-	eligible, reason := h.eligibility(srv.ID)
+	eligible, stopped, hasFiles, reason := h.eligibilityWithMode(srv.ID, "")
 	var job *sftpImportJob
 	h.mu.Lock()
 	h.pruneLocked()
@@ -159,7 +171,7 @@ func (h *sftpImportHandler) status(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Unlock()
 	limit := importByteLimit(srv)
-	writeJSON(w, http.StatusOK, map[string]any{"job": job, "eligible": eligible, "reason": reason, "limits": map[string]any{"max_bytes": limit, "default_bytes": min(sftpImportDefaultBytes, limit), "max_entries": 100000, "max_active": sftpImportMaxJobs}})
+	writeJSON(w, http.StatusOK, map[string]any{"job": job, "eligible": eligible, "stopped": stopped, "has_files": hasFiles, "reason": reason, "limits": map[string]any{"max_bytes": limit, "default_bytes": min(sftpImportDefaultBytes, limit), "max_entries": 100000, "max_active": sftpImportMaxJobs}})
 }
 
 func decodeSFTPImport(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -401,7 +413,7 @@ func (h *sftpImportHandler) start(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "Import permission has changed; sign in again")
 		return
 	}
-	if eligible, reason := h.eligibility(srv.ID); !eligible {
+	if eligible, _, _, reason := h.eligibilityWithMode(srv.ID, opts.ConflictMode); !eligible {
 		writeError(w, 409, reason)
 		return
 	}
@@ -465,7 +477,7 @@ func (h *sftpImportHandler) start(w http.ResponseWriter, r *http.Request) {
 
 func (h *sftpImportHandler) run(ctx context.Context, rec *sftpImportRecord, srv *database.Server, opts sftpimport.Options, allowed []string, authority importAuthority) {
 	defer rec.cancel()
-	result, err := h.manager.ImportServerFiles(ctx, srv, func(ctx context.Context, stage string) error {
+	result, err := h.manager.ImportServerFilesWithMode(ctx, srv, opts.ConflictMode, func(ctx context.Context, stage string) error {
 		if !h.authorized(srv.ID, authority) {
 			return errors.New("Import permission was revoked")
 		}

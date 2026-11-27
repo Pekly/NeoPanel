@@ -186,3 +186,17 @@ test('failed import connections do not show proxy addresses to users', async () 
     assert.equal(h.nodes.start.disabled,true);
   }
 });
+
+test('stopped server with existing files enables Start and sends preserve or replace conflict_mode', async () => {
+  const h=harness(async(_,o)=>o?.method==='POST'?job():status({eligible:false,stopped:true,has_files:true,reason:'Your server still has files.'}));
+  h.open();await flush();h.fill();
+  assert.equal(h.nodes['conflict-mode'].value,'preserve');
+  assert.equal(h.nodes.start.disabled,false);
+  h.submit();await flush();
+  assert.equal(JSON.parse(h.calls[1].options.body).conflict_mode,'preserve');
+
+  h.fill();h.nodes['conflict-mode'].value='replace';h.nodes['conflict-mode'].onchange();await flush();
+  assert.equal(h.nodes.start.disabled,false);
+  h.submit();await flush();
+  assert.equal(JSON.parse(h.calls[3].options.body).conflict_mode,'replace');
+});

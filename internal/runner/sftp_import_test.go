@@ -356,3 +356,65 @@ func TestImportServerFilesShutdownCancelsAndJoins(t *testing.T) {
 		t.Fatalf("shutdown published data: %v, %v", entries, err)
 	}
 }
+
+func TestImportServerFilesPreserveAndReplace(t *testing.T) {
+	m, srv, live := importFixture(t)
+	if err := os.MkdirAll(filepath.Join(live, "plugins"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(live, "server.properties"), []byte("keep-me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(live, "plugins", "existing.jar"), []byte("old-jar"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Preserve mode keeps existing files, merges new files, and skips conflicts.
+	res, err := m.ImportServerFilesWithMode(context.Background(), srv, ImportConflictPreserve, func(ctx context.Context, fresh string) error {
+		if err := os.MkdirAll(filepath.Join(fresh, "plugins"), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(fresh, "plugins", "existing.jar"), []byte("new-jar"), 0600); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(fresh, "plugins", "added.jar"), []byte("added-jar"), 0600); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(fresh, "world.dat"), []byte("world"), 0600)
+	})
+	if err != nil {
+		t.Fatalf("preserve import: %v", err)
+	}
+	if res.SafetyCopy != "" {
+		t.Fatalf("preserve should not create safety copy: %q", res.SafetyCopy)
+	}
+	if got, err := os.ReadFile(filepath.Join(live, "server.properties")); err != nil || string(got) != "keep-me" {
+		t.Fatalf("server.properties changed: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(live, "plugins", "existing.jar")); err != nil || string(got) != "old-jar" {
+		t.Fatalf("existing.jar was overwritten: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(live, "plugins", "added.jar")); err != nil || string(got) != "added-jar" {
+		t.Fatalf("added.jar missing: %q, %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(live, "world.dat")); err != nil || string(got) != "world" {
+		t.Fatalf("world.dat missing: %q, %v", got, err)
+	}
+
+	// Replace mode removes existing files and replaces them with imported files.
+	res, err = m.ImportServerFilesWithMode(context.Background(), srv, ImportConflictReplace, func(ctx context.Context, fresh string) error {
+		return os.WriteFile(filepath.Join(fresh, "fresh-only.txt"), []byte("fresh"), 0600)
+	})
+	if err != nil {
+		t.Fatalf("replace import: %v", err)
+	}
+	if res.SafetyCopy == "" {
+		t.Fatal("replace should retain safety copy")
+	}
+	if _, err := os.Stat(filepath.Join(live, "server.properties")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected server.properties removed, got %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(live, "fresh-only.txt")); err != nil || string(got) != "fresh" {
+		t.Fatalf("fresh-only.txt missing: %q, %v", got, err)
+	}
+}
