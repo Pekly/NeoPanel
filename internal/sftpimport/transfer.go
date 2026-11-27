@@ -73,7 +73,7 @@ func selected(o Options, p string, dir bool) bool {
 }
 
 // foldKey uses Unicode simple folding, not just lowercase (e.g. Kelvin sign,
-// long S). Rejecting these collisions is conservative on every target platform.
+// long S). Used on case-insensitive filesystems (Windows/macOS).
 func foldKey(p string) string {
 	return strings.Map(func(r rune) rune {
 		r = unicode.ToUpper(r) // Include Windows upcase collisions (e.g. dotless I).
@@ -85,6 +85,15 @@ func foldKey(p string) string {
 		}
 		return min
 	}, p)
+}
+
+// collisionKey folds case only on case-insensitive host OSes (Windows/macOS);
+// Linux filesystems are case-sensitive so distinct-case filenames are valid.
+func collisionKey(p string) string {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return foldKey(p)
+	}
+	return p
 }
 
 // Probe lists only the immediate remote root. Entries are relative to RemotePath.
@@ -121,7 +130,7 @@ func Probe(ctx context.Context, options Options, allowedHosts []string) (preview
 		if !safeComponent(st.Name()) {
 			return Preview{}, problem("unsafe remote entry")
 		}
-		key := foldKey(st.Name())
+		key := collisionKey(st.Name())
 		if seen[key] {
 			return Preview{}, problem("case-fold path collision")
 		}
@@ -220,7 +229,7 @@ func Transfer(ctx context.Context, options Options, allowedHosts []string, desti
 			if pathBytes > maxMetadata {
 				return problem("remote path metadata limit exceeded")
 			}
-			key := foldKey(child)
+			key := collisionKey(child)
 			if seen[key] {
 				return problem("case-fold path collision")
 			}

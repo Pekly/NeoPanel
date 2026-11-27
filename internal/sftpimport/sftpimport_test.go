@@ -407,8 +407,13 @@ func TestCaseFoldCollision(t *testing.T) {
 	f.add("/a", "a", 0644)
 	f.add("/A", "b", 0644)
 	s := serve(t, f, nil)
-	if e := Transfer(testContext(t), s.options, s.allowed, t.TempDir(), nil); e == nil || !strings.Contains(e.Error(), "collision") {
-		t.Fatalf("collision %v", e)
+	err := Transfer(testContext(t), s.options, s.allowed, t.TempDir(), nil)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		if err == nil || !strings.Contains(err.Error(), "collision") {
+			t.Fatalf("collision %v", err)
+		}
+	} else if err != nil {
+		t.Fatalf("case-sensitive OS should allow distinct-case files: %v", err)
 	}
 	if foldKey("s") != foldKey("ſ") {
 		t.Fatal("incomplete Unicode folding")

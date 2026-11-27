@@ -398,7 +398,7 @@ func probeFTP(ctx context.Context, o Options, allowedHosts []string) (preview Pr
 		if !safeComponent(ent.name) {
 			return Preview{}, problem("unsafe remote entry")
 		}
-		key := foldKey(ent.name)
+		key := collisionKey(ent.name)
 		if seen[key] {
 			return Preview{}, problem("case-fold path collision")
 		}
@@ -473,7 +473,7 @@ func transferFTP(ctx context.Context, o Options, allowedHosts []string, destinat
 			if !safeComponent(ent.name) || !safePath(child, false) || len(path.Join(root, child)) > 4096 {
 				return problem("unsafe remote path")
 			}
-			key := foldKey(child)
+			key := collisionKey(child)
 			if seen[key] {
 				return problem("case-fold path collision")
 			}
