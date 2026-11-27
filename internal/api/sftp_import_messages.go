@@ -65,12 +65,12 @@ func importUserError(message string) string {
 		return "Could not connect to the source. Check its address and port, then try again."
 	case strings.Contains(message, "host fingerprint required"):
 		return "Enter a valid SHA256 fingerprint and verify it with your provider."
-	case strings.Contains(message, "remote") && strings.Contains(message, "changed"):
-		return "Source files changed during the copy. Stop the source server and try again."
 	case strings.Contains(message, "invalid byte limit"):
 		return "Choose a transfer size within the allowed range."
 	case strings.Contains(message, "byte limit"):
-		return "The selected files exceed the transfer size limit. Copy fewer files or adjust the limit."
+		return "The selected files exceed the max copy size limit. Increase Max copy size (GiB) in Advanced options or copy fewer files."
+	case strings.Contains(message, "remote entry changed"), strings.Contains(message, "remote file changed"), (strings.Contains(message, "remote") && strings.Contains(message, " changed")):
+		return "Source files changed during the copy. Stop the source server and try again."
 	case strings.Contains(message, "entry limit"), strings.Contains(message, "depth limit"), strings.Contains(message, "listing failed or exceeded limits"):
 		return "This selection is too large to list. Choose a smaller source folder or contact support."
 	case strings.Contains(message, "symlink"), strings.Contains(message, "unsafe remote"), strings.Contains(message, "path collision"):

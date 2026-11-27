@@ -27,7 +27,7 @@ const sftpImportPermission = "files.view+files.edit+sftp.access"
 const sftpImportExpiryHeader = "X-NeoPanel-Import-Expires"
 const sftpImportBodyLimit = 128 << 10
 const sftpImportMaxBytes int64 = 100 << 30
-const sftpImportDefaultBytes int64 = 10 << 30
+const sftpImportDefaultBytes int64 = 100 << 30
 const sftpImportMaxJobs = 2
 const sftpImportHistoryLimit = 128
 

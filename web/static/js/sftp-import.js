@@ -26,39 +26,48 @@
   function markup(server) {
     return `<div class="pal" id="sfi-overlay"><section class="pbox sfi-modal" role="dialog" aria-modal="true" aria-labelledby="sfi-title" aria-describedby="sfi-intro" tabindex="-1">
       <header class="sfi-row sfi-header"><div><div class="np-eyebrow">Files / Remote transfer</div><h2 id="sfi-title">Import Server Files</h2></div><button type="button" class="btn sm" id="sfi-close" aria-label="Close importer">×</button></header>
-      <p id="sfi-intro" class="mu">Copy files into <strong>${escape(server.name || server.id)}</strong> from another host. Stop the source server first; source files will not be changed.</p>
+      <p id="sfi-intro" class="mu">Copy files into <strong>${escape(server.name || server.id)}</strong>. Stop the source server first; source files will not be changed.</p>
       <section class="sfi-notice sfi-target-bar" aria-label="Destination status"><div class="sfi-row"><div><strong>Destination</strong><p id="sfi-target" role="status">Checking empty, stopped server…</p></div><button type="button" class="btn sm" id="sfi-refresh">Refresh</button></div></section>
       <section id="sfi-job" class="sfi-job" hidden aria-label="Import progress"><h3 id="sfi-job-state" role="status"></h3><progress id="sfi-progress" max="100" aria-label="Bytes transferred"></progress><p id="sfi-counts"></p><p id="sfi-current" class="mono"></p><p id="sfi-job-message" role="status"></p><button type="button" class="btn" id="sfi-cancel" hidden>Cancel import</button></section>
       <form id="sfi-form" autocomplete="off" novalidate>
+        <nav class="sfi-steps" aria-label="Import steps">
+          <button type="button" class="sfi-step active" id="sfi-step-btn-1">1. Connect</button>
+          <button type="button" class="sfi-step" id="sfi-step-btn-2">2. Files &amp; Import</button>
+        </nav>
         <fieldset id="sfi-settings"><legend class="sfi-sr">Source and copy options</legend>
-          <section class="sfi-section"><h3>1. Source Connection</h3><div class="sfi-grid sfi-grid-3">
-            <label class="f"><span>Protocol</span><select id="sfi-protocol"><option value="sftp">SFTP (SSH)</option><option value="ftp">FTP</option><option value="ftps">FTPS (TLS)</option></select></label>
-            ${field('host','Host','text','required placeholder="sftp.example.com" spellcheck="false"')}
-            ${field('port','Port','number','required value="22" min="1" max="65535" step="1"')}
-          </div>
-          <div class="sfi-grid">${field('username','Username','text','required spellcheck="false" autocomplete="off"')}<label class="f" id="sfi-auth-wrap"><span>Auth method</span><select id="sfi-auth"><option value="password">Password</option><option value="key">Private key</option></select></label></div>
-          <div id="sfi-password-wrap">${field('password','Password','password','autocomplete="new-password"')}</div>
-          <div id="sfi-key-wrap" hidden><label class="f"><span>Load private key file (max 64 KiB)</span><input id="sfi-key-file" type="file" accept=".key,.pem,text/plain"></label><label class="f"><span>Private key (PEM / OpenSSH)</span><textarea id="sfi-private-key" rows="3" spellcheck="false" autocomplete="off"></textarea></label>${field('passphrase','Key passphrase (optional)','password','autocomplete="new-password"')}</div>
-          <div id="sfi-sftp-only" class="sfi-key-box">
-            <div class="sfi-row"><button type="button" class="btn sm" id="sfi-fetch">Get fingerprint</button><span class="mu" id="sfi-key-note">Compare fingerprint with your provider.</span></div>
-            ${field('fingerprint','Host fingerprint (SHA256)','text','required placeholder="SHA256:…" spellcheck="false"')}
-            <label class="sfi-check"><input type="checkbox" id="sfi-confirm"><span>I verified this fingerprint with my provider.</span></label>
-          </div></section>
-          <section class="sfi-section"><h3>2. Files &amp; Destination</h3>
-          <div class="sfi-grid">
-            <label class="f"><span>If destination has files</span><select id="sfi-conflict-mode"><option value="">Keep empty / preserve</option><option value="preserve">Preserve existing files (skip duplicates)</option><option value="replace">Remove &amp; replace existing files</option></select></label>
-            <div class="f"><span>Source folder</span><div class="sfi-inline"><input id="sfi-remote-path" type="text" value="." required spellcheck="false"><button type="button" class="btn" id="sfi-test" disabled>Preview</button></div></div>
-          </div>
-          <div id="sfi-preview" class="sfi-preview" aria-label="Remote directory preview"><p class="mu">Click Preview to browse remote files, or start directly to copy everything.</p></div>
-          <details class="sfi-advanced"><summary>Advanced options</summary>
-            <label class="f"><span>Exclude paths (one per line)</span><textarea id="sfi-excludes" rows="2" placeholder="logs&#10;backups" spellcheck="false"></textarea></label>
-            <div class="sfi-row sfi-presets"><span>Quick exclude:</span>${['logs','backups','cache'].map(p => `<label class="sfi-check"><input type="checkbox" data-exclude="${p}"><span>${p}/</span></label>`).join('')}</div>
-            <div class="sfi-grid"><label class="sfi-check"><input id="sfi-hidden" type="checkbox"><span>Skip hidden files</span></label><label class="sfi-check"><input id="sfi-times" type="checkbox" checked><span>Preserve timestamps</span></label>
-            ${field('max','Max copy size (GiB)','number','min="0" step="any" value="10" required aria-describedby="sfi-limits"')}
-            ${field('bandwidth','Bandwidth (MiB/s, 0 = max)','number','value="0" min="0" max="1024" step="any" required')}
-            ${field('timeout','Timeout (minutes)','number','value="60" min="1" max="240" step="1" required')}</div>
-            <p class="mu" id="sfi-limits">Checking transfer limits…</p>
-          </details></section>
+          <section class="sfi-section" id="sfi-step-1">
+            <div class="sfi-grid sfi-grid-3">
+              <label class="f"><span>Protocol</span><select id="sfi-protocol"><option value="sftp">SFTP (SSH)</option><option value="ftp">FTP</option><option value="ftps">FTPS (TLS)</option></select></label>
+              ${field('host','Host','text','required placeholder="sftp.example.com" spellcheck="false"')}
+              ${field('port','Port','number','required value="22" min="1" max="65535" step="1"')}
+            </div>
+            <div class="sfi-grid">${field('username','Username','text','required spellcheck="false" autocomplete="off"')}<label class="f" id="sfi-auth-wrap"><span>Auth method</span><select id="sfi-auth"><option value="password">Password</option><option value="key">Private key</option></select></label></div>
+            <div id="sfi-password-wrap">${field('password','Password','password','autocomplete="new-password"')}</div>
+            <div id="sfi-key-wrap" hidden><label class="f"><span>Load private key file (max 64 KiB)</span><input id="sfi-key-file" type="file" accept=".key,.pem,text/plain"></label><label class="f"><span>Private key (PEM / OpenSSH)</span><textarea id="sfi-private-key" rows="3" spellcheck="false" autocomplete="off"></textarea></label>${field('passphrase','Key passphrase (optional)','password','autocomplete="new-password"')}</div>
+            <div id="sfi-sftp-only" class="sfi-key-box">
+              <div class="sfi-row"><button type="button" class="btn sm" id="sfi-fetch">Get fingerprint</button><span class="mu" id="sfi-key-note">Compare fingerprint with your provider.</span></div>
+              ${field('fingerprint','Host fingerprint (SHA256)','text','required placeholder="SHA256:…" spellcheck="false"')}
+              <label class="sfi-check"><input type="checkbox" id="sfi-confirm"><span>I verified this fingerprint with my provider.</span></label>
+            </div>
+            <div class="sfi-step-actions"><button type="button" class="btn pr" id="sfi-next">Next: Files &amp; Destination →</button></div>
+          </section>
+          <section class="sfi-section" id="sfi-step-2" hidden>
+            <div class="sfi-grid">
+              <label class="f"><span>If server already has files</span><select id="sfi-conflict-mode"><option value="">Keep empty / preserve</option><option value="preserve">Preserve existing files (skip duplicates)</option><option value="replace">Remove &amp; replace existing files</option></select></label>
+              <div class="f"><span>Source folder</span><div class="sfi-inline"><input id="sfi-remote-path" type="text" value="." required spellcheck="false"><button type="button" class="btn" id="sfi-test" disabled>Preview</button></div></div>
+            </div>
+            <div id="sfi-preview" class="sfi-preview" aria-label="Remote directory preview"><p class="mu">Click Preview to browse remote files, or start directly to copy everything.</p></div>
+            <details class="sfi-advanced"><summary>Advanced options</summary>
+              <label class="f"><span>Exclude paths (one per line)</span><textarea id="sfi-excludes" rows="2" placeholder="logs&#10;backups" spellcheck="false"></textarea></label>
+              <div class="sfi-row sfi-presets"><span>Quick exclude:</span>${['logs','backups','cache'].map(p => `<label class="sfi-check"><input type="checkbox" data-exclude="${p}"><span>${p}/</span></label>`).join('')}</div>
+              <div class="sfi-grid"><label class="sfi-check"><input id="sfi-hidden" type="checkbox"><span>Skip hidden files</span></label><label class="sfi-check"><input id="sfi-times" type="checkbox" checked><span>Preserve timestamps</span></label>
+              ${field('max','Max copy size (GiB)','number','min="0" step="any" value="100" required aria-describedby="sfi-limits"')}
+              ${field('bandwidth','Bandwidth (MiB/s, 0 = max)','number','value="0" min="0" max="1024" step="any" required')}
+              ${field('timeout','Timeout (minutes)','number','value="60" min="1" max="240" step="1" required')}</div>
+              <p class="mu" id="sfi-limits">Checking transfer limits…</p>
+            </details>
+            <div class="sfi-step-actions"><button type="button" class="btn" id="sfi-back">← Back</button></div>
+          </section>
         </fieldset>
         ${S.user?.role === 'admin' ? `<details class="sfi-notice"><summary>Operator details</summary><p>Hosting node: ${escape(server.node_id || 'local')}. Private sources require the node's SFTP allowlist. Imports use staging and share the three-copy restore retention limit. Jobs do not resume after a service restart.</p></details>` : ''}
         <p id="sfi-error" role="alert" class="sfi-error" tabindex="-1" hidden></p><p id="sfi-status" role="status" class="mu"></p>
@@ -334,6 +343,18 @@
     };
     el('confirm').onchange = sync;
     if (el('conflict-mode')) el('conflict-mode').onchange = () => { refresh(); };
+    function setStep(step) {
+      const s1 = el('step-1'), s2 = el('step-2'), b1 = el('step-btn-1'), b2 = el('step-btn-2');
+      if (!s1 || !s2) return;
+      s1.hidden = step !== 1;
+      s2.hidden = step !== 2;
+      if (b1) b1.classList?.toggle('active', step === 1);
+      if (b2) b2.classList?.toggle('active', step === 2);
+    }
+    if (el('step-btn-1')) el('step-btn-1').onclick = () => setStep(1);
+    if (el('step-btn-2')) el('step-btn-2').onclick = () => setStep(2);
+    if (el('next')) el('next').onclick = () => setStep(2);
+    if (el('back')) el('back').onclick = () => setStep(1);
     el('auth').onchange = () => {
       clearSecrets(); keyRead++; invalidatePreview();
       el('key-wrap').hidden = el('auth').value !== 'key';
