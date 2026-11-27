@@ -394,13 +394,18 @@ func probeFTP(ctx context.Context, o Options, allowedHosts []string) (preview Pr
 		return preview, err
 	}
 	seen := map[string]bool{}
+	exactSeen := map[string]bool{}
 	for _, ent := range entries {
 		if !safeComponent(ent.name) {
 			return Preview{}, problem("unsafe remote entry")
 		}
+		if exactSeen[ent.name] {
+			continue
+		}
+		exactSeen[ent.name] = true
 		key := collisionKey(ent.name)
 		if seen[key] {
-			return Preview{}, problem("case-fold path collision")
+			return Preview{}, problem("case-fold path collision: " + ent.name)
 		}
 		seen[key] = true
 		if !selected(o, ent.name, ent.isDir) {
@@ -450,6 +455,7 @@ func transferFTP(ctx context.Context, o Options, allowedHosts []string, destinat
 
 	var plan []ftpPlanItem
 	seen := map[string]bool{}
+	exactSeen := map[string]bool{}
 	count := 0
 	var scan func(string, int) error
 	scan = func(rel string, depth int) error {
@@ -473,9 +479,13 @@ func transferFTP(ctx context.Context, o Options, allowedHosts []string, destinat
 			if !safeComponent(ent.name) || !safePath(child, false) || len(path.Join(root, child)) > 4096 {
 				return problem("unsafe remote path")
 			}
+			if exactSeen[child] {
+				continue
+			}
+			exactSeen[child] = true
 			key := collisionKey(child)
 			if seen[key] {
-				return problem("case-fold path collision")
+				return problem("case-fold path collision: " + child)
 			}
 			seen[key] = true
 			if !selected(o, child, ent.isDir) {

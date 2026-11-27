@@ -126,13 +126,18 @@ func Probe(ctx context.Context, options Options, allowedHosts []string) (preview
 		return preview, err
 	}
 	seen := map[string]bool{}
+	exactSeen := map[string]bool{}
 	for _, st := range entries {
 		if !safeComponent(st.Name()) {
 			return Preview{}, problem("unsafe remote entry")
 		}
+		if exactSeen[st.Name()] {
+			continue
+		}
+		exactSeen[st.Name()] = true
 		key := collisionKey(st.Name())
 		if seen[key] {
-			return Preview{}, problem("case-fold path collision")
+			return Preview{}, problem("case-fold path collision: " + st.Name())
 		}
 		seen[key] = true
 		if !selected(o, st.Name(), st.IsDir()) {
@@ -194,6 +199,7 @@ func Transfer(ctx context.Context, options Options, allowedHosts []string, desti
 	emit()
 	var plan []item
 	seen := map[string]bool{}
+	exactSeen := map[string]bool{}
 	count := 0
 	pathBytes := 0
 	var scan func(string, int) error
@@ -229,9 +235,13 @@ func Transfer(ctx context.Context, options Options, allowedHosts []string, desti
 			if pathBytes > maxMetadata {
 				return problem("remote path metadata limit exceeded")
 			}
+			if exactSeen[child] {
+				continue
+			}
+			exactSeen[child] = true
 			key := collisionKey(child)
 			if seen[key] {
-				return problem("case-fold path collision")
+				return problem("case-fold path collision: " + child)
 			}
 			seen[key] = true
 			if !selected(o, child, listed.IsDir()) {
